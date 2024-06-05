@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Card Builder</title>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="form-container">
+            <h2>Card Builder</h2>
+            <form id="cardForm">
+                <div class="input-group">
+                    <label for="title">Title:</label>
+                    <input type="text" id="title" name="title">
+                </div>
+                <div class="input-group">
+                    <label for="class">Class:</label>
+                    <select id="class" name="class"></select>
+                </div>
+                <div class="input-group">
+                    <label for="race">Race:</label>
+                    <select id="race" name="race"></select>
+                </div>
+                <div class="input-group">
+                    <label for="challenge">Challenge:</label>
+                    <input type="text" id="challenge" name="challenge">
+                </div>
+                <div class="input-group">
+                    <label for="hp">HP:</label>
+                    <input type="text" id="hp" name="hp">
+                </div>
+                <div class="input-group">
+                    <label for="ac">AC:</label>
+                    <input type="text" id="ac" name="ac">
+                </div>
+                <div class="input-group">
+                    <label for="stats">Stats:</label>
+                    <div>
+                        <label for="stat1">STR:</label>
+                        <input type="text" id="stat1" name="stat1">
+                    </div>
+                    <div>
+                        <label for="stat2">DEX:</label>
+                        <input type="text" id="stat2" name="stat2">
+                    </div>
+                    <div>
+                        <label for="stat3">INT:</label>
+                        <input type="text" id="stat3" name="stat3">
+                    </div>
+                    <div>
+                        <label for="stat4">CHA:</label>
+                        <input type="text" id="stat4" name="stat4">
+                    </div>
+                    <div>
+                        <label for="stat5">STA:</label>
+                        <input type="text" id="stat5" name="stat5">
+                    </div>
+                    <div>
+                        <label for="stat6">CON:</label>
+                        <input type="text" id="stat6" name="stat6">
+                    </div>
+                    <div>
+                        <label for="stat7">PER:</label>
+                        <input type="text" id="stat7" name="stat7">
+                    </div>
+                    <div class="roll-buttons">
+                        <button type="button" onclick="rollStats(6)">Roll 1d6</button>
+                        <button type="button" onclick="rollStats(12)">Roll 1d12</button>
+                        <button type="button" onclick="rollStats(20)">Roll 1d20</button>
+                    </div>
+                </div>
+                <div class="input-group">
+                    <label for="skills">Skills:</label>
+                    <div class="flex-row">
+                        <select id="skills" name="skills"></select>
+                        <input type="text" id="skillsValue" placeholder="Value">
+                        <button type="button" onclick="addSkill()">+ Add</button>
+                    </div>
+                    <ul id="skillsList"></ul>
+                </div>
+                <div class="input-group">
+                    <label for="senses">Senses:</label>
+                    <div class="flex-row">
+                        <select id="senses" name="senses"></select>
+                        <button type="button" onclick="addAbility('senses', 'sensesList')">+ Add</button>
+                    </div>
+                    <ul id="sensesList"></ul>
+                </div>
+                <div class="input-group">
+                    <label for="languages">Languages:</label>
+                    <div class="flex-row">
+                        <select id="languages" name="languages"></select>
+                        <button type="button" onclick="addAbility('languages', 'languagesList')">+ Add</button>
+                    </div>
+                    <ul id="languagesList"></ul>
+                </div>
+                <div class="input-group">
+                    <label for="resistances">Damage Resistances:</label>
+                    <div class="flex-row">
+                        <select id="resistances" name="resistances"></select>
+                        <button type="button" onclick="addAbility('resistances', 'resistancesList')">+ Add</button>
+                    </div>
+                    <ul id="resistancesList"></ul>
+                </div>
+                <div class="input-group">
+                    <label for="magicResistance">Magic Resistance:</label>
+                    <div class="flex-row">
+                        <select id="magicResistance" name="magicResistance"></select>
+                        <button type="button" onclick="addAbility('magicResistance', 'magicResistanceList')">+ Add</button>
+                    </div>
+                    <ul id="magicResistanceList"></ul>
+                </div>
+                <div class="input-group">
+                    <label for="spellcasting">Spellcasting:</label>
+                    <div class="flex-row">
+                        <select id="spellcasting" name="spellcasting"></select>
+                        <button type="button" onclick="addAbility('spellcasting', 'spellcastingList')">+ Add</button>
+                    </div>
+                    <ul id="spellcastingList"></ul>
+                </div>
+                <div class="input-group">
+                    <label for="abilities">Abilities:</label>
+                    <div class="flex-row">
+                        <select id="abilities" name="abilities"></select>
+                        <button type="button" onclick="addAbility('abilities', 'abilitiesList')">+ Add</button>
+                    </div>
+                    <ul id="abilitiesList"></ul>
+                </div>
+                <div class="input-group">
+                    <label for="actions">Actions:</label>
+                    <div class="flex-row">
+                        <select id="actions" name="actions"></select>
+                        <button type="button" onclick="addAbility('actions', 'actionsList')">+ Add</button>
+                    </div>
+                    <ul id="actionsList"></ul>
+                </div>
+                <div class="input-group">
+                    <label for="reactions">Reactions:</label>
+                    <div class="flex-row">
+                        <select id="reactions" name="reactions"></select>
+                        <button type="button" onclick="addAbility('reactions', 'reactionsList')">+ Add</button>
+                    </div>
+                    <ul id="reactionsList"></ul>
+                </div>
+                <div class="input-group">
+                    <label for="items">Items:</label>
+                    <div class="flex-row">
+                        <select id="items" name="items"></select>
+                        <button type="button" onclick="addAbility('items', 'itemsList')">+ Add</button>
+                    </div>
+                    <ul id="itemsList"></ul>
+                </div>
+                <div class="input-group">
+                    <label for="image">Image/Avatar:</label>
+                    <input type="text" id="image" name="image">
+                </div>
+                <div class="input-group">
+                    <label for="seedInput">Seed Input:</label>
+                    <input type="text" id="seedInput" name="seedInput">
+                    <button type="button" onclick="loadSeed()">Load Seed</button>
+                </div>
+                <div class="input-group">
+                    <label for="generatedSeed">Generated Seed:</label>
+                    <input type="text" id="generatedSeed" name="generatedSeed" readonly>
+                </div>
+                <div class="toggle-container">
+                    <label for="toggleSkills">Show Skills</label>
+                    <input type="checkbox" id="toggleSkills" checked>
+                    <label for="toggleSenses">Show Senses</label>
+                    <input type="checkbox" id="toggleSenses" checked>
+                    <label for="toggleLanguages">Show Languages</label>
+                    <input type="checkbox" id="toggleLanguages" checked>
+                    <label for="toggleResistances">Show Resistances</label>
+                    <input type="checkbox" id="toggleResistances" checked>
+                    <label for="toggleMagicResistance">Show Magic Resistance</label>
+                    <input type="checkbox" id="toggleMagicResistance" checked>
+                    <label for="toggleSpellcasting">Show Spellcasting</label>
+                    <input type="checkbox" id="toggleSpellcasting" checked>
+                    <label for="toggleAbilities">Show Abilities</label>
+                    <input type="checkbox" id="toggleAbilities" checked>
+                    <label for="toggleActions">Show Actions</label>
+                    <input type="checkbox" id="toggleActions" checked>
+                    <label for="toggleReactions">Show Reactions</label>
+                    <input type="checkbox" id="toggleReactions" checked>
+                    <label for="toggleItems">Show Items</label>
+                    <input type="checkbox" id="toggleItems" checked>
+                </div>
+                <button type="button" onclick="buildCard()">Build Card</button>
+                <button type="button" onclick="clearForm()">Clear Form</button>
+            </form>
+        </div>
+        <div class="card-container">
+            <div class="card" id="card">
+                <img id="cardImage" src="" alt="Avatar" class="card-image">
+                <div class="card-details">
+                    <div class="card-header">
+                        <h1 id="cardTitle">Title</h1>
+                        <p id="cardClass"><strong>Class:</strong> <span id="classDisplay">None</span></p>
+                    </div>
+                    <p id="cardChallenge" class="card-subtitle">Challenge</p>
+                    <p id="cardHP"><span class="icon-heart">❤</span> HP</p>
+                    <p id="cardAC"><span class="icon-shield">🛡</span> AC</p>
+                    <div id="cardStats" class="card-section"></div>
+                    <div class="divider"></div>
+                    <div id="cardSkills" class="card-section"><strong>Skills:</strong></div>
+                    <div id="cardSenses" class="card-section"><strong>Senses:</strong></div>
+                    <div id="cardLanguages" class="card-section"><strong>Languages:</strong></div>
+                    <div id="cardResistances" class="card-section"><strong>Damage Resistances:</strong></div>
+                    <div class="divider"></div>
+                    <div id="cardMagicResistance" class="card-section"><strong>Magic Resistance:</strong></div>
+                    <div id="cardSpellcasting" class="card-section"><strong>Spellcasting:</strong></div>
+                    <div id="cardAbilities" class="card-section"><strong>Abilities:</strong></div>
+                    <div class="divider"></div>
+                    <div id="cardActions" class="card-section"><strong>Actions:</strong></div>
+                    <div id="cardReactions" class="card-section"><strong>Reactions:</strong></div>
+                    <div id="cardItems" class="card-section"><strong>Equipment:</strong></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="data.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
