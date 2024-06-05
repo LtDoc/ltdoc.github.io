@@ -2,6 +2,7 @@
 const firebaseConfig = {
     apiKey: "AIzaSyCo9QPVrLCXS6li_kcTu3e-GOoiiwpHvLs",
     authDomain: "woe-world.firebaseapp.com",
+    databaseURL: "https://woe-world.firebaseio.com",  // <-- Correct URL format
     projectId: "woe-world",
     storageBucket: "woe-world.appspot.com",
     messagingSenderId: "706865712365",
