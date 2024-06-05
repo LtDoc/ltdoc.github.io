@@ -1,0 +1,34 @@
+#map-container {
+    position: relative;
+    width: 100%;
+    height: 100vh;
+    overflow: hidden;
+}
+
+#map {
+    width: 100%;
+    height: 100%;
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    cursor: grab;
+    transform-origin: 0 0; /* Ensure scaling starts from top-left corner */
+}
+
+.draggable {
+    position: absolute;
+    cursor: move;
+    max-width: 100px;
+    max-height: 100px;
+}
+
+#zoom-level {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    background: rgba(0, 0, 0, 0.5);
+    color: white;
+    padding: 5px 10px;
+    border-radius: 5px;
+    font-size: 14px;
+}
