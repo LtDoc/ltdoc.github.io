@@ -359,63 +359,63 @@ const data = {
     ],
     "races": [
         {
-            "name": "Human",
+            "name": "Imperial",
             "modifiers": {
-                "STR": 0,
+                "STR": 3,
                 "DEX": 0,
-                "CON": 0,
-                "INT": 0,
-                "CHA": 0,
+                "CON": 2,
+                "INT": -1,
+                "CHA": -2,
                 "STA": 0,
                 "PER": 0
             }
         },
         {
-            "name": "Elf",
+            "name": "Zephyri",
             "modifiers": {
-                "STR": -1,
-                "DEX": 2,
-                "CON": -1,
-                "INT": 1,
-                "CHA": 1,
-                "STA": -1,
-                "PER": 2
-            }
-        },
-        {
-            "name": "Dwarf",
-            "modifiers": {
-                "STR": 1,
-                "DEX": -1,
-                "CON": 2,
-                "INT": 0,
-                "CHA": -1,
-                "STA": 2,
+                "STR": -3,
+                "DEX": 3,
+                "CON": 0,
+                "INT": -1,
+                "CHA": 0,
+                "STA": 3,
                 "PER": 0
             }
         },
         {
-            "name": "Orc",
+            "name": "Alvirran",
             "modifiers": {
-                "STR": 2,
+                "STR": 0,
                 "DEX": 0,
-                "CON": 2,
-                "INT": -1,
-                "CHA": -1,
-                "STA": 1,
-                "PER": -1
+                "CON": -2,
+                "INT": 3,
+                "CHA": 0,
+                "STA": -3,
+                "PER": 5
+            }
+        },
+        {
+            "name": "Tenebrae",
+            "modifiers": {
+                "STR": 3,
+                "DEX": 0,
+                "CON": 0,
+                "INT": -3,
+                "CHA": 0,
+                "STA": 0,
+                "PER": 3
             }
         },
         {
             "name": "Halfling",
             "modifiers": {
-                "STR": -1,
+                "STR": -2,
                 "DEX": 2,
                 "CON": 0,
                 "INT": 0,
-                "CHA": 1,
+                "CHA": 3,
                 "STA": 0,
-                "PER": 1
+                "PER": -3
             }
         }
     ]
