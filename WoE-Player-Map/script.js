@@ -280,6 +280,7 @@ function addNewMarker() {
     });
 }
 
+
 // Admin sign up function
 function adminSignup() {
     const username = document.getElementById('admin-signup-username').value;
