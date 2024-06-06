@@ -1,11 +1,13 @@
 let isAdmin = false;
 let selectedMarker = null;
+let currentUser = null;
+let markers = {};
 
 // Firebase configuration
 const firebaseConfig = {
     apiKey: "AIzaSyCo9QPVrLCXS6li_kcTu3e-GOoiiwpHvLs",
     authDomain: "woe-world.firebaseapp.com",
-    databaseURL: "woe-world-default-rtdb.firebaseio.com",  // Ensure this URL is correct
+    databaseURL: "woe-world-default-rtdb.firebaseio.com",
     projectId: "woe-world",
     storageBucket: "woe-world.appspot.com",
     messagingSenderId: "706865712365",
@@ -15,9 +17,8 @@ const firebaseConfig = {
 
 // Initialize Firebase
 firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
 const database = firebase.database();
-
-let markers = {};
 
 // Initialize the map
 const map = L.map('map-container', {
@@ -60,11 +61,11 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
         markerInstance.on('dragend', function (event) {
             const marker = event.target;
             const newPosition = marker.getLatLng();
-            console.log(`Marker ${id} dragged to ${newPosition}`);
             firebase.database().ref('markers/' + id).set({
                 position: newPosition,
                 iconUrl: marker.options.icon.options.iconUrl,
-                label: marker.getTooltip().getContent()
+                label: marker.getTooltip().getContent(),
+                userId: currentUser.uid
             }).then(() => {
                 console.log(`Marker ${id} position saved to Firebase.`);
             }).catch((error) => {
@@ -91,7 +92,9 @@ firebase.database().ref('markers').on('value', (snapshot) => {
     console.log("Initial marker data loaded from Firebase: ", data);
     if (data) {
         for (const id in data) {
-            createOrUpdateMarker(id, data[id].position, data[id].iconUrl, data[id].label);
+            if (data[id].userId === currentUser.uid || data[id].partyId === currentUser.partyId) {
+                createOrUpdateMarker(id, data[id].position, data[id].iconUrl, data[id].label);
+            }
         }
     }
 });
@@ -106,32 +109,66 @@ initialMarkers.forEach(marker => {
     const { id, position, icon, label } = marker;
     firebase.database().ref('markers/' + id).once('value', (snapshot) => {
         if (!snapshot.exists()) {
-            firebase.database().ref('markers/' + id).set({ position, iconUrl: icon, label }).then(() => {
-                console.log(`Initial marker ${id} data saved to Firebase.`);
-            }).catch((error) => {
-                console.error(`Failed to save initial marker ${id} data: `, error);
-            });
+            firebase.database().ref('markers/' + id).set({ position, iconUrl: icon, label });
         }
     });
 });
 
 // Login function
 function login() {
-    const username = document.getElementById('username').value;
-    const password = document.getElementById('password').value;
+    const email = document.getElementById('login-email').value;
+    const password = document.getElementById('login-password').value;
 
-    // Simple hardcoded credentials (for demonstration purposes only)
-    if (username === 'admin' && password === 'password') {
-        isAdmin = true;
-        document.getElementById('login-form').style.display = 'none';
-        // Make markers draggable if the user is admin
-        for (const id in markers) {
-            markers[id].options.draggable = true;
-            markers[id].dragging.enable();
-        }
-    } else {
-        alert('Invalid credentials');
-    }
+    auth.signInWithEmailAndPassword(email, password)
+        .then(userCredential => {
+            currentUser = userCredential.user;
+            document.getElementById('login-form').style.display = 'none';
+            // Show admin button if the user is admin
+            if (currentUser.email === 'admin@example.com') {  // Change this to your admin email
+                isAdmin = true;
+                document.getElementById('admin-button').style.display = 'block';
+            }
+            // Make markers draggable if the user is admin
+            for (const id in markers) {
+                markers[id].options.draggable = true;
+                markers[id].dragging.enable();
+            }
+            loadUserMarkers();
+        })
+        .catch(error => {
+            console.error('Error logging in: ', error);
+            alert('Invalid credentials');
+        });
+}
+
+// Sign up function
+function signup() {
+    const email = document.getElementById('signup-email').value;
+    const password = document.getElementById('signup-password').value;
+
+    auth.createUserWithEmailAndPassword(email, password)
+        .then(userCredential => {
+            currentUser = userCredential.user;
+            document.getElementById('signup-form').style.display = 'none';
+            document.getElementById('login-form').style.display = 'block';
+            alert('Sign up successful! Please log in.');
+        })
+        .catch(error => {
+            console.error('Error signing up: ', error);
+            alert('Sign up failed');
+        });
+}
+
+// Show sign up form
+function showSignup() {
+    document.getElementById('login-form').style.display = 'none';
+    document.getElementById('signup-form').style.display = 'block';
+}
+
+// Show login form
+function showLogin() {
+    document.getElementById('login-form').style.display = 'block';
+    document.getElementById('signup-form').style.display = 'none';
 }
 
 // Update selected marker
@@ -146,7 +183,8 @@ function updateSelectedMarker() {
         firebase.database().ref('markers/' + selectedMarker.options.id).set({
             position: selectedMarker.getLatLng(),
             iconUrl,
-            label
+            label,
+            userId: currentUser.uid
         }).then(() => {
             console.log(`Marker ${selectedMarker.options.id} updated in Firebase.`);
         }).catch((error) => {
@@ -168,4 +206,117 @@ function removeSelectedMarker() {
         selectedMarker = null;
         document.getElementById('marker-actions').style.display = 'none';
     }
+}
+
+// Load markers relevant to the logged-in user
+function loadUserMarkers() {
+    firebase.database().ref('markers').orderByChild('userId').equalTo(currentUser.uid).on('value', (snapshot) => {
+        const data = snapshot.val();
+        console.log("User marker data loaded from Firebase: ", data);
+        if (data) {
+            for (const id in data) {
+                createOrUpdateMarker(id, data[id].position, data[id].iconUrl, data[id].label);
+            }
+        }
+    });
+}
+
+// Toggle admin panel
+function toggleAdminPanel() {
+    const adminPanel = document.getElementById('admin-panel');
+    if (adminPanel.style.display === 'none' || adminPanel.style.display === '') {
+        adminPanel.style.display = 'block';
+    } else {
+        adminPanel.style.display = 'none';
+    }
+}
+
+// Add new marker
+function addNewMarker() {
+    const id = document.getElementById('new-marker-id').value;
+    const label = document.getElementById('new-marker-label').value;
+    const iconUrl = document.getElementById('new-marker-icon').value;
+    const position = { lat: map.getCenter().lat, lng: map.getCenter().lng }; // Default position
+
+    firebase.database().ref('markers/' + id).set({
+        position,
+        iconUrl,
+        label,
+        userId: currentUser.uid
+    }).then(() => {
+        console.log(`Marker ${id} added to Firebase.`);
+        createOrUpdateMarker(id, position, iconUrl, label);
+    }).catch((error) => {
+        console.error(`Failed to add marker ${id}: `, error);
+    });
+}
+
+// Admin sign up function
+function adminSignup() {
+    const email = document.getElementById('admin-signup-email').value;
+    const password = document.getElementById('admin-signup-password').value;
+    const markerIds = document.getElementById('admin-signup-markers').value.split(',').map(id => id.trim());
+
+    auth.createUserWithEmailAndPassword(email, password)
+        .then(userCredential => {
+            const newUser = userCredential.user;
+            const updates = {};
+            markerIds.forEach(id => {
+                updates[`markers/${id}/userId`] = newUser.uid;
+            });
+            firebase.database().ref().update(updates).then(() => {
+                console.log(`User ${email} created and markers assigned.`);
+            }).catch(error => {
+                console.error('Error assigning markers: ', error);
+            });
+            alert('User created and markers assigned.');
+        })
+        .catch(error => {
+            console.error('Error signing up user: ', error);
+            alert('Sign up failed');
+        });
+}
+
+// Remove user function
+function removeUser() {
+    const email = document.getElementById('remove-user-email').value;
+
+    auth.fetchSignInMethodsForEmail(email)
+        .then(signInMethods => {
+            if (signInMethods.length > 0) {
+                // This method does not exist, alternative implementation needed
+                // Fetching the user ID by email using custom implementation
+                const userRef = firebase.database().ref('users').orderByChild('email').equalTo(email);
+                userRef.once('value', snapshot => {
+                    const userData = snapshot.val();
+                    if (userData) {
+                        const userId = Object.keys(userData)[0]; // Get the userId from the data
+                        const updates = {};
+                        updates[`users/${userId}`] = null; // Remove user
+                        firebase.database().ref('markers').orderByChild('userId').equalTo(userId).once('value', (snapshot) => {
+                            const data = snapshot.val();
+                            if (data) {
+                                Object.keys(data).forEach(markerId => {
+                                    updates[`markers/${markerId}`] = null; // Remove marker
+                                });
+                                firebase.database().ref().update(updates).then(() => {
+                                    console.log(`User ${email} and associated markers removed.`);
+                                    alert('User and markers removed.');
+                                }).catch(error => {
+                                    console.error('Error removing user and markers: ', error);
+                                });
+                            }
+                        });
+                    } else {
+                        alert('No user found with that email.');
+                    }
+                });
+            } else {
+                alert('No user found with that email.');
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching sign-in methods: ', error);
+            alert('Failed to fetch sign-in methods.');
+        });
 }
