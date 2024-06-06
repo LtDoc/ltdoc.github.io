@@ -32,7 +32,7 @@ function ensureUsersTable() {
 
 // Initialize the map
 const map = L.map('map-container', {
-    center: [540, 750], // Center of the image
+    center: [0, 0], // Reverted to initial center
     zoom: 1,
     crs: L.CRS.Simple, // Use simple coordinate system
     minZoom: 1,
@@ -87,26 +87,12 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
         });
 
         markerInstance.on('click', function (event) {
-            event.originalEvent.stopPropagation(); // Prevent click event propagation
             if (isAdmin) {
                 selectedMarker = markerInstance;
                 document.getElementById('marker-label').value = markerInstance.getTooltip().getContent();
                 document.getElementById('marker-icon').value = markerInstance.options.icon.options.iconUrl;
                 document.getElementById('marker-actions').style.display = 'block';
             }
-        });
-
-        // Prevent the marker's mousedown and click events from propagating to the map
-        markerInstance.on('mousedown', function (event) {
-            event.originalEvent.stopPropagation(); // Prevent mousedown event propagation
-        });
-
-        markerInstance.on('click', function (event) {
-            event.originalEvent.stopPropagation(); // Prevent click event propagation
-        });
-
-        markerInstance.on('dragstart', function (event) {
-            event.originalEvent.stopPropagation(); // Prevent dragstart event propagation
         });
 
         markers[id] = markerInstance;
