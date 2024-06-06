@@ -90,7 +90,7 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
 firebase.database().ref('markers').on('value', (snapshot) => {
     const data = snapshot.val();
     console.log("Initial marker data loaded from Firebase: ", data);
-    if (data) {
+    if (data && currentUser) {
         for (const id in data) {
             if (data[id].userId === currentUser.uid || data[id].partyId === currentUser.partyId) {
                 createOrUpdateMarker(id, data[id].position, data[id].iconUrl, data[id].label);
@@ -116,15 +116,16 @@ initialMarkers.forEach(marker => {
 
 // Login function
 function login() {
-    const email = document.getElementById('login-email').value;
+    const username = document.getElementById('login-username').value;
     const password = document.getElementById('login-password').value;
 
-    auth.signInWithEmailAndPassword(email, password)
+    auth.signInWithEmailAndPassword(username + '@elyndor.com', password)  // Using a fake domain for usernames
         .then(userCredential => {
             currentUser = userCredential.user;
-            document.getElementById('login-form').style.display = 'none';
+            document.getElementById('landing-page').style.display = 'none';
+            document.getElementById('map-container').style.display = 'block';
             // Show admin button if the user is admin
-            if (currentUser.email === 'admin@example.com') {  // Change this to your admin email
+            if (username === 'admin') {
                 isAdmin = true;
                 document.getElementById('admin-button').style.display = 'block';
             }
@@ -143,10 +144,10 @@ function login() {
 
 // Sign up function
 function signup() {
-    const email = document.getElementById('signup-email').value;
+    const username = document.getElementById('signup-username').value;
     const password = document.getElementById('signup-password').value;
 
-    auth.createUserWithEmailAndPassword(email, password)
+    auth.createUserWithEmailAndPassword(username + '@elyndor.com', password)  // Using a fake domain for usernames
         .then(userCredential => {
             currentUser = userCredential.user;
             document.getElementById('signup-form').style.display = 'none';
@@ -210,6 +211,7 @@ function removeSelectedMarker() {
 
 // Load markers relevant to the logged-in user
 function loadUserMarkers() {
+    if (!currentUser) return;  // Ensure currentUser is set
     firebase.database().ref('markers').orderByChild('userId').equalTo(currentUser.uid).on('value', (snapshot) => {
         const data = snapshot.val();
         console.log("User marker data loaded from Firebase: ", data);
@@ -253,11 +255,11 @@ function addNewMarker() {
 
 // Admin sign up function
 function adminSignup() {
-    const email = document.getElementById('admin-signup-email').value;
+    const username = document.getElementById('admin-signup-username').value;
     const password = document.getElementById('admin-signup-password').value;
     const markerIds = document.getElementById('admin-signup-markers').value.split(',').map(id => id.trim());
 
-    auth.createUserWithEmailAndPassword(email, password)
+    auth.createUserWithEmailAndPassword(username + '@elyndor.com', password)  // Using a fake domain for usernames
         .then(userCredential => {
             const newUser = userCredential.user;
             const updates = {};
@@ -265,7 +267,7 @@ function adminSignup() {
                 updates[`markers/${id}/userId`] = newUser.uid;
             });
             firebase.database().ref().update(updates).then(() => {
-                console.log(`User ${email} created and markers assigned.`);
+                console.log(`User ${username} created and markers assigned.`);
             }).catch(error => {
                 console.error('Error assigning markers: ', error);
             });
@@ -279,14 +281,13 @@ function adminSignup() {
 
 // Remove user function
 function removeUser() {
-    const email = document.getElementById('remove-user-email').value;
+    const username = document.getElementById('remove-user-username').value;
 
-    auth.fetchSignInMethodsForEmail(email)
+    auth.fetchSignInMethodsForEmail(username + '@elyndor.com')
         .then(signInMethods => {
             if (signInMethods.length > 0) {
-                // This method does not exist, alternative implementation needed
-                // Fetching the user ID by email using custom implementation
-                const userRef = firebase.database().ref('users').orderByChild('email').equalTo(email);
+                // Fetch the user ID by email using custom implementation
+                const userRef = firebase.database().ref('users').orderByChild('email').equalTo(username + '@elyndor.com');
                 userRef.once('value', snapshot => {
                     const userData = snapshot.val();
                     if (userData) {
@@ -300,7 +301,7 @@ function removeUser() {
                                     updates[`markers/${markerId}`] = null; // Remove marker
                                 });
                                 firebase.database().ref().update(updates).then(() => {
-                                    console.log(`User ${email} and associated markers removed.`);
+                                    console.log(`User ${username} and associated markers removed.`);
                                     alert('User and markers removed.');
                                 }).catch(error => {
                                     console.error('Error removing user and markers: ', error);
@@ -308,11 +309,11 @@ function removeUser() {
                             }
                         });
                     } else {
-                        alert('No user found with that email.');
+                        alert('No user found with that username.');
                     }
                 });
             } else {
-                alert('No user found with that email.');
+                alert('No user found with that username.');
             }
         })
         .catch(error => {
