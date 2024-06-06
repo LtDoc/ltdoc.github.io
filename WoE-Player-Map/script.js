@@ -1,19 +1,3 @@
-// Firebase configuration
-const firebaseConfig = {
-    apiKey: "AIzaSyCo9QPVrLCXS6li_kcTu3e-GOoiiwpHvLs",
-    authDomain: "woe-world.firebaseapp.com",
-    databaseURL: "https://woe-world-default-rtdb.firebaseio.com/",  // Ensure this URL is correct
-    projectId: "woe-world",
-    storageBucket: "woe-world.appspot.com",
-    messagingSenderId: "706865712365",
-    appId: "1:706865712365:web:e080b1ef45b8d8b27190e4",
-    measurementId: "G-789BN2WECG"
-};
-
-// Initialize Firebase
-firebase.initializeApp(firebaseConfig);
-const database = firebase.database();
-
 let isAdmin = false;
 let selectedMarker = null;
 
@@ -43,51 +27,34 @@ const CustomIcon = L.Icon.extend({
 const markers = {};
 
 // Function to create or update a marker
-function updateMarker(id, position, iconUrl, label) {
-    if (markers[id]) {
-        markers[id].setLatLng(position);
-        markers[id].setIcon(new CustomIcon({ iconUrl }));
-        markers[id].bindTooltip(label).openTooltip();
-    } else {
-        const customIcon = new CustomIcon({ iconUrl });
-        const markerInstance = L.marker(position, {
-            icon: customIcon,
-            draggable: isAdmin,
-            id
-        }).addTo(map);
+function createMarker(id, position, iconUrl, label) {
+    const customIcon = new CustomIcon({ iconUrl });
+    const markerInstance = L.marker(position, {
+        icon: customIcon,
+        draggable: isAdmin,
+        id
+    }).addTo(map);
 
-        markerInstance.bindTooltip(label).openTooltip();
+    markerInstance.bindTooltip(label).openTooltip();
 
+    markerInstance.on('dragend', function (event) {
+        const marker = event.target;
+        const newPosition = marker.getLatLng();
+        console.log(`Marker ${id} dragged to ${newPosition}`);
+        // Here you would save the new position to Firebase
+    });
+
+    markerInstance.on('click', function (event) {
         if (isAdmin) {
-            markerInstance.on('dragend', function (event) {
-                const marker = event.target;
-                const newPosition = marker.getLatLng();
-                firebase.database().ref('markers/' + id).set({
-                    position: newPosition,
-                    iconUrl: marker.options.icon.options.iconUrl,
-                    label: marker.getTooltip().getContent()
-                });
-            });
-
-            markerInstance.on('click', function (event) {
-                selectedMarker = markerInstance;
-                document.getElementById('marker-label').value = markerInstance.getTooltip().getContent();
-                document.getElementById('marker-icon').value = markerInstance.options.icon.options.iconUrl;
-                document.getElementById('marker-actions').style.display = 'block';
-            });
+            selectedMarker = markerInstance;
+            document.getElementById('marker-label').value = markerInstance.getTooltip().getContent();
+            document.getElementById('marker-icon').value = markerInstance.options.icon.options.iconUrl;
+            document.getElementById('marker-actions').style.display = 'block';
         }
+    });
 
-        markers[id] = markerInstance;
-    }
+    markers[id] = markerInstance;
 }
-
-// Handle initial marker data from server
-firebase.database().ref('markers').on('value', (snapshot) => {
-    const data = snapshot.val();
-    for (const id in data) {
-        updateMarker(id, data[id].position, data[id].iconUrl, data[id].label);
-    }
-});
 
 // Initialize markers with default positions
 const initialMarkers = [
@@ -97,8 +64,7 @@ const initialMarkers = [
 
 initialMarkers.forEach(marker => {
     const { id, position, icon, label } = marker;
-    firebase.database().ref('markers/' + id).set({ position, iconUrl: icon, label });
-    updateMarker(id, position, icon, label);
+    createMarker(id, position, icon, label);
 });
 
 // Login function
@@ -113,6 +79,7 @@ function login() {
         // Make markers draggable if the user is admin
         for (const id in markers) {
             markers[id].options.draggable = true;
+            markers[id].dragging.enable();
         }
     } else {
         alert('Invalid credentials');
@@ -128,11 +95,7 @@ function updateSelectedMarker() {
         selectedMarker.setIcon(new CustomIcon({ iconUrl }));
         selectedMarker.bindTooltip(label).openTooltip();
         
-        firebase.database().ref('markers/' + selectedMarker.options.id).set({
-            position: selectedMarker.getLatLng(),
-            iconUrl,
-            label
-        });
+        // Here you would save the updated marker details to Firebase
     }
 }
 
@@ -141,7 +104,7 @@ function removeSelectedMarker() {
     if (selectedMarker) {
         const markerId = selectedMarker.options.id;
         map.removeLayer(selectedMarker);
-        firebase.database().ref('markers/' + markerId).remove();
+        // Here you would remove the marker from Firebase
         selectedMarker = null;
         document.getElementById('marker-actions').style.display = 'none';
     }
