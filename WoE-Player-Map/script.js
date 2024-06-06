@@ -96,9 +96,17 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
             }
         });
 
-        // Prevent the marker's mousedown event from propagating to the map
+        // Prevent the marker's mousedown and click events from propagating to the map
         markerInstance.on('mousedown', function (event) {
             event.originalEvent.stopPropagation(); // Prevent mousedown event propagation
+        });
+
+        markerInstance.on('click', function (event) {
+            event.originalEvent.stopPropagation(); // Prevent click event propagation
+        });
+
+        markerInstance.on('dragstart', function (event) {
+            event.originalEvent.stopPropagation(); // Prevent dragstart event propagation
         });
 
         markers[id] = markerInstance;
