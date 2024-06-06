@@ -5,7 +5,7 @@ let selectedMarker = null;
 const firebaseConfig = {
     apiKey: "AIzaSyCo9QPVrLCXS6li_kcTu3e-GOoiiwpHvLs",
     authDomain: "woe-world.firebaseapp.com",
-    databaseURL: "https://woe-world-default-rtdb.firebaseio.com/",  // Ensure this URL is correct
+    databaseURL: "woe-world-default-rtdb.firebaseio.com",  // Ensure this URL is correct
     projectId: "woe-world",
     storageBucket: "woe-world.appspot.com",
     messagingSenderId: "706865712365",
@@ -60,10 +60,15 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
         markerInstance.on('dragend', function (event) {
             const marker = event.target;
             const newPosition = marker.getLatLng();
+            console.log(`Marker ${id} dragged to ${newPosition}`);
             firebase.database().ref('markers/' + id).set({
                 position: newPosition,
                 iconUrl: marker.options.icon.options.iconUrl,
                 label: marker.getTooltip().getContent()
+            }).then(() => {
+                console.log(`Marker ${id} position saved to Firebase.`);
+            }).catch((error) => {
+                console.error(`Failed to save marker ${id} position: `, error);
             });
         });
 
@@ -83,6 +88,7 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
 // Handle initial marker data from server
 firebase.database().ref('markers').on('value', (snapshot) => {
     const data = snapshot.val();
+    console.log("Initial marker data loaded from Firebase: ", data);
     if (data) {
         for (const id in data) {
             createOrUpdateMarker(id, data[id].position, data[id].iconUrl, data[id].label);
@@ -100,7 +106,11 @@ initialMarkers.forEach(marker => {
     const { id, position, icon, label } = marker;
     firebase.database().ref('markers/' + id).once('value', (snapshot) => {
         if (!snapshot.exists()) {
-            firebase.database().ref('markers/' + id).set({ position, iconUrl: icon, label });
+            firebase.database().ref('markers/' + id).set({ position, iconUrl: icon, label }).then(() => {
+                console.log(`Initial marker ${id} data saved to Firebase.`);
+            }).catch((error) => {
+                console.error(`Failed to save initial marker ${id} data: `, error);
+            });
         }
     });
 });
@@ -137,6 +147,10 @@ function updateSelectedMarker() {
             position: selectedMarker.getLatLng(),
             iconUrl,
             label
+        }).then(() => {
+            console.log(`Marker ${selectedMarker.options.id} updated in Firebase.`);
+        }).catch((error) => {
+            console.error(`Failed to update marker ${selectedMarker.options.id}: `, error);
         });
     }
 }
@@ -146,7 +160,11 @@ function removeSelectedMarker() {
     if (selectedMarker) {
         const markerId = selectedMarker.options.id;
         map.removeLayer(selectedMarker);
-        firebase.database().ref('markers/' + markerId).remove();
+        firebase.database().ref('markers/' + markerId).remove().then(() => {
+            console.log(`Marker ${markerId} removed from Firebase.`);
+        }).catch((error) => {
+            console.error(`Failed to remove marker ${markerId}: `, error);
+        });
         selectedMarker = null;
         document.getElementById('marker-actions').style.display = 'none';
     }
