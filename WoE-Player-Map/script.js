@@ -2,7 +2,7 @@
 const firebaseConfig = {
     apiKey: "AIzaSyCo9QPVrLCXS6li_kcTu3e-GOoiiwpHvLs",
     authDomain: "woe-world.firebaseapp.com",
-    databaseURL: "https://woe-world.firebaseio.com",  // <-- Correct URL format
+    databaseURL: "https://woe-world-default-rtdb.firebaseio.com/",  // Ensure this URL is correct
     projectId: "woe-world",
     storageBucket: "woe-world.appspot.com",
     messagingSenderId: "706865712365",
@@ -46,6 +46,7 @@ const markers = {};
 function updateMarker(id, position, iconUrl, label) {
     if (markers[id]) {
         markers[id].setLatLng(position);
+        markers[id].setIcon(new CustomIcon({ iconUrl }));
         markers[id].bindTooltip(label).openTooltip();
     } else {
         const customIcon = new CustomIcon({ iconUrl });
@@ -109,6 +110,10 @@ function login() {
     if (username === 'admin' && password === 'password') {
         isAdmin = true;
         document.getElementById('login-form').style.display = 'none';
+        // Make markers draggable if the user is admin
+        for (const id in markers) {
+            markers[id].options.draggable = true;
+        }
     } else {
         alert('Invalid credentials');
     }
