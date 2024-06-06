@@ -37,7 +37,7 @@ const map = L.map('map-container', {
     crs: L.CRS.Simple, // Use simple coordinate system
     minZoom: 1,
     maxZoom: 5, // Allow zooming in but not zooming out past the original size
-    zoomControl: false // Hide the default zoom control
+    zoomControl: true // Show the default zoom control
 });
 
 // Load the map image
@@ -93,6 +93,11 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
                 document.getElementById('marker-icon').value = markerInstance.options.icon.options.iconUrl;
                 document.getElementById('marker-actions').style.display = 'block';
             }
+        });
+
+        // Prevent the marker's mousedown event from propagating to the map
+        markerInstance.on('mousedown', function (event) {
+            event.originalEvent.stopPropagation();
         });
 
         markers[id] = markerInstance;
@@ -260,16 +265,16 @@ function addNewMarker() {
     const id = document.getElementById('new-marker-id').value;
     const label = document.getElementById('new-marker-label').value;
     const iconUrl = document.getElementById('new-marker-icon').value;
-    const position = { lat: map.getCenter().lat, lng: map.getCenter().lng }; // Default position
+    const center = map.getCenter(); // Get the center of the visible map
 
     firebase.database().ref('markers/' + id).set({
-        position,
+        position: center,
         iconUrl,
         label,
         userId: currentUser
     }).then(() => {
         console.log(`Marker ${id} added to Firebase.`);
-        createOrUpdateMarker(id, position, iconUrl, label);
+        createOrUpdateMarker(id, center, iconUrl, label);
     }).catch((error) => {
         console.error(`Failed to add marker ${id}: `, error);
     });
