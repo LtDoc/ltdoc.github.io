@@ -32,9 +32,12 @@ function ensureUsersTable() {
 
 // Initialize the map
 const map = L.map('map-container', {
-    center: [0, 0],
+    center: [540, 750], // Center of the image
     zoom: 1,
-    crs: L.CRS.Simple // Use simple coordinate system
+    crs: L.CRS.Simple, // Use simple coordinate system
+    minZoom: 1,
+    maxZoom: 5, // Allow zooming in but not zooming out past the original size
+    zoomControl: false // Hide the default zoom control
 });
 
 // Load the map image
