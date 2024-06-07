@@ -26,12 +26,12 @@ function login() {
             const user = users[userId];
             if (user.password === password) {
                 currentUser = username;
-                document.getElementById('landing-page').style.display = 'none';
-                document.getElementById('map-container').style.display = 'block';
+                document.getElementById('landing-page').style.display = 'none'; // Ensure this element exists
+                document.getElementById('map-container').style.display = 'block'; // Ensure this element exists
                 // Show admin button if the user is admin
                 if (username === 'admin') {
                     isAdmin = true;
-                    document.getElementById('admin-button').style.display = 'block';
+                    document.getElementById('admin-button').style.display = 'block'; // Ensure this element exists
                 }
                 // Make markers draggable if the user is admin
                 for (const id in markers) {

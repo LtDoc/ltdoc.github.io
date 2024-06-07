@@ -45,23 +45,29 @@
     <script src="https://www.gstatic.com/firebasejs/9.21.0/firebase-database-compat.js"></script>
 </head>
 <body>
-    <div id="map-container"></div>
-    <div id="login-form">
-        <label for="login-username">Username:</label>
-        <input type="text" id="login-username">
-        <label for="login-password">Password:</label>
-        <input type="password" id="login-password">
-        <button onclick="login()">Login</button>
-        <button onclick="showSignup()">Sign Up</button>
+    <div id="landing-page" class="bg">
+        <div class="login-container">
+            <h1>The World of Elyndor</h1>
+            <p>Live Player Map</p>
+            <div id="login-form">
+                <label for="login-username">Username:</label>
+                <input type="text" id="login-username">
+                <label for="login-password">Password:</label>
+                <input type="password" id="login-password">
+                <button onclick="login()">Login</button>
+                <button onclick="showSignup()">Sign Up</button>
+            </div>
+            <div id="signup-form">
+                <label for="signup-username">Username:</label>
+                <input type="text" id="signup-username">
+                <label for="signup-password">Password:</label>
+                <input type="password" id="signup-password">
+                <button onclick="signup()">Sign Up</button>
+                <button onclick="showLogin()">Back to Login</button>
+            </div>
+        </div>
     </div>
-    <div id="signup-form">
-        <label for="signup-username">Username:</label>
-        <input type="text" id="signup-username">
-        <label for="signup-password">Password:</label>
-        <input type="password" id="signup-password">
-        <button onclick="signup()">Sign Up</button>
-        <button onclick="showLogin()">Back to Login</button>
-    </div>
+    <div id="map-container" style="display:none;"></div>
     <div id="marker-actions">
         <label for="marker-label">Marker Label:</label>
         <input type="text" id="marker-label">
