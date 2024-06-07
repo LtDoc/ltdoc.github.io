@@ -68,7 +68,7 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
 firebase.database().ref('markers').on('value', (snapshot) => {
     const data = snapshot.val();
     console.log("Initial marker data loaded from Firebase: ", data);
-    if (data && currentUser) {
+    if (data) {
         for (const id in data) {
             if (data[id].userId === currentUser || data[id].partyId === currentUser) {
                 createOrUpdateMarker(id, data[id].position, data[id].iconUrl, data[id].label);

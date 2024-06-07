@@ -38,7 +38,9 @@ function login() {
                     markers[id].options.draggable = true;
                     markers[id].dragging.enable();
                 }
-                loadUserMarkers();
+                if (currentUser) {
+                    loadUserMarkers();
+                }
             } else {
                 alert('Invalid credentials');
             }
