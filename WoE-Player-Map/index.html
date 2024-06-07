@@ -14,7 +14,7 @@
             max-width: 100px;
             max-height: 100px;
         }
-        #login-form, #signup-form, #marker-actions, #admin-panel {
+        #login-form {
             position: absolute;
             top: 10px;
             left: 10px;
@@ -23,52 +23,29 @@
             border: 1px solid #ccc;
             z-index: 1000;
         }
-        #signup-form, #admin-panel {
-            display: none;
-        }
         #marker-actions {
-            display: none;
-            top: 10px;
-            right: 10px;
-            z-index: 1001;
-        }
-        #admin-button {
             position: absolute;
             top: 10px;
             right: 10px;
+            background: white;
+            padding: 10px;
+            border: 1px solid #ccc;
             z-index: 1000;
-            display: none;
         }
     </style>
-    <!-- Load Firebase SDKs -->
     <script src="https://www.gstatic.com/firebasejs/9.21.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.21.0/firebase-database-compat.js"></script>
 </head>
 <body>
-    <div id="landing-page" class="bg">
-        <div class="login-container">
-            <h1>The World of Elyndor</h1>
-            <p>Live Player Map</p>
-            <div id="login-form">
-                <label for="login-username">Username:</label>
-                <input type="text" id="login-username">
-                <label for="login-password">Password:</label>
-                <input type="password" id="login-password">
-                <button onclick="login()">Login</button>
-                <button onclick="showSignup()">Sign Up</button>
-            </div>
-            <div id="signup-form">
-                <label for="signup-username">Username:</label>
-                <input type="text" id="signup-username">
-                <label for="signup-password">Password:</label>
-                <input type="password" id="signup-password">
-                <button onclick="signup()">Sign Up</button>
-                <button onclick="showLogin()">Back to Login</button>
-            </div>
-        </div>
+    <div id="map-container"></div>
+    <div id="login-form">
+        <label for="username">Username:</label>
+        <input type="text" id="username">
+        <label for="password">Password:</label>
+        <input type="password" id="password">
+        <button onclick="login()">Login</button>
     </div>
-    <div id="map-container" style="display:none;"></div>
-    <div id="marker-actions">
+    <div id="marker-actions" style="display:none;">
         <label for="marker-label">Marker Label:</label>
         <input type="text" id="marker-label">
         <label for="marker-icon">Marker Icon URL:</label>
@@ -76,40 +53,7 @@
         <button onclick="updateSelectedMarker()">Update Marker</button>
         <button onclick="removeSelectedMarker()">Remove Marker</button>
     </div>
-    <button id="admin-button" onclick="toggleAdminPanel()">🛠️ Admin</button>
-    <div id="admin-panel">
-        <h3>Admin Panel</h3>
-        <div>
-            <h4>Add New Marker</h4>
-            <label for="new-marker-id">Marker ID:</label>
-            <input type="text" id="new-marker-id">
-            <label for="new-marker-label">Marker Label:</label>
-            <input type="text" id="new-marker-label">
-            <label for="new-marker-icon">Marker Icon URL:</label>
-            <input type="text" id="new-marker-icon">
-            <button onclick="addNewMarker()">Add Marker</button>
-        </div>
-        <div>
-            <h4>Create User Account</h4>
-            <label for="admin-signup-username">Username:</label>
-            <input type="text" id="admin-signup-username">
-            <label for="admin-signup-password">Password:</label>
-            <input type="password" id="admin-signup-password">
-            <label for="admin-signup-markers">Marker IDs (comma-separated):</label>
-            <input type="text" id="admin-signup-markers">
-            <button onclick="adminSignup()">Create User</button>
-        </div>
-        <div>
-            <h4>Remove User Account</h4>
-            <label for="remove-user-username">Username:</label>
-            <input type="text" id="remove-user-username">
-            <button onclick="removeUser()">Remove User</button>
-        </div>
-    </div>
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-    <script src="firebase_init.js"></script>
-    <script src="common.js"></script>
-    <script src="map_mngr.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
