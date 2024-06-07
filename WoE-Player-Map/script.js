@@ -30,15 +30,8 @@ function ensureUsersTable() {
     });
 }
 
-// Initialize the map
-const map = L.map('map-container', {
-    center: [0, 0], // Reverted to initial center
-    zoom: 1,
-    crs: L.CRS.Simple, // Use simple coordinate system
-    minZoom: 1,
-    maxZoom: 5, // Allow zooming in but not zooming out past the original size
-    zoomControl: true // Show the default zoom control
-});
+// Initialize the map with default settings
+const map = L.map('map-container').setView([0, 0], 1);
 
 // Load the map image
 const bounds = [[0, 0], [1080, 1500]]; // Assuming the image is 1080x1500 pixels
