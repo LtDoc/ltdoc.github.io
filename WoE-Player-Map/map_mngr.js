@@ -1,3 +1,5 @@
+const { isAdmin, markers, currentUser } = window.sharedData;
+
 // Function to create or update a marker
 function createOrUpdateMarker(id, position, iconUrl, label) {
     if (markers[id]) {
@@ -42,7 +44,7 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
         markerInstance.on('click', function (event) {
             if (event.stopPropagation) event.stopPropagation(); // Prevent map click event
             if (isAdmin) {
-                selectedMarker = markerInstance;
+                window.sharedData.selectedMarker = markerInstance;
                 window.parent.postMessage({
                     type: 'selectMarker',
                     id: id,
@@ -79,13 +81,14 @@ window.addEventListener('message', (event) => {
     } else if (data.type === 'updateMarker') {
         createOrUpdateMarker(data.id, data.position, data.iconUrl, data.label);
     } else if (data.type === 'login') {
-        currentUser = data.username;
-        isAdmin = currentUser === 'admin';
+        window.sharedData.currentUser = data.username;
+        window.sharedData.isAdmin = data.username === 'admin';
         loadUserMarkers();
     }
 });
 
 function loadUserMarkers() {
+    const { currentUser } = window.sharedData;
     if (!currentUser) return;  // Ensure currentUser is set
     firebase.database().ref('markers').orderByChild('userId').equalTo(currentUser).on('value', (snapshot) => {
         const data = snapshot.val();

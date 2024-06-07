@@ -8,13 +8,13 @@ function login() {
             const userId = Object.keys(users)[0];
             const user = users[userId];
             if (user.password === password) {
-                currentUser = username;
+                window.sharedData.currentUser = username;
                 document.getElementById('login-form').style.display = 'none';
                 document.getElementById('signup-form').style.display = 'none';
                 document.getElementById('map-container').contentWindow.postMessage({ type: 'login', username }, '*');
                 // Show admin button if the user is admin
                 if (username === 'admin') {
-                    isAdmin = true;
+                    window.sharedData.isAdmin = true;
                     document.getElementById('admin-panel').style.display = 'block';
                 }
             } else {
@@ -57,6 +57,7 @@ function showLogin() {
 }
 
 function updateSelectedMarker() {
+    const { selectedMarker, currentUser } = window.sharedData;
     if (selectedMarker) {
         const label = document.getElementById('marker-label').value;
         const iconUrl = document.getElementById('marker-icon').value;
@@ -76,6 +77,7 @@ function updateSelectedMarker() {
 }
 
 function removeSelectedMarker() {
+    const { selectedMarker } = window.sharedData;
     if (selectedMarker) {
         const markerId = selectedMarker.options.id;
         document.getElementById('map-container').contentWindow.postMessage({ type: 'removeMarker', id: markerId }, '*');
@@ -84,7 +86,7 @@ function removeSelectedMarker() {
         }).catch((error) => {
             console.error(`Failed to remove marker ${markerId}: `, error);
         });
-        selectedMarker = null;
+        window.sharedData.selectedMarker = null;
         document.getElementById('marker-actions').style.display = 'none';
     }
 }
@@ -93,6 +95,7 @@ function addNewMarker() {
     const id = document.getElementById('new-marker-id').value;
     const label = document.getElementById('new-marker-label').value;
     const iconUrl = document.getElementById('new-marker-icon').value;
+    const { currentUser } = window.sharedData;
 
     firebase.database().ref('markers/' + id).set({
         position: { lat: 3277, lng: 4096 },
@@ -171,25 +174,9 @@ function removeUser() {
     });
 }
 
-function loadUserMarkers() {
-    if (!currentUser) return;  // Ensure currentUser is set
-    firebase.database().ref('markers').orderByChild('userId').equalTo(currentUser).on('value', (snapshot) => {
-        const data = snapshot.val();
-        console.log("User marker data loaded from Firebase: ", data);
-        if (data) {
-            for (const id in data) {
-                createOrUpdateMarker(id, data[id].position, data[id].iconUrl, data[id].label);
-            }
-        }
-    });
-}
-
-// Ensure the users table exists on load
-ensureUsersTable();
-
 window.addEventListener('message', (event) => {
     if (event.data.type === 'login') {
-        currentUser = event.data.username;
+        window.sharedData.currentUser = event.data.username;
         loadUserMarkers();
     }
 });

@@ -15,10 +15,12 @@ firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
 // Shared variables
-let isAdmin = false;
-let selectedMarker = null;
-let currentUser = null;
-let markers = {};
+window.sharedData = {
+    isAdmin: false,
+    selectedMarker: null,
+    currentUser: null,
+    markers: {}
+};
 
 // Ensure the users table exists
 function ensureUsersTable() {
@@ -30,3 +32,5 @@ function ensureUsersTable() {
         console.error('Error ensuring users table exists:', error);
     });
 }
+
+ensureUsersTable();
