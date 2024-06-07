@@ -2,22 +2,24 @@
 const map = L.map('map-container', {
     center: [0, 0], // Center of the image
     zoom: 1,
-    crs: L.CRS.Simple // Use simple coordinate system
+    crs: L.CRS.Simple, // Use simple coordinate system
+    dragging: false, // Disable dragging/panning
 });
 
 // Load the map image
-const bounds = [[0, 0], [6554, 8192]]; // Assuming the image is 1080x1500 pixels
+const bounds = [[0, 0], [1080, 1500]]; // Assuming the image is 1080x1500 pixels
 const image = L.imageOverlay('assets/high_res_image.png', bounds).addTo(map);
 
-// Fit the map to the image bounds
+// Fit the map to the image bounds and set max bounds
 map.fitBounds(bounds);
+map.setMaxBounds(bounds);
 
 // Custom icon class
 const CustomIcon = L.Icon.extend({
     options: {
         iconSize: [100, 100],
-        iconAnchor: [50, 50] // Anchor in the middle of the icon
-    }
+        iconAnchor: [50, 50], // Anchor in the middle of the icon
+    },
 });
 
 // Function to create or update a marker
@@ -31,22 +33,29 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
         const markerInstance = L.marker(position, {
             icon: customIcon,
             draggable: isAdmin,
-            id
+            id,
         }).addTo(map);
 
         // Handle marker dragging
-        markerInstance.on('dragstart', function (event) {
+        markerInstance.on('dragstart', function () {
             markerInstance.closeTooltip(); // Close the tooltip while dragging
         });
 
         markerInstance.on('dragend', function (event) {
             const marker = event.target;
             const newPosition = marker.getLatLng();
+
+            // Ensure marker is within bounds
+            if (!map.getBounds().contains(newPosition)) {
+                marker.setLatLng(position);
+                return;
+            }
+
             firebase.database().ref('markers/' + id).set({
                 position: newPosition,
                 iconUrl: marker.options.icon.options.iconUrl,
-                label: marker.getTooltip().getContent(),
-                userId: currentUser
+                label: label,
+                userId: currentUser,
             }).then(() => {
                 console.log(`Marker ${id} position saved to Firebase.`);
             }).catch((error) => {
@@ -72,7 +81,7 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
 
         // Prevent the marker's mousedown event from propagating to the map
         markerInstance.on('mousedown', function (event) {
-            event.stopPropagation(); // Prevent map mousedown event
+            event.originalEvent.stopPropagation(); // Prevent map mousedown event
         });
 
         markers[id] = markerInstance;
@@ -95,7 +104,7 @@ firebase.database().ref('markers').on('value', (snapshot) => {
 // Initialize markers with default positions if not already in Firebase
 const initialMarkers = [
     { id: 'marker1', position: { lat: 250, lng: 250 }, icon: 'assets/image1.png', label: 'Marker 1' },
-    { id: 'marker2', position: { lat: 750, lng: 750 }, icon: 'assets/image2.png', label: 'Marker 2' }
+    { id: 'marker2', position: { lat: 750, lng: 750 }, icon: 'assets/image2.png', label: 'Marker 2' },
 ];
 
 initialMarkers.forEach(marker => {
@@ -120,7 +129,7 @@ function updateSelectedMarker() {
             position: selectedMarker.getLatLng(),
             iconUrl,
             label,
-            userId: currentUser
+            userId: currentUser,
         }).then(() => {
             console.log(`Marker ${selectedMarker.options.id} updated in Firebase.`);
         }).catch((error) => {
@@ -155,7 +164,7 @@ function addNewMarker() {
         position: center,
         iconUrl,
         label,
-        userId: currentUser
+        userId: currentUser,
     }).then(() => {
         console.log(`Marker ${id} added to Firebase.`);
         createOrUpdateMarker(id, center, iconUrl, label);
