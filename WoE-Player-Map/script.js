@@ -21,7 +21,7 @@ let markers = {};
 
 // Initialize the map
 const map = L.map('map-container', {
-    center: [0, 0],
+    center: [540, 750],
     zoom: 1,
     crs: L.CRS.Simple // Use simple coordinate system
 });
