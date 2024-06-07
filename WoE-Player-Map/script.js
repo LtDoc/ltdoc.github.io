@@ -30,8 +30,12 @@ function ensureUsersTable() {
     });
 }
 
-// Initialize the map with default settings
-const map = L.map('map-container').setView([0, 0], 1);
+// Initialize the map
+const map = L.map('map-container', {
+    center: [0, 0], // Center of the image
+    zoom: 1,
+    crs: L.CRS.Simple // Use simple coordinate system
+});
 
 // Load the map image
 const bounds = [[0, 0], [1080, 1500]]; // Assuming the image is 1080x1500 pixels
