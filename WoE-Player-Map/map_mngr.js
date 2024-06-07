@@ -1,8 +1,3 @@
-let markers = {};
-let selectedMarker = null;
-let currentUser = null;
-let isAdmin = false;
-
 // Function to create or update a marker
 function createOrUpdateMarker(id, position, iconUrl, label) {
     if (markers[id]) {
