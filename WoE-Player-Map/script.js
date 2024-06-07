@@ -7,7 +7,7 @@ let markers = {};
 const firebaseConfig = {
     apiKey: "AIzaSyCo9QPVrLCXS6li_kcTu3e-GOoiiwpHvLs",
     authDomain: "woe-world.firebaseapp.com",
-    databaseURL: "https://woe-world-default-rtdb.firebaseio.com",
+    databaseURL: "woe-world-default-rtdb.firebaseio.com",
     projectId: "woe-world",
     storageBucket: "woe-world.appspot.com",
     messagingSenderId: "706865712365",
