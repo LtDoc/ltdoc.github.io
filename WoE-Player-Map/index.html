@@ -25,10 +25,6 @@
             height: 100vh;
             border: none;
         }
-        .login-container {
-            display: flex;
-            flex-direction: column;
-        }
         #marker-actions, #admin-panel {
             margin-top: 20px;
             display: none;
@@ -41,24 +37,6 @@
 </head>
 <body>
     <div id="sidebar">
-        <div class="login-container" id="login-form">
-            <h1>The World of Elyndor</h1>
-            <p>Live Player Map</p>
-            <label for="login-username">Username:</label>
-            <input type="text" id="login-username">
-            <label for="login-password">Password:</label>
-            <input type="password" id="login-password">
-            <button onclick="login()">Login</button>
-            <button onclick="showSignup()">Sign Up</button>
-        </div>
-        <div class="login-container" id="signup-form" style="display: none;">
-            <label for="signup-username">Username:</label>
-            <input type="text" id="signup-username">
-            <label for="signup-password">Password:</label>
-            <input type="password" id="signup-password">
-            <button onclick="signup()">Sign Up</button>
-            <button onclick="showLogin()">Back to Login</button>
-        </div>
         <div id="marker-actions">
             <label for="marker-label">Marker Label:</label>
             <input type="text" id="marker-label">
@@ -80,28 +58,11 @@
                 <input type="text" id="new-marker-icon">
                 <button onclick="addNewMarker()">Add Marker</button>
             </div>
-            <div>
-                <h4>Create User Account</h4>
-                <label for="admin-signup-username">Username:</label>
-                <input type="text" id="admin-signup-username">
-                <label for="admin-signup-password">Password:</label>
-                <input type="password" id="admin-signup-password">
-                <label for="admin-signup-markers">Marker IDs (comma-separated):</label>
-                <input type="text" id="admin-signup-markers">
-                <button onclick="adminSignup()">Create User</button>
-            </div>
-            <div>
-                <h4>Remove User Account</h4>
-                <label for="remove-user-username">Username:</label>
-                <input type="text" id="remove-user-username">
-                <button onclick="removeUser()">Remove User</button>
-            </div>
         </div>
     </div>
     <iframe id="map-container" src="map.html"></iframe>
     <script src="https://www.gstatic.com/firebasejs/9.21.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.21.0/firebase-database-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.21.0/firebase-auth-compat.js"></script>
     <script src="common.js"></script>
     <script src="script.js"></script>
 </body>

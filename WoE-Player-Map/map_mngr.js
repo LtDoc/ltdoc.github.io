@@ -1,4 +1,4 @@
-const { isAdmin, markers, currentUser } = window.sharedData;
+const { isAdmin, markers } = window.sharedData;
 
 // Function to create or update a marker
 function createOrUpdateMarker(id, position, iconUrl, label) {
@@ -10,7 +10,7 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
         const customIcon = new CustomIcon({ iconUrl });
         const markerInstance = L.marker(position, {
             icon: customIcon,
-            draggable: isAdmin,
+            draggable: window.sharedData.isAdmin,
             id,
         }).addTo(map);
 
@@ -43,7 +43,7 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
 
         markerInstance.on('click', function (event) {
             if (event.stopPropagation) event.stopPropagation(); // Prevent map click event
-            if (isAdmin) {
+            if (window.sharedData.isAdmin) {
                 window.sharedData.selectedMarker = markerInstance;
                 window.parent.postMessage({
                     type: 'selectMarker',
@@ -81,18 +81,14 @@ window.addEventListener('message', (event) => {
     } else if (data.type === 'updateMarker') {
         createOrUpdateMarker(data.id, data.position, data.iconUrl, data.label);
     } else if (data.type === 'login') {
-        window.sharedData.currentUser = data.username;
-        window.sharedData.isAdmin = data.username === 'admin';
         loadUserMarkers();
     }
 });
 
 function loadUserMarkers() {
-    const { currentUser } = window.sharedData;
-    if (!currentUser) return;  // Ensure currentUser is set
-    firebase.database().ref('markers').orderByChild('userId').equalTo(currentUser).on('value', (snapshot) => {
+    firebase.database().ref('markers').on('value', (snapshot) => {
         const data = snapshot.val();
-        console.log("User marker data loaded from Firebase: ", data);
+        console.log("Marker data loaded from Firebase: ", data);
         if (data) {
             for (const id in data) {
                 createOrUpdateMarker(id, data[id].position, data[id].iconUrl, data[id].label);
