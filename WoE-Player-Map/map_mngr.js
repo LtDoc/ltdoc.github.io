@@ -1,4 +1,4 @@
-const { isAdmin, markers } = window.sharedData;
+const { markers } = window.sharedData;
 
 // Function to create or update a marker
 function createOrUpdateMarker(id, position, iconUrl, label) {
