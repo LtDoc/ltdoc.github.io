@@ -104,7 +104,7 @@ function loadUserMarkers() {
 // Initialize the map
 const map = L.map('map', {
     center: [3277, 4096], // Center of the image (assuming the image is 8192x6554 pixels)
-    zoom: 1,
+    zoom: 0.5, // Adjust initial zoom level
     crs: L.CRS.Simple, // Use simple coordinate system
     maxBounds: [[0, 0], [6554, 8192]], // Set the bounds to prevent panning outside the image
     maxBoundsViscosity: 1.0 // Fully constrain the map to the bounds

@@ -15,7 +15,7 @@ function login() {
                 // Show admin button if the user is admin
                 if (username === 'admin') {
                     window.sharedData.isAdmin = true;
-                    document.getElementById('admin-panel').style.display = 'block';
+                    document.getElementById('admin-toggle').style.display = 'block';
                 }
             } else {
                 alert('Invalid credentials');
@@ -172,6 +172,15 @@ function removeUser() {
         console.error('Error fetching user by username: ', error);
         alert('Failed to fetch user by username.');
     });
+}
+
+function toggleAdminPanel() {
+    const adminPanel = document.getElementById('admin-panel');
+    if (adminPanel.style.display === 'none' || adminPanel.style.display === '') {
+        adminPanel.style.display = 'block';
+    } else {
+        adminPanel.style.display = 'none';
+    }
 }
 
 window.addEventListener('message', (event) => {
