@@ -36,6 +36,11 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
 
         markerInstance.bindTooltip(label).openTooltip();
 
+        // Handle marker dragging
+        markerInstance.on('dragstart', function (event) {
+            event.originalEvent.preventDefault();
+        });
+
         markerInstance.on('dragend', function (event) {
             const marker = event.target;
             const newPosition = marker.getLatLng();
@@ -52,12 +57,18 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
         });
 
         markerInstance.on('click', function (event) {
+            event.originalEvent.preventDefault();
             if (isAdmin) {
                 selectedMarker = markerInstance;
                 document.getElementById('marker-label').value = markerInstance.getTooltip().getContent();
                 document.getElementById('marker-icon').value = markerInstance.options.icon.options.iconUrl;
                 document.getElementById('marker-actions').style.display = 'block';
             }
+        });
+
+        // Prevent the marker's mousedown event from propagating to the map
+        markerInstance.on('mousedown', function (event) {
+            event.originalEvent.preventDefault();
         });
 
         markers[id] = markerInstance;
