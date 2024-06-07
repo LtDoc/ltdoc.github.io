@@ -66,6 +66,7 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
 
         // Show tooltip on right-click
         markerInstance.on('contextmenu', function (event) {
+            event.preventDefault();
             markerInstance.bindTooltip(label).openTooltip();
         });
 
