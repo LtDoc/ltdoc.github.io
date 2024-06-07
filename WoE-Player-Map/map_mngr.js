@@ -6,7 +6,7 @@ const map = L.map('map-container', {
 });
 
 // Load the map image
-const bounds = [[0, 0], [1080, 1500]]; // Assuming the image is 1080x1500 pixels
+const bounds = [[0, 0], [6554, 8192]]; // Assuming the image is 1080x1500 pixels
 const image = L.imageOverlay('assets/high_res_image.png', bounds).addTo(map);
 
 // Fit the map to the image bounds
