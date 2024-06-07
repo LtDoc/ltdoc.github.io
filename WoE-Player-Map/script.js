@@ -19,6 +19,17 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
+// Ensure the users table exists
+function ensureUsersTable() {
+    database.ref('users').once('value', snapshot => {
+        if (!snapshot.exists()) {
+            database.ref('users').set({});
+        }
+    }).catch(error => {
+        console.error('Error ensuring users table exists:', error);
+    });
+}
+
 function login() {
     const username = document.getElementById('login-username').value;
     const password = document.getElementById('login-password').value;
@@ -99,7 +110,7 @@ function updateSelectedMarker() {
 function removeSelectedMarker() {
     if (selectedMarker) {
         const markerId = selectedMarker.options.id;
-        document.getElementById('map-container').contentWindow.removeMarker(markerId);
+        document.getElementById('map-container').contentWindow.postMessage({ type: 'removeMarker', id: markerId }, '*');
         firebase.database().ref('markers/' + markerId).remove().then(() => {
             console.log(`Marker ${markerId} removed from Firebase.`);
         }).catch((error) => {
@@ -114,16 +125,21 @@ function addNewMarker() {
     const id = document.getElementById('new-marker-id').value;
     const label = document.getElementById('new-marker-label').value;
     const iconUrl = document.getElementById('new-marker-icon').value;
-    const center = map.getCenter(); // Get the center of the visible map
 
     firebase.database().ref('markers/' + id).set({
-        position: center,
+        position: { lat: 3277, lng: 4096 },
         iconUrl,
         label,
         userId: currentUser
     }).then(() => {
         console.log(`Marker ${id} added to Firebase.`);
-        document.getElementById('map-container').contentWindow.addMarker(id, center, iconUrl, label);
+        document.getElementById('map-container').contentWindow.postMessage({
+            type: 'addMarker',
+            id: id,
+            position: { lat: 3277, lng: 4096 },
+            iconUrl: iconUrl,
+            label: label
+        }, '*');
     }).catch((error) => {
         console.error(`Failed to add marker ${id}: `, error);
     });
