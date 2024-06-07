@@ -1,6 +1,3 @@
-let currentUser = null;
-let isAdmin = false;
-
 // Ensure Firebase is initialized before using it
 if (!firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
