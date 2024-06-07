@@ -1,3 +1,12 @@
+// Ensure Firebase is initialized before using it
+if (!firebase.apps.length) {
+    firebase.initializeApp(firebaseConfig);
+}
+
+let isAdmin = false;
+let selectedMarker = null;
+let markers = {};
+
 // Initialize the map
 const map = L.map('map-container', {
     center: [0, 0], // Center of the image
