@@ -1,7 +1,3 @@
-let isAdmin = false;
-let selectedMarker = null;
-let markers = {};
-
 // Initialize the map
 const map = L.map('map-container', {
     center: [0, 0], // Center of the image
@@ -152,6 +148,3 @@ function addNewMarker() {
         console.error(`Failed to add marker ${id}: `, error);
     });
 }
-
-// Ensure the users table exists on load
-ensureUsersTable();

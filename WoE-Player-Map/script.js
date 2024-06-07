@@ -1,4 +1,7 @@
 let currentUser = null;
+let isAdmin = false;
+let markers = {};
+let selectedMarker = null;
 
 // Firebase configuration
 const firebaseConfig = {
