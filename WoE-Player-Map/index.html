@@ -1,71 +1,173 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
+    <title>Interactive Game Map with Firebase</title>
+    <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>The World of Elyndor - Live Player Map</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
     <style>
-        body, html {
-            height: 100%;
-            margin: 0;
-            font-family: Arial, Helvetica, sans-serif;
-            display: flex;
+        #map {
+            height: 500px;
         }
         #sidebar {
-            width: 300px;
-            background-color: white;
-            padding: 20px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-            overflow-y: auto;
-        }
-        #map-container {
-            flex-grow: 1;
-            height: 100vh;
-            border: none;
-        }
-        #marker-actions, #admin-panel {
-            margin-top: 20px;
-            display: none;
-        }
-        #admin-toggle {
-            cursor: pointer;
-            margin-top: 20px;
+            width: 250px;
+            height: 500px;
+            overflow: auto;
+            position: absolute;
+            top: 0;
+            left: 0;
+            background: white;
+            padding: 10px;
+            border-right: 1px solid #ddd;
         }
     </style>
 </head>
 <body>
     <div id="sidebar">
-        <div id="marker-actions">
-            <label for="marker-label">Marker Label:</label>
-            <input type="text" id="marker-label">
-            <label for="marker-icon">Marker Icon URL:</label>
-            <input type="text" id="marker-icon">
-            <button onclick="updateSelectedMarker()">Update Marker</button>
-            <button onclick="removeSelectedMarker()">Remove Marker</button>
-        </div>
-        <div id="admin-toggle" onclick="toggleAdminPanel()">🛠️ Admin Panel</div>
-        <div id="admin-panel">
-            <h3>Admin Panel</h3>
-            <div>
-                <h4>Add New Marker</h4>
-                <label for="new-marker-id">Marker ID:</label>
-                <input type="text" id="new-marker-id">
-                <label for="new-marker-label">Marker Label:</label>
-                <input type="text" id="new-marker-label">
-                <label for="new-marker-icon">Marker Icon URL:</label>
-                <input type="text" id="new-marker-icon">
-                <button onclick="addNewMarker()">Add Marker</button>
-            </div>
-        </div>
+        <h2>Marker Management</h2>
+        <form id="markerForm">
+            <label for="markerName">Name:</label><br>
+            <input type="text" id="markerName"><br>
+            <label for="markerImage">Image URL:</label><br>
+            <input type="text" id="markerImage"><br>
+            <button type="button" onclick="addMarker()">Add Marker</button>
+        </form>
+        <h3>Markers:</h3>
+        <ul id="markerList"></ul>
     </div>
-    <iframe id="map-container" src="map.html"></iframe>
-    <script src="https://www.gstatic.com/firebasejs/9.21.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.21.0/firebase-database-compat.js"></script>
-    <script src="common.js"></script>
-    <script src="script.js"></script>
+    <div id="map"></div>
+
+    <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-database.js"></script>
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script>
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyCo9QPVrLCXS6li_kcTu3e-GOoiiwpHvLs",
+            authDomain: "woe-world.firebaseapp.com",
+            databaseURL: "https://woe-world-default-rtdb.firebaseio.com",
+            projectId: "woe-world",
+            storageBucket: "woe-world.appspot.com",
+            messagingSenderId: "706865712365",
+            appId: "1:706865712365:web:e080b1ef45b8d8b27190e4",
+            measurementId: "G-789BN2WECG"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+
+        // Custom game map image
+        const imageUrl = 'assets/high_res_image.png'; // Path to your game map image
+        const imageBounds = [[0, 0], [6554, 8192]]; // Adjust these bounds to fit your image dimensions (height, width)
+
+        // Initialize the map
+        const map = L.map('map', {
+            crs: L.CRS.Simple,
+            maxZoom: 2,
+            minZoom: -2
+        });
+
+        // Add the image overlay to the map
+        L.imageOverlay(imageUrl, imageBounds).addTo(map);
+
+        // Fit the map to the image bounds
+        map.fitBounds(imageBounds);
+
+        let markers = {};
+
+        // Load markers from Firebase
+        database.ref('markers').on('value', snapshot => {
+            const data = snapshot.val();
+            if (data) {
+                Object.keys(data).forEach(id => {
+                    const markerData = data[id];
+                    createMarker(id, markerData.lat, markerData.lng, markerData.name, markerData.image);
+                });
+            }
+        });
+
+        // Add marker
+        function addMarker() {
+            const name = document.getElementById('markerName').value;
+            const image = document.getElementById('markerImage').value;
+            const marker = L.marker(map.getCenter(), { draggable: true }).addTo(map).bindPopup(`<strong>${name}</strong><br><img src="${image}" width="100">`);
+            const markerId = database.ref().child('markers').push().key;
+            database.ref('markers/' + markerId).set({
+                lat: map.getCenter().lat,
+                lng: map.getCenter().lng,
+                name: name,
+                image: image
+            });
+            createMarker(markerId, map.getCenter().lat, map.getCenter().lng, name, image);
+        }
+
+        // Create marker
+        function createMarker(id, lat, lng, name, image) {
+            if (markers[id]) {
+                map.removeLayer(markers[id]);
+            }
+            const marker = L.marker([lat, lng], { draggable: true }).addTo(map).bindPopup(`<strong>${name}</strong><br><img src="${image}" width="100">`);
+            marker.on('dragend', function(e) {
+                const newPos = e.target.getLatLng();
+                database.ref('markers/' + id).update({
+                    lat: newPos.lat,
+                    lng: newPos.lng
+                });
+            });
+            markers[id] = marker;
+            updateSidebar();
+        }
+
+        // Update sidebar
+        function updateSidebar() {
+            const markerList = document.getElementById('markerList');
+            markerList.innerHTML = '';
+            Object.keys(markers).forEach(id => {
+                const marker = markers[id];
+                const listItem = document.createElement('li');
+                listItem.innerHTML = `<strong>${marker.getPopup().getContent().split('<br>')[0].replace('<strong>', '').replace('</strong>', '')}</strong>
+                                      <button onclick="editMarker('${id}')">Edit</button>
+                                      <button onclick="removeMarker('${id}')">Remove</button>`;
+                markerList.appendChild(listItem);
+            });
+        }
+
+        // Edit marker
+        function editMarker(id) {
+            const marker = markers[id];
+            const newName = prompt('Enter new name:', marker.getPopup().getContent().split('<br>')[0].replace('<strong>', '').replace('</strong>', ''));
+            const newImage = prompt('Enter new image URL:', marker.getPopup().getContent().split('<br>')[1].replace('<img src="', '').replace('" width="100">', ''));
+            database.ref('markers/' + id).update({
+                name: newName,
+                image: newImage
+            });
+            marker.setPopupContent(`<strong>${newName}</strong><br><img src="${newImage}" width="100">`);
+            updateSidebar();
+        }
+
+        // Remove marker
+        function removeMarker(id) {
+            map.removeLayer(markers[id]);
+            delete markers[id];
+            database.ref('markers/' + id).remove();
+            updateSidebar();
+        }
+
+        // IP-based access control
+        function checkIPAccess() {
+            fetch('https://api.ipify.org?format=json')
+                .then(response => response.json())
+                .then(data => {
+                    const userIP = data.ip;
+                    const allowedIP = 'YOUR_ALLOWED_IP'; // Replace with your allowed IP address
+                    if (userIP === allowedIP) {
+                        Object.values(markers).forEach(marker => marker.dragging.enable());
+                    } else {
+                        Object.values(markers).forEach(marker => marker.dragging.disable());
+                    }
+                });
+        }
+
+        checkIPAccess();
+    </script>
 </body>
 </html>
