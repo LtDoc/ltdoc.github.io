@@ -25,7 +25,7 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
     if (markers[id]) {
         markers[id].setLatLng(position);
         markers[id].setIcon(new CustomIcon({ iconUrl }));
-        markers[id].bindTooltip(label).openTooltip();
+        markers[id].unbindTooltip();
     } else {
         const customIcon = new CustomIcon({ iconUrl });
         const markerInstance = L.marker(position, {
@@ -34,11 +34,9 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
             id
         }).addTo(map);
 
-        markerInstance.bindTooltip(label).openTooltip();
-
         // Handle marker dragging
         markerInstance.on('dragstart', function (event) {
-            event.originalEvent.preventDefault();
+            markerInstance.closeTooltip(); // Close the tooltip while dragging
         });
 
         markerInstance.on('dragend', function (event) {
@@ -57,18 +55,23 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
         });
 
         markerInstance.on('click', function (event) {
-            event.originalEvent.preventDefault();
+            event.originalEvent.stopPropagation(); // Prevent map click event
             if (isAdmin) {
                 selectedMarker = markerInstance;
-                document.getElementById('marker-label').value = markerInstance.getTooltip().getContent();
-                document.getElementById('marker-icon').value = markerInstance.options.icon.options.iconUrl;
+                document.getElementById('marker-label').value = label;
+                document.getElementById('marker-icon').value = iconUrl;
                 document.getElementById('marker-actions').style.display = 'block';
             }
         });
 
+        // Show tooltip on right-click
+        markerInstance.on('contextmenu', function (event) {
+            markerInstance.bindTooltip(label).openTooltip();
+        });
+
         // Prevent the marker's mousedown event from propagating to the map
         markerInstance.on('mousedown', function (event) {
-            event.originalEvent.preventDefault();
+            event.originalEvent.stopPropagation(); // Prevent map mousedown event
         });
 
         markers[id] = markerInstance;
@@ -110,7 +113,7 @@ function updateSelectedMarker() {
         const iconUrl = document.getElementById('marker-icon').value;
 
         selectedMarker.setIcon(new CustomIcon({ iconUrl }));
-        selectedMarker.bindTooltip(label).openTooltip();
+        selectedMarker.unbindTooltip().bindTooltip(label);
 
         firebase.database().ref('markers/' + selectedMarker.options.id).set({
             position: selectedMarker.getLatLng(),
