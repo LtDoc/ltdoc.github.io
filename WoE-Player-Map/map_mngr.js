@@ -55,7 +55,7 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
         });
 
         markerInstance.on('click', function (event) {
-            event.originalEvent.stopPropagation(); // Prevent map click event
+            event.stopPropagation(); // Prevent map click event
             if (isAdmin) {
                 selectedMarker = markerInstance;
                 document.getElementById('marker-label').value = label;
@@ -71,7 +71,7 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
 
         // Prevent the marker's mousedown event from propagating to the map
         markerInstance.on('mousedown', function (event) {
-            event.originalEvent.stopPropagation(); // Prevent map mousedown event
+            event.stopPropagation(); // Prevent map mousedown event
         });
 
         markers[id] = markerInstance;
