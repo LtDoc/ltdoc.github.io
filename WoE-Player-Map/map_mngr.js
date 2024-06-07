@@ -3,15 +3,16 @@ const map = L.map('map-container', {
     center: [3277, 4096], // Center of the image (assuming the image is 8192x6554 pixels)
     zoom: 1,
     crs: L.CRS.Simple, // Use simple coordinate system
+    maxBounds: [[0, 0], [6554, 8192]], // Set the bounds to prevent panning outside the image
+    maxBoundsViscosity: 1.0 // Fully constrain the map to the bounds
 });
 
 // Load the map image
 const bounds = [[0, 0], [6554, 8192]]; // Assuming the image is 8192x6554 pixels
 const image = L.imageOverlay('assets/high_res_image.png', bounds).addTo(map);
 
-// Fit the map to the image bounds and set max bounds
+// Fit the map to the image bounds
 map.fitBounds(bounds);
-map.setMaxBounds(bounds);
 
 // Custom icon class
 const CustomIcon = L.Icon.extend({
@@ -37,10 +38,13 @@ function createOrUpdateMarker(id, position, iconUrl, label) {
 
         // Handle marker dragging
         markerInstance.on('dragstart', function () {
+            map.dragging.disable(); // Disable map dragging while marker is being dragged
             markerInstance.closeTooltip(); // Close the tooltip while dragging
         });
 
         markerInstance.on('dragend', function (event) {
+            map.dragging.enable(); // Re-enable map dragging once marker drag is complete
+
             const marker = event.target;
             const newPosition = marker.getLatLng();
 
