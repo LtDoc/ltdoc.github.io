@@ -1,3 +1,4 @@
+window.sharedData = window.sharedData || {};
 const { markers } = window.sharedData;
 
 // Function to create or update a marker
