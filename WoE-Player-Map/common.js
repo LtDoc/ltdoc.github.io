@@ -10,12 +10,14 @@ const firebaseConfig = {
     measurementId: "G-789BN2WECG"
 };
 
-// Initialize Firebase
-firebase.initializeApp(firebaseConfig);
+// Initialize Firebase if not already initialized
+if (!firebase.apps.length) {
+    firebase.initializeApp(firebaseConfig);
+}
 const database = firebase.database();
 
 // Shared variables
-window.sharedData = {
+window.sharedData = window.sharedData || {
     isAdmin: false,
     selectedMarker: null,
     currentUser: null,
