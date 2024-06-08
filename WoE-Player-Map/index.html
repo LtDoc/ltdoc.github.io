@@ -42,12 +42,15 @@
         #toggleSidebar {
             position: absolute;
             top: 10px;
-            left: 10px;
+            left: 260px; /* Move it away from the sidebar */
             z-index: 1000;
             background: #fff;
             border: 1px solid #ddd;
             padding: 5px;
             cursor: pointer;
+        }
+        .leaflet-top.leaflet-left {
+            margin-top: 50px; /* Adjust to ensure it is below the toggle button */
         }
     </style>
 </head>
