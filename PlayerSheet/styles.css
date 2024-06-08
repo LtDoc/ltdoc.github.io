@@ -63,6 +63,8 @@ form button:hover {
 
 .character-display {
     width: 100%;
+    display: flex;
+    flex-wrap: wrap;
 }
 
 .character-portrait {
@@ -72,13 +74,11 @@ form button:hover {
     margin-right: 10px;
 }
 
-.basic-info, .stats, .additional-info, .languages, .skills, .senses, .damage-resistances, .magic-resistances, .spells, .abilities, .actions, .reactions, .items {
+.section {
     width: 48%;
+    border: 1px solid #000;
+    padding: 10px;
     margin-bottom: 10px;
-}
-
-.basic-info p, .stats p, .additional-info p {
-    margin: 5px 0;
 }
 
 #load-character {

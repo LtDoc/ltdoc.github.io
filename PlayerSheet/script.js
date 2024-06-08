@@ -133,12 +133,14 @@ function updateCharacterSheet() {
 function updateFieldDisplay(fieldType, displayId, includeValue = false) {
     const displayElement = document.getElementById(displayId);
     const container = document.getElementById(`${fieldType}-container`);
-    let displayHtml = '';
-    container.childNodes.forEach(child => {
-        const text = child.innerHTML.split('<button')[0];
-        displayHtml += `<p>${text}</p>`;
-    });
-    displayElement.innerHTML = displayHtml;
+    if (container) {
+        let displayHtml = '';
+        container.childNodes.forEach(child => {
+            const text = child.innerHTML.split('<button')[0];
+            displayHtml += `<p>${text}</p>`;
+        });
+        displayElement.innerHTML = displayHtml;
+    }
 }
 
 // Generate a unique 6-digit ID
