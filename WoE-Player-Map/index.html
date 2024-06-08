@@ -149,6 +149,8 @@
                     <option value="town">Town</option>
                     <option value="poi">POI</option>
                 </select><br>
+                <label for="markerName">Name:</label><br>
+                <input type="text" id="markerName"><br>
                 <div id="iconFields">
                     <label for="markerIcon">Icon URL:</label><br>
                     <input type="text" id="markerIcon"><br>
@@ -174,7 +176,8 @@
 
         <button type="button" class="collapsible">Player Markers</button>
         <div class="content">
-            <!-- Player marker specific management can go here -->
+            <h3>Markers:</h3>
+            <ul id="playerMarkerList"></ul>
         </div>
     </div>
     <div id="map"></div>
