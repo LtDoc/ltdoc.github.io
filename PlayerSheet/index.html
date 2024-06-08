@@ -127,8 +127,37 @@
         
         <div class="character-sheet">
             <h2>Character Sheet</h2>
-            <div id="character-display">
-                <img id="character-portrait" style="float: left; margin-right: 10px;">
+            <div id="character-display" class="character-display">
+                <img id="character-portrait" class="character-portrait">
+                <div class="basic-info">
+                    <p><strong>Name:</strong> <span id="display-name"></span></p>
+                    <p><strong>Level:</strong> <span id="display-level"></span></p>
+                    <p><strong>Race:</strong> <span id="display-race"></span></p>
+                    <p><strong>Class:</strong> <span id="display-class"></span></p>
+                </div>
+                <div class="stats">
+                    <p><strong>STR:</strong> <span id="display-str"></span></p>
+                    <p><strong>DEX:</strong> <span id="display-dex"></span></p>
+                    <p><strong>CON:</strong> <span id="display-con"></span></p>
+                    <p><strong>INT:</strong> <span id="display-int"></span></p>
+                    <p><strong>CHA:</strong> <span id="display-cha"></span></p>
+                    <p><strong>STA:</strong> <span id="display-sta"></span></p>
+                    <p><strong>PER:</strong> <span id="display-per"></span></p>
+                </div>
+                <div class="additional-info">
+                    <p><strong>HP:</strong> <span id="display-hp"></span></p>
+                    <p><strong>AC:</strong> <span id="display-ac"></span></p>
+                </div>
+                <div class="languages" id="languages-display"></div>
+                <div class="skills" id="skills-display"></div>
+                <div class="senses" id="senses-display"></div>
+                <div class="damage-resistances" id="damage-resistances-display"></div>
+                <div class="magic-resistances" id="magic-resistances-display"></div>
+                <div class="spells" id="spells-display"></div>
+                <div class="abilities" id="abilities-display"></div>
+                <div class="actions" id="actions-display"></div>
+                <div class="reactions" id="reactions-display"></div>
+                <div class="items" id="items-display"></div>
             </div>
             <button id="savePng">Save as PNG</button>
             <div id="character-id-display"></div>

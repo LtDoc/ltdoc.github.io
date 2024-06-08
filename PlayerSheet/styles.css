@@ -27,6 +27,9 @@ body {
     padding: 20px;
     box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
     overflow-y: auto;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
 }
 
 form label {
@@ -58,18 +61,24 @@ form button:hover {
     background-color: #0056b3;
 }
 
-.character-sheet h2 {
-    text-align: center;
+.character-display {
+    width: 100%;
 }
 
-#character-display {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
+.character-portrait {
+    max-width: 150px;
+    max-height: 150px;
+    float: left;
+    margin-right: 10px;
 }
 
-#stats-section {
-    margin-bottom: 20px;
+.basic-info, .stats, .additional-info, .languages, .skills, .senses, .damage-resistances, .magic-resistances, .spells, .abilities, .actions, .reactions, .items {
+    width: 48%;
+    margin-bottom: 10px;
+}
+
+.basic-info p, .stats p, .additional-info p {
+    margin: 5px 0;
 }
 
 #load-character {
@@ -83,9 +92,4 @@ form button:hover {
 .roll-btn {
     margin-right: 5px;
     margin-bottom: 5px;
-}
-
-#character-portrait {
-    max-width: 150px;
-    max-height: 150px;
 }

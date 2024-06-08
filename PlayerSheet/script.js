@@ -104,17 +104,41 @@ function rollStats(event) {
 // Update character sheet in real-time
 function updateCharacterSheet() {
     const characterData = new FormData(characterForm);
+    document.getElementById('display-name').textContent = characterData.get('name');
+    document.getElementById('display-level').textContent = characterData.get('level');
+    document.getElementById('display-race').textContent = characterData.get('race');
+    document.getElementById('display-class').textContent = characterData.get('class');
+    document.getElementById('display-str').textContent = characterData.get('str');
+    document.getElementById('display-dex').textContent = characterData.get('dex');
+    document.getElementById('display-con').textContent = characterData.get('con');
+    document.getElementById('display-int').textContent = characterData.get('int');
+    document.getElementById('display-cha').textContent = characterData.get('cha');
+    document.getElementById('display-sta').textContent = characterData.get('sta');
+    document.getElementById('display-per').textContent = characterData.get('per');
+    document.getElementById('display-hp').textContent = characterData.get('hp');
+    document.getElementById('display-ac').textContent = characterData.get('ac');
+
+    updateFieldDisplay('languages', 'languages-display');
+    updateFieldDisplay('skills', 'skills-display', true);
+    updateFieldDisplay('senses', 'senses-display');
+    updateFieldDisplay('damageResistances', 'damage-resistances-display');
+    updateFieldDisplay('magicResistances', 'magic-resistances-display');
+    updateFieldDisplay('spells', 'spells-display');
+    updateFieldDisplay('abilities', 'abilities-display');
+    updateFieldDisplay('actions', 'actions-display');
+    updateFieldDisplay('reactions', 'reactions-display');
+    updateFieldDisplay('items', 'items-display');
+}
+
+function updateFieldDisplay(fieldType, displayId, includeValue = false) {
+    const displayElement = document.getElementById(displayId);
+    const container = document.getElementById(`${fieldType}-container`);
     let displayHtml = '';
-    const fields = document.querySelectorAll('.field');
-    fields.forEach(field => {
-        displayHtml += `<p>${field.innerHTML}</p>`;
+    container.childNodes.forEach(child => {
+        const text = child.innerHTML.split('<button')[0];
+        displayHtml += `<p>${text}</p>`;
     });
-    characterData.forEach((value, key) => {
-        if (key !== 'portrait' && key !== 'skills-value') {
-            displayHtml += `<p><strong>${key}:</strong> ${value}</p>`;
-        }
-    });
-    characterDisplay.innerHTML = displayHtml;
+    displayElement.innerHTML = displayHtml;
 }
 
 // Generate a unique 6-digit ID
