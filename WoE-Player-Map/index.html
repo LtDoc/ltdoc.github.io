@@ -122,18 +122,23 @@
             <input type="text" id="markerName"><br>
             <label for="markerIcon">Icon URL:</label><br>
             <input type="text" id="markerIcon"><br>
+            <input type="file" id="markerIconFile" accept="image/*"><br>
             <label for="markerTooltip">Tooltip Image URL:</label><br>
             <input type="text" id="markerTooltip"><br>
+            <input type="file" id="markerTooltipFile" accept="image/*"><br>
             <button type="button" onclick="addMarker()">Add Marker</button>
         </form>
         <h3>Markers:</h3>
         <ul id="markerList"></ul>
         <button type="button" id="startPolygonDraw" onclick="startPolygonDraw()">Draw Polygon</button>
+        <h3>Polygons:</h3>
+        <ul id="polygonList"></ul>
     </div>
     <div id="map"></div>
 
     <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-database.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-storage.js"></script>
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
     <script>
@@ -150,6 +155,7 @@
         };
         firebase.initializeApp(firebaseConfig);
         const database = firebase.database();
+        const storage = firebase.storage();
 
         // Custom game map image
         const imageUrl = 'assets/high_res_image.png'; // Path to your game map image
@@ -185,6 +191,7 @@
         map.addControl(drawControl);
 
         let markers = {};
+        let polygons = {};
 
         // Load markers from Firebase
         database.ref('markers').on('value', snapshot => {
@@ -193,6 +200,17 @@
                 Object.keys(data).forEach(id => {
                     const markerData = data[id];
                     createMarker(id, markerData);
+                });
+            }
+        });
+
+        // Load polygons from Firebase
+        database.ref('polygons').on('value', snapshot => {
+            const data = snapshot.val();
+            if (data) {
+                Object.keys(data).forEach(id => {
+                    const polygonData = data[id];
+                    createPolygon(id, polygonData);
                 });
             }
         });
@@ -215,8 +233,34 @@
                 tooltipUrl: tooltipUrl
             };
 
-            database.ref('markers/' + markerId).set(markerOptions);
-            createMarker(markerId, markerOptions);
+            const iconFile = document.getElementById('markerIconFile').files[0];
+            const tooltipFile = document.getElementById('markerTooltipFile').files[0];
+
+            const promises = [];
+
+            if (iconFile) {
+                const iconStorageRef = storage.ref(`markers/${markerId}/icon`);
+                promises.push(iconStorageRef.put(iconFile).then(snapshot => {
+                    return snapshot.ref.getDownloadURL().then(url => {
+                        markerOptions.iconUrl = url;
+                    });
+                }));
+            }
+
+            if (tooltipFile) {
+                const tooltipStorageRef = storage.ref(`markers/${markerId}/tooltip`);
+                promises.push(tooltipStorageRef.put(tooltipFile).then(snapshot => {
+                    return snapshot.ref.getDownloadURL().then(url => {
+                        markerOptions.tooltipUrl = url;
+                    });
+                }));
+            }
+
+            Promise.all(promises).then(() => {
+                database.ref('markers/' + markerId).set(markerOptions);
+                createMarker(markerId, markerOptions);
+                resetMarkerForm();
+            });
         }
 
         // Create marker
@@ -228,7 +272,7 @@
             let marker;
             if (markerData.type === 'player') {
                 let icon = L.divIcon({
-                    html: `<img src="${markerData.iconUrl}" class="circular-icon">`,
+                    html: `<img src="${markerData.iconUrl}" class="circular-icon" onerror="this.src='assets/placeholder.png'">`,
                     className: ''
                 });
                 marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
@@ -270,6 +314,16 @@
             updateSidebar();
         }
 
+        // Reset marker form fields
+        function resetMarkerForm() {
+            document.getElementById('markerType').value = 'player';
+            document.getElementById('markerName').value = '';
+            document.getElementById('markerIcon').value = '';
+            document.getElementById('markerTooltip').value = '';
+            document.getElementById('markerIconFile').value = '';
+            document.getElementById('markerTooltipFile').value = '';
+        }
+
         // Update sidebar
         function updateSidebar() {
             const markerList = document.getElementById('markerList');
@@ -281,6 +335,17 @@
                                       <button onclick="editMarker('${id}')">Edit</button>
                                       <button onclick="removeMarker('${id}')">Remove</button>`;
                 markerList.appendChild(listItem);
+            });
+
+            const polygonList = document.getElementById('polygonList');
+            polygonList.innerHTML = '';
+            Object.keys(polygons).forEach(id => {
+                const polygon = polygons[id];
+                const listItem = document.createElement('li');
+                listItem.innerHTML = `<strong>Polygon ${id}</strong>
+                                      <button onclick="editPolygon('${id}')">Edit</button>
+                                      <button onclick="removePolygon('${id}')">Remove</button>`;
+                polygonList.appendChild(listItem);
             });
         }
 
@@ -302,6 +367,42 @@
             map.removeLayer(markers[id]);
             delete markers[id];
             database.ref('markers/' + id).remove();
+            updateSidebar();
+        }
+
+        // Create polygon
+        function createPolygon(id, polygonData) {
+            const latlngs = polygonData.latlngs;
+            const options = { color: polygonData.color, opacity: polygonData.opacity };
+            const polygon = L.polygon(latlngs, options).addTo(map);
+
+            polygon.on('click', function() {
+                if (hasEditPermissions) {
+                    const newColor = prompt('Enter new color (e.g., #ff0000):', polygon.options.color);
+                    const newOpacity = prompt('Enter new opacity (0-1):', polygon.options.opacity);
+                    polygon.setStyle({ color: newColor, opacity: parseFloat(newOpacity) });
+                    database.ref('polygons/' + id).update({ color: newColor, opacity: parseFloat(newOpacity) });
+                }
+            });
+
+            polygons[id] = polygon;
+            updateSidebar();
+        }
+
+        // Edit polygon
+        function editPolygon(id) {
+            const polygon = polygons[id];
+            const newColor = prompt('Enter new color (e.g., #ff0000):', polygon.options.color);
+            const newOpacity = prompt('Enter new opacity (0-1):', polygon.options.opacity);
+            polygon.setStyle({ color: newColor, opacity: parseFloat(newOpacity) });
+            database.ref('polygons/' + id).update({ color: newColor, opacity: parseFloat(newOpacity) });
+        }
+
+        // Remove polygon
+        function removePolygon(id) {
+            map.removeLayer(polygons[id]);
+            delete polygons[id];
+            database.ref('polygons/' + id).remove();
             updateSidebar();
         }
 
@@ -358,20 +459,36 @@
 
         // Start polygon draw
         function startPolygonDraw() {
-            new L.Draw.Polygon(map).enable();
+            if (hasEditPermissions) {
+                new L.Draw.Polygon(map).enable();
+            } else {
+                alert("You don't have permissions to draw polygons.");
+            }
         }
 
         // Handle polygon creation and editing
         map.on('draw:created', function(event) {
             const layer = event.layer;
             drawControl.options.edit.featureGroup.addLayer(layer);
+
+            const id = database.ref().child('polygons').push().key;
+            const latlngs = layer.getLatLngs();
+            const color = layer.options.color;
+            const opacity = layer.options.opacity;
+
+            database.ref('polygons/' + id).set({ latlngs, color, opacity });
+
             layer.on('click', function() {
                 if (hasEditPermissions) {
                     const newColor = prompt('Enter new color (e.g., #ff0000):', layer.options.color);
                     const newOpacity = prompt('Enter new opacity (0-1):', layer.options.opacity);
                     layer.setStyle({ color: newColor, opacity: parseFloat(newOpacity) });
+                    database.ref('polygons/' + id).update({ color: newColor, opacity: parseFloat(newOpacity) });
                 }
             });
+
+            polygons[id] = layer;
+            updateSidebar();
         });
     </script>
 </body>
