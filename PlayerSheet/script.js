@@ -19,6 +19,7 @@ const characterDisplay = document.getElementById('character-display');
 const savePngButton = document.getElementById('savePng');
 const rollBtns = document.querySelectorAll('.roll-btn');
 const characterIdDisplay = document.getElementById('character-id-display');
+const characterPortrait = document.getElementById('character-portrait');
 
 // Populate select fields with data
 document.addEventListener('DOMContentLoaded', () => {
@@ -39,6 +40,10 @@ document.addEventListener('DOMContentLoaded', () => {
 // Populate single select
 function populateSelect(id, options) {
     const select = document.getElementById(id);
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'Select';
+    select.appendChild(opt);
     options.forEach(option => {
         const opt = document.createElement('option');
         opt.value = option.name;
@@ -57,8 +62,14 @@ function addField(fieldType) {
     if (option) {
         const div = document.createElement('div');
         div.classList.add('field');
-        div.innerHTML = `${option.name}: ${option.description} <button type="button" onclick="removeField(this)">Remove</button>`;
+        if (fieldType === 'skills') {
+            const skillValue = document.getElementById('skills-value').value;
+            div.innerHTML = `${option.name}: ${option.description} (Value: ${skillValue}) <button type="button" onclick="removeField(this)">Remove</button>`;
+        } else {
+            div.innerHTML = `${option.name}: ${option.description} <button type="button" onclick="removeField(this)">Remove</button>`;
+        }
         container.appendChild(div);
+        updateCharacterSheet();
     }
 }
 
@@ -66,6 +77,7 @@ function addField(fieldType) {
 function removeField(button) {
     const field = button.parentElement;
     field.remove();
+    updateCharacterSheet();
 }
 
 // Event listeners
@@ -93,8 +105,14 @@ function rollStats(event) {
 function updateCharacterSheet() {
     const characterData = new FormData(characterForm);
     let displayHtml = '';
+    const fields = document.querySelectorAll('.field');
+    fields.forEach(field => {
+        displayHtml += `<p>${field.innerHTML}</p>`;
+    });
     characterData.forEach((value, key) => {
-        displayHtml += `<p><strong>${key}:</strong> ${value}</p>`;
+        if (key !== 'portrait' && key !== 'skills-value') {
+            displayHtml += `<p><strong>${key}:</strong> ${value}</p>`;
+        }
     });
     characterDisplay.innerHTML = displayHtml;
 }
@@ -148,10 +166,8 @@ function loadCharacter() {
                 }
             }
             if (characterData.portrait) {
-                const img = document.createElement('img');
-                img.src = characterData.portrait;
-                img.alt = 'Character Portrait';
-                characterDisplay.appendChild(img);
+                characterPortrait.src = characterData.portrait;
+                characterPortrait.alt = 'Character Portrait';
             }
             characterIdDisplay.innerHTML = `<p>Character ID: ${characterId}</p>`;
             updateCharacterSheet();

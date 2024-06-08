@@ -68,6 +68,7 @@
                 <label for="skills">Skills:</label>
                 <div id="skills-container"></div>
                 <select id="skills-select" name="skills"></select>
+                <input type="number" id="skills-value" placeholder="Value">
                 <button type="button" onclick="addField('skills')">Add Skill</button>
                 
                 <label for="senses">Senses:</label>
@@ -126,7 +127,9 @@
         
         <div class="character-sheet">
             <h2>Character Sheet</h2>
-            <div id="character-display"></div>
+            <div id="character-display">
+                <img id="character-portrait" style="float: left; margin-right: 10px;">
+            </div>
             <button id="savePng">Save as PNG</button>
             <div id="character-id-display"></div>
         </div>
