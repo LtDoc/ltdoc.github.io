@@ -12,6 +12,8 @@
             padding: 0;
             height: 100%;
             overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0f0f0;
         }
         #map {
             width: 100%;
@@ -23,39 +25,80 @@
             left: 0;
         }
         #sidebar {
-            width: 250px;
+            width: 300px;
             height: 100%;
             overflow: auto;
-            background: white;
-            padding: 10px;
-            border-right: 1px solid #ddd;
+            background: #2c3e50;
+            color: white;
+            padding: 15px;
+            border-right: 2px solid #34495e;
             transition: transform 0.3s ease;
             position: absolute;
             left: 0;
             top: 0;
             bottom: 0;
             z-index: 1000;
+            box-shadow: 3px 0px 10px rgba(0,0,0,0.5);
         }
         #sidebar.hidden {
             transform: translateX(-100%);
         }
         #toggleSidebar {
             position: absolute;
-            top: 10px;
-            left: 260px; /* Move it away from the sidebar */
+            top: 15px;
+            left: 310px;
             z-index: 1000;
-            background: #fff;
-            border: 1px solid #ddd;
-            padding: 5px;
+            background: #34495e;
+            color: white;
+            border: none;
+            padding: 10px;
             cursor: pointer;
+            font-size: 16px;
+            box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
+            transition: left 0.3s ease;
         }
         .leaflet-top.leaflet-left {
-            margin-top: 50px; /* Adjust to ensure it is below the toggle button */
+            left: 320px; /* Adjust to ensure it is not on top of the sidebar */
+            transition: left 0.3s ease;
+        }
+        .leaflet-container .custom-div-icon {
+            font-size: 24px;
+            color: gold;
+            text-align: center;
+            line-height: 24px;
+        }
+        h2, h3 {
+            font-family: 'Fantasy', cursive;
+        }
+        button {
+            background-color: #2980b9;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            margin: 5px 0;
+            cursor: pointer;
+            font-size: 14px;
+            border-radius: 5px;
+            box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
+        }
+        input, select {
+            width: calc(100% - 30px);
+            padding: 10px;
+            margin: 5px 0;
+            border: none;
+            border-radius: 5px;
+            box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
+        }
+        label {
+            margin: 5px 0;
+        }
+        #sidebar h2, #sidebar h3 {
+            color: #ecf0f1;
         }
     </style>
 </head>
 <body>
-    <div id="toggleSidebar">☰</div>
+    <button id="toggleSidebar">☰</button>
     <div id="sidebar" class="hidden">
         <h2>Marker Management</h2>
         <form id="markerForm">
@@ -274,12 +317,21 @@
         const toggleSidebar = document.getElementById('toggleSidebar');
         toggleSidebar.addEventListener('click', () => {
             sidebar.classList.toggle('hidden');
+            if (sidebar.classList.contains('hidden')) {
+                toggleSidebar.style.left = '10px';
+                document.querySelector('.leaflet-top.leaflet-left').style.left = '10px';
+            } else {
+                toggleSidebar.style.left = '310px';
+                document.querySelector('.leaflet-top.leaflet-left').style.left = '320px';
+            }
             map.invalidateSize();
         });
 
         function showSidebar() {
             if (sidebar.classList.contains('hidden')) {
                 sidebar.classList.remove('hidden');
+                toggleSidebar.style.left = '310px';
+                document.querySelector('.leaflet-top.leaflet-left').style.left = '320px';
                 map.invalidateSize();
             }
         }
@@ -289,10 +341,15 @@
             new L.Draw.Polygon(map).enable();
         }
 
-        // Handle polygon creation
+        // Handle polygon creation and editing
         map.on('draw:created', function(event) {
             const layer = event.layer;
             drawControl.options.edit.featureGroup.addLayer(layer);
+            layer.on('click', function() {
+                const newColor = prompt('Enter new color (e.g., #ff0000):', layer.options.color);
+                const newOpacity = prompt('Enter new opacity (0-1):', layer.options.opacity);
+                layer.setStyle({ color: newColor, opacity: parseFloat(newOpacity) });
+            });
         });
     </script>
 </body>
