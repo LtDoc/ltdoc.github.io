@@ -67,6 +67,12 @@
             text-align: center;
             line-height: 24px;
         }
+        .circular-icon {
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            object-fit: cover;
+        }
         h2, h3 {
             font-family: 'Fantasy', cursive;
         }
@@ -95,6 +101,10 @@
         #sidebar h2, #sidebar h3 {
             color: #ecf0f1;
         }
+        .readonly #markerForm,
+        .readonly #startPolygonDraw {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -118,7 +128,7 @@
         </form>
         <h3>Markers:</h3>
         <ul id="markerList"></ul>
-        <button type="button" onclick="startPolygonDraw()">Draw Polygon</button>
+        <button type="button" id="startPolygonDraw" onclick="startPolygonDraw()">Draw Polygon</button>
     </div>
     <div id="map"></div>
 
@@ -217,11 +227,11 @@
 
             let marker;
             if (markerData.type === 'player') {
-                let icon = L.icon({
-                    iconUrl: markerData.iconUrl,
-                    iconSize: [50, 50]
+                let icon = L.divIcon({
+                    html: `<img src="${markerData.iconUrl}" class="circular-icon">`,
+                    className: ''
                 });
-                marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: true });
+                marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
                 marker.bindPopup(`<strong>${markerData.name}</strong><br><img src="${markerData.tooltipUrl}" width="100">`);
             } else if (markerData.type === 'town') {
                 let iconHtml;
@@ -232,14 +242,14 @@
                 } else {
                     iconHtml = '🔵';
                 }
-                marker = L.marker([markerData.lat, markerData.lng], { icon: L.divIcon({ html: iconHtml, className: 'custom-div-icon' }), draggable: true });
+                marker = L.marker([markerData.lat, markerData.lng], { icon: L.divIcon({ html: iconHtml, className: 'custom-div-icon' }), draggable: hasEditPermissions });
                 marker.bindPopup(`<strong>${markerData.name}</strong>`);
             } else if (markerData.type === 'poi') {
                 let icon = L.icon({
                     iconUrl: 'path/to/question-mark-icon.png',
                     iconSize: [50, 50]
                 });
-                marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: true });
+                marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
                 marker.bindPopup(`<strong>${markerData.name}</strong><br><img src="${markerData.tooltipUrl}" width="100">`);
             }
 
@@ -295,18 +305,28 @@
             updateSidebar();
         }
 
-        // IP-based access control
+        // Check if the user has edit permissions based on their IP
+        let hasEditPermissions = false;
         function checkIPAccess() {
             fetch('https://api.ipify.org?format=json')
                 .then(response => response.json())
                 .then(data => {
                     const userIP = data.ip;
-                    const allowedIP = '24.57.218.92'; // Replace with your allowed IP address
-                    if (userIP === allowedIP) {
-                        Object.values(markers).forEach(marker => marker.dragging.enable());
+                    const allowedIPs = ['24.57.218.92']; // Replace with your allowed IP addresses
+                    if (allowedIPs.includes(userIP)) {
+                        hasEditPermissions = true;
+                        document.body.classList.remove('readonly');
                     } else {
-                        Object.values(markers).forEach(marker => marker.dragging.disable());
+                        hasEditPermissions = false;
+                        document.body.classList.add('readonly');
                     }
+                    Object.values(markers).forEach(marker => {
+                        if (hasEditPermissions) {
+                            marker.dragging.enable();
+                        } else {
+                            marker.dragging.disable();
+                        }
+                    });
                 });
         }
 
@@ -346,9 +366,11 @@
             const layer = event.layer;
             drawControl.options.edit.featureGroup.addLayer(layer);
             layer.on('click', function() {
-                const newColor = prompt('Enter new color (e.g., #ff0000):', layer.options.color);
-                const newOpacity = prompt('Enter new opacity (0-1):', layer.options.opacity);
-                layer.setStyle({ color: newColor, opacity: parseFloat(newOpacity) });
+                if (hasEditPermissions) {
+                    const newColor = prompt('Enter new color (e.g., #ff0000):', layer.options.color);
+                    const newOpacity = prompt('Enter new opacity (0-1):', layer.options.opacity);
+                    layer.setStyle({ color: newColor, opacity: parseFloat(newOpacity) });
+                }
             });
         });
     </script>
