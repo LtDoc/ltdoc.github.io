@@ -17,7 +17,8 @@ const storage = firebase.storage();
 const characterForm = document.getElementById('character-form');
 const characterDisplay = document.getElementById('character-display');
 const savePngButton = document.getElementById('savePng');
-const rollStatsButton = document.getElementById('rollStats');
+const rollBtns = document.querySelectorAll('.roll-btn');
+const characterIdDisplay = document.getElementById('character-id-display');
 
 // Populate select fields with data
 document.addEventListener('DOMContentLoaded', () => {
@@ -69,16 +70,16 @@ function removeField(button) {
 
 // Event listeners
 characterForm.addEventListener('submit', saveCharacter);
-rollStatsButton.addEventListener('click', rollStats);
+rollBtns.forEach(btn => btn.addEventListener('click', rollStats));
 savePngButton.addEventListener('click', saveAsPng);
 characterForm.addEventListener('input', updateCharacterSheet);
 
 // Roll stats function
-function rollStats() {
+function rollStats(event) {
+    const diceType = event.target.getAttribute('data-dice');
+    const [num, sides] = diceType.split('d').map(Number);
     const stats = ['str', 'dex', 'con', 'int', 'cha', 'sta', 'per'];
     stats.forEach(stat => {
-        const diceType = prompt(`Enter dice type for ${stat.toUpperCase()} (e.g., 1d6, 1d8, 1d10, 1d20):`);
-        const [num, sides] = diceType.split('d').map(Number);
         let total = 0;
         for (let i = 0; i < num; i++) {
             total += Math.floor(Math.random() * sides) + 1;
@@ -98,12 +99,17 @@ function updateCharacterSheet() {
     characterDisplay.innerHTML = displayHtml;
 }
 
+// Generate a unique 6-digit ID
+function generateUniqueId() {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
 // Save character to Firebase
 function saveCharacter(event) {
     event.preventDefault();
     const characterData = new FormData(characterForm);
-    const characterId = database.ref().child('characters').push().key;
-    const characterObj = {};
+    const characterId = generateUniqueId();
+    const characterObj = { id: characterId };
     characterData.forEach((value, key) => {
         if (key !== 'portrait') {
             characterObj[key] = value;
@@ -117,12 +123,42 @@ function saveCharacter(event) {
                 characterObj.portrait = url;
                 database.ref('characters/' + characterId).set(characterObj);
                 alert('Character saved successfully!');
+                characterIdDisplay.innerHTML = `<p>Character ID: ${characterId}</p>`;
             });
         });
     } else {
         database.ref('characters/' + characterId).set(characterObj);
         alert('Character saved successfully!');
+        characterIdDisplay.innerHTML = `<p>Character ID: ${characterId}</p>`;
     }
+}
+
+// Load character from Firebase
+function loadCharacter() {
+    const characterId = document.getElementById('character-id').value;
+    database.ref('characters/' + characterId).once('value').then(snapshot => {
+        const characterData = snapshot.val();
+        if (characterData) {
+            for (const key in characterData) {
+                if (key !== 'portrait' && key !== 'id') {
+                    const element = document.getElementById(key);
+                    if (element) {
+                        element.value = characterData[key];
+                    }
+                }
+            }
+            if (characterData.portrait) {
+                const img = document.createElement('img');
+                img.src = characterData.portrait;
+                img.alt = 'Character Portrait';
+                characterDisplay.appendChild(img);
+            }
+            characterIdDisplay.innerHTML = `<p>Character ID: ${characterId}</p>`;
+            updateCharacterSheet();
+        } else {
+            alert('Character not found!');
+        }
+    });
 }
 
 // Save character sheet as PNG

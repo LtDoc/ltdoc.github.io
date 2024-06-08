@@ -43,7 +43,12 @@
                     <label for="per">PER:</label>
                     <input type="number" id="per" name="per">
 
-                    <button type="button" id="rollStats">Roll Stats</button>
+                    <div>
+                        <button type="button" class="roll-btn" data-dice="1d6">Roll 1d6</button>
+                        <button type="button" class="roll-btn" data-dice="1d8">Roll 1d8</button>
+                        <button type="button" class="roll-btn" data-dice="1d10">Roll 1d10</button>
+                        <button type="button" class="roll-btn" data-dice="1d20">Roll 1d20</button>
+                    </div>
                 </div>
 
                 <label for="hp">HP:</label>
@@ -110,12 +115,20 @@
                 
                 <button type="submit">Save Character</button>
             </form>
+
+            <div id="load-character">
+                <h3>Load Character</h3>
+                <label for="character-id">Character ID:</label>
+                <input type="text" id="character-id" name="character-id">
+                <button type="button" onclick="loadCharacter()">Load Character</button>
+            </div>
         </div>
         
         <div class="character-sheet">
             <h2>Character Sheet</h2>
             <div id="character-display"></div>
             <button id="savePng">Save as PNG</button>
+            <div id="character-id-display"></div>
         </div>
     </div>
 

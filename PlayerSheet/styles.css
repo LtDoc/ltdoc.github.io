@@ -71,3 +71,16 @@ form button:hover {
 #stats-section {
     margin-bottom: 20px;
 }
+
+#load-character {
+    margin-top: 20px;
+}
+
+.field {
+    margin-top: 10px;
+}
+
+.roll-btn {
+    margin-right: 5px;
+    margin-bottom: 5px;
+}
