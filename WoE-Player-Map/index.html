@@ -5,6 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
     <style>
         html, body {
             margin: 0;
@@ -55,20 +56,30 @@
     <div id="sidebar" class="hidden">
         <h2>Marker Management</h2>
         <form id="markerForm">
+            <label for="markerType">Type:</label><br>
+            <select id="markerType">
+                <option value="player">Player</option>
+                <option value="town">Town</option>
+                <option value="poi">POI</option>
+            </select><br>
             <label for="markerName">Name:</label><br>
             <input type="text" id="markerName"><br>
-            <label for="markerImage">Image URL:</label><br>
-            <input type="text" id="markerImage"><br>
+            <label for="markerIcon">Icon URL:</label><br>
+            <input type="text" id="markerIcon"><br>
+            <label for="markerTooltip">Tooltip Image URL:</label><br>
+            <input type="text" id="markerTooltip"><br>
             <button type="button" onclick="addMarker()">Add Marker</button>
         </form>
         <h3>Markers:</h3>
         <ul id="markerList"></ul>
+        <button type="button" onclick="startPolygonDraw()">Draw Polygon</button>
     </div>
     <div id="map"></div>
 
     <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-database.js"></script>
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
     <script>
         // Firebase configuration
         const firebaseConfig = {
@@ -101,6 +112,22 @@
         // Fit the map to the image bounds
         map.fitBounds(imageBounds);
 
+        // Initialize the draw control
+        const drawControl = new L.Control.Draw({
+            draw: {
+                polygon: true,
+                polyline: false,
+                rectangle: false,
+                circle: false,
+                marker: false,
+                circlemarker: false
+            },
+            edit: {
+                featureGroup: new L.FeatureGroup()
+            }
+        });
+        map.addControl(drawControl);
+
         let markers = {};
 
         // Load markers from Firebase
@@ -109,32 +136,67 @@
             if (data) {
                 Object.keys(data).forEach(id => {
                     const markerData = data[id];
-                    createMarker(id, markerData.lat, markerData.lng, markerData.name, markerData.image);
+                    createMarker(id, markerData);
                 });
             }
         });
 
         // Add marker
         function addMarker() {
+            const markerType = document.getElementById('markerType').value;
             const name = document.getElementById('markerName').value;
-            const image = document.getElementById('markerImage').value;
-            const marker = L.marker(map.getCenter(), { draggable: true }).addTo(map).bindPopup(`<strong>${name}</strong><br><img src="${image}" width="100">`);
+            const iconUrl = document.getElementById('markerIcon').value;
+            const tooltipUrl = document.getElementById('markerTooltip').value;
             const markerId = database.ref().child('markers').push().key;
-            database.ref('markers/' + markerId).set({
+
+            let markerOptions = {
+                id: markerId,
                 lat: map.getCenter().lat,
                 lng: map.getCenter().lng,
                 name: name,
-                image: image
-            });
-            createMarker(markerId, map.getCenter().lat, map.getCenter().lng, name, image);
+                type: markerType,
+                iconUrl: iconUrl,
+                tooltipUrl: tooltipUrl
+            };
+
+            database.ref('markers/' + markerId).set(markerOptions);
+            createMarker(markerId, markerOptions);
         }
 
         // Create marker
-        function createMarker(id, lat, lng, name, image) {
+        function createMarker(id, markerData) {
             if (markers[id]) {
                 map.removeLayer(markers[id]);
             }
-            const marker = L.marker([lat, lng], { draggable: true }).addTo(map).bindPopup(`<strong>${name}</strong><br><img src="${image}" width="100">`);
+
+            let marker;
+            if (markerData.type === 'player') {
+                let icon = L.icon({
+                    iconUrl: markerData.iconUrl,
+                    iconSize: [50, 50]
+                });
+                marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: true });
+                marker.bindPopup(`<strong>${markerData.name}</strong><br><img src="${markerData.tooltipUrl}" width="100">`);
+            } else if (markerData.type === 'town') {
+                let iconHtml;
+                if (markerData.name === 'capital') {
+                    iconHtml = '⭐';
+                } else if (markerData.name === 'city') {
+                    iconHtml = '⚫';
+                } else {
+                    iconHtml = '🔵';
+                }
+                marker = L.marker([markerData.lat, markerData.lng], { icon: L.divIcon({ html: iconHtml, className: 'custom-div-icon' }), draggable: true });
+                marker.bindPopup(`<strong>${markerData.name}</strong>`);
+            } else if (markerData.type === 'poi') {
+                let icon = L.icon({
+                    iconUrl: 'path/to/question-mark-icon.png',
+                    iconSize: [50, 50]
+                });
+                marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: true });
+                marker.bindPopup(`<strong>${markerData.name}</strong><br><img src="${markerData.tooltipUrl}" width="100">`);
+            }
+
             marker.on('dragend', function(e) {
                 const newPos = e.target.getLatLng();
                 database.ref('markers/' + id).update({
@@ -142,11 +204,13 @@
                     lng: newPos.lng
                 });
             });
+
             marker.on('click', function() {
                 showSidebar();
                 map.panTo(marker.getLatLng());
             });
-            markers[id] = marker;
+
+            markers[id] = marker.addTo(map);
             updateSidebar();
         }
 
@@ -171,7 +235,7 @@
             const newImage = prompt('Enter new image URL:', marker.getPopup().getContent().split('<br>')[1].replace('<img src="', '').replace('" width="100">', ''));
             database.ref('markers/' + id).update({
                 name: newName,
-                image: newImage
+                tooltipUrl: newImage
             });
             marker.setPopupContent(`<strong>${newName}</strong><br><img src="${newImage}" width="100">`);
             updateSidebar();
@@ -216,6 +280,17 @@
                 map.invalidateSize();
             }
         }
+
+        // Start polygon draw
+        function startPolygonDraw() {
+            new L.Draw.Polygon(map).enable();
+        }
+
+        // Handle polygon creation
+        map.on('draw:created', function(event) {
+            const layer = event.layer;
+            drawControl.options.edit.featureGroup.addLayer(layer);
+        });
     </script>
 </body>
 </html>
