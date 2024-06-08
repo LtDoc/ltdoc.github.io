@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Elyndor Player Map by Doc</title>
+    <title>Interactive Game Map with Firebase</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
@@ -144,7 +144,7 @@
         <div class="content">
             <form id="markerForm">
                 <label for="markerType">Type:</label><br>
-                <select id="markerType" onchange="toggleIconFields()">
+                <select id="markerType" onchange="toggleIconFields(); toggleTooltipFields();">
                     <option value="player">Player</option>
                     <option value="town">Town</option>
                     <option value="poi">POI</option>
@@ -155,7 +155,7 @@
                     <input type="file" id="markerIconFile" accept="image/*"><br>
                 </div>
                 <label for="markerTooltipType">Tooltip Type:</label><br>
-                <select id="markerTooltipType">
+                <select id="markerTooltipType" onchange="toggleTooltipFields()">
                     <option value="image">Image</option>
                     <option value="text">Text</option>
                 </select><br>
@@ -241,15 +241,21 @@
         }
 
         // Toggle tooltip type input fields
-        document.getElementById('markerTooltipType').addEventListener('change', function() {
-            if (this.value === 'image') {
+        function toggleTooltipFields() {
+            const markerType = document.getElementById('markerType').value;
+            const tooltipType = document.getElementById('markerTooltipType').value;
+            if (markerType === 'player') {
+                document.getElementById('markerTooltipType').value = 'image';
+                document.getElementById('markerTooltip').style.display = 'none';
+                document.getElementById('markerTooltipFile').style.display = 'block';
+            } else if (tooltipType === 'image') {
                 document.getElementById('markerTooltip').style.display = 'none';
                 document.getElementById('markerTooltipFile').style.display = 'block';
             } else {
                 document.getElementById('markerTooltip').style.display = 'block';
                 document.getElementById('markerTooltipFile').style.display = 'none';
             }
-        });
+        }
 
         // Add marker
         function addMarker() {
@@ -285,7 +291,7 @@
                 }));
             }
 
-            if (tooltipFile) {
+            if (tooltipFile && tooltipType === 'image') {
                 const tooltipStorageRef = storage.ref(`markers/${markerId}/tooltip`);
                 promises.push(tooltipStorageRef.put(tooltipFile).then(snapshot => {
                     return snapshot.ref.getDownloadURL().then(url => {
@@ -363,6 +369,7 @@
             document.getElementById('markerTooltip').style.display = 'none';
             document.getElementById('markerTooltipFile').style.display = 'block';
             toggleIconFields();
+            toggleTooltipFields();
         }
 
         // Update sidebar
@@ -382,12 +389,13 @@
         // Edit marker
         function editMarker(id) {
             const marker = markers[id];
-            const newName = prompt('Enter new name:', marker.getPopup().getContent().split('<br>')[0].replace('<strong>', '').replace('</strong>', ''));
-            let newTooltipContent = markerData.tooltipContent;
+            const markerData = marker.getPopup().getContent().split('<br>');
+            const newName = prompt('Enter new name:', markerData[0].replace('<strong>', '').replace('</strong>', ''));
+            let newTooltipContent = markerData[1].replace('<img src="', '').replace('" width="200">', '');
             if (markerData.tooltipType === 'text') {
-                newTooltipContent = prompt('Enter new tooltip text:', markerData.tooltipContent);
+                newTooltipContent = prompt('Enter new tooltip text:', markerData[1]);
             } else {
-                newTooltipContent = prompt('Enter new tooltip image URL:', markerData.tooltipContent);
+                newTooltipContent = prompt('Enter new tooltip image URL:', newTooltipContent);
             }
             database.ref('markers/' + id).update({
                 name: newName,
