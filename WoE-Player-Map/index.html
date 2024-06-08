@@ -170,6 +170,8 @@
                 <label for="markerTooltip">Tooltip Content:</label><br>
                 <input type="text" id="markerTooltip"><br>
                 <input type="file" id="markerTooltipFile" accept="image/*" style="display:none;"><br>
+                <label for="markerAdminOnly">Admin Only:</label>
+                <input type="checkbox" id="markerAdminOnly"><br>
                 <button type="button" onclick="addMarker()">Add Marker</button>
             </form>
         </div>
@@ -279,6 +281,7 @@
             const iconUrl = document.getElementById('markerIcon').value;
             const tooltipType = document.getElementById('markerTooltipType').value;
             const tooltipContent = document.getElementById('markerTooltip').value;
+            const adminOnly = document.getElementById('markerAdminOnly').checked;
             const markerId = database.ref().child('markers').push().key;
 
             let markerOptions = {
@@ -289,7 +292,8 @@
                 type: markerType,
                 iconUrl: iconUrl,
                 tooltipType: tooltipType,
-                tooltipContent: tooltipContent
+                tooltipContent: tooltipContent,
+                adminOnly: adminOnly
             };
 
             const iconFile = document.getElementById('markerIconFile').files[0];
@@ -328,6 +332,10 @@
 
         // Create marker
         function createMarker(id, markerData) {
+            if (!hasEditPermissions && markerData.adminOnly) {
+                return;
+            }
+
             if (markers[id]) {
                 map.removeLayer(markers[id]);
             }
@@ -368,8 +376,10 @@
             });
 
             marker.on('click', function() {
-                showSidebar();
-                map.panTo(marker.getLatLng());
+                if (hasEditPermissions) {
+                    showSidebar();
+                    map.panTo(marker.getLatLng());
+                }
             });
 
             markers[id] = marker.addTo(map);
@@ -385,6 +395,7 @@
             document.getElementById('markerIconFile').value = '';
             document.getElementById('markerTooltipFile').value = '';
             document.getElementById('markerTooltipType').value = 'image';
+            document.getElementById('markerAdminOnly').checked = false;
             document.getElementById('markerTooltip').style.display = 'none';
             document.getElementById('markerTooltipFile').style.display = 'block';
             toggleIconFields();
@@ -397,10 +408,13 @@
             markerList.innerHTML = '';
             Object.keys(markers).forEach(id => {
                 const marker = markers[id];
+                const markerData = marker.getPopup().getContent().split('<br>');
                 const listItem = document.createElement('li');
-                listItem.innerHTML = `<strong>${marker.getPopup().getContent().split('<br>')[0].replace('<strong>', '').replace('</strong>', '')}</strong>
-                                      <button onclick="editMarker('${id}')">Edit</button>
-                                      <button onclick="removeMarker('${id}')">Remove</button>`;
+                listItem.innerHTML = `<strong>${markerData[0].replace('<strong>', '').replace('</strong>', '')}</strong>`;
+                if (hasEditPermissions) {
+                    listItem.innerHTML += `<button onclick="editMarker('${id}')">Edit</button>
+                                           <button onclick="removeMarker('${id}')">Remove</button>`;
+                }
                 markerList.appendChild(listItem);
             });
         }
@@ -416,9 +430,11 @@
             } else {
                 newTooltipContent = prompt('Enter new tooltip image URL:', newTooltipContent);
             }
+            const adminOnly = confirm('Make this marker admin only?');
             database.ref('markers/' + id).update({
                 name: newName,
-                tooltipContent: newTooltipContent
+                tooltipContent: newTooltipContent,
+                adminOnly: adminOnly
             });
             if (markerData.tooltipType === 'image') {
                 marker.setPopupContent(`<div style="font-size: 16px;"><strong>${newName}</strong><br><img src="${newTooltipContent}" width="200"></div>`);
