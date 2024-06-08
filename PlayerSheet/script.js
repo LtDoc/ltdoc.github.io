@@ -23,17 +23,16 @@ const rollStatsButton = document.getElementById('rollStats');
 document.addEventListener('DOMContentLoaded', () => {
     populateSelect('class', data.classes);
     populateSelect('race', data.races);
-    populateSelect('language', data.languages);
-    populateSelect('damageResistances', data.resistances);
-    populateSelect('magicResistances', data.magicResistance);
-
-    populateMultiSelect('skills', data.skills);
-    populateMultiSelect('senses', data.senses);
-    populateMultiSelect('spells', data.spellcasting);
-    populateMultiSelect('abilities', data.abilities);
-    populateMultiSelect('actions', data.actions);
-    populateMultiSelect('reactions', data.reactions);
-    populateMultiSelect('items', data.items);
+    populateSelect('language-select', data.languages);
+    populateSelect('damageResistances-select', data.resistances);
+    populateSelect('magicResistances-select', data.magicResistance);
+    populateSelect('skills-select', data.skills);
+    populateSelect('senses-select', data.senses);
+    populateSelect('spells-select', data.spellcasting);
+    populateSelect('abilities-select', data.abilities);
+    populateSelect('actions-select', data.actions);
+    populateSelect('reactions-select', data.reactions);
+    populateSelect('items-select', data.items);
 });
 
 // Populate single select
@@ -47,19 +46,25 @@ function populateSelect(id, options) {
     });
 }
 
-// Populate multi-select fields
-function populateMultiSelect(id, options) {
-    const container = document.getElementById(id);
-    options.forEach(option => {
-        const label = document.createElement('label');
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.value = option.name;
-        checkbox.name = id;
-        label.appendChild(checkbox);
-        label.appendChild(document.createTextNode(`${option.name}: ${option.description}`));
-        container.appendChild(label);
-    });
+// Add field to container
+function addField(fieldType) {
+    const select = document.getElementById(`${fieldType}-select`);
+    const container = document.getElementById(`${fieldType}-container`);
+    const value = select.value;
+    const option = data[fieldType].find(item => item.name === value);
+    
+    if (option) {
+        const div = document.createElement('div');
+        div.classList.add('field');
+        div.innerHTML = `${option.name}: ${option.description} <button type="button" onclick="removeField(this)">Remove</button>`;
+        container.appendChild(div);
+    }
+}
+
+// Remove field from container
+function removeField(button) {
+    const field = button.parentElement;
+    field.remove();
 }
 
 // Event listeners
@@ -70,9 +75,9 @@ characterForm.addEventListener('input', updateCharacterSheet);
 
 // Roll stats function
 function rollStats() {
-    const stats = ['hp', 'ac'];
+    const stats = ['str', 'dex', 'con', 'int', 'cha', 'sta', 'per'];
     stats.forEach(stat => {
-        const diceType = prompt(`Enter dice type for ${stat} (e.g., 1d6, 1d8, 1d10, 1d20):`);
+        const diceType = prompt(`Enter dice type for ${stat.toUpperCase()} (e.g., 1d6, 1d8, 1d10, 1d20):`);
         const [num, sides] = diceType.split('d').map(Number);
         let total = 0;
         for (let i = 0; i < num; i++) {
@@ -129,3 +134,20 @@ function saveAsPng() {
         link.click();
     });
 }
+
+// Apply race modifiers to stats
+document.getElementById('race').addEventListener('change', () => {
+    const race = document.getElementById('race').value;
+    const raceData = data.races.find(r => r.name === race);
+    
+    if (raceData) {
+        const modifiers = raceData.modifiers;
+        for (const stat in modifiers) {
+            const statInput = document.getElementById(stat.toLowerCase());
+            if (statInput) {
+                statInput.value = parseInt(statInput.value) + modifiers[stat];
+            }
+        }
+    }
+    updateCharacterSheet();
+});
