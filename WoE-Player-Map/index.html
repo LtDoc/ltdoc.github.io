@@ -41,12 +41,12 @@
             box-shadow: 3px 0px 10px rgba(0,0,0,0.5);
         }
         #sidebar.hidden {
-            transform: translateX(-100%);
+            display: none;
         }
         #toggleSidebar {
             position: absolute;
             top: 15px;
-            left: 310px;
+            left: 10px;
             z-index: 1000;
             background: #34495e;
             color: white;
@@ -55,11 +55,9 @@
             cursor: pointer;
             font-size: 16px;
             box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
-            transition: left 0.3s ease;
         }
         .leaflet-top.leaflet-left {
-            left: 320px; /* Adjust to ensure it is not on top of the sidebar */
-            transition: left 0.3s ease;
+            left: 10px; /* Adjust to ensure it is not on top of the sidebar */
         }
         .leaflet-container .custom-div-icon {
             font-size: 24px;
@@ -138,7 +136,7 @@
     </style>
 </head>
 <body>
-    <button id="toggleSidebar">☰</button>
+    <button id="toggleSidebar" style="display:none;">☰</button>
     <div id="sidebar" class="hidden">
         <button type="button" class="collapsible">Marker Management</button>
         <div class="content">
@@ -155,6 +153,14 @@
                     <label for="markerIcon">Icon URL:</label><br>
                     <input type="text" id="markerIcon"><br>
                     <input type="file" id="markerIconFile" accept="image/*"><br>
+                </div>
+                <div id="townFields" style="display: none;">
+                    <label for="townSize">Town Size:</label><br>
+                    <select id="townSize">
+                        <option value="capital">Capital (⭐)</option>
+                        <option value="city">City (⚫)</option>
+                        <option value="village">Village (🔵)</option>
+                    </select><br>
                 </div>
                 <label for="markerTooltipType">Tooltip Type:</label><br>
                 <select id="markerTooltipType" onchange="toggleTooltipFields()">
@@ -236,10 +242,16 @@
         function toggleIconFields() {
             const markerType = document.getElementById('markerType').value;
             const iconFields = document.getElementById('iconFields');
+            const townFields = document.getElementById('townFields');
             if (markerType === 'player') {
                 iconFields.style.display = 'block';
+                townFields.style.display = 'none';
+            } else if (markerType === 'town') {
+                iconFields.style.display = 'none';
+                townFields.style.display = 'block';
             } else {
                 iconFields.style.display = 'none';
+                townFields.style.display = 'none';
             }
         }
 
@@ -303,6 +315,10 @@
                 }));
             }
 
+            if (markerType === 'town') {
+                markerOptions.size = document.getElementById('townSize').value;
+            }
+
             Promise.all(promises).then(() => {
                 database.ref('markers/' + markerId).set(markerOptions);
                 createMarker(markerId, markerOptions);
@@ -331,7 +347,7 @@
             } else if (markerData.type === 'town' || markerData.type === 'poi') {
                 let iconHtml;
                 if (markerData.type === 'town') {
-                    iconHtml = markerData.name === 'capital' ? '⭐' : (markerData.name === 'city' ? '⚫' : '🔵');
+                    iconHtml = markerData.size === 'capital' ? '⭐' : (markerData.size === 'city' ? '⚫' : '🔵');
                 } else {
                     iconHtml = '❓';
                 }
@@ -431,9 +447,13 @@
                     if (allowedIPs.includes(userIP)) {
                         hasEditPermissions = true;
                         document.body.classList.remove('readonly');
+                        document.getElementById('sidebar').classList.remove('hidden');
+                        document.getElementById('toggleSidebar').style.display = 'block';
                     } else {
                         hasEditPermissions = false;
                         document.body.classList.add('readonly');
+                        document.getElementById('sidebar').classList.add('hidden');
+                        document.getElementById('toggleSidebar').style.display = 'none';
                     }
                     Object.values(markers).forEach(marker => {
                         if (hasEditPermissions) {
