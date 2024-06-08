@@ -72,10 +72,10 @@
             object-fit: cover;
         }
         .portrait-icon {
-            width: 50px;
-            height: 70px;
-            object-fit: cover;
-        }
+    width: 50px;
+    height: auto;
+    object-fit: cover;
+}
         h2, h3 {
             font-family: 'Fantasy', cursive;
         }
@@ -415,27 +415,28 @@
                     marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br>${markerData.tooltipContent}</div>`);
                 }
             } else if (markerData.type === 'army') {
-                let icon = L.divIcon({
-                    html: `<img src="${markerData.iconUrl}" class="portrait-icon" onerror="this.src='assets/placeholder.png'">`,
-                    className: ''
-                });
-                marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
-                let tooltipHtml = `<div style="font-size: 16px;">
-                                    <strong>${markerData.name}</strong><br>
-                                    <img src="${markerData.iconUrl}" width="50" height="70"><br>
-                                    <strong>Faction:</strong> ${markerData.faction}<br>
-                                    <strong>Level:</strong> ${markerData.level}<br>
-                                    <strong>Levies:</strong> ${markerData.levies}<br>
-                                    <strong>Veterans:</strong> ${markerData.veterans}<br>
-                                    <strong>Sergeant-at-Arms:</strong> ${markerData.sergeant}<br>
-                                    <strong>Squires:</strong> ${markerData.squires}<br>
-                                    <strong>Knights:</strong> ${markerData.knights}<br>
-                                    <strong>Noble Retinue:</strong> ${markerData.retinue}<br>
-                                    <strong>Household Guard:</strong> ${markerData.guard}<br>
-                                    <strong>Archers:</strong> ${markerData.archers}
-                                   </div>`;
-                marker.bindPopup(tooltipHtml);
-            }
+    let icon = L.divIcon({
+        html: `<img src="${markerData.iconUrl}" class="portrait-icon" onerror="this.src='assets/placeholder.png'">`,
+        className: '',
+        iconSize: [50, 70]  // Adjust the size to ensure the full image shows
+    });
+    marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
+    let tooltipHtml = `<div style="font-size: 16px;">
+                        <strong>${markerData.name}</strong><br>
+                        <img src="${markerData.iconUrl}" width="50" height="70"><br>
+                        <strong>Faction:</strong> ${markerData.faction}<br>
+                        <strong>Level:</strong> ${markerData.level}<br>
+                        <strong>Levies:</strong> ${markerData.levies}<br>
+                        <strong>Veterans:</strong> ${markerData.veterans}<br>
+                        <strong>Sergeant-at-Arms:</strong> ${markerData.sergeant}<br>
+                        <strong>Squires:</strong> ${markerData.squires}<br>
+                        <strong>Knights:</strong> ${markerData.knights}<br>
+                        <strong>Noble Retinue:</strong> ${markerData.retinue}<br>
+                        <strong>Household Guard:</strong> ${markerData.guard}<br>
+                        <strong>Archers:</strong> ${markerData.archers}
+                       </div>`;
+    marker.bindPopup(tooltipHtml);
+}
 
             marker.on('dragend', function(e) {
                 const newPos = e.target.getLatLng();
