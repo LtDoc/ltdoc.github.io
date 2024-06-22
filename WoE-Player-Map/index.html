@@ -138,6 +138,17 @@
         .content.show {
             display: block;
         }
+        .marker-item {
+            cursor: pointer;
+        }
+        .search-bar {
+            width: calc(100% - 30px);
+            padding: 10px;
+            margin: 10px 0;
+            border: none;
+            border-radius: 5px;
+            box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
+        }
     </style>
 </head>
 <body>
@@ -211,12 +222,14 @@
 
         <button type="button" class="collapsible">Town and POI Markers</button>
         <div class="content">
+            <input type="text" class="search-bar" id="searchBarTown" placeholder="Search...">
             <h3>Markers:</h3>
             <ul id="markerList"></ul>
         </div>
 
         <button type="button" class="collapsible">Player Markers</button>
         <div class="content">
+            <input type="text" class="search-bar" id="searchBarPlayer" placeholder="Search...">
             <h3>Markers:</h3>
             <ul id="playerMarkerList"></ul>
         </div>
@@ -505,14 +518,18 @@
             markerList.innerHTML = '';
             Object.keys(markers).forEach(id => {
                 const marker = markers[id];
-                const markerData = marker.getPopup().getContent().split('<br>');
+                const markerData = markers[id].getPopup().getContent().split('<br>');
                 const listItem = document.createElement('li');
+                listItem.classList.add('marker-item');
                 listItem.innerHTML = `<strong>${markerData[0].replace('<strong>', '').replace('</strong>', '')}</strong>`;
-                if (hasEditPermissions) {
-                    listItem.innerHTML += `<button onclick="editMarker('${id}')">Edit</button>
-                                           <button onclick="removeMarker('${id}')">Remove</button>
-                                           <button onclick="duplicateMarker('${id}')">Duplicate</button>`;
-                }
+                listItem.onclick = () => {
+                    const optionsDiv = document.createElement('div');
+                    optionsDiv.innerHTML = `<button onclick="editMarker('${id}')">Edit</button>
+                                            <button onclick="removeMarker('${id}')">Remove</button>
+                                            <button onclick="duplicateMarker('${id}')">Duplicate</button>`;
+                    listItem.appendChild(optionsDiv);
+                    listItem.onclick = null;
+                };
                 markerList.appendChild(listItem);
             });
         }
@@ -587,14 +604,13 @@
         function duplicateMarker(id) {
             const originalMarker = markers[id];
             const markerData = {
-                ...originalMarker.getPopup().getContent().split('<br>'),
+                ...originalMarker.options,
                 lat: originalMarker.getLatLng().lat + 0.001,
-                lng: originalMarker.getLatLng().lng + 0.001
+                lng: originalMarker.getLatLng().lng + 0.001,
+                id: database.ref().child('markers').push().key
             };
-            const markerId = database.ref().child('markers').push().key;
-            markerData.id = markerId;
-            database.ref('markers/' + markerId).set(markerData);
-            createMarker(markerId, markerData);
+            database.ref('markers/' + markerData.id).set(markerData);
+            createMarker(markerData.id, markerData);
         }
 
         // Check if the user has edit permissions based on their IP
