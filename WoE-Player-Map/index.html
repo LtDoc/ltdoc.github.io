@@ -203,9 +203,9 @@
                     <input type="text" id="armyArchers"><br>
                 </div>
                 <div id="unitFields" style="display: none;">
-                    <label for="unitImage">Unit Image:</label><br>
-                    <input type="text" id="unitImage" value="assets/unit_default.png"><br>
-                </div>
+                    <label for="markerIconFile">Unit Image:</label><br>
+                    <input type="file" id="markerIconFile" accept="image/*"><br>
+                </div>                
                 <label for="markerTooltipType">Tooltip Type:</label><br>
                 <select id="markerTooltipType" onchange="toggleTooltipFields()">
                     <option value="image">Image</option>
@@ -335,76 +335,73 @@
 
         // Add marker
         function addMarker() {
-            const markerType = document.getElementById('markerType').value;
-            const name = document.getElementById('markerName').value;
-            const iconUrl = document.getElementById('markerIcon').value;
-            const tooltipType = document.getElementById('markerTooltipType').value;
-            const tooltipContent = document.getElementById('markerTooltip').value;
-            const adminOnly = document.getElementById('markerAdminOnly').checked;
-            const markerId = database.ref().child('markers').push().key;
+    const markerType = document.getElementById('markerType').value;
+    const name = document.getElementById('markerName').value;
+    const iconUrl = document.getElementById('markerIcon').value;
+    const tooltipType = document.getElementById('markerTooltipType').value;
+    const tooltipContent = document.getElementById('markerTooltip').value;
+    const adminOnly = document.getElementById('markerAdminOnly').checked;
+    const markerId = database.ref().child('markers').push().key;
 
-            let markerOptions = {
-                id: markerId,
-                lat: map.getCenter().lat,
-                lng: map.getCenter().lng,
-                name: name,
-                type: markerType,
-                iconUrl: iconUrl,
-                tooltipType: tooltipType,
-                tooltipContent: tooltipContent,
-                adminOnly: adminOnly
-            };
+    let markerOptions = {
+        id: markerId,
+        lat: map.getCenter().lat,
+        lng: map.getCenter().lng,
+        name: name,
+        type: markerType,
+        iconUrl: iconUrl,
+        tooltipType: tooltipType,
+        tooltipContent: tooltipContent,
+        adminOnly: adminOnly
+    };
 
-            const iconFile = document.getElementById('markerIconFile').files[0];
-            const tooltipFile = document.getElementById('markerTooltipFile').files[0];
+    const iconFile = document.getElementById('markerIconFile').files[0];
+    const tooltipFile = document.getElementById('markerTooltipFile').files[0];
 
-            const promises = [];
+    const promises = [];
 
-            if (iconFile && (markerType === 'player' || markerType === 'army')) {
-                const iconStorageRef = storage.ref(`markers/${markerId}/icon`);
-                promises.push(iconStorageRef.put(iconFile).then(snapshot => {
-                    return snapshot.ref.getDownloadURL().then(url => {
-                        markerOptions.iconUrl = url;
-                    });
-                }));
-            }
-
-            if (tooltipFile && tooltipType === 'image') {
-                const tooltipStorageRef = storage.ref(`markers/${markerId}/tooltip`);
-                promises.push(tooltipStorageRef.put(tooltipFile).then(snapshot => {
-                    return snapshot.ref.getDownloadURL().then(url => {
-                        markerOptions.tooltipContent = url;
-                    });
-                }));
-            }
-
-            if (markerType === 'town') {
-                markerOptions.size = document.getElementById('townSize').value;
-            }
-
-            if (markerType === 'army') {
-                markerOptions.faction = document.getElementById('armyFaction').value;
-                markerOptions.level = document.getElementById('armyLevel').value;
-                markerOptions.levies = document.getElementById('armyLevies').value;
-                markerOptions.veterans = document.getElementById('armyVeterans').value;
-                markerOptions.sergeant = document.getElementById('armySergeant').value;
-                markerOptions.squires = document.getElementById('armySquires').value;
-                markerOptions.knights = document.getElementById('armyKnights').value;
-                markerOptions.retinue = document.getElementById('armyRetinue').value;
-                markerOptions.guard = document.getElementById('armyGuard').value;
-                markerOptions.archers = document.getElementById('armyArchers').value;
-            }
-
-            if (markerType === 'unit') {
-                markerOptions.iconUrl = document.getElementById('unitImage').value;
-            }
-
-            Promise.all(promises).then(() => {
-                database.ref('markers/' + markerId).set(markerOptions);
-                createMarker(markerId, markerOptions);
-                resetMarkerForm();
+    if (iconFile && (markerType === 'player' || markerType === 'army' || markerType === 'unit')) {
+        const iconStorageRef = storage.ref(`markers/${markerId}/icon`);
+        promises.push(iconStorageRef.put(iconFile).then(snapshot => {
+            return snapshot.ref.getDownloadURL().then(url => {
+                markerOptions.iconUrl = url;
             });
-        }
+        }));
+    }
+
+    if (tooltipFile && tooltipType === 'image') {
+        const tooltipStorageRef = storage.ref(`markers/${markerId}/tooltip`);
+        promises.push(tooltipStorageRef.put(tooltipFile).then(snapshot => {
+            return snapshot.ref.getDownloadURL().then(url => {
+                markerOptions.tooltipContent = url;
+            });
+        }));
+    }
+
+    if (markerType === 'town') {
+        markerOptions.size = document.getElementById('townSize').value;
+    }
+
+    if (markerType === 'army') {
+        markerOptions.faction = document.getElementById('armyFaction').value;
+        markerOptions.level = document.getElementById('armyLevel').value;
+        markerOptions.levies = document.getElementById('armyLevies').value;
+        markerOptions.veterans = document.getElementById('armyVeterans').value;
+        markerOptions.sergeant = document.getElementById('armySergeant').value;
+        markerOptions.squires = document.getElementById('armySquires').value;
+        markerOptions.knights = document.getElementById('armyKnights').value;
+        markerOptions.retinue = document.getElementById('armyRetinue').value;
+        markerOptions.guard = document.getElementById('armyGuard').value;
+        markerOptions.archers = document.getElementById('armyArchers').value;
+    }
+
+    Promise.all(promises).then(() => {
+        database.ref('markers/' + markerId).set(markerOptions);
+        createMarker(markerId, markerOptions);
+        resetMarkerForm();
+    });
+}
+
 
         function createMarker(id, markerData) {
     if (!hasEditPermissions && markerData.adminOnly) {
@@ -494,6 +491,7 @@
     markers[id] = marker.addTo(map);
     updateSidebar();
 }
+
 
 
         // Reset marker form fields
