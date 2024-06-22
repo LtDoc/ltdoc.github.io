@@ -391,107 +391,133 @@
             }
 
             // Create marker
-function createMarker(id, markerData) {
-    if (!hasEditPermissions && markerData.adminOnly) {
-        return;
-    }
+            function createMarker(id, markerData) {
+                if (!hasEditPermissions && markerData.adminOnly) {
+                    return;
+                }
 
-    // Remove existing marker if it exists
-    if (markers[id]) {
-        map.removeLayer(markers[id]);
-    }
+                if (markers[id]) {
+                    map.removeLayer(markers[id]);
+                }
 
-    let marker;
-    if (markerData.type === 'player') {
-        marker = createPlayerMarker(markerData);
-    } else if (markerData.type === 'town' || markerData.type === 'poi') {
-        marker = createTownOrPoiMarker(markerData);
-    } else if (markerData.type === 'army') {
-        marker = createArmyMarker(markerData);
-    } else {
-        console.error(`Unknown marker type: ${markerData.type}`);
-        return;
-    }
+                let marker;
+                switch (markerData.type) {
+                    case 'player':
+                        marker = createPlayerMarker(markerData);
+                        break;
+                    case 'town':
+                    case 'poi':
+                        marker = createTownOrPoiMarker(markerData);
+                        break;
+                    case 'army':
+                        marker = createArmyMarker(markerData);
+                        break;
+                    case 'unit':
+                        marker = createUnitMarker(markerData);
+                        break;
+                    default:
+                        console.error(`Unknown marker type: ${markerData.type}`, markerData);
+                        return;
+                }
 
-    // Ensure marker is defined
-    if (!marker) {
-        console.error(`Failed to create marker for id: ${id}`);
-        return;
-    }
+                // Ensure marker is defined
+                if (!marker) {
+                    console.error(`Failed to create marker for id: ${id}`, markerData);
+                    return;
+                }
 
-    marker.on('dragend', function(e) {
-        const newPos = e.target.getLatLng();
-        database.ref('markers/' + id).update({
-            lat: newPos.lat,
-            lng: newPos.lng
-        });
-    });
+                marker.on('dragend', function(e) {
+                    const newPos = e.target.getLatLng();
+                    database.ref('markers/' + id).update({
+                        lat: newPos.lat,
+                        lng: newPos.lng
+                    });
+                });
 
-    marker.on('click', function() {
-        if (hasEditPermissions) {
-            showSidebar();
-            map.panTo(marker.getLatLng());
-        }
-    });
+                marker.on('click', function() {
+                    if (hasEditPermissions) {
+                        showSidebar();
+                        map.panTo(marker.getLatLng());
+                    }
+                });
 
-    markers[id] = marker.addTo(map);
-    updateSidebar();
-}
+                markers[id] = marker.addTo(map);
+                updateSidebar();
+            }
 
-function createPlayerMarker(markerData) {
-    const icon = L.divIcon({
-        html: `<img src="${markerData.iconUrl}" class="circular-icon" onerror="this.src='assets/placeholder.png'">`,
-        className: ''
-    });
-    const marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
-    if (markerData.tooltipType === 'image') {
-        marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br><img src="${markerData.tooltipContent}" width="200"></div>`);
-    } else {
-        marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br>${markerData.tooltipContent}</div>`);
-    }
-    return marker;
-}
+            function createPlayerMarker(markerData) {
+                const icon = L.divIcon({
+                    html: `<img src="${markerData.iconUrl}" class="circular-icon" onerror="this.src='assets/placeholder.png'">`,
+                    className: ''
+                });
+                const marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
+                if (markerData.tooltipType === 'image') {
+                    marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br><img src="${markerData.tooltipContent}" width="200"></div>`);
+                } else {
+                    marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br>${markerData.tooltipContent}</div>`);
+                }
+                return marker;
+            }
 
-function createTownOrPoiMarker(markerData) {
-    let iconHtml;
-    if (markerData.type === 'town') {
-        iconHtml = markerData.size === 'capital' ? '⭐' : (markerData.size === 'city' ? '⚫' : '🔵');
-    } else {
-        iconHtml = '❓';
-    }
-    const marker = L.marker([markerData.lat, markerData.lng], { icon: L.divIcon({ html: iconHtml, className: 'custom-div-icon' }), draggable: hasEditPermissions });
-    if (markerData.tooltipType === 'image') {
-        marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br><img src="${markerData.tooltipContent}" width="200"></div>`);
-    } else {
-        marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br>${markerData.tooltipContent}</div>`);
-    }
-    return marker;
-}
+            function createTownOrPoiMarker(markerData) {
+                let iconHtml;
+                if (markerData.type === 'town') {
+                    iconHtml = markerData.size === 'capital' ? '⭐' : (markerData.size === 'city' ? '⚫' : '🔵');
+                } else {
+                    iconHtml = '❓';
+                }
+                const marker = L.marker([markerData.lat, markerData.lng], { icon: L.divIcon({ html: iconHtml, className: 'custom-div-icon' }), draggable: hasEditPermissions });
+                if (markerData.tooltipType === 'image') {
+                    marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br><img src="${markerData.tooltipContent}" width="200"></div>`);
+                } else {
+                    marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br>${markerData.tooltipContent}</div>`);
+                }
+                return marker;
+            }
 
-function createArmyMarker(markerData) {
-    const icon = L.divIcon({
-        html: `<img src="${markerData.iconUrl}" class="portrait-icon" onerror="this.src='assets/placeholder.png'">`,
-        className: '',
-        iconSize: [50, 70]
-    });
-    const marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
-    const tooltipHtml = `<div style="font-size: 16px;">
-                        <strong>${markerData.name}</strong><br>
-                        <img src="${markerData.iconUrl}" width="50" height="70"><br>
-                        <strong>Faction:</strong> ${markerData.faction}<br>
-                        <strong>Level:</strong> ${markerData.level}<br>
-                        <strong>Levies:</strong> ${markerData.levies}<br>
-                        <strong>Veterans:</strong> ${markerData.veterans}<br>
-                        <strong>Sergeant-at-Arms:</strong> ${markerData.sergeant}<br>
-                        <strong>Squires:</strong> ${markerData.squires}<br>
-                        <strong>Knights:</strong> ${markerData.knights}<br>
-                        <strong>Noble Retinue:</strong> ${markerData.retinue}<br>
-                        <strong>Household Guard:</strong> ${markerData.guard}<br>
-                        <strong>Archers:</strong> ${markerData.archers}
-                       </div>`;
-    marker.bindPopup(tooltipHtml);
-    return marker;
-}
+            function createArmyMarker(markerData) {
+                const icon = L.divIcon({
+                    html: `<img src="${markerData.iconUrl}" class="portrait-icon" onerror="this.src='assets/placeholder.png'">`,
+                    className: '',
+                    iconSize: [50, 70]
+                });
+                const marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
+                const tooltipHtml = `<div style="font-size: 16px;">
+                                    <strong>${markerData.name}</strong><br>
+                                    <img src="${markerData.iconUrl}" width="50" height="70"><br>
+                                    <strong>Faction:</strong> ${markerData.faction}<br>
+                                    <strong>Level:</strong> ${markerData.level}<br>
+                                    <strong>Levies:</strong> ${markerData.levies}<br>
+                                    <strong>Veterans:</strong> ${markerData.veterans}<br>
+                                    <strong>Sergeant-at-Arms:</strong> ${markerData.sergeant}<br>
+                                    <strong>Squires:</strong> ${markerData.squires}<br>
+                                    <strong>Knights:</strong> ${markerData.knights}<br>
+                                    <strong>Noble Retinue:</strong> ${markerData.retinue}<br>
+                                    <strong>Household Guard:</strong> ${markerData.guard}<br>
+                                    <strong>Archers:</strong> ${markerData.archers}
+                                   </div>`;
+                marker.bindPopup(tooltipHtml);
+                return marker;
+            }
+
+            // Placeholder function for 'unit' marker type
+            function createUnitMarker(markerData) {
+                // Implementation for 'unit' marker type
+                console.log('Creating unit marker:', markerData);
+                const icon = L.divIcon({
+                    html: `<img src="${markerData.iconUrl}" class="portrait-icon" onerror="this.src='assets/placeholder.png'">`,
+                    className: '',
+                    iconSize: [50, 70]
+                });
+                const marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
+                const tooltipHtml = `<div style="font-size: 16px;">
+                                    <strong>${markerData.name}</strong><br>
+                                    <img src="${markerData.iconUrl}" width="50" height="70"><br>
+                                    <!-- Add additional unit-specific tooltip content here -->
+                                   </div>`;
+                marker.bindPopup(tooltipHtml);
+                return marker;
+            }
 
             // Reset marker form fields
             function resetMarkerForm() {
@@ -543,10 +569,12 @@ function createArmyMarker(markerData) {
 
             // Remove marker
             function removeMarker(id) {
-                map.removeLayer(markers[id]);
-                delete markers[id];
-                database.ref('markers/' + id).remove();
-                updateSidebar();
+                if (markers[id]) {
+                    map.removeLayer(markers[id]);
+                    delete markers[id];
+                    database.ref('markers/' + id).remove();
+                    updateSidebar();
+                }
             }
 
             // Check if the user has edit permissions based on their IP
