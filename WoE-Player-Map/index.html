@@ -329,8 +329,9 @@
                 markerTooltipInput.style.display = tooltipType === 'text' && markerType !== 'player' && markerType !== 'army' ? 'block' : 'none';
                 markerTooltipFileInput.style.display = tooltipType === 'image' || markerType === 'player' || markerType === 'army' ? 'block' : 'none';
             }
-             // Add marker
-             async function addMarker() {
+
+            // Add marker
+            async function addMarker() {
                 const markerType = markerTypeSelect.value;
                 const name = markerNameInput.value;
                 let iconUrl = markerIconInput.value;
@@ -644,6 +645,10 @@
                     this.nextElementSibling.classList.toggle("show");
                 });
             }
+
+            // Expose functions to the global scope
+            window.removeMarker = removeMarker;
+            window.editMarker = editMarker;
         })();
     </script>
 </body>
