@@ -406,7 +406,6 @@
             });
         }
 
-        // Create marker
         function createMarker(id, markerData) {
     if (!hasEditPermissions && markerData.adminOnly) {
         return;
@@ -495,6 +494,7 @@
     markers[id] = marker.addTo(map);
     updateSidebar();
 }
+
 
         // Reset marker form fields
         function resetMarkerForm() {
@@ -601,6 +601,7 @@
         }
 
         // Duplicate marker
+// Duplicate marker
 function duplicateMarker(id) {
     const originalMarker = markers[id];
     if (!originalMarker) {
@@ -608,29 +609,23 @@ function duplicateMarker(id) {
         return;
     }
 
-    const markerData = {
+    const newMarkerId = database.ref().child('markers').push().key;
+    const newMarkerLatLng = originalMarker.getLatLng();
+    const newMarkerData = {
         ...originalMarker.options,
-        lat: originalMarker.getLatLng().lat + 0.001,
-        lng: originalMarker.getLatLng().lng + 0.001,
-        id: database.ref().child('markers').push().key
+        id: newMarkerId,
+        lat: newMarkerLatLng.lat + 0.001, // slight offset
+        lng: newMarkerLatLng.lng + 0.001, // slight offset
+        name: originalMarker.options.name + '_1'
     };
 
-    // Ensure we duplicate the popup content if it exists
-    const popupContent = originalMarker.getPopup().getContent();
-    if (popupContent) {
-        const contentParts = popupContent.split('<br>');
-        markerData.name = contentParts[0].replace('<strong>', '').replace('</strong>', '') + '_1';
-        markerData.tooltipContent = contentParts.length > 1 ? contentParts[1] : '';
-    } else {
-        markerData.name += '_1';
-    }
-
-    database.ref('markers/' + markerData.id).set(markerData).then(() => {
-        createMarker(markerData.id, markerData);
+    database.ref('markers/' + newMarkerId).set(newMarkerData).then(() => {
+        createMarker(newMarkerId, newMarkerData);
     }).catch(error => {
         console.error("Error duplicating marker: ", error);
     });
 }
+
 
         // Check if the user has edit permissions based on their IP
         let hasEditPermissions = false;
