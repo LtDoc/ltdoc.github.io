@@ -408,93 +408,93 @@
 
         // Create marker
         function createMarker(id, markerData) {
-            if (!hasEditPermissions && markerData.adminOnly) {
-                return;
-            }
+    if (!hasEditPermissions && markerData.adminOnly) {
+        return;
+    }
 
-            if (markers[id]) {
-                map.removeLayer(markers[id]);
-            }
+    if (markers[id]) {
+        map.removeLayer(markers[id]);
+    }
 
-            let marker;
-            if (markerData.type === 'player') {
-                let icon = L.divIcon({
-                    html: `<img src="${markerData.iconUrl}" class="circular-icon" onerror="this.src='assets/placeholder.png'">`,
-                    className: ''
-                });
-                marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
-                if (markerData.tooltipType === 'image') {
-                    marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br><img src="${markerData.tooltipContent}" width="200"></div>`);
-                } else {
-                    marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br>${markerData.tooltipContent}</div>`);
-                }
-            } else if (markerData.type === 'town' || markerData.type === 'poi') {
-                let iconHtml;
-                if (markerData.type === 'town') {
-                    iconHtml = markerData.size === 'capital' ? '⭐' : (markerData.size === 'city' ? '⚫' : '🔵');
-                } else {
-                    iconHtml = '❓';
-                }
-                marker = L.marker([markerData.lat, markerData.lng], { icon: L.divIcon({ html: iconHtml, className: 'custom-div-icon' }), draggable: hasEditPermissions });
-                if (markerData.tooltipType === 'image') {
-                    marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br><img src="${markerData.tooltipContent}" width="200"></div>`);
-                } else {
-                    marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br>${markerData.tooltipContent}</div>`);
-                }
-            } else if (markerData.type === 'army') {
-                let icon = L.divIcon({
-                    html: `<img src="${markerData.iconUrl}" class="portrait-icon" onerror="this.src='assets/placeholder.png'">`,
-                    className: '',
-                    iconSize: [50, 70]  // Adjust the size to ensure the full image shows
-                });
-                marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
-                let tooltipHtml = `<div style="font-size: 16px;">
-                                    <strong>${markerData.name}</strong><br>
-                                    <img src="${markerData.iconUrl}" width="50" height="70"><br>
-                                    <strong>Faction:</strong> ${markerData.faction}<br>
-                                    <strong>Level:</strong> ${markerData.level}<br>
-                                    <strong>Levies:</strong> ${markerData.levies}<br>
-                                    <strong>Veterans:</strong> ${markerData.veterans}<br>
-                                    <strong>Sergeant-at-Arms:</strong> ${markerData.sergeant}<br>
-                                    <strong>Squires:</strong> ${markerData.squires}<br>
-                                    <strong>Knights:</strong> ${markerData.knights}<br>
-                                    <strong>Noble Retinue:</strong> ${markerData.retinue}<br>
-                                    <strong>Household Guard:</strong> ${markerData.guard}<br>
-                                    <strong>Archers:</strong> ${markerData.archers}
-                                   </div>`;
-                marker.bindPopup(tooltipHtml);
-            } else if (markerData.type === 'unit') {
-                let icon = L.divIcon({
-                    html: `<img src="${markerData.iconUrl}" width="100" height="100" onerror="this.src='assets/unit_default.png'">`,
-                    className: '',
-                    iconSize: [100, 100]
-                });
-                marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
-                if (markerData.tooltipType === 'image') {
-                    marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br><img src="${markerData.tooltipContent}" width="200"></div>`);
-                } else {
-                    marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br>${markerData.tooltipContent}</div>`);
-                }
-            }
-
-            marker.on('dragend', function(e) {
-                const newPos = e.target.getLatLng();
-                database.ref('markers/' + id).update({
-                    lat: newPos.lat,
-                    lng: newPos.lng
-                });
-            });
-
-            marker.on('click', function() {
-                if (hasEditPermissions) {
-                    showSidebar();
-                    populateEditForm(id, markerData);
-                }
-            });
-
-            markers[id] = marker.addTo(map);
-            updateSidebar();
+    let marker;
+    if (markerData.type === 'player') {
+        let icon = L.divIcon({
+            html: `<img src="${markerData.iconUrl}" class="circular-icon" onerror="this.src='assets/placeholder.png'">`,
+            className: ''
+        });
+        marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
+        if (markerData.tooltipType === 'image') {
+            marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br><img src="${markerData.tooltipContent}" width="200"></div>`);
+        } else {
+            marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br>${markerData.tooltipContent}</div>`);
         }
+    } else if (markerData.type === 'town' || markerData.type === 'poi') {
+        let iconHtml;
+        if (markerData.type === 'town') {
+            iconHtml = markerData.size === 'capital' ? '⭐' : (markerData.size === 'city' ? '⚫' : '🔵');
+        } else {
+            iconHtml = '❓';
+        }
+        marker = L.marker([markerData.lat, markerData.lng], { icon: L.divIcon({ html: iconHtml, className: 'custom-div-icon' }), draggable: hasEditPermissions });
+        if (markerData.tooltipType === 'image') {
+            marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br><img src="${markerData.tooltipContent}" width="200"></div>`);
+        } else {
+            marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br>${markerData.tooltipContent}</div>`);
+        }
+    } else if (markerData.type === 'army') {
+        let icon = L.divIcon({
+            html: `<img src="${markerData.iconUrl}" class="portrait-icon" onerror="this.src='assets/placeholder.png'">`,
+            className: '',
+            iconSize: [50, 70]  // Adjust the size to ensure the full image shows
+        });
+        marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
+        let tooltipHtml = `<div style="font-size: 16px;">
+                            <strong>${markerData.name}</strong><br>
+                            <img src="${markerData.iconUrl}" width="50" height="70"><br>
+                            <strong>Faction:</strong> ${markerData.faction}<br>
+                            <strong>Level:</strong> ${markerData.level}<br>
+                            <strong>Levies:</strong> ${markerData.levies}<br>
+                            <strong>Veterans:</strong> ${markerData.veterans}<br>
+                            <strong>Sergeant-at-Arms:</strong> ${markerData.sergeant}<br>
+                            <strong>Squires:</strong> ${markerData.squires}<br>
+                            <strong>Knights:</strong> ${markerData.knights}<br>
+                            <strong>Noble Retinue:</strong> ${markerData.retinue}<br>
+                            <strong>Household Guard:</strong> ${markerData.guard}<br>
+                            <strong>Archers:</strong> ${markerData.archers}
+                           </div>`;
+        marker.bindPopup(tooltipHtml);
+    } else if (markerData.type === 'unit') {
+        let icon = L.divIcon({
+            html: `<img src="${markerData.iconUrl}" width="100" height="100" onerror="this.src='assets/unit_default.png'">`,
+            className: '',
+            iconSize: [100, 100]
+        });
+        marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
+        if (markerData.tooltipType === 'image') {
+            marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br><img src="${markerData.tooltipContent}" width="200"></div>`);
+        } else {
+            marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br>${markerData.tooltipContent}</div>`);
+        }
+    }
+
+    marker.on('dragend', function(e) {
+        const newPos = e.target.getLatLng();
+        database.ref('markers/' + id).update({
+            lat: newPos.lat,
+            lng: newPos.lng
+        });
+    });
+
+    marker.on('click', function() {
+        if (hasEditPermissions) {
+            showSidebar();
+            populateEditForm(id, markerData);
+        }
+    });
+
+    markers[id] = marker.addTo(map);
+    updateSidebar();
+}
 
         // Reset marker form fields
         function resetMarkerForm() {
@@ -601,26 +601,36 @@
         }
 
         // Duplicate marker
-        function duplicateMarker(id) {
-            const originalMarker = markers[id];
-            const markerData = {
-                ...originalMarker.options,
-                lat: originalMarker.getLatLng().lat + 0.001,
-                lng: originalMarker.getLatLng().lng + 0.001,
-                id: database.ref().child('markers').push().key
-            };
+function duplicateMarker(id) {
+    const originalMarker = markers[id];
+    if (!originalMarker) {
+        console.error("Marker not found for duplication.");
+        return;
+    }
 
-            // Ensure we duplicate the popup content if it exists
-            const popupContent = originalMarker.getPopup().getContent();
-            if (popupContent) {
-                const contentParts = popupContent.split('<br>');
-                markerData.name = contentParts[0].replace('<strong>', '').replace('</strong>', '');
-                markerData.tooltipContent = contentParts.length > 1 ? contentParts[1] : '';
-            }
+    const markerData = {
+        ...originalMarker.options,
+        lat: originalMarker.getLatLng().lat + 0.001,
+        lng: originalMarker.getLatLng().lng + 0.001,
+        id: database.ref().child('markers').push().key
+    };
 
-            database.ref('markers/' + markerData.id).set(markerData);
-            createMarker(markerData.id, markerData);
-        }
+    // Ensure we duplicate the popup content if it exists
+    const popupContent = originalMarker.getPopup().getContent();
+    if (popupContent) {
+        const contentParts = popupContent.split('<br>');
+        markerData.name = contentParts[0].replace('<strong>', '').replace('</strong>', '') + '_1';
+        markerData.tooltipContent = contentParts.length > 1 ? contentParts[1] : '';
+    } else {
+        markerData.name += '_1';
+    }
+
+    database.ref('markers/' + markerData.id).set(markerData).then(() => {
+        createMarker(markerData.id, markerData);
+    }).catch(error => {
+        console.error("Error duplicating marker: ", error);
+    });
+}
 
         // Check if the user has edit permissions based on their IP
         let hasEditPermissions = false;
