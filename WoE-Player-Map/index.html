@@ -290,10 +290,26 @@
                 const data = snapshot.val();
                 if (data) {
                     Object.keys(data).forEach(id => {
-                        createMarker(id, data[id]);
+                        const correctedData = correctMarkerData(data[id]);
+                        createMarker(id, correctedData);
                     });
                 }
             });
+
+            // Correct marker data
+            function correctMarkerData(data) {
+                const defaults = {
+                    type: 'unknown',
+                    lat: 0,
+                    lng: 0,
+                    name: 'Unnamed Marker',
+                    iconUrl: 'assets/placeholder.png',
+                    tooltipType: 'text',
+                    tooltipContent: '',
+                    adminOnly: false
+                };
+                return { ...defaults, ...data };
+            }
 
             // Toggle icon fields visibility
             function toggleIconFields() {
@@ -313,9 +329,8 @@
                 markerTooltipInput.style.display = tooltipType === 'text' && markerType !== 'player' && markerType !== 'army' ? 'block' : 'none';
                 markerTooltipFileInput.style.display = tooltipType === 'image' || markerType === 'player' || markerType === 'army' ? 'block' : 'none';
             }
-
-            // Add marker
-            async function addMarker() {
+             // Add marker
+             async function addMarker() {
                 const markerType = markerTypeSelect.value;
                 const name = markerNameInput.value;
                 let iconUrl = markerIconInput.value;
