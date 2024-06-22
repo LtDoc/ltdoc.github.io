@@ -72,10 +72,10 @@
             object-fit: cover;
         }
         .portrait-icon {
-    width: 50px;
-    height: auto;
-    object-fit: cover;
-}
+            width: 50px;
+            height: auto;
+            object-fit: cover;
+        }
         h2, h3 {
             font-family: 'Fantasy', cursive;
         }
@@ -152,6 +152,7 @@
                     <option value="town">Town</option>
                     <option value="poi">POI</option>
                     <option value="army">Army</option>
+                    <option value="unit">Unit</option>
                 </select><br>
                 <label for="markerName">Name:</label><br>
                 <input type="text" id="markerName"><br>
@@ -189,6 +190,10 @@
                     <input type="text" id="armyGuard"><br>
                     <label for="armyArchers">Archers:</label><br>
                     <input type="text" id="armyArchers"><br>
+                </div>
+                <div id="unitFields" style="display: none;">
+                    <label for="unitImage">Unit Image:</label><br>
+                    <input type="text" id="unitImage" value="assets/unit_default.png"><br>
                 </div>
                 <label for="markerTooltipType">Tooltip Type:</label><br>
                 <select id="markerTooltipType" onchange="toggleTooltipFields()">
@@ -274,34 +279,39 @@
             const iconFields = document.getElementById('iconFields');
             const townFields = document.getElementById('townFields');
             const armyFields = document.getElementById('armyFields');
+            const unitFields = document.getElementById('unitFields');
             if (markerType === 'player') {
                 iconFields.style.display = 'block';
                 townFields.style.display = 'none';
                 armyFields.style.display = 'none';
+                unitFields.style.display = 'none';
             } else if (markerType === 'town') {
                 iconFields.style.display = 'none';
                 townFields.style.display = 'block';
                 armyFields.style.display = 'none';
+                unitFields.style.display = 'none';
             } else if (markerType === 'army') {
                 iconFields.style.display = 'block';
                 townFields.style.display = 'none';
                 armyFields.style.display = 'block';
+                unitFields.style.display = 'none';
+            } else if (markerType === 'unit') {
+                iconFields.style.display = 'none';
+                townFields.style.display = 'none';
+                armyFields.style.display = 'none';
+                unitFields.style.display = 'block';
             } else {
                 iconFields.style.display = 'none';
                 townFields.style.display = 'none';
                 armyFields.style.display = 'none';
+                unitFields.style.display = 'none';
             }
         }
 
         // Toggle tooltip type input fields
         function toggleTooltipFields() {
-            const markerType = document.getElementById('markerType').value;
             const tooltipType = document.getElementById('markerTooltipType').value;
-            if (markerType === 'player' || markerType === 'army') {
-                document.getElementById('markerTooltipType').value = 'image';
-                document.getElementById('markerTooltip').style.display = 'none';
-                document.getElementById('markerTooltipFile').style.display = 'block';
-            } else if (tooltipType === 'image') {
+            if (tooltipType === 'image') {
                 document.getElementById('markerTooltip').style.display = 'none';
                 document.getElementById('markerTooltipFile').style.display = 'block';
             } else {
@@ -372,6 +382,10 @@
                 markerOptions.archers = document.getElementById('armyArchers').value;
             }
 
+            if (markerType === 'unit') {
+                markerOptions.iconUrl = document.getElementById('unitImage').value;
+            }
+
             Promise.all(promises).then(() => {
                 database.ref('markers/' + markerId).set(markerOptions);
                 createMarker(markerId, markerOptions);
@@ -415,28 +429,40 @@
                     marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br>${markerData.tooltipContent}</div>`);
                 }
             } else if (markerData.type === 'army') {
-    let icon = L.divIcon({
-        html: `<img src="${markerData.iconUrl}" class="portrait-icon" onerror="this.src='assets/placeholder.png'">`,
-        className: '',
-        iconSize: [50, 70]  // Adjust the size to ensure the full image shows
-    });
-    marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
-    let tooltipHtml = `<div style="font-size: 16px;">
-                        <strong>${markerData.name}</strong><br>
-                        <img src="${markerData.iconUrl}" width="50" height="70"><br>
-                        <strong>Faction:</strong> ${markerData.faction}<br>
-                        <strong>Level:</strong> ${markerData.level}<br>
-                        <strong>Levies:</strong> ${markerData.levies}<br>
-                        <strong>Veterans:</strong> ${markerData.veterans}<br>
-                        <strong>Sergeant-at-Arms:</strong> ${markerData.sergeant}<br>
-                        <strong>Squires:</strong> ${markerData.squires}<br>
-                        <strong>Knights:</strong> ${markerData.knights}<br>
-                        <strong>Noble Retinue:</strong> ${markerData.retinue}<br>
-                        <strong>Household Guard:</strong> ${markerData.guard}<br>
-                        <strong>Archers:</strong> ${markerData.archers}
-                       </div>`;
-    marker.bindPopup(tooltipHtml);
-}
+                let icon = L.divIcon({
+                    html: `<img src="${markerData.iconUrl}" class="portrait-icon" onerror="this.src='assets/placeholder.png'">`,
+                    className: '',
+                    iconSize: [50, 70]  // Adjust the size to ensure the full image shows
+                });
+                marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
+                let tooltipHtml = `<div style="font-size: 16px;">
+                                    <strong>${markerData.name}</strong><br>
+                                    <img src="${markerData.iconUrl}" width="50" height="70"><br>
+                                    <strong>Faction:</strong> ${markerData.faction}<br>
+                                    <strong>Level:</strong> ${markerData.level}<br>
+                                    <strong>Levies:</strong> ${markerData.levies}<br>
+                                    <strong>Veterans:</strong> ${markerData.veterans}<br>
+                                    <strong>Sergeant-at-Arms:</strong> ${markerData.sergeant}<br>
+                                    <strong>Squires:</strong> ${markerData.squires}<br>
+                                    <strong>Knights:</strong> ${markerData.knights}<br>
+                                    <strong>Noble Retinue:</strong> ${markerData.retinue}<br>
+                                    <strong>Household Guard:</strong> ${markerData.guard}<br>
+                                    <strong>Archers:</strong> ${markerData.archers}
+                                   </div>`;
+                marker.bindPopup(tooltipHtml);
+            } else if (markerData.type === 'unit') {
+                let icon = L.divIcon({
+                    html: `<img src="${markerData.iconUrl}" width="100" height="100" onerror="this.src='assets/unit_default.png'">`,
+                    className: '',
+                    iconSize: [100, 100]
+                });
+                marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
+                if (markerData.tooltipType === 'image') {
+                    marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br><img src="${markerData.tooltipContent}" width="200"></div>`);
+                } else {
+                    marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br>${markerData.tooltipContent}</div>`);
+                }
+            }
 
             marker.on('dragend', function(e) {
                 const newPos = e.target.getLatLng();
@@ -449,7 +475,7 @@
             marker.on('click', function() {
                 if (hasEditPermissions) {
                     showSidebar();
-                    map.panTo(marker.getLatLng());
+                    populateEditForm(id, markerData);
                 }
             });
 
@@ -484,35 +510,69 @@
                 listItem.innerHTML = `<strong>${markerData[0].replace('<strong>', '').replace('</strong>', '')}</strong>`;
                 if (hasEditPermissions) {
                     listItem.innerHTML += `<button onclick="editMarker('${id}')">Edit</button>
-                                           <button onclick="removeMarker('${id}')">Remove</button>`;
+                                           <button onclick="removeMarker('${id}')">Remove</button>
+                                           <button onclick="duplicateMarker('${id}')">Duplicate</button>`;
                 }
                 markerList.appendChild(listItem);
             });
         }
 
+        // Populate the form with marker data for editing
+        function populateEditForm(id, markerData) {
+            document.getElementById('markerType').value = markerData.type;
+            document.getElementById('markerName').value = markerData.name;
+            document.getElementById('markerIcon').value = markerData.iconUrl;
+            document.getElementById('markerTooltip').value = markerData.tooltipContent;
+            document.getElementById('markerAdminOnly').checked = markerData.adminOnly;
+            toggleIconFields();
+            toggleTooltipFields();
+        }
+
         // Edit marker
         function editMarker(id) {
-            const marker = markers[id];
-            const markerData = marker.getPopup().getContent().split('<br>');
-            const newName = prompt('Enter new name:', markerData[0].replace('<strong>', '').replace('</strong>', ''));
-            let newTooltipContent = markerData[1].replace('<img src="', '').replace('" width="200">', '');
-            if (markerData.tooltipType === 'text') {
-                newTooltipContent = prompt('Enter new tooltip text:', markerData[1]);
-            } else {
-                newTooltipContent = prompt('Enter new tooltip image URL:', newTooltipContent);
-            }
-            const adminOnly = confirm('Make this marker admin only?');
-            database.ref('markers/' + id).update({
-                name: newName,
-                tooltipContent: newTooltipContent,
+            const markerType = document.getElementById('markerType').value;
+            const name = document.getElementById('markerName').value;
+            const iconUrl = document.getElementById('markerIcon').value;
+            const tooltipType = document.getElementById('markerTooltipType').value;
+            const tooltipContent = document.getElementById('markerTooltip').value;
+            const adminOnly = document.getElementById('markerAdminOnly').checked;
+
+            let markerOptions = {
+                id: id,
+                name: name,
+                type: markerType,
+                iconUrl: iconUrl,
+                tooltipType: tooltipType,
+                tooltipContent: tooltipContent,
                 adminOnly: adminOnly
-            });
-            if (markerData.tooltipType === 'image') {
-                marker.setPopupContent(`<div style="font-size: 16px;"><strong>${newName}</strong><br><img src="${newTooltipContent}" width="200"></div>`);
-            } else {
-                marker.setPopupContent(`<div style="font-size: 16px;"><strong>${newName}</strong><br>${newTooltipContent}</div>`);
+            };
+
+            if (markerType === 'town') {
+                markerOptions.size = document.getElementById('townSize').value;
             }
-            updateSidebar();
+
+            if (markerType === 'army') {
+                markerOptions.faction = document.getElementById('armyFaction').value;
+                markerOptions.level = document.getElementById('armyLevel').value;
+                markerOptions.levies = document.getElementById('armyLevies').value;
+                markerOptions.veterans = document.getElementById('armyVeterans').value;
+                markerOptions.sergeant = document.getElementById('armySergeant').value;
+                markerOptions.squires = document.getElementById('armySquires').value;
+                markerOptions.knights = document.getElementById('armyKnights').value;
+                markerOptions.retinue = document.getElementById('armyRetinue').value;
+                markerOptions.guard = document.getElementById('armyGuard').value;
+                markerOptions.archers = document.getElementById('armyArchers').value;
+            }
+
+            if (markerType === 'unit') {
+                markerOptions.iconUrl = document.getElementById('unitImage').value;
+            }
+
+            database.ref('markers/' + id).update(markerOptions).then(() => {
+                createMarker(id, markerOptions);
+                resetMarkerForm();
+                updateSidebar();
+            });
         }
 
         // Remove marker
@@ -521,6 +581,20 @@
             delete markers[id];
             database.ref('markers/' + id).remove();
             updateSidebar();
+        }
+
+        // Duplicate marker
+        function duplicateMarker(id) {
+            const originalMarker = markers[id];
+            const markerData = {
+                ...originalMarker.getPopup().getContent().split('<br>'),
+                lat: originalMarker.getLatLng().lat + 0.001,
+                lng: originalMarker.getLatLng().lng + 0.001
+            };
+            const markerId = database.ref().child('markers').push().key;
+            markerData.id = markerId;
+            database.ref('markers/' + markerId).set(markerData);
+            createMarker(markerId, markerData);
         }
 
         // Check if the user has edit permissions based on their IP
@@ -580,7 +654,7 @@
 
         // Handle collapsible sections
         const coll = document.getElementsByClassName("collapsible");
-        for (let i = 0;0 < coll.length; i++) {
+        for (let i = 0; i < coll.length; i++) {
             coll[i].addEventListener("click", function() {
                 this.classList.toggle("active");
                 const content = this.nextElementSibling;
