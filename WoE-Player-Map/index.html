@@ -291,7 +291,12 @@
                 if (data) {
                     Object.keys(data).forEach(id => {
                         const correctedData = correctMarkerData(data[id]);
-                        createMarker(id, correctedData);
+                        if (!isValidMarkerData(correctedData)) {
+                            console.error(`Removing invalid marker data with id: ${id}`, correctedData);
+                            database.ref('markers/' + id).remove();
+                        } else {
+                            createMarker(id, correctedData);
+                        }
                     });
                 }
             });
@@ -309,6 +314,12 @@
                     adminOnly: false
                 };
                 return { ...defaults, ...data };
+            }
+
+            // Validate marker data
+            function isValidMarkerData(data) {
+                const requiredFields = ['type', 'lat', 'lng', 'name'];
+                return requiredFields.every(field => data[field] !== undefined && data[field] !== null);
             }
 
             // Toggle icon fields visibility
@@ -433,12 +444,14 @@
                         break;
                     default:
                         console.error(`Unknown marker type: ${markerData.type}`, markerData);
+                        database.ref('markers/' + id).remove(); // Remove invalid marker from Firebase
                         return;
                 }
 
                 // Ensure marker is defined
                 if (!marker) {
                     console.error(`Failed to create marker for id: ${id}`, markerData);
+                    database.ref('markers/' + id).remove(); // Remove invalid marker from Firebase
                     return;
                 }
 
@@ -518,7 +531,6 @@
 
             // Placeholder function for 'unit' marker type
             function createUnitMarker(markerData) {
-                // Implementation for 'unit' marker type
                 console.log('Creating unit marker:', markerData);
                 const icon = L.divIcon({
                     html: `<img src="${markerData.iconUrl}" class="portrait-icon" onerror="this.src='assets/placeholder.png'">`,
