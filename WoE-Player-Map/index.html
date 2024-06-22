@@ -518,7 +518,7 @@
             markerList.innerHTML = '';
             Object.keys(markers).forEach(id => {
                 const marker = markers[id];
-                const markerData = markers[id].getPopup().getContent().split('<br>');
+                const markerData = marker.getPopup().getContent().split('<br>');
                 const listItem = document.createElement('li');
                 listItem.classList.add('marker-item');
                 listItem.innerHTML = `<strong>${markerData[0].replace('<strong>', '').replace('</strong>', '')}</strong>`;
@@ -609,6 +609,15 @@
                 lng: originalMarker.getLatLng().lng + 0.001,
                 id: database.ref().child('markers').push().key
             };
+
+            // Ensure we duplicate the popup content if it exists
+            const popupContent = originalMarker.getPopup().getContent();
+            if (popupContent) {
+                const contentParts = popupContent.split('<br>');
+                markerData.name = contentParts[0].replace('<strong>', '').replace('</strong>', '');
+                markerData.tooltipContent = contentParts.length > 1 ? contentParts[1] : '';
+            }
+
             database.ref('markers/' + markerData.id).set(markerData);
             createMarker(markerData.id, markerData);
         }
