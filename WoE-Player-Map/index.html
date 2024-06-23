@@ -613,7 +613,7 @@
                     .then(response => response.json())
                     .then(data => {
                         const userIP = data.ip;
-                        const allowedIPs = ['24.57.218.92']; // Replace with your allowed IP addresses
+                        const allowedIPs = ['24.57.218.92','98.16.223.9']; // Replace with your allowed IP addresses
                         hasEditPermissions = allowedIPs.includes(userIP);
                         document.body.classList.toggle('readonly', !hasEditPermissions);
                         sidebar.classList.toggle('hidden', !hasEditPermissions);
