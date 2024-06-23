@@ -147,7 +147,7 @@
         <div class="content">
             <form id="markerForm">
                 <label for="markerType">Type:</label><br>
-                <select id="markerType">
+                <select id="markerType" onchange="toggleFields();">
                     <option value="player">Player</option>
                     <option value="town">Town</option>
                     <option value="poi">POI</option>
@@ -191,7 +191,7 @@
                     <input type="text" id="armyArchers"><br>
                 </div>
                 <label for="markerTooltipType">Tooltip Type:</label><br>
-                <select id="markerTooltipType">
+                <select id="markerTooltipType" onchange="toggleTooltipFields()">
                     <option value="image">Image</option>
                     <option value="text">Text</option>
                 </select><br>
