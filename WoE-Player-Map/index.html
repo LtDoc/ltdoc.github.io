@@ -661,6 +661,10 @@
             // Expose functions to the global scope
             window.removeMarker = removeMarker;
             window.editMarker = editMarker;
+
+            // Initial call to set visibility based on default selected marker type
+            toggleIconFields();
+            toggleTooltipFields();
         })();
     </script>
 </body>
