@@ -147,7 +147,7 @@
         <div class="content">
             <form id="markerForm">
                 <label for="markerType">Type:</label><br>
-                <select id="markerType" onchange="toggleIconFields(); toggleTooltipFields();">
+                <select id="markerType" onchange="toggleFields();">
                     <option value="player">Player</option>
                     <option value="town">Town</option>
                     <option value="poi">POI</option>
@@ -322,23 +322,24 @@
                 return requiredFields.every(field => data[field] !== undefined && data[field] !== null);
             }
 
-            // Toggle icon fields visibility
-            function toggleIconFields() {
+            // Toggle icon and other fields visibility
+            function toggleFields() {
                 const markerType = markerTypeSelect.value;
-                console.log("Toggling icon fields for marker type:", markerType); // Debugging
                 const iconFields = document.getElementById('iconFields');
                 const townFields = document.getElementById('townFields');
                 const armyFields = document.getElementById('armyFields');
+
                 iconFields.style.display = (markerType === 'player' || markerType === 'army') ? 'block' : 'none';
                 townFields.style.display = markerType === 'town' ? 'block' : 'none';
                 armyFields.style.display = markerType === 'army' ? 'block' : 'none';
+
+                toggleTooltipFields();
             }
 
             // Toggle tooltip type input fields
             function toggleTooltipFields() {
                 const tooltipType = markerTooltipTypeSelect.value;
                 const markerType = markerTypeSelect.value;
-                console.log("Toggling tooltip fields for marker type:", markerType, "and tooltip type:", tooltipType); // Debugging
                 markerTooltipInput.style.display = tooltipType === 'text' && markerType !== 'player' && markerType !== 'army' ? 'block' : 'none';
                 markerTooltipFileInput.style.display = tooltipType === 'image' || markerType === 'player' || markerType === 'army' ? 'block' : 'none';
             }
@@ -552,8 +553,7 @@
             // Reset marker form fields
             function resetMarkerForm() {
                 markerForm.reset();
-                toggleIconFields();
-                toggleTooltipFields();
+                toggleFields();
             }
 
             // Update sidebar
@@ -665,8 +665,7 @@
             window.editMarker = editMarker;
 
             // Initial call to set visibility based on default selected marker type
-            toggleIconFields();
-            toggleTooltipFields();
+            toggleFields();
         })();
     </script>
 </body>
