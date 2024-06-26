@@ -134,10 +134,10 @@ document.addEventListener('DOMContentLoaded', function() {
         return `<div class="health-bar" style="width: ${healthPercentage}%; background-color: ${color};"></div>`;
     }
 
-    function removeItem(uid, itemId) {
+    window.removeItem = function(uid, itemId) {
         const itemRef = db.ref('users_new/' + uid + '/inventory/' + itemId);
         itemRef.remove();
         const logRef = db.ref('users_new/' + uid + '/log');
         logRef.transaction(log => (log || '') + `\nRemoved item ${itemId}`);
-    }
+    };
 });
