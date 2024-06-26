@@ -56,7 +56,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 itemCard.innerHTML = `
                     <img src="${item.image}" alt="${item.name}">
                     <p>${item.name}</p>
-                    ${item.class === 'Weapons' || item.class === 'Armor' ? createHealthBar(item.health) : ''}
+                    ${(item.class === 'Weapons' || item.class === 'Armor') ? createHealthBar(item.health) : ''}
                 `;
                 if ((item.class === 'Weapons' || item.class === 'Armor') && item.health <= 0) {
                     itemCard.style.borderColor = 'red';
