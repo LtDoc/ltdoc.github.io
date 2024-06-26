@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
+    <script defer src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js"></script>
+    <script defer src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js"></script>
+    <script defer src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js"></script>
+    <script defer src="admin.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>Admin Panel</h1>
+        <form id="item-form">
+            <input type="text" id="item-name" placeholder="Item Name">
+            <input type="text" id="item-image" placeholder="Item Image URL">
+            <select id="item-class">
+                <option value="Weapons">Weapons</option>
+                <option value="Armor">Armor</option>
+                <option value="Potions">Potions</option>
+                <option value="Books">Books</option>
+                <option value="Valuables">Valuables</option>
+                <option value="Misc">Misc</option>
+            </select>
+            <input type="number" id="item-health" placeholder="Health" min="0">
+            <button type="submit">Add Item</button>
+        </form>
+        <form id="user-form">
+            <input type="text" id="username" placeholder="Username" required>
+            <input type="password" id="user-password" placeholder="Password" required>
+            <input type="text" id="character-name" placeholder="Character Name" required>
+            <input type="number" id="gold" placeholder="Starting Gold" required>
+            <button type="submit">Create User</button>
+        </form>
+        <select id="player-select">
+            <option value="">Select Player</option>
+        </select>
+        <div id="admin-inventory"></div>
+        <textarea id="log" readonly></textarea>
+    </div>
+</body>
+</html>

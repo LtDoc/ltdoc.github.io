@@ -84,5 +84,3 @@ function createHealthBar(health) {
     }
     return `<div class="health-bar" style="width: ${healthPercentage}%; background-color: ${color};"></div>`;
 }
-
-// Create default admin account
