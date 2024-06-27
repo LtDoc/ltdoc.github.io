@@ -38,12 +38,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.getElementById('user-form').addEventListener('submit', e => {
         e.preventDefault();
-
+    
         const username = document.getElementById('username').value;
         const userPassword = document.getElementById('user-password').value;
         const characterName = document.getElementById('character-name').value;
         const gold = document.getElementById('gold').value;
-
+    
         if (username && userPassword && characterName && gold) {
             auth.createUserWithEmailAndPassword(`${username}@example.com`, userPassword)
                 .then(userCredential => {
@@ -69,6 +69,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
         }
     });
+    
 
     // Load Players
     db.ref('users_new').on('value', snapshot => {
