@@ -1,13 +1,13 @@
 // Firebase Configuration
 const firebaseConfig = {
     apiKey: "AIzaSyCo9QPVrLCXS6li_kcTu3e-GOoiiwpHvLs",
-                authDomain: "woe-world.firebaseapp.com",
-                databaseURL: "https://woe-world-default-rtdb.firebaseio.com",
-                projectId: "woe-world",
-                storageBucket: "woe-world.appspot.com",
-                messagingSenderId: "706865712365",
-                appId: "1:706865712365:web:e080b1ef45b8d8b27190e4",
-                measurementId: "G-789BN2WECG"
+    authDomain: "woe-world.firebaseapp.com",
+    databaseURL: "https://woe-world-default-rtdb.firebaseio.com",
+    projectId: "woe-world",
+    storageBucket: "woe-world.appspot.com",
+    messagingSenderId: "706865712365",
+    appId: "1:706865712365:web:e080b1ef45b8d8b27190e4",
+    measurementId: "G-789BN2WECG"
 };
 
 // Initialize Firebase
@@ -38,12 +38,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.getElementById('user-form').addEventListener('submit', e => {
         e.preventDefault();
-    
+
         const username = document.getElementById('username').value;
         const userPassword = document.getElementById('user-password').value;
         const characterName = document.getElementById('character-name').value;
         const gold = document.getElementById('gold').value;
-    
+
         if (username && userPassword && characterName && gold) {
             auth.createUserWithEmailAndPassword(`${username}@example.com`, userPassword)
                 .then(userCredential => {
@@ -58,8 +58,13 @@ document.addEventListener('DOMContentLoaded', function() {
                                 gold: gold,
                                 inventory: [],
                                 log: ""
+                            })
+                            .then(() => {
+                                console.log('New user created with ID:', newUserId);
+                            })
+                            .catch(dbError => {
+                                console.error('Failed to add user to users_new table:', dbError.message);
                             });
-                            console.log('New user created with ID:', newUserId);
                         }
                     });
                 })
@@ -69,7 +74,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
         }
     });
-    
 
     // Load Players
     db.ref('users_new').on('value', snapshot => {

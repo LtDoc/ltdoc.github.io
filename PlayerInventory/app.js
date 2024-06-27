@@ -1,13 +1,13 @@
 // Firebase Configuration
 const firebaseConfig = {
     apiKey: "AIzaSyCo9QPVrLCXS6li_kcTu3e-GOoiiwpHvLs",
-                authDomain: "woe-world.firebaseapp.com",
-                databaseURL: "https://woe-world-default-rtdb.firebaseio.com",
-                projectId: "woe-world",
-                storageBucket: "woe-world.appspot.com",
-                messagingSenderId: "706865712365",
-                appId: "1:706865712365:web:e080b1ef45b8d8b27190e4",
-                measurementId: "G-789BN2WECG"
+    authDomain: "woe-world.firebaseapp.com",
+    databaseURL: "https://woe-world-default-rtdb.firebaseio.com",
+    projectId: "woe-world",
+    storageBucket: "woe-world.appspot.com",
+    messagingSenderId: "706865712365",
+    appId: "1:706865712365:web:e080b1ef45b8d8b27190e4",
+    measurementId: "G-789BN2WECG"
 };
 
 // Initialize Firebase
@@ -16,46 +16,45 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 const auth = firebase.auth();
 
-function createDefaultAdmin() {
-    auth.createUserWithEmailAndPassword("admin@example.com", "29KJPKCDRQ6")
-        .then(userCredential => {
-            db.ref('users_new/' + userCredential.user.uid).set({
-                username: "admin",
-                characterName: "Admin",
-                userId: 0,
-                gold: 0,
-                inventory: [],
-                log: ""
+document.addEventListener('DOMContentLoaded', function() {
+    function createDefaultAdmin() {
+        auth.createUserWithEmailAndPassword("admin@example.com", "29KJPKCDRQ6")
+            .then(userCredential => {
+                return db.ref('users_new/' + userCredential.user.uid).set({
+                    username: "admin",
+                    characterName: "Admin",
+                    userId: 0,
+                    gold: 0,
+                    inventory: [],
+                    log: ""
+                });
+            })
+            .then(() => {
+                console.log("Admin account created and added to users_new table");
+            })
+            .catch(error => {
+                console.error("Failed to create admin account or add to users_new table:", error.message);
             });
-            console.log("Admin account created");
+    }
+
+    // Check if the admin account exists; if not, create it
+    auth.signInWithEmailAndPassword("admin@example.com", "29KJPKCDRQ6")
+        .then(() => {
+            console.log("Admin signed in");
         })
         .catch(error => {
-            if (error.code === 'auth/email-already-in-use') {
-                console.log("Admin account already exists");
+            if (error.code === 'auth/user-not-found') {
+                createDefaultAdmin();
             } else {
-                console.error("Failed to create admin account:", error.message);
+                console.error("Failed to sign in admin:", error.message);
             }
         });
-}
 
-auth.signInWithEmailAndPassword("admin@example.com", "29KJPKCDRQ6")
-    .then(() => {
-        console.log("Admin signed in");
-    })
-    .catch(error => {
-        if (error.code === 'auth/user-not-found') {
-            createDefaultAdmin();
-        } else {
-            console.error("Failed to sign in admin:", error.message);
-        }
-    });
-
-document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('login-form').addEventListener('submit', e => {
         e.preventDefault();
         const username = document.getElementById('login-username').value;
         const password = document.getElementById('login-password').value;
-    
+
         auth.signInWithEmailAndPassword(`${username}@example.com`, password)
             .then(userCredential => {
                 document.getElementById('login-container').style.display = 'none';
