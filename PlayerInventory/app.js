@@ -16,6 +16,33 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 const auth = firebase.auth();
 
+// Create default admin account if not exists
+auth.signInWithEmailAndPassword("admin@example.com", "29KJPKCDRQ6")
+    .then(() => {
+        console.log("Admin already exists");
+    })
+    .catch((error) => {
+        if (error.code === "auth/user-not-found") {
+            auth.createUserWithEmailAndPassword("admin@example.com", "29KJPKCDRQ6")
+                .then((userCredential) => {
+                    db.ref('users_new/' + userCredential.user.uid).set({
+                        username: "admin",
+                        characterName: "Admin",
+                        userId: 0,
+                        gold: 0,
+                        inventory: [],
+                        log: ""
+                    });
+                    console.log("Admin account created");
+                })
+                .catch((createError) => {
+                    console.error("Failed to create admin account:", createError.message);
+                });
+        } else {
+            console.error("Failed to sign in admin:", error.message);
+        }
+    });
+
 document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('login-form').addEventListener('submit', e => {
         e.preventDefault();
