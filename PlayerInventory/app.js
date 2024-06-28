@@ -42,11 +42,12 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(snapshot => {
                 const users = snapshot.val();
                 if (users) {
-                    const user = Object.values(users)[0];
+                    const userKey = Object.keys(users)[0];
+                    const user = users[userKey];
                     if (user.password === password) {
                         document.getElementById('login-container').style.display = 'none';
                         document.getElementById('inventory-container').style.display = 'block';
-                        loadInventory(user.uid);
+                        loadInventory(userKey);
                     } else {
                         alert('Incorrect password');
                     }
