@@ -14,56 +14,48 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 
 const db = firebase.database();
-const auth = firebase.auth();
 
 document.addEventListener('DOMContentLoaded', function() {
-    function createDefaultAdmin() {
-        auth.createUserWithEmailAndPassword("admin@example.com", "29KJPKCDRQ6")
-            .then(userCredential => {
-                return db.ref('users_new/' + userCredential.user.uid).set({
-                    username: "admin",
-                    characterName: "Admin",
-                    userId: 0,
-                    gold: 0,
-                    inventory: [],
-                    log: ""
-                });
-            })
-            .then(() => {
-                console.log("Admin account created and added to users_new table");
-            })
-            .catch(error => {
-                console.error("Failed to create admin account or add to users_new table:", error.message);
+    const allowedAdminIPs = ['24.57.218.92', '98.16.223.9'];
+
+    function checkIPAccess() {
+        return fetch('https://api.ipify.org?format=json')
+            .then(response => response.json())
+            .then(data => {
+                if (allowedAdminIPs.includes(data.ip)) {
+                    document.getElementById('admin-button').style.display = 'block';
+                    document.getElementById('admin-button').addEventListener('click', () => {
+                        window.location.href = 'admin.html';
+                    });
+                }
             });
     }
 
-    // Check if the admin account exists; if not, create it
-    auth.signInWithEmailAndPassword("admin@example.com", "29KJPKCDRQ6")
-        .then(() => {
-            console.log("Admin signed in");
-        })
-        .catch(error => {
-            if (error.code === 'auth/user-not-found') {
-                createDefaultAdmin();
-            } else {
-                console.error("Failed to sign in admin:", error.message);
-            }
-        });
+    checkIPAccess();
 
     document.getElementById('login-form').addEventListener('submit', e => {
         e.preventDefault();
         const username = document.getElementById('login-username').value;
         const password = document.getElementById('login-password').value;
 
-        auth.signInWithEmailAndPassword(`${username}@example.com`, password)
-            .then(userCredential => {
-                document.getElementById('login-container').style.display = 'none';
-                document.getElementById('inventory-container').style.display = 'block';
-                loadInventory(userCredential.user.uid);
+        db.ref('users_new').orderByChild('username').equalTo(username).once('value')
+            .then(snapshot => {
+                const users = snapshot.val();
+                if (users) {
+                    const user = Object.values(users)[0];
+                    if (user.password === password) {
+                        document.getElementById('login-container').style.display = 'none';
+                        document.getElementById('inventory-container').style.display = 'block';
+                        loadInventory(user.uid);
+                    } else {
+                        alert('Incorrect password');
+                    }
+                } else {
+                    alert('User not found');
+                }
             })
             .catch(error => {
-                console.error(error);
-                alert('Login failed: ' + error.message);
+                console.error('Error logging in:', error);
             });
     });
 

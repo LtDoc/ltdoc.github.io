@@ -14,7 +14,6 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 
 const db = firebase.database();
-const auth = firebase.auth();
 
 document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('item-form').addEventListener('submit', e => {
@@ -45,33 +44,21 @@ document.addEventListener('DOMContentLoaded', function() {
         const gold = document.getElementById('gold').value;
 
         if (username && userPassword && characterName && gold) {
-            auth.createUserWithEmailAndPassword(`${username}@example.com`, userPassword)
-                .then(userCredential => {
-                    const userIdRef = db.ref('user_id_counter');
-                    userIdRef.transaction(currentId => (currentId || 0) + 1, (error, committed, snapshot) => {
-                        if (committed) {
-                            const newUserId = snapshot.val();
-                            db.ref('users_new/' + userCredential.user.uid).set({
-                                username: username,
-                                characterName: characterName,
-                                userId: newUserId,
-                                gold: gold,
-                                inventory: [],
-                                log: ""
-                            })
-                            .then(() => {
-                                console.log('New user created with ID:', newUserId);
-                            })
-                            .catch(dbError => {
-                                console.error('Failed to add user to users_new table:', dbError.message);
-                            });
-                        }
-                    });
-                })
-                .catch(error => {
-                    console.error(error);
-                    alert('User creation failed: ' + error.message);
-                });
+            const newUserRef = db.ref('users_new').push();
+            newUserRef.set({
+                username: username,
+                password: userPassword,
+                characterName: characterName,
+                gold: gold,
+                inventory: [],
+                log: ""
+            })
+            .then(() => {
+                console.log('New user created:', username);
+            })
+            .catch(error => {
+                console.error('Failed to create user:', error.message);
+            });
         }
     });
 
