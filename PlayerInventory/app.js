@@ -23,10 +23,9 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(response => response.json())
             .then(data => {
                 if (allowedAdminIPs.includes(data.ip)) {
-                    document.getElementById('admin-button').style.display = 'block';
-                    document.getElementById('admin-button').addEventListener('click', () => {
-                        window.location.href = 'admin.html';
-                    });
+                    window.location.href = 'admin.html';
+                } else {
+                    document.getElementById('login-container').style.display = 'block';
                 }
             });
     }
