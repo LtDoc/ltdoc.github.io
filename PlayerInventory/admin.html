@@ -12,33 +12,53 @@
 </head>
 <body>
     <div class="container">
-        <h1>Admin Panel</h1>
-        <form id="item-form">
-            <input type="text" id="item-name" placeholder="Item Name">
-            <input type="text" id="item-image" placeholder="Item Image URL">
-            <select id="item-class">
-                <option value="Weapons">Weapons</option>
-                <option value="Armor">Armor</option>
-                <option value="Potions">Potions</option>
-                <option value="Books">Books</option>
-                <option value="Valuables">Valuables</option>
-                <option value="Misc">Misc</option>
-            </select>
-            <input type="number" id="item-health" placeholder="Health" min="0">
-            <button type="submit">Add Item</button>
-        </form>
-        <form id="user-form">
-            <input type="text" id="username" placeholder="Username" required>
-            <input type="password" id="user-password" placeholder="Password" required>
-            <input type="text" id="character-name" placeholder="Character Name" required>
-            <input type="number" id="gold" placeholder="Starting Gold" required>
-            <button type="submit">Create User</button>
-        </form>
-        <select id="player-select">
-            <option value="">Select Player</option>
-        </select>
-        <div id="admin-inventory"></div>
-        <textarea id="log" readonly></textarea>
+        <h1 class="title">Admin Panel</h1>
+        <div class="panel" id="create-item-panel">
+            <h2>Create Item</h2>
+            <form id="item-form">
+                <input type="text" id="item-name" placeholder="Item name">
+                <input type="number" id="item-health" placeholder="Item Health">
+                <textarea id="item-tooltip" placeholder="Item tooltip text"></textarea>
+                <input type="file" id="item-image">
+                <button type="submit">Create Item</button>
+            </form>
+        </div>
+        <div class="panel" id="create-user-panel">
+            <h2>Create User</h2>
+            <form id="user-form">
+                <input type="text" id="username" placeholder="Username">
+                <input type="password" id="user-password" placeholder="Password">
+                <input type="text" id="character-name" placeholder="Character Name">
+                <input type="number" id="gold" placeholder="Gold">
+                <button type="submit">Create User</button>
+            </form>
+            <button id="update-gold">Update Gold</button>
+        </div>
+        <div class="panel" id="inventory-panel">
+            <h2>Selected Character Name | UserID</h2>
+            <div id="inventory">
+                <div class="inventory-section" id="weapons-section">
+                    <h3>Weapons</h3>
+                    <div class="inventory-items" id="weapons-items"></div>
+                </div>
+                <div class="inventory-section" id="armor-section">
+                    <h3>Armor</h3>
+                    <div class="inventory-items" id="armor-items"></div>
+                </div>
+                <div class="inventory-section" id="potions-section">
+                    <h3>Potions</h3>
+                    <div class="inventory-items" id="potions-items"></div>
+                </div>
+                <div class="inventory-section" id="books-section">
+                    <h3>Books</h3>
+                    <div class="inventory-items" id="books-items"></div>
+                </div>
+                <div class="inventory-section" id="valuables-section">
+                    <h3>Valuables</h3>
+                    <div class="inventory-items" id="valuables-items"></div>
+                </div>
+            </div>
+        </div>
     </div>
 </body>
 </html>

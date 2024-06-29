@@ -1,75 +1,63 @@
 body {
     font-family: 'Montserrat', sans-serif;
-    background-color: #2E2D2B;
-    color: #E4DCCF;
+    background-color: #004400;
+    color: #FFD700;
 }
 
 .container {
-    width: 80%;
-    margin: 0 auto;
-    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
 }
 
-h1 {
-    color: #C69C6D;
+.title {
+    font-size: 2em;
+    margin-bottom: 20px;
 }
 
-h2 {
-    color: #D4AF37;
+.panel {
+    border: 2px solid #FFD700;
+    padding: 20px;
+    margin: 10px;
+    width: 300px;
 }
 
-h3 {
-    color: #C69C6D;
+#inventory-panel {
+    width: 800px;
 }
 
-#inventory, #admin-inventory {
+.inventory-section {
+    margin-bottom: 20px;
+}
+
+.inventory-items {
     display: flex;
     flex-wrap: wrap;
-    justify-content: center;
-    gap: 10px;
+    overflow-y: auto;
+    max-height: 150px;
 }
 
-.item-card {
-    background-color: #3B3A37;
-    border: 1px solid #C69C6D;
-    border-radius: 10px;
+.inventory-items .item-card {
+    border: 2px solid #FFD700;
+    margin: 5px;
     padding: 10px;
-    width: 150px;
+    width: 100px;
     text-align: center;
     position: relative;
 }
 
-.item-card img {
+.inventory-items .item-card img {
     max-width: 100%;
-    border-radius: 5px;
+    max-height: 100%;
 }
 
-.health-bar {
-    width: 100%;
-    height: 10px;
-    background-color: green;
-    border-radius: 5px;
-    position: absolute;
-    bottom: 0;
-    left: 0;
+.inventory-items .item-card p {
+    margin: 5px 0 0 0;
 }
 
 textarea {
     width: 100%;
     height: 100px;
-    background-color: #3B3A37;
-    color: #E4DCCF;
-    border: 1px solid #C69C6D;
-    border-radius: 10px;
-    margin-top: 20px;
-    padding: 10px;
-    resize: none;
-}
-
-#login-container {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100vh;
+    margin-bottom: 10px;
 }

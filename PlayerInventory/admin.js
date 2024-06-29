@@ -20,18 +20,33 @@ document.addEventListener('DOMContentLoaded', function() {
         e.preventDefault();
 
         const itemName = document.getElementById('item-name').value;
-        const itemImage = document.getElementById('item-image').value;
-        const itemClass = document.getElementById('item-class').value;
         const itemHealth = document.getElementById('item-health').value || 100;
+        const itemTooltip = document.getElementById('item-tooltip').value;
+        const itemImage = document.getElementById('item-image').files[0];
 
-        if (itemName && itemImage && itemClass) {
+        if (itemName && itemTooltip && itemImage) {
             const newItemRef = db.ref('items').push();
-            newItemRef.set({
-                name: itemName,
-                image: itemImage,
-                class: itemClass,
-                health: itemClass === 'Weapons' || itemClass === 'Armor' ? itemHealth : null
-            });
+            const storageRef = firebase.storage().ref();
+            const uploadTask = storageRef.child(`images/${newItemRef.key}`).put(itemImage);
+
+            uploadTask.on('state_changed',
+                snapshot => {
+                    // Handle upload progress
+                },
+                error => {
+                    console.error('Image upload failed:', error);
+                },
+                () => {
+                    uploadTask.snapshot.ref.getDownloadURL().then(downloadURL => {
+                        newItemRef.set({
+                            name: itemName,
+                            health: itemHealth,
+                            tooltip: itemTooltip,
+                            image: downloadURL
+                        });
+                    });
+                }
+            );
         }
     });
 
@@ -85,8 +100,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
             inventoryRef.on('value', snapshot => {
                 const inventory = snapshot.val();
-                const adminInventoryDiv = document.getElementById('admin-inventory');
-                adminInventoryDiv.innerHTML = '';
+                const weaponsItems = document.getElementById('weapons-items');
+                const armorItems = document.getElementById('armor-items');
+                const potionsItems = document.getElementById('potions-items');
+                const booksItems = document.getElementById('books-items');
+                const valuablesItems = document.getElementById('valuables-items');
+                weaponsItems.innerHTML = '';
+                armorItems.innerHTML = '';
+                potionsItems.innerHTML = '';
+                booksItems.innerHTML = '';
+                valuablesItems.innerHTML = '';
+
                 for (const key in inventory) {
                     const item = inventory[key];
                     const itemCard = document.createElement('div');
@@ -94,13 +118,22 @@ document.addEventListener('DOMContentLoaded', function() {
                     itemCard.innerHTML = `
                         <img src="${item.image}" alt="${item.name}">
                         <p>${item.name}</p>
-                        ${(item.class === 'Weapons' || item.class === 'Armor') ? createHealthBar(item.health) : ''}
-                        <button onclick="removeItem('${uid}', '${key}')">Remove</button>
                     `;
-                    if ((item.class === 'Weapons' || item.class === 'Armor') && item.health <= 0) {
-                        itemCard.style.borderColor = 'red';
+                    itemCard.addEventListener('click', () => {
+                        showItemDetails(item);
+                    });
+
+                    if (item.class === 'Weapons') {
+                        weaponsItems.appendChild(itemCard);
+                    } else if (item.class === 'Armor') {
+                        armorItems.appendChild(itemCard);
+                    } else if (item.class === 'Potions') {
+                        potionsItems.appendChild(itemCard);
+                    } else if (item.class === 'Books') {
+                        booksItems.appendChild(itemCard);
+                    } else if (item.class === 'Valuables') {
+                        valuablesItems.appendChild(itemCard);
                     }
-                    adminInventoryDiv.appendChild(itemCard);
                 }
             });
 
@@ -112,18 +145,9 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    function createHealthBar(health) {
-        const healthPercentage = (health / 100) * 100;
-        let color = 'green';
-        if (healthPercentage <= 25) {
-            color = 'orange';
-        }
-        if (healthPercentage <= 0) {
-            color = 'red';
-        } else if (healthPercentage <= 50) {
-            color = 'yellow';
-        }
-        return `<div class="health-bar" style="width: ${healthPercentage}%; background-color: ${color};"></div>`;
+    function showItemDetails(item) {
+        // Implement the logic to show item details in a larger view
+        console.log('Show item details:', item);
     }
 
     window.removeItem = function(uid, itemId) {
