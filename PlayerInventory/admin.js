@@ -138,6 +138,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
         inventoryRef.on('value', snapshot => {
             const inventory = snapshot.val();
+            const weaponsItems = document.getElementById('weapons-items');
+            const armorItems = document.getElementById('armor-items');
+            const potionsItems = document.getElementById('potions-items');
+            const booksItems = document.getElementById('books-items');
+            const valuablesItems = document.getElementById('valuables-items');
+            const miscItems = document.getElementById('misc-items');
+        
             weaponsItems.innerHTML = '';
             armorItems.innerHTML = '';
             potionsItems.innerHTML = '';
