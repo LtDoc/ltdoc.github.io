@@ -71,6 +71,18 @@ document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('shop-container').style.display = 'block';
             loadShops(uid);
         });
+
+        document.getElementById('navbar-inventory').addEventListener('click', () => {
+            document.getElementById('shop-container').style.display = 'none';
+            document.getElementById('inventory-container').style.display = 'block';
+            loadInventory(uid);
+        });
+
+        document.getElementById('navbar-shop').addEventListener('click', () => {
+            document.getElementById('inventory-container').style.display = 'none';
+            document.getElementById('shop-container').style.display = 'block';
+            loadShops(uid);
+        });
     }
 
     function loadInventory(uid) {
@@ -146,7 +158,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                 <p>${item.name}</p>
                                 <img src="${item.image}" alt="${item.name}">
                                 <p>Price: ${item.price}</p>
-                                <button data-item-id="${itemKey}" data-shop-id="${shopKey}" data-price="${item.price}">Buy</button>
+                                <button data-item-id="${itemKey}" data-shop-id="${shopKey}" data-price="${item.price}" data-shop-name="${shop.name}">Buy</button>
                             `;
                             itemsDiv.appendChild(itemCard);
                         }
@@ -162,12 +174,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 const itemId = e.target.getAttribute('data-item-id');
                 const shopId = e.target.getAttribute('data-shop-id');
                 const price = parseInt(e.target.getAttribute('data-price'));
-                purchaseItem(uid, itemId, shopId, price);
+                const shopName = e.target.getAttribute('data-shop-name');
+                purchaseItem(uid, itemId, shopId, price, shopName);
             }
         });
     }
 
-    function purchaseItem(uid, itemId, shopId, price) {
+    function purchaseItem(uid, itemId, shopId, price, shopName) {
         const userRef = db.ref('users_new/' + uid);
         userRef.once('value').then(snapshot => {
             const user = snapshot.val();
@@ -181,7 +194,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         userRef.child('gold').set(user.gold - price);
                         itemRef.remove();
                         const logRef = db.ref('users_new/' + uid + '/log');
-                        logRef.transaction(log => (log || '') + `\nPurchased item ${item.name} from ${shopId} for ${price}`);
+                        logRef.transaction(log => (log || '') + `\nPurchased item ${item.name} from ${shopName} for ${price}`);
+                        loadShops(uid); // Reload shops to update the available items
                     }
                 });
             } else {
