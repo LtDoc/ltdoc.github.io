@@ -17,17 +17,16 @@ const db = firebase.database();
 const storage = firebase.storage();
 
 document.addEventListener('DOMContentLoaded', function() {
+    // Create Item
     document.getElementById('item-form').addEventListener('submit', e => {
         e.preventDefault();
 
-        // Get form values
         const itemName = document.getElementById('item-name').value.trim();
         const itemHealth = parseInt(document.getElementById('item-health').value) || 100;
         const itemTooltip = document.getElementById('item-tooltip').value.trim();
         const itemImage = document.getElementById('item-image').files[0];
         const itemCategory = document.getElementById('item-category').value.trim();
 
-        // Validate form inputs
         if (itemName && itemTooltip && itemImage && itemCategory) {
             const newItemRef = db.ref('items').push();
             const storageRef = storage.ref(`images/${newItemRef.key}`);
@@ -36,14 +35,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
             uploadTask.on('state_changed',
                 snapshot => {
-                    // Optional: Handle upload progress
+                    // Handle upload progress
                 },
                 error => {
                     console.error('Image upload failed:', error);
                 },
                 () => {
                     uploadTask.snapshot.ref.getDownloadURL().then(downloadURL => {
-                        // Create item object
                         const newItem = {
                             name: itemName,
                             health: itemHealth,
@@ -52,12 +50,11 @@ document.addEventListener('DOMContentLoaded', function() {
                             category: itemCategory
                         };
 
-                        // Store item data in Firebase Realtime Database
                         newItemRef.set(newItem)
                         .then(() => {
                             console.log('New item created successfully:', newItem);
-                            // Optional: Reset the form
                             document.getElementById('item-form').reset();
+                            loadExistingItems();
                         })
                         .catch(error => {
                             console.error('Failed to create new item:', error);
@@ -70,6 +67,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    // Create User
     document.getElementById('user-form').addEventListener('submit', e => {
         e.preventDefault();
 
@@ -140,11 +138,13 @@ document.addEventListener('DOMContentLoaded', function() {
             const potionsItems = document.getElementById('potions-items');
             const booksItems = document.getElementById('books-items');
             const valuablesItems = document.getElementById('valuables-items');
+            const miscItems = document.getElementById('misc-items');
             weaponsItems.innerHTML = '';
             armorItems.innerHTML = '';
             potionsItems.innerHTML = '';
             booksItems.innerHTML = '';
             valuablesItems.innerHTML = '';
+            miscItems.innerHTML = '';
 
             for (const key in inventory) {
                 const item = inventory[key];
@@ -158,10 +158,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     <button onclick="modifyItemHealth('${uid}', '${key}', ${item.health})">Modify Health</button>
                     <button onclick="removeItem('${uid}', '${key}')">Remove Item</button>
                 `;
-                itemCard.addEventListener('click', () => {
-                    showItemDetails(item);
-                });
-
                 if (item.category === 'Weapons') {
                     weaponsItems.appendChild(itemCard);
                 } else if (item.category === 'Armor') {
@@ -172,6 +168,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     booksItems.appendChild(itemCard);
                 } else if (item.category === 'Valuables') {
                     valuablesItems.appendChild(itemCard);
+                } else {
+                    miscItems.appendChild(itemCard);
                 }
             }
         });
@@ -190,6 +188,7 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('potions-items').innerHTML = '';
         document.getElementById('books-items').innerHTML = '';
         document.getElementById('valuables-items').innerHTML = '';
+        document.getElementById('misc-items').innerHTML = '';
         document.getElementById('log').value = '';
     }
 
@@ -211,11 +210,9 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     window.addItemToInventory = function(uid, itemId) {
-        // Get the item details from the items collection
         db.ref('items/' + itemId).once('value').then(snapshot => {
             const item = snapshot.val();
             if (item) {
-                // Add the item to the player's inventory
                 db.ref('users_new/' + uid + '/inventory/' + itemId).set(item);
                 const logRef = db.ref('users_new/' + uid + '/log');
                 logRef.transaction(log => (log || '') + `\nAdded item ${itemId} to inventory`);
@@ -225,15 +222,42 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     };
 
-    // Optional: Function to add an item to a player's inventory via UI
+    function loadExistingItems() {
+        db.ref('items').on('value', snapshot => {
+            const items = snapshot.val();
+            const existingItemsDiv = document.getElementById('existing-items');
+            const existingItemsSelect = document.getElementById('existing-items-select');
+            existingItemsDiv.innerHTML = '';
+            existingItemsSelect.innerHTML = '<option value="">Select Item</option>';
+
+            for (const key in items) {
+                const item = items[key];
+                const itemCard = document.createElement('div');
+                itemCard.classList.add('item-card');
+                itemCard.innerHTML = `
+                    <img src="${item.image}" alt="${item.name}">
+                    <p>${item.name}</p>
+                `;
+                existingItemsDiv.appendChild(itemCard);
+
+                const option = document.createElement('option');
+                option.value = key;
+                option.textContent = item.name;
+                existingItemsSelect.appendChild(option);
+            }
+        });
+    }
+
     document.getElementById('add-item-form').addEventListener('submit', e => {
         e.preventDefault();
         const playerSelect = document.getElementById('player-select').value;
-        const itemId = document.getElementById('add-item-id').value.trim();
+        const itemId = document.getElementById('existing-items-select').value;
         if (playerSelect && itemId) {
             addItemToInventory(playerSelect, itemId);
         } else {
-            alert('Please select a player and enter an item ID.');
+            alert('Please select a player and an item.');
         }
     });
+
+    loadExistingItems();
 });

@@ -48,7 +48,7 @@
             <select id="player-select">
                 <option value="">Select Player</option>
             </select>
-            <div id="inventory">
+            <div class="inventory">
                 <div class="inventory-section" id="weapons-section">
                     <h3>Weapons</h3>
                     <div class="inventory-items" id="weapons-items"></div>
@@ -69,8 +69,23 @@
                     <h3>Valuables</h3>
                     <div class="inventory-items" id="valuables-items"></div>
                 </div>
+                <div class="inventory-section" id="misc-section">
+                    <h3>Misc</h3>
+                    <div class="inventory-items" id="misc-items"></div>
+                </div>
             </div>
             <textarea id="log" readonly></textarea>
+        </div>
+        <div class="panel" id="existing-items-panel">
+            <h2>Existing Items</h2>
+            <div class="inventory-items" id="existing-items"></div>
+            <h2>Add Item to Player</h2>
+            <form id="add-item-form">
+                <select id="existing-items-select">
+                    <option value="">Select Item</option>
+                </select>
+                <button type="submit">Add Item</button>
+            </form>
         </div>
     </div>
 </body>
