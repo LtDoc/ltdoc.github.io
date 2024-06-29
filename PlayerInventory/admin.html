@@ -17,26 +17,29 @@
         <div class="panel" id="create-item-panel">
             <h2>Create Item</h2>
             <form id="item-form">
-                <input type="text" id="item-name" placeholder="Item name">
-                <input type="number" id="item-health" placeholder="Item Health">
-                <textarea id="item-tooltip" placeholder="Item tooltip text"></textarea>
-                <input type="file" id="item-image">
+                <input type="text" id="item-name" placeholder="Item name" required>
+                <input type="number" id="item-health" placeholder="Item Health" required>
+                <textarea id="item-tooltip" placeholder="Item tooltip text" required></textarea>
+                <input type="file" id="item-image" required>
                 <button type="submit">Create Item</button>
             </form>
         </div>
         <div class="panel" id="create-user-panel">
             <h2>Create User</h2>
             <form id="user-form">
-                <input type="text" id="username" placeholder="Username">
-                <input type="password" id="user-password" placeholder="Password">
-                <input type="text" id="character-name" placeholder="Character Name">
-                <input type="number" id="gold" placeholder="Gold">
+                <input type="text" id="username" placeholder="Username" required>
+                <input type="password" id="user-password" placeholder="Password" required>
+                <input type="text" id="character-name" placeholder="Character Name" required>
+                <input type="number" id="gold" placeholder="Gold" required>
                 <button type="submit">Create User</button>
             </form>
             <button id="update-gold">Update Gold</button>
         </div>
         <div class="panel" id="inventory-panel">
-            <h2 id="selected-character">Selected Character Name | UserID</h2>
+            <h2 id="selected-character">Select a Player</h2>
+            <select id="player-select">
+                <option value="">Select Player</option>
+            </select>
             <div id="inventory">
                 <div class="inventory-section" id="weapons-section">
                     <h3>Weapons</h3>
@@ -59,6 +62,7 @@
                     <div class="inventory-items" id="valuables-items"></div>
                 </div>
             </div>
+            <textarea id="log" readonly></textarea>
         </div>
     </div>
 </body>

@@ -116,59 +116,78 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('player-select').addEventListener('change', e => {
         const uid = e.target.value;
         if (uid) {
-            const inventoryRef = db.ref('users_new/' + uid + '/inventory');
-            const logRef = db.ref('users_new/' + uid + '/log');
-
-            inventoryRef.on('value', snapshot => {
-                const inventory = snapshot.val();
-                const weaponsItems = document.getElementById('weapons-items');
-                const armorItems = document.getElementById('armor-items');
-                const potionsItems = document.getElementById('potions-items');
-                const booksItems = document.getElementById('books-items');
-                const valuablesItems = document.getElementById('valuables-items');
-                weaponsItems.innerHTML = '';
-                armorItems.innerHTML = '';
-                potionsItems.innerHTML = '';
-                booksItems.innerHTML = '';
-                valuablesItems.innerHTML = '';
-
-                for (const key in inventory) {
-                    const item = inventory[key];
-                    const itemCard = document.createElement('div');
-                    itemCard.classList.add('item-card');
-                    itemCard.innerHTML = `
-                        <img src="${item.image}" alt="${item.name}">
-                        <p>${item.name}</p>
-                    `;
-                    itemCard.addEventListener('click', () => {
-                        showItemDetails(item);
-                    });
-
-                    if (item.class === 'Weapons') {
-                        weaponsItems.appendChild(itemCard);
-                    } else if (item.class === 'Armor') {
-                        armorItems.appendChild(itemCard);
-                    } else if (item.class === 'Potions') {
-                        potionsItems.appendChild(itemCard);
-                    } else if (item.class === 'Books') {
-                        booksItems.appendChild(itemCard);
-                    } else if (item.class === 'Valuables') {
-                        valuablesItems.appendChild(itemCard);
-                    }
-                }
-            });
-
-            logRef.on('value', snapshot => {
-                const log = snapshot.val() || '';
-                const logTextarea = document.getElementById('log');
-                logTextarea.value = log;
-            });
+            displayPlayerDetails(uid);
+        } else {
+            clearPlayerDetails();
         }
     });
 
-    function showItemDetails(item) {
-        // Implement the logic to show item details in a larger view
-        console.log('Show item details:', item);
+    function displayPlayerDetails(uid) {
+        const userRef = db.ref('users_new/' + uid);
+        const inventoryRef = db.ref('users_new/' + uid + '/inventory');
+        const logRef = db.ref('users_new/' + uid + '/log');
+
+        userRef.once('value').then(snapshot => {
+            const user = snapshot.val();
+            document.getElementById('selected-character').textContent = `${user.characterName} | ${uid}`;
+        });
+
+        inventoryRef.on('value', snapshot => {
+            const inventory = snapshot.val();
+            const weaponsItems = document.getElementById('weapons-items');
+            const armorItems = document.getElementById('armor-items');
+            const potionsItems = document.getElementById('potions-items');
+            const booksItems = document.getElementById('books-items');
+            const valuablesItems = document.getElementById('valuables-items');
+            weaponsItems.innerHTML = '';
+            armorItems.innerHTML = '';
+            potionsItems.innerHTML = '';
+            booksItems.innerHTML = '';
+            valuablesItems.innerHTML = '';
+
+            for (const key in inventory) {
+                const item = inventory[key];
+                const itemCard = document.createElement('div');
+                itemCard.classList.add('item-card');
+                itemCard.innerHTML = `
+                    <img src="${item.image}" alt="${item.name}">
+                    <p>${item.name}</p>
+                    <button onclick="modifyItemHealth('${uid}', '${key}', ${item.health})">Modify Health</button>
+                    <button onclick="removeItem('${uid}', '${key}')">Remove Item</button>
+                `;
+                itemCard.addEventListener('click', () => {
+                    showItemDetails(item);
+                });
+
+                if (item.class === 'Weapons') {
+                    weaponsItems.appendChild(itemCard);
+                } else if (item.class === 'Armor') {
+                    armorItems.appendChild(itemCard);
+                } else if (item.class === 'Potions') {
+                    potionsItems.appendChild(itemCard);
+                } else if (item.class === 'Books') {
+                    booksItems.appendChild(itemCard);
+                } else if (item.class === 'Valuables') {
+                    valuablesItems.appendChild(itemCard);
+                }
+            }
+        });
+
+        logRef.on('value', snapshot => {
+            const log = snapshot.val() || '';
+            const logTextarea = document.getElementById('log');
+            logTextarea.value = log;
+        });
+    }
+
+    function clearPlayerDetails() {
+        document.getElementById('selected-character').textContent = 'Select a Player';
+        document.getElementById('weapons-items').innerHTML = '';
+        document.getElementById('armor-items').innerHTML = '';
+        document.getElementById('potions-items').innerHTML = '';
+        document.getElementById('books-items').innerHTML = '';
+        document.getElementById('valuables-items').innerHTML = '';
+        document.getElementById('log').value = '';
     }
 
     window.removeItem = function(uid, itemId) {
@@ -177,4 +196,41 @@ document.addEventListener('DOMContentLoaded', function() {
         const logRef = db.ref('users_new/' + uid + '/log');
         logRef.transaction(log => (log || '') + `\nRemoved item ${itemId}`);
     };
+
+    window.modifyItemHealth = function(uid, itemId, currentHealth) {
+        const newHealth = prompt('Enter new health value:', currentHealth);
+        if (newHealth !== null) {
+            const itemRef = db.ref('users_new/' + uid + '/inventory/' + itemId + '/health');
+            itemRef.set(parseInt(newHealth));
+            const logRef = db.ref('users_new/' + uid + '/log');
+            logRef.transaction(log => (log || '') + `\nModified health of item ${itemId} to ${newHealth}`);
+        }
+    };
+
+    window.addItemToInventory = function(uid, itemId) {
+        // Get the item details from the items collection
+        db.ref('items/' + itemId).once('value').then(snapshot => {
+            const item = snapshot.val();
+            if (item) {
+                // Add the item to the player's inventory
+                db.ref('users_new/' + uid + '/inventory/' + itemId).set(item);
+                const logRef = db.ref('users_new/' + uid + '/log');
+                logRef.transaction(log => (log || '') + `\nAdded item ${itemId} to inventory`);
+            } else {
+                console.error('Item not found:', itemId);
+            }
+        });
+    };
+
+    // Optional: Function to add an item to a player's inventory via UI
+    document.getElementById('add-item-form').addEventListener('submit', e => {
+        e.preventDefault();
+        const playerSelect = document.getElementById('player-select').value;
+        const itemId = document.getElementById('add-item-id').value.trim();
+        if (playerSelect && itemId) {
+            addItemToInventory(playerSelect, itemId);
+        } else {
+            alert('Please select a player and enter an item ID.');
+        }
+    });
 });
