@@ -1,168 +1,183 @@
 /* General Styles */
 body {
-    font-family: 'Arial', sans-serif;
+    font-family: 'Cinzel', serif;
     background-color: #f4f4f4;
-    color: #333;
     margin: 0;
     padding: 0;
-    box-sizing: border-box;
-}
-
-h1, h2, h3, h4, h5, h6 {
-    font-family: 'Verdana', sans-serif;
-    color: #444;
 }
 
 .container {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
+    max-width: 1200px;
+    margin: 0 auto;
     padding: 20px;
-    max-width: 1400px;
-    margin: auto;
+    background-color: #fff;
+    border-radius: 10px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
 }
 
+h1 {
+    font-family: 'Cinzel Decorative', serif;
+    text-align: center;
+}
+
+h2 {
+    font-family: 'Cinzel Decorative', serif;
+    text-align: center;
+}
+
+h3 {
+    font-family: 'Cinzel Decorative', serif;
+    text-align: center;
+}
+
+button {
+    padding: 10px 20px;
+    font-size: 16px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    background-color: #4CAF50;
+    color: white;
+}
+
+button:hover {
+    background-color: #45a049;
+}
+
+input, textarea, select {
+    display: block;
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+}
+
+/* Header Styles */
 .header {
     display: flex;
     justify-content: space-between;
-    width: 100%;
+    align-items: center;
 }
 
 .gold-container {
     display: flex;
     align-items: center;
-    border: 2px solid #444;
-    padding: 10px;
-    border-radius: 10px;
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
 }
 
-/* Navigation Bar */
-.navbar {
-    width: 100%;
-    background-color: #444;
-    overflow: hidden;
-    position: sticky;
-    top: 0;
-    z-index: 1000;
+.gold-container span {
+    margin-right: 10px;
 }
 
-.navbar a {
-    float: left;
-    display: block;
-    color: white;
-    text-align: center;
-    padding: 14px 20px;
-    text-decoration: none;
-}
-
-.navbar a:hover {
-    background-color: #ddd;
-    color: black;
-}
-
-/* Inventory */
+/* Inventory Styles */
 .inventory {
     display: flex;
-    justify-content: space-between;
-    width: 100%;
-    overflow-x: auto;
-    margin-bottom: 20px; /* Added margin to separate from log */
+    flex-wrap: wrap;
+    gap: 20px;
+    justify-content: center;
 }
 
 .inventory-section {
     flex: 1;
-    margin: 0 10px;
-    border: 2px solid #444;
-    padding: 10px;
+    min-width: 200px;
+    border: 1px solid #ccc;
     border-radius: 10px;
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-}
-
-.inventory-section h3 {
-    color: #444;
+    padding: 10px;
+    background-color: #f9f9f9;
+    box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
 }
 
 .inventory-items {
     display: flex;
     flex-direction: column;
-    overflow-y: auto;
-    max-height: 500px; /* Increase max height */
+    gap: 10px;
 }
 
-.inventory-items .item-card {
-    position: relative;
+.item-card {
     display: flex;
     flex-direction: column;
     align-items: center;
     border: 1px solid #ccc;
-    background-color: #fff;
-    margin: 5px;
+    border-radius: 10px;
     padding: 10px;
-    width: 140px; /* Increase width */
-    height: 180px; /* Increase height */
-    box-sizing: border-box;
-    border-radius: 5px;
+    background-color: #fff;
     box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
     text-align: center;
+    width: 100px;
 }
 
-.inventory-items .item-card img {
-    max-width: 100%;
+.item-card img {
+    max-width: 80px;
     max-height: 80px;
-    cursor: pointer;
-    object-fit: contain; /* Ensures image scales properly */
+    margin-bottom: 10px;
 }
 
-.inventory-items .item-card p {
-    margin: 5px 0 0 0;
-    color: #444;
+.item-card p {
+    margin: 0;
+    font-size: 14px;
+}
+
+.health-bar {
+    width: 100%;
+    height: 5px;
+    border-radius: 3px;
+    background-color: green;
+}
+
+/* Shop Styles */
+.shop {
+    margin-bottom: 30px;
+}
+
+.shop h3 {
+    font-size: 24px;
+    margin-bottom: 20px;
     text-align: center;
 }
 
-.inventory-items .item-card .health-bar {
-    width: 100%;
-    height: 10px;
-    border-radius: 0 0 5px 5px;
-    margin-top: 5px;
+.shop-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    justify-content: center;
 }
 
-textarea {
-    width: 100%;
-    height: 100px;
-    background-color: #fff;
-    color: #333;
-    border: 1px solid #444;
-    border-radius: 5px;
+.shop-item-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    border: 1px solid #ccc;
+    border-radius: 10px;
     padding: 10px;
+    text-align: center;
+    width: 150px;
+    background-color: #fff;
     box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
-    margin-top: 20px; /* Add margin to separate from inventory */
 }
 
-button {
-    background-color: #444;
-    color: #fff;
+.shop-item-card img {
+    max-width: 80px;
+    max-height: 80px;
+    margin-bottom: 10px;
+}
+
+.shop-item-card p {
+    margin: 0;
+    font-size: 14px;
+}
+
+.shop-item-card button {
+    margin-top: 10px;
+    padding: 5px 10px;
+    background-color: #4CAF50;
+    color: white;
     border: none;
-    padding: 10px 20px;
     border-radius: 5px;
     cursor: pointer;
-    font-size: 1em;
-    transition: background-color 0.3s;
 }
 
-button:hover {
-    background-color: #555;
-}
-
-input, select {
-    width: 100%;
-    padding: 10px;
-    margin-bottom: 10px;
-    border: 1px solid #444;
-    border-radius: 5px;
-    background-color: #fff;
-    color: #333;
-    box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
+.shop-item-card button:hover {
+    background-color: #45a049;
 }
 
 /* Modal Styles */
@@ -177,24 +192,17 @@ input, select {
     overflow: auto;
     background-color: rgb(0, 0, 0);
     background-color: rgba(0, 0, 0, 0.4);
+    padding-top: 60px;
 }
 
 .modal-content {
     background-color: #fefefe;
-    margin: 15% auto;
+    margin: 5% auto;
     padding: 20px;
     border: 1px solid #888;
     width: 80%;
-    max-width: 600px;
     border-radius: 10px;
-    text-align: center; /* Center content */
-}
-
-.modal-content img {
-    max-width: 100%;
-    max-height: 400px; /* Ensure image fits within modal */
-    object-fit: contain; /* Ensures image scales properly */
-    margin: auto; /* Center image */
+    text-align: center;
 }
 
 .close {
@@ -209,107 +217,4 @@ input, select {
     color: black;
     text-decoration: none;
     cursor: pointer;
-}
-
-/* Health Bar */
-.health-bar {
-    height: 10px;
-    border-radius: 5px;
-    margin-top: 5px;
-}
-
-.search-bar {
-    width: 100%;
-    padding: 10px;
-    margin-bottom: 10px;
-    border: 1px solid #444;
-    border-radius: 5px;
-    background-color: #fff;
-    color: #333;
-    box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
-}
-
-.item-list {
-    width: 100%;
-    margin-bottom: 20px;
-}
-
-.item-list table {
-    width: 100%;
-    border-collapse: collapse;
-}
-
-.item-list th, .item-list td {
-    border: 1px solid #444;
-    padding: 10px;
-    text-align: left;
-}
-
-.item-list th {
-    background-color: #f4f4f4;
-}
-
-.item-list tr:nth-child(even) {
-    background-color: #f9f9f9;
-}
-
-.pagination {
-    display: flex;
-    justify-content: center;
-    margin: 10px 0;
-}
-
-.pagination button {
-    background-color: #444;
-    color: #fff;
-    border: none;
-    padding: 5px 10px;
-    margin: 0 5px;
-    border-radius: 5px;
-    cursor: pointer;
-}
-
-.pagination button:disabled {
-    background-color: #ccc;
-    cursor: not-allowed;
-}
-
-.checkbox {
-    margin-right: 10px;
-}
-
-/* Shop Styles */
-#shop-container {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-}
-
-#shops-list {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-around;
-    width: 100%;
-}
-
-.shop-card {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    border: 1px solid #ccc;
-    background-color: #fff;
-    margin: 10px;
-    padding: 20px;
-    width: 200px;
-    height: 200px;
-    box-sizing: border-box;
-    border-radius: 5px;
-    box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
-    text-align: center;
-    cursor: pointer;
-}
-
-.shop-card h3 {
-    color: #444;
-    margin: 0 0 10px 0;
 }

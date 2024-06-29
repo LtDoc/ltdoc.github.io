@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WoE Inventory</title>
+    <title>WoE Inventory and Shop</title>
     <link rel="stylesheet" href="styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Cinzel+Decorative:wght@400;700&display=swap" rel="stylesheet">
     <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
@@ -18,9 +18,13 @@
             <input type="password" id="login-password" placeholder="Password" required>
             <button type="submit">Login</button>
         </form>
-        <button id="admin-button" style="display: none;">Admin Panel</button>
     </div>
-    <div class="container" id="main-container" style="display: none;">
+    <div class="container" id="selection-container" style="display: none;">
+        <h1>Select an option</h1>
+        <button id="inventory-button">Inventory</button>
+        <button id="shop-button">Shop</button>
+    </div>
+    <div class="container" id="inventory-container" style="display: none;">
         <div class="header">
             <h1 id="character-name"></h1>
             <div class="gold-container">
@@ -30,43 +34,37 @@
                 <span id="bank-amount"></span>
             </div>
         </div>
-        <nav class="navbar">
-            <a href="#" id="nav-inventory">Inventory</a>
-            <a href="#" id="nav-shop">Shop</a>
-        </nav>
-        <div id="inventory-container">
-            <div class="inventory">
-                <div class="inventory-section" id="weapons-section">
-                    <h3>Weapons</h3>
-                    <div class="inventory-items" id="weapons-items"></div>
-                </div>
-                <div class="inventory-section" id="armor-section">
-                    <h3>Armor</h3>
-                    <div class="inventory-items" id="armor-items"></div>
-                </div>
-                <div class="inventory-section" id="potions-section">
-                    <h3>Potions</h3>
-                    <div class="inventory-items" id="potions-items"></div>
-                </div>
-                <div class="inventory-section" id="books-section">
-                    <h3>Books</h3>
-                    <div class="inventory-items" id="books-items"></div>
-                </div>
-                <div class="inventory-section" id="valuables-section">
-                    <h3>Valuables</h3>
-                    <div class="inventory-items" id="valuables-items"></div>
-                </div>
-                <div class="inventory-section" id="misc-section">
-                    <h3>Misc</h3>
-                    <div class="inventory-items" id="misc-items"></div>
-                </div>
+        <div class="inventory">
+            <div class="inventory-section" id="weapons-section">
+                <h3>Weapons</h3>
+                <div class="inventory-items" id="weapons-items"></div>
             </div>
-            <textarea id="log" readonly></textarea>
+            <div class="inventory-section" id="armor-section">
+                <h3>Armor</h3>
+                <div class="inventory-items" id="armor-items"></div>
+            </div>
+            <div class="inventory-section" id="potions-section">
+                <h3>Potions</h3>
+                <div class="inventory-items" id="potions-items"></div>
+            </div>
+            <div class="inventory-section" id="books-section">
+                <h3>Books</h3>
+                <div class="inventory-items" id="books-items"></div>
+            </div>
+            <div class="inventory-section" id="valuables-section">
+                <h3>Valuables</h3>
+                <div class="inventory-items" id="valuables-items"></div>
+            </div>
+            <div class="inventory-section" id="misc-section">
+                <h3>Misc</h3>
+                <div class="inventory-items" id="misc-items"></div>
+            </div>
         </div>
-        <div id="shop-container" style="display: none;">
-            <h2>Available Shops</h2>
-            <div id="shops-list"></div>
-        </div>
+        <textarea id="log" readonly></textarea>
+    </div>
+    <div class="container" id="shop-container" style="display: none;">
+        <h1>Shops</h1>
+        <div id="shops"></div>
     </div>
     <div id="item-details-modal" class="modal">
         <div class="modal-content">
