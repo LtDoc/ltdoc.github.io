@@ -23,7 +23,7 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(response => response.json())
             .then(data => {
                 if (allowedAdminIPs.includes(data.ip)) {
-                    window.location.href = 'admin.html';
+                    document.getElementById('admin-button').style.display = 'block';
                 } else {
                     document.getElementById('login-container').style.display = 'block';
                 }
@@ -66,14 +66,25 @@ document.addEventListener('DOMContentLoaded', function() {
 
         userRef.on('value', snapshot => {
             const user = snapshot.val();
-            document.getElementById('character-name').textContent = user.characterName;
+            document.getElementById('character-name').textContent = `${user.characterName} | ${uid}`;
             document.getElementById('gold-amount').textContent = user.gold;
         });
 
         inventoryRef.on('value', snapshot => {
             const inventory = snapshot.val();
-            const inventoryDiv = document.getElementById('inventory');
-            inventoryDiv.innerHTML = '';
+            const weaponsItems = document.getElementById('weapons-items');
+            const armorItems = document.getElementById('armor-items');
+            const potionsItems = document.getElementById('potions-items');
+            const booksItems = document.getElementById('books-items');
+            const valuablesItems = document.getElementById('valuables-items');
+            const miscItems = document.getElementById('misc-items');
+            weaponsItems.innerHTML = '';
+            armorItems.innerHTML = '';
+            potionsItems.innerHTML = '';
+            booksItems.innerHTML = '';
+            valuablesItems.innerHTML = '';
+            miscItems.innerHTML = '';
+
             for (const key in inventory) {
                 const item = inventory[key];
                 const itemCard = document.createElement('div');
@@ -81,12 +92,22 @@ document.addEventListener('DOMContentLoaded', function() {
                 itemCard.innerHTML = `
                     <img src="${item.image}" alt="${item.name}">
                     <p>${item.name}</p>
-                    ${(item.class === 'Weapons' || item.class === 'Armor') ? createHealthBar(item.health) : ''}
+                    <p>HP: ${item.health}</p>
+                    <p>${item.tooltip}</p>
                 `;
-                if ((item.class === 'Weapons' || item.class === 'Armor') && item.health <= 0) {
-                    itemCard.style.borderColor = 'red';
+                if (item.category === 'Weapons') {
+                    weaponsItems.appendChild(itemCard);
+                } else if (item.category === 'Armor') {
+                    armorItems.appendChild(itemCard);
+                } else if (item.category === 'Potions') {
+                    potionsItems.appendChild(itemCard);
+                } else if (item.category === 'Books') {
+                    booksItems.appendChild(itemCard);
+                } else if (item.category === 'Valuables') {
+                    valuablesItems.appendChild(itemCard);
+                } else {
+                    miscItems.appendChild(itemCard);
                 }
-                inventoryDiv.appendChild(itemCard);
             }
         });
 
@@ -95,19 +116,5 @@ document.addEventListener('DOMContentLoaded', function() {
             const logTextarea = document.getElementById('log');
             logTextarea.value = log;
         });
-    }
-
-    function createHealthBar(health) {
-        const healthPercentage = (health / 100) * 100;
-        let color = 'green';
-        if (healthPercentage <= 25) {
-            color = 'orange';
-        }
-        if (healthPercentage <= 0) {
-            color = 'red';
-        } else if (healthPercentage <= 50) {
-            color = 'yellow';
-        }
-        return `<div class="health-bar" style="width: ${healthPercentage}%; background-color: ${color};"></div>`;
     }
 });

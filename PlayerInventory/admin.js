@@ -153,6 +153,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 itemCard.innerHTML = `
                     <img src="${item.image}" alt="${item.name}">
                     <p>${item.name}</p>
+                    <p>HP: ${item.health}</p>
+                    <p>${item.tooltip}</p>
                     <button onclick="modifyItemHealth('${uid}', '${key}', ${item.health})">Modify Health</button>
                     <button onclick="removeItem('${uid}', '${key}')">Remove Item</button>
                 `;

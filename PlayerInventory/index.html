@@ -21,10 +21,39 @@
         <button id="admin-button" style="display: none;">Admin Panel</button>
     </div>
     <div class="container" id="inventory-container" style="display: none;">
-        <h1>Player Inventory</h1>
-        <h2 id="character-name"></h2>
-        <h3>Gold: <span id="gold-amount"></span></h3>
-        <div id="inventory"></div>
+        <div class="header">
+            <h1 id="character-name"></h1>
+            <div class="gold-container">
+                <span>Gold:</span>
+                <span id="gold-amount"></span>
+            </div>
+        </div>
+        <div class="inventory">
+            <div class="inventory-section" id="weapons-section">
+                <h3>Weapons</h3>
+                <div class="inventory-items" id="weapons-items"></div>
+            </div>
+            <div class="inventory-section" id="armor-section">
+                <h3>Armor</h3>
+                <div class="inventory-items" id="armor-items"></div>
+            </div>
+            <div class="inventory-section" id="potions-section">
+                <h3>Potions</h3>
+                <div class="inventory-items" id="potions-items"></div>
+            </div>
+            <div class="inventory-section" id="books-section">
+                <h3>Books</h3>
+                <div class="inventory-items" id="books-items"></div>
+            </div>
+            <div class="inventory-section" id="valuables-section">
+                <h3>Valuables</h3>
+                <div class="inventory-items" id="valuables-items"></div>
+            </div>
+            <div class="inventory-section" id="misc-section">
+                <h3>Misc</h3>
+                <div class="inventory-items" id="misc-items"></div>
+            </div>
+        </div>
         <textarea id="log" readonly></textarea>
     </div>
 </body>
