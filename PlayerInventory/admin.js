@@ -83,6 +83,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 password: userPassword,
                 characterName: characterName,
                 gold: gold,
+                bank: 0,  // Initialize bank with 0
                 inventory: [],
                 log: ""
             })
@@ -129,6 +130,8 @@ document.addEventListener('DOMContentLoaded', function() {
         userRef.once('value').then(snapshot => {
             const user = snapshot.val();
             document.getElementById('selected-character').textContent = `${user.characterName} | ${uid}`;
+            document.getElementById('update-gold').value = user.gold;
+            document.getElementById('update-bank').value = user.bank;
         });
 
         inventoryRef.on('value', snapshot => {
@@ -151,12 +154,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 const itemCard = document.createElement('div');
                 itemCard.classList.add('item-card');
                 itemCard.innerHTML = `
-                    <img src="${item.image}" alt="${item.name}">
+                    <img src="${item.image}" alt="${item.name}" onclick="showItemDetails('${item.image}', '${item.tooltip}')">
                     <p>${item.name}</p>
-                    <p>HP: ${item.health}</p>
-                    <p>${item.tooltip}</p>
-                    <button onclick="modifyItemHealth('${uid}', '${key}', ${item.health})">Modify Health</button>
-                    <button onclick="removeItem('${uid}', '${key}')">Remove Item</button>
+                    <div class="health-bar" style="width: ${item.health}%; background-color: ${getHealthColor(item.health)};"></div>
+                    <button class="remove-btn" onclick="removeItem('${uid}', '${key}')">X</button>
                 `;
                 if (item.category === 'Weapons') {
                     weaponsItems.appendChild(itemCard);
@@ -179,6 +180,18 @@ document.addEventListener('DOMContentLoaded', function() {
             const logTextarea = document.getElementById('log');
             logTextarea.value = log;
         });
+    }
+
+    function getHealthColor(health) {
+        if (health > 75) {
+            return 'green';
+        } else if (health > 50) {
+            return 'yellow';
+        } else if (health > 25) {
+            return 'orange';
+        } else {
+            return 'red';
+        }
     }
 
     function clearPlayerDetails() {
@@ -235,7 +248,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 const itemCard = document.createElement('div');
                 itemCard.classList.add('item-card');
                 itemCard.innerHTML = `
-                    <img src="${item.image}" alt="${item.name}">
                     <p>${item.name}</p>
                 `;
                 existingItemsDiv.appendChild(itemCard);
@@ -256,6 +268,26 @@ document.addEventListener('DOMContentLoaded', function() {
             addItemToInventory(playerSelect, itemId);
         } else {
             alert('Please select a player and an item.');
+        }
+    });
+
+    document.getElementById('gold-form').addEventListener('submit', e => {
+        e.preventDefault();
+        const playerSelect = document.getElementById('player-select').value;
+        const newGold = parseInt(document.getElementById('update-gold').value);
+        const newBank = parseInt(document.getElementById('update-bank').value);
+        if (playerSelect && !isNaN(newGold) && !isNaN(newBank)) {
+            const userRef = db.ref('users_new/' + playerSelect);
+            userRef.update({
+                gold: newGold,
+                bank: newBank
+            }).then(() => {
+                console.log('Gold and bank updated successfully');
+            }).catch(error => {
+                console.error('Failed to update gold and bank:', error);
+            });
+        } else {
+            alert('Please select a player and enter valid gold and bank values.');
         }
     });
 

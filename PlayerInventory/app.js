@@ -68,6 +68,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const user = snapshot.val();
             document.getElementById('character-name').textContent = `${user.characterName} | ${uid}`;
             document.getElementById('gold-amount').textContent = user.gold;
+            document.getElementById('bank-amount').textContent = user.bank;
         });
 
         inventoryRef.on('value', snapshot => {
@@ -90,10 +91,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 const itemCard = document.createElement('div');
                 itemCard.classList.add('item-card');
                 itemCard.innerHTML = `
-                    <img src="${item.image}" alt="${item.name}">
+                    <img src="${item.image}" alt="${item.name}" onclick="showItemDetails('${item.image}', '${item.tooltip}')">
                     <p>${item.name}</p>
-                    <p>HP: ${item.health}</p>
-                    <p>${item.tooltip}</p>
+                    <div class="health-bar" style="width: ${item.health}%; background-color: ${getHealthColor(item.health)};"></div>
                 `;
                 if (item.category === 'Weapons') {
                     weaponsItems.appendChild(itemCard);
@@ -116,5 +116,39 @@ document.addEventListener('DOMContentLoaded', function() {
             const logTextarea = document.getElementById('log');
             logTextarea.value = log;
         });
+    }
+
+    window.showItemDetails = function(image, tooltip) {
+        const modal = document.getElementById('item-details-modal');
+        const modalImage = document.getElementById('modal-image');
+        const modalTooltip = document.getElementById('modal-tooltip');
+        modal.style.display = 'block';
+        modalImage.src = image;
+        modalTooltip.textContent = tooltip;
+    };
+
+    const modal = document.getElementById('item-details-modal');
+    const span = document.getElementsByClassName('close')[0];
+
+    span.onclick = function() {
+        modal.style.display = 'none';
+    };
+
+    window.onclick = function(event) {
+        if (event.target == modal) {
+            modal.style.display = 'none';
+        }
+    };
+
+    function getHealthColor(health) {
+        if (health > 75) {
+            return 'green';
+        } else if (health > 50) {
+            return 'yellow';
+        } else if (health > 25) {
+            return 'orange';
+        } else {
+            return 'red';
+        }
     }
 });
