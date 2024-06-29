@@ -14,51 +14,70 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 
 const db = firebase.database();
+const storage = firebase.storage();
 
 document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('item-form').addEventListener('submit', e => {
         e.preventDefault();
 
-        const itemName = document.getElementById('item-name').value;
-        const itemHealth = document.getElementById('item-health').value || 100;
-        const itemTooltip = document.getElementById('item-tooltip').value;
+        // Get form values
+        const itemName = document.getElementById('item-name').value.trim();
+        const itemHealth = parseInt(document.getElementById('item-health').value) || 100;
+        const itemTooltip = document.getElementById('item-tooltip').value.trim();
         const itemImage = document.getElementById('item-image').files[0];
 
+        // Validate form inputs
         if (itemName && itemTooltip && itemImage) {
             const newItemRef = db.ref('items').push();
-            const storageRef = firebase.storage().ref();
-            const uploadTask = storageRef.child(`images/${newItemRef.key}`).put(itemImage);
+            const storageRef = storage.ref(`images/${newItemRef.key}`);
+
+            const uploadTask = storageRef.put(itemImage);
 
             uploadTask.on('state_changed',
                 snapshot => {
-                    // Handle upload progress
+                    // Optional: Handle upload progress
                 },
                 error => {
                     console.error('Image upload failed:', error);
                 },
                 () => {
                     uploadTask.snapshot.ref.getDownloadURL().then(downloadURL => {
-                        newItemRef.set({
+                        // Create item object
+                        const newItem = {
                             name: itemName,
                             health: itemHealth,
                             tooltip: itemTooltip,
-                            image: downloadURL
+                            image: downloadURL,
+                            // Add any additional fields you need here
+                        };
+
+                        // Store item data in Firebase Realtime Database
+                        newItemRef.set(newItem)
+                        .then(() => {
+                            console.log('New item created successfully:', newItem);
+                            // Optional: Reset the form
+                            document.getElementById('item-form').reset();
+                        })
+                        .catch(error => {
+                            console.error('Failed to create new item:', error);
                         });
                     });
                 }
             );
+        } else {
+            alert('Please fill in all required fields and upload an image.');
         }
     });
 
     document.getElementById('user-form').addEventListener('submit', e => {
         e.preventDefault();
 
-        const username = document.getElementById('username').value;
-        const userPassword = document.getElementById('user-password').value;
-        const characterName = document.getElementById('character-name').value;
-        const gold = document.getElementById('gold').value;
+        const username = document.getElementById('username').value.trim();
+        const userPassword = document.getElementById('user-password').value.trim();
+        const characterName = document.getElementById('character-name').value.trim();
+        const gold = parseInt(document.getElementById('gold').value);
 
-        if (username && userPassword && characterName && gold) {
+        if (username && userPassword && characterName && !isNaN(gold)) {
             const newUserRef = db.ref('users_new').push();
             newUserRef.set({
                 username: username,
@@ -74,6 +93,8 @@ document.addEventListener('DOMContentLoaded', function() {
             .catch(error => {
                 console.error('Failed to create user:', error.message);
             });
+        } else {
+            alert('Please fill in all fields.');
         }
     });
 
