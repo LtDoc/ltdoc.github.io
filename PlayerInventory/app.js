@@ -73,19 +73,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
         inventoryRef.on('value', snapshot => {
             const inventory = snapshot.val();
-            const weaponsItems = document.getElementById('weapons-items');
-            const armorItems = document.getElementById('armor-items');
-            const potionsItems = document.getElementById('potions-items');
-            const booksItems = document.getElementById('books-items');
-            const valuablesItems = document.getElementById('valuables-items');
-            const miscItems = document.getElementById('misc-items');
             weaponsItems.innerHTML = '';
             armorItems.innerHTML = '';
             potionsItems.innerHTML = '';
             booksItems.innerHTML = '';
             valuablesItems.innerHTML = '';
             miscItems.innerHTML = '';
-
+        
             for (const key in inventory) {
                 const item = inventory[key];
                 const itemCard = document.createElement('div');
@@ -93,7 +87,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 itemCard.innerHTML = `
                     <img src="${item.image}" alt="${item.name}" onclick="showItemDetails('${item.image}', '${item.tooltip}')">
                     <p>${item.name}</p>
-                    <div class="health-bar" style="width: ${item.health}%; background-color: ${getHealthColor(item.health)};"></div>
+                    <div class="health-bar" style="width: ${item.health}%; background-color: ${getHealthColor(item.health, item.startingHealth)};"></div>
                 `;
                 if (item.category === 'Weapons') {
                     weaponsItems.appendChild(itemCard);
@@ -110,7 +104,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
         });
-
         logRef.on('value', snapshot => {
             const log = snapshot.val() || '';
             const logTextarea = document.getElementById('log');
@@ -140,12 +133,13 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
-    function getHealthColor(health) {
-        if (health > 75) {
+    function getHealthColor(currentHealth, startingHealth) {
+        const healthPercentage = (currentHealth / startingHealth) * 100;
+        if (healthPercentage > 75) {
             return 'green';
-        } else if (health > 50) {
+        } else if (healthPercentage > 50) {
             return 'yellow';
-        } else if (health > 25) {
+        } else if (healthPercentage > 25) {
             return 'orange';
         } else {
             return 'red';

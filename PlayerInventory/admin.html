@@ -77,7 +77,20 @@
         </div>
         <div class="panel" id="existing-items-panel">
             <h2>Existing Items</h2>
-            <div class="inventory-items" id="existing-items"></div>
+            <input type="text" id="search-bar" class="search-bar" placeholder="Search items...">
+            <div class="item-list">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Item Name</th>
+                            <th>Starting HP</th>
+                            <th>Tooltip</th>
+                            <th>Category</th>
+                        </tr>
+                    </thead>
+                    <tbody id="existing-items"></tbody>
+                </table>
+            </div>
             <h2>Add Item to Player</h2>
             <form id="add-item-form">
                 <select id="existing-items-select">
@@ -87,7 +100,7 @@
             </form>
         </div>
         <div class="panel" id="update-gold-panel">
-            <h2>Update Gold</h2>
+            <h2>Update Gold and Bank</h2>
             <form id="gold-form">
                 <input type="number" id="update-gold" placeholder="Gold" required>
                 <input type="number" id="update-bank" placeholder="Bank" required>

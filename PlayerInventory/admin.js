@@ -102,6 +102,7 @@ document.addEventListener('DOMContentLoaded', function() {
     db.ref('users_new').on('value', snapshot => {
         const users = snapshot.val();
         const playerSelect = document.getElementById('player-select');
+        const currentSelection = playerSelect.value;
         playerSelect.innerHTML = '<option value="">Select Player</option>';
         for (const uid in users) {
             const user = users[uid];
@@ -110,6 +111,7 @@ document.addEventListener('DOMContentLoaded', function() {
             option.textContent = user.username || uid;
             playerSelect.appendChild(option);
         }
+        playerSelect.value = currentSelection;
     });
 
     // Display and Modify Player Inventory
@@ -136,19 +138,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
         inventoryRef.on('value', snapshot => {
             const inventory = snapshot.val();
-            const weaponsItems = document.getElementById('weapons-items');
-            const armorItems = document.getElementById('armor-items');
-            const potionsItems = document.getElementById('potions-items');
-            const booksItems = document.getElementById('books-items');
-            const valuablesItems = document.getElementById('valuables-items');
-            const miscItems = document.getElementById('misc-items');
             weaponsItems.innerHTML = '';
             armorItems.innerHTML = '';
             potionsItems.innerHTML = '';
             booksItems.innerHTML = '';
             valuablesItems.innerHTML = '';
             miscItems.innerHTML = '';
-
+        
             for (const key in inventory) {
                 const item = inventory[key];
                 const itemCard = document.createElement('div');
@@ -156,8 +152,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 itemCard.innerHTML = `
                     <img src="${item.image}" alt="${item.name}" onclick="showItemDetails('${item.image}', '${item.tooltip}')">
                     <p>${item.name}</p>
-                    <div class="health-bar" style="width: ${item.health}%; background-color: ${getHealthColor(item.health)};"></div>
-                    <button class="remove-btn" onclick="removeItem('${uid}', '${key}')">X</button>
+                    <div class="health-bar" style="width: ${item.health}%; background-color: ${getHealthColor(item.health, item.startingHealth)};"></div>
+                    <button class="remove-btn" onclick="removeItem('${uid}', '${key}', '${item.name}')">X</button>
                 `;
                 if (item.category === 'Weapons') {
                     weaponsItems.appendChild(itemCard);
@@ -205,11 +201,11 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('log').value = '';
     }
 
-    window.removeItem = function(uid, itemId) {
+    window.removeItem = function(uid, itemId, itemName) {
         const itemRef = db.ref('users_new/' + uid + '/inventory/' + itemId);
         itemRef.remove();
         const logRef = db.ref('users_new/' + uid + '/log');
-        logRef.transaction(log => (log || '') + `\nRemoved item ${itemId}`);
+        logRef.transaction(log => (log || '') + `\nRemoved item ${itemName}`);
     };
 
     window.modifyItemHealth = function(uid, itemId, currentHealth) {
@@ -228,7 +224,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (item) {
                 db.ref('users_new/' + uid + '/inventory/' + itemId).set(item);
                 const logRef = db.ref('users_new/' + uid + '/log');
-                logRef.transaction(log => (log || '') + `\nAdded item ${itemId} to inventory`);
+                logRef.transaction(log => (log || '') + `\nAdded item ${item.name} to inventory`);
             } else {
                 console.error('Item not found:', itemId);
             }
@@ -238,19 +234,21 @@ document.addEventListener('DOMContentLoaded', function() {
     function loadExistingItems() {
         db.ref('items').on('value', snapshot => {
             const items = snapshot.val();
-            const existingItemsDiv = document.getElementById('existing-items');
+            const existingItemsTable = document.getElementById('existing-items');
             const existingItemsSelect = document.getElementById('existing-items-select');
-            existingItemsDiv.innerHTML = '';
+            existingItemsTable.innerHTML = '';
             existingItemsSelect.innerHTML = '<option value="">Select Item</option>';
 
             for (const key in items) {
                 const item = items[key];
-                const itemCard = document.createElement('div');
-                itemCard.classList.add('item-card');
-                itemCard.innerHTML = `
-                    <p>${item.name}</p>
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${item.name}</td>
+                    <td>${item.health}</td>
+                    <td>${item.tooltip}</td>
+                    <td>${item.category}</td>
                 `;
-                existingItemsDiv.appendChild(itemCard);
+                existingItemsTable.appendChild(row);
 
                 const option = document.createElement('option');
                 option.value = key;
@@ -289,6 +287,22 @@ document.addEventListener('DOMContentLoaded', function() {
         } else {
             alert('Please select a player and enter valid gold and bank values.');
         }
+    });
+
+    document.getElementById('search-bar').addEventListener('input', e => {
+        const searchTerm = e.target.value.toLowerCase();
+        const items = document.querySelectorAll('#existing-items tr');
+        items.forEach(item => {
+            const name = item.children[0].textContent.toLowerCase();
+            const health = item.children[1].textContent.toLowerCase();
+            const tooltip = item.children[2].textContent.toLowerCase();
+            const category = item.children[3].textContent.toLowerCase();
+            if (name.includes(searchTerm) || health.includes(searchTerm) || tooltip.includes(searchTerm) || category.includes(searchTerm)) {
+                item.style.display = '';
+            } else {
+                item.style.display = 'none';
+            }
+        });
     });
 
     loadExistingItems();

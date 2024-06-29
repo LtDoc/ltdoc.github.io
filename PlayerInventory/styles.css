@@ -231,3 +231,38 @@ input, select {
     border-radius: 5px;
     margin-top: 5px;
 }
+
+.search-bar {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 10px;
+    border: 1px solid #444;
+    border-radius: 5px;
+    background-color: #fff;
+    color: #333;
+    box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
+}
+
+.item-list {
+    width: 100%;
+    margin-bottom: 20px;
+}
+
+.item-list table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.item-list th, .item-list td {
+    border: 1px solid #444;
+    padding: 10px;
+    text-align: left;
+}
+
+.item-list th {
+    background-color: #f4f4f4;
+}
+
+.item-list tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
