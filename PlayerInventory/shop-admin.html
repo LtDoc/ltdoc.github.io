@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WoE Shop Admin</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Cinzel+Decorative:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-database.js"></script>
+    <script src="shop-admin.js" defer></script>
+</head>
+<body>
+    <div class="container">
+        <h1>Shop Management</h1>
+        <nav class="navbar">
+            <a href="admin.html">User Management</a>
+            <a href="shop-admin.html">Shop Management</a>
+        </nav>
+        <div id="shop-management">
+            <h2>Create New Shop</h2>
+            <form id="shop-form">
+                <input type="text" id="shop-name" placeholder="Shop Name" required>
+                <button type="submit">Create Shop</button>
+            </form>
+            <h2>Add Items to Shop</h2>
+            <select id="shop-select">
+                <option value="">Select Shop</option>
+            </select>
+            <div id="existing-items-container">
+                <input type="text" id="search-bar" placeholder="Search items...">
+                <div class="item-list">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th></th> <!-- For checkboxes -->
+                                <th>Item Name</th>
+                                <th>Starting HP</th>
+                                <th>Tooltip</th>
+                                <th>Category</th>
+                                <th>Price</th>
+                            </tr>
+                        </thead>
+                        <tbody id="existing-items">
+                            <!-- Items will be populated here -->
+                        </tbody>
+                    </table>
+                </div>
+                <div id="pagination"></div>
+                <button id="add-items-btn">Add Selected Items to Shop</button>
+            </div>
+            <h2>Add Player to Shop</h2>
+            <select id="player-select">
+                <option value="">Select Player</option>
+            </select>
+            <button id="add-player-btn">Add Player to Shop</button>
+        </div>
+    </div>
+</body>
+</html>
