@@ -121,6 +121,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     <img src="${item.image}" alt="${item.name}">
                     <div class="health-bar" style="width: ${(item.health / item.startingHealth) * 100}%; background-color: ${getHealthColor(item.health)};"></div>
                 `;
+                itemCard.addEventListener('click', () => {
+                    openTooltip(item.image, item.tooltip);
+                });
                 sections[item.category].appendChild(itemCard);
             }
         });
@@ -140,6 +143,27 @@ document.addEventListener('DOMContentLoaded', function() {
             return 'orange';
         } else {
             return 'green';
+        }
+    }
+
+    function openTooltip(image, tooltip) {
+        const modal = document.getElementById('item-details-modal');
+        const modalImage = document.getElementById('modal-image');
+        const modalTooltip = document.getElementById('modal-tooltip');
+        const closeModal = document.getElementsByClassName('close')[0];
+
+        modalImage.src = image;
+        modalTooltip.textContent = tooltip;
+        modal.style.display = 'block';
+
+        closeModal.onclick = function() {
+            modal.style.display = 'none';
+        }
+
+        window.onclick = function(event) {
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
         }
     }
 
