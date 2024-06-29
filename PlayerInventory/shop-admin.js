@@ -14,7 +14,6 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 
 const db = firebase.database();
-const storage = firebase.storage();
 
 const ITEMS_PER_PAGE = 12;
 let currentPage = 1;
@@ -65,18 +64,22 @@ document.addEventListener('DOMContentLoaded', function() {
     loadShops();
 
     // Load Players
-    db.ref('users_new').on('value', snapshot => {
-        const users = snapshot.val() || {};
-        const playerSelect = document.getElementById('player-select');
-        playerSelect.innerHTML = '<option value="">Select Player</option>';
-        for (const uid in users) {
-            const user = users[uid];
-            const option = document.createElement('option');
-            option.value = uid;
-            option.textContent = user.username || uid;
-            playerSelect.appendChild(option);
-        }
-    });
+    function loadPlayers() {
+        db.ref('users_new').on('value', snapshot => {
+            const users = snapshot.val() || {};
+            const playerSelect = document.getElementById('player-select');
+            playerSelect.innerHTML = '<option value="">Select Player</option>';
+            for (const uid in users) {
+                const user = users[uid];
+                const option = document.createElement('option');
+                option.value = uid;
+                option.textContent = user.username || uid;
+                playerSelect.appendChild(option);
+            }
+        });
+    }
+
+    loadPlayers();
 
     // Add Player to Shop
     document.getElementById('add-player-btn').addEventListener('click', () => {
