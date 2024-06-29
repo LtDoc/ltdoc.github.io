@@ -160,9 +160,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 const priceInput = document.querySelector(`.item-price[data-item-id="${itemId}"]`);
                 const price = parseInt(priceInput.value);
                 if (!isNaN(price) && price > 0) {
-                    db.ref('shops/' + shopSelect + '/items/' + itemId).set({
-                        ...allItems.find(i => i.id === itemId),
-                        price: price
+                    db.ref('shops/' + shopSelect + '/items/' + itemId).transaction(currentData => {
+                        if (currentData) {
+                            db.ref('shops/' + shopSelect + '/items').push({ ...allItems.find(i => i.id === itemId), price });
+                        } else {
+                            currentData = { ...allItems.find(i => i.id === itemId), price };
+                        }
+                        return currentData;
                     });
                 } else {
                     alert('Please enter a valid price for all selected items.');

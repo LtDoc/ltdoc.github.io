@@ -153,6 +153,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const closeModal = document.getElementsByClassName('close')[0];
 
         modalImage.src = image;
+        modalImage.style.width = '300px';
+        modalImage.style.height = '300px';
         modalTooltip.textContent = tooltip;
         modal.style.display = 'block';
 
@@ -224,7 +226,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 itemRef.once('value').then(itemSnapshot => {
                     const item = itemSnapshot.val();
                     if (item) {
-                        const userInventoryRef = db.ref('users_new/' + uid + '/inventory/' + itemId);
+                        const userInventoryRef = db.ref('users_new/' + uid + '/inventory').push();
                         userInventoryRef.set(item);
                         userRef.child('gold').set(user.gold - price);
                         itemRef.remove();

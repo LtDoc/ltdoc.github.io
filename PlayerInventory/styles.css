@@ -75,12 +75,16 @@ input, textarea, select {
     padding: 10px;
     background-color: #f9f9f9;
     box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
+    max-height: 400px; /* Adjust the height as needed */
+    overflow-y: auto;
 }
 
 .inventory-items {
     display: flex;
-    flex-direction: column;
+    flex-wrap: wrap;
     gap: 10px;
+    align-items: center;
+    justify-content: center; /* Center items horizontally */
 }
 
 .item-card {
@@ -94,6 +98,7 @@ input, textarea, select {
     box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
     text-align: center;
     width: 100px;
+    margin: 5px; /* Add margin for spacing between items */
 }
 
 .item-card img {
@@ -129,7 +134,7 @@ input, textarea, select {
     display: flex;
     flex-wrap: wrap;
     gap: 20px;
-    justify-content: center;
+    justify-content: center; /* Center items horizontally */
 }
 
 .shop-item-card {
@@ -193,6 +198,12 @@ input, textarea, select {
     width: 80%;
     border-radius: 10px;
     text-align: center;
+}
+
+.modal-content img {
+    width: 300px;
+    height: 300px;
+    object-fit: contain; /* Keep aspect ratio */
 }
 
 .close {

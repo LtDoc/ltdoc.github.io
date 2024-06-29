@@ -143,19 +143,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
         inventoryRef.on('value', snapshot => {
             const inventory = snapshot.val();
-            const weaponsItems = document.getElementById('weapons-items');
-            const armorItems = document.getElementById('armor-items');
-            const potionsItems = document.getElementById('potions-items');
-            const booksItems = document.getElementById('books-items');
-            const valuablesItems = document.getElementById('valuables-items');
-            const miscItems = document.getElementById('misc-items');
+            const sections = {
+                'Weapons': document.getElementById('weapons-items'),
+                'Armor': document.getElementById('armor-items'),
+                'Potions': document.getElementById('potions-items'),
+                'Books': document.getElementById('books-items'),
+                'Valuables': document.getElementById('valuables-items'),
+                'Misc': document.getElementById('misc-items')
+            };
 
-            weaponsItems.innerHTML = '';
-            armorItems.innerHTML = '';
-            potionsItems.innerHTML = '';
-            booksItems.innerHTML = '';
-            valuablesItems.innerHTML = '';
-            miscItems.innerHTML = '';
+            for (const section in sections) {
+                sections[section].innerHTML = '';
+            }
 
             for (const key in inventory) {
                 const item = inventory[key];
@@ -167,19 +166,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div class="health-bar" style="width: ${item.health}%; background-color: ${getHealthColor(item.health, item.startingHealth)};"></div>
                     <button class="remove-btn" onclick="removeItem('${uid}', '${key}', '${item.name}')">X</button>
                 `;
-                if (item.category === 'Weapons') {
-                    weaponsItems.appendChild(itemCard);
-                } else if (item.category === 'Armor') {
-                    armorItems.appendChild(itemCard);
-                } else if (item.category === 'Potions') {
-                    potionsItems.appendChild(itemCard);
-                } else if (item.category === 'Books') {
-                    booksItems.appendChild(itemCard);
-                } else if (item.category === 'Valuables') {
-                    valuablesItems.appendChild(itemCard);
-                } else {
-                    miscItems.appendChild(itemCard);
-                }
+                sections[item.category].appendChild(itemCard);
             }
         });
 
@@ -235,7 +222,8 @@ document.addEventListener('DOMContentLoaded', function() {
         db.ref('items/' + itemId).once('value').then(snapshot => {
             const item = snapshot.val();
             if (item) {
-                db.ref('users_new/' + uid + '/inventory/' + itemId).set(item);
+                const userInventoryRef = db.ref('users_new/' + uid + '/inventory').push();
+                userInventoryRef.set(item);
                 const logRef = db.ref('users_new/' + uid + '/log');
                 logRef.transaction(log => (log || '') + `\nAdded item ${item.name} to inventory`);
             } else {
@@ -350,7 +338,7 @@ function showItemDetails(image, tooltip) {
     modal.innerHTML = `
         <div class="modal-content">
             <span class="close" onclick="this.parentElement.parentElement.style.display='none';">&times;</span>
-            <img src="${image}" alt="Item Image">
+            <img src="${image}" alt="Item Image" style="width: 300px; height: 300px; object-fit: contain;">
             <p>${tooltip}</p>
         </div>
     `;
