@@ -23,7 +23,7 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(response => response.json())
             .then(data => {
                 if (allowedAdminIPs.includes(data.ip)) {
-                    document.getElementById('admin-button').style.display = 'block';
+                    window.location.href = 'admin.html';
                 } else {
                     document.getElementById('login-container').style.display = 'block';
                 }
@@ -119,28 +119,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    window.showItemDetails = function(image, tooltip) {
-        const modal = document.getElementById('item-details-modal');
-        const modalImage = document.getElementById('modal-image');
-        const modalTooltip = document.getElementById('modal-tooltip');
-        modal.style.display = 'block';
-        modalImage.src = image;
-        modalTooltip.textContent = tooltip;
-    };
-
-    const modal = document.getElementById('item-details-modal');
-    const span = document.getElementsByClassName('close')[0];
-
-    span.onclick = function() {
-        modal.style.display = 'none';
-    };
-
-    window.onclick = function(event) {
-        if (event.target == modal) {
-            modal.style.display = 'none';
-        }
-    };
-
     function getHealthColor(currentHealth, startingHealth) {
         const healthPercentage = (currentHealth / startingHealth) * 100;
         if (healthPercentage > 75) {
@@ -153,4 +131,18 @@ document.addEventListener('DOMContentLoaded', function() {
             return 'red';
         }
     }
+});
+
+function showItemDetails(image, tooltip) {
+    const modal = document.getElementById('item-details-modal');
+    const modalImg = document.getElementById('modal-image');
+    const modalTooltip = document.getElementById('modal-tooltip');
+
+    modalImg.src = image;
+    modalTooltip.textContent = tooltip;
+    modal.style.display = 'block';
+}
+
+document.querySelector('.close').addEventListener('click', function() {
+    document.getElementById('item-details-modal').style.display = 'none';
 });

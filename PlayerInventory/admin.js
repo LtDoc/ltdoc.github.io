@@ -311,6 +311,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 gold: newGold,
                 bank: newBank
             }).then(() => {
+                const logRef = db.ref('users_new/' + playerSelect + '/log');
+                logRef.transaction(log => (log || '') + `\nUpdated gold to ${newGold} and bank to ${newBank}`);
                 console.log('Gold and bank updated successfully');
             }).catch(error => {
                 console.error('Failed to update gold and bank:', error);
@@ -335,3 +337,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
     loadExistingItems();
 });
+
+function showItemDetails(image, tooltip) {
+    const modal = document.createElement('div');
+    modal.classList.add('modal');
+    modal.innerHTML = `
+        <div class="modal-content">
+            <span class="close" onclick="this.parentElement.parentElement.style.display='none';">&times;</span>
+            <img src="${image}" alt="Item Image">
+            <p>${tooltip}</p>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    modal.style.display = 'block';
+}
