@@ -30,8 +30,20 @@
             <div id="existing-items-container">
                 <input type="text" id="search-bar" placeholder="Search items...">
                 <div class="item-list">
-                    <table id="existing-items">
-                        <!-- Items will be populated here -->
+                    <table>
+                        <thead>
+                            <tr>
+                                <th></th> <!-- For checkboxes -->
+                                <th>Item Name</th>
+                                <th>Starting HP</th>
+                                <th>Tooltip</th>
+                                <th>Category</th>
+                                <th>Price</th>
+                            </tr>
+                        </thead>
+                        <tbody id="existing-items">
+                            <!-- Items will be populated here -->
+                        </tbody>
                     </table>
                 </div>
                 <div id="pagination"></div>
