@@ -16,6 +16,10 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 const storage = firebase.storage();
 
+const ITEMS_PER_PAGE = 12;
+let currentPage = 1;
+let allItems = [];
+
 document.addEventListener('DOMContentLoaded', function() {
     // Create Item
     document.getElementById('item-form').addEventListener('submit', e => {
@@ -241,39 +245,58 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function loadExistingItems() {
         db.ref('items').on('value', snapshot => {
-            const items = snapshot.val();
-            const existingItemsTable = document.getElementById('existing-items');
-            const existingItemsSelect = document.getElementById('existing-items-select');
-            existingItemsTable.innerHTML = '';
-            existingItemsSelect.innerHTML = '<option value="">Select Item</option>';
-
-            for (const key in items) {
-                const item = items[key];
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td>${item.name}</td>
-                    <td>${item.health}</td>
-                    <td>${item.tooltip}</td>
-                    <td>${item.category}</td>
-                `;
-                existingItemsTable.appendChild(row);
-
-                const option = document.createElement('option');
-                option.value = key;
-                option.textContent = item.name;
-                existingItemsSelect.appendChild(option);
-            }
+            allItems = Object.entries(snapshot.val() || {}).map(([key, value]) => ({ id: key, ...value }));
+            displayItems();
+            displayPagination();
         });
     }
 
-    document.getElementById('add-item-form').addEventListener('submit', e => {
-        e.preventDefault();
+    function displayItems() {
+        const existingItemsTable = document.getElementById('existing-items');
+        const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+        const endIndex = startIndex + ITEMS_PER_PAGE;
+        const itemsToDisplay = allItems.slice(startIndex, endIndex);
+        
+        existingItemsTable.innerHTML = '';
+        itemsToDisplay.forEach(item => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td><input type="checkbox" class="checkbox" value="${item.id}"></td>
+                <td>${item.name}</td>
+                <td>${item.health}</td>
+                <td>${item.tooltip}</td>
+                <td>${item.category}</td>
+            `;
+            existingItemsTable.appendChild(row);
+        });
+    }
+
+    function displayPagination() {
+        const pagination = document.getElementById('pagination');
+        const pageCount = Math.ceil(allItems.length / ITEMS_PER_PAGE);
+        
+        pagination.innerHTML = '';
+        for (let i = 1; i <= pageCount; i++) {
+            const button = document.createElement('button');
+            button.textContent = i;
+            button.disabled = i === currentPage;
+            button.addEventListener('click', () => {
+                currentPage = i;
+                displayItems();
+            });
+            pagination.appendChild(button);
+        }
+    }
+
+    document.getElementById('add-items-btn').addEventListener('click', () => {
         const playerSelect = document.getElementById('player-select').value;
-        const itemId = document.getElementById('existing-items-select').value;
-        if (playerSelect && itemId) {
-            addItemToInventory(playerSelect, itemId);
+        const selectedItems = document.querySelectorAll('.checkbox:checked');
+        if (playerSelect && selectedItems.length > 0) {
+            selectedItems.forEach(item => {
+                addItemToInventory(playerSelect, item.value);
+            });
         } else {
-            alert('Please select a player and an item.');
+            alert('Please select a player and at least one item.');
         }
     });
 
@@ -299,18 +322,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.getElementById('search-bar').addEventListener('input', e => {
         const searchTerm = e.target.value.toLowerCase();
-        const items = document.querySelectorAll('#existing-items tr');
-        items.forEach(item => {
-            const name = item.children[0].textContent.toLowerCase();
-            const health = item.children[1].textContent.toLowerCase();
-            const tooltip = item.children[2].textContent.toLowerCase();
-            const category = item.children[3].textContent.toLowerCase();
-            if (name.includes(searchTerm) || health.includes(searchTerm) || tooltip.includes(searchTerm) || category.includes(searchTerm)) {
-                item.style.display = '';
-            } else {
-                item.style.display = 'none';
-            }
-        });
+        allItems = allItems.filter(item => 
+            item.name.toLowerCase().includes(searchTerm) ||
+            item.health.toString().toLowerCase().includes(searchTerm) ||
+            item.tooltip.toLowerCase().includes(searchTerm) ||
+            item.category.toLowerCase().includes(searchTerm)
+        );
+        currentPage = 1;
+        displayItems();
+        displayPagination();
     });
 
     loadExistingItems();

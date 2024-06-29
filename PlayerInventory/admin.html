@@ -83,6 +83,7 @@
                 <table>
                     <thead>
                         <tr>
+                            <th></th> <!-- For checkboxes -->
                             <th>Item Name</th>
                             <th>Starting HP</th>
                             <th>Tooltip</th>
@@ -92,13 +93,8 @@
                     <tbody id="existing-items"></tbody>
                 </table>
             </div>
-            <h2>Add Item to Player</h2>
-            <form id="add-item-form">
-                <select id="existing-items-select">
-                    <option value="">Select Item</option>
-                </select>
-                <button type="submit">Add Item</button>
-            </form>
+            <div class="pagination" id="pagination"></div>
+            <button id="add-items-btn">Add Selected Items</button>
         </div>
         <div class="panel" id="update-gold-panel">
             <h2>Update Gold and Bank</h2>

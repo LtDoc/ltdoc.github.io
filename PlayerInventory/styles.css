@@ -266,3 +266,28 @@ input, select {
 .item-list tr:nth-child(even) {
     background-color: #f9f9f9;
 }
+
+.pagination {
+    display: flex;
+    justify-content: center;
+    margin: 10px 0;
+}
+
+.pagination button {
+    background-color: #444;
+    color: #fff;
+    border: none;
+    padding: 5px 10px;
+    margin: 0 5px;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.pagination button:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+}
+
+.checkbox {
+    margin-right: 10px;
+}
