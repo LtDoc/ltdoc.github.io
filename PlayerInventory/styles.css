@@ -15,17 +15,7 @@ body {
     box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
 }
 
-h1 {
-    font-family: 'Cinzel Decorative', serif;
-    text-align: center;
-}
-
-h2 {
-    font-family: 'Cinzel Decorative', serif;
-    text-align: center;
-}
-
-h3 {
+h1, h2, h3 {
     font-family: 'Cinzel Decorative', serif;
     text-align: center;
 }

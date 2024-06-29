@@ -99,8 +99,19 @@ document.addEventListener('DOMContentLoaded', function() {
 
         inventoryRef.on('value', snapshot => {
             const inventory = snapshot.val();
-            const inventoryDiv = document.getElementById('inventory');
-            inventoryDiv.innerHTML = '';
+            const sections = {
+                'Weapons': document.getElementById('weapons-items'),
+                'Armor': document.getElementById('armor-items'),
+                'Potions': document.getElementById('potions-items'),
+                'Books': document.getElementById('books-items'),
+                'Valuables': document.getElementById('valuables-items'),
+                'Misc': document.getElementById('misc-items')
+            };
+
+            for (const section in sections) {
+                sections[section].innerHTML = '';
+            }
+
             for (const key in inventory) {
                 const item = inventory[key];
                 const itemCard = document.createElement('div');
@@ -110,7 +121,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <img src="${item.image}" alt="${item.name}">
                     <div class="health-bar" style="width: ${(item.health / item.startingHealth) * 100}%; background-color: ${getHealthColor(item.health)};"></div>
                 `;
-                inventoryDiv.appendChild(itemCard);
+                sections[item.category].appendChild(itemCard);
             }
         });
 
