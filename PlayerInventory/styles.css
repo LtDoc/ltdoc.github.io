@@ -80,13 +80,14 @@ h1, h2, h3, h4, h5, h6 {
 .inventory-items .item-card {
     position: relative;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    border: 2px solid #444;
+    border: 1px solid #ccc;
     background-color: #fff;
     margin: 5px;
     padding: 10px;
     width: 100px;
-    height: 100px;
+    height: 140px;
     box-sizing: border-box;
     border-radius: 5px;
     box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
@@ -94,22 +95,21 @@ h1, h2, h3, h4, h5, h6 {
 
 .inventory-items .item-card img {
     max-width: 100%;
-    max-height: 100%;
+    max-height: 80px;
     cursor: pointer;
 }
 
 .inventory-items .item-card p {
     margin: 5px 0 0 0;
     color: #444;
+    text-align: center;
 }
 
 .inventory-items .item-card .health-bar {
-    position: absolute;
-    bottom: 0;
-    left: 0;
     width: 100%;
     height: 10px;
     border-radius: 0 0 5px 5px;
+    margin-top: 5px;
 }
 
 .inventory-items .item-card .remove-btn {

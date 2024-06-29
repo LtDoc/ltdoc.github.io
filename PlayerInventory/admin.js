@@ -144,21 +144,21 @@ document.addEventListener('DOMContentLoaded', function() {
             const booksItems = document.getElementById('books-items');
             const valuablesItems = document.getElementById('valuables-items');
             const miscItems = document.getElementById('misc-items');
-        
+
             weaponsItems.innerHTML = '';
             armorItems.innerHTML = '';
             potionsItems.innerHTML = '';
             booksItems.innerHTML = '';
             valuablesItems.innerHTML = '';
             miscItems.innerHTML = '';
-        
+
             for (const key in inventory) {
                 const item = inventory[key];
                 const itemCard = document.createElement('div');
                 itemCard.classList.add('item-card');
                 itemCard.innerHTML = `
-                    <img src="${item.image}" alt="${item.name}" onclick="showItemDetails('${item.image}', '${item.tooltip}')">
                     <p>${item.name}</p>
+                    <img src="${item.image}" alt="${item.name}" onclick="showItemDetails('${item.image}', '${item.tooltip}')">
                     <div class="health-bar" style="width: ${item.health}%; background-color: ${getHealthColor(item.health, item.startingHealth)};"></div>
                     <button class="remove-btn" onclick="removeItem('${uid}', '${key}', '${item.name}')">X</button>
                 `;
@@ -185,12 +185,13 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    function getHealthColor(health) {
-        if (health > 75) {
+    function getHealthColor(currentHealth, startingHealth) {
+        const healthPercentage = (currentHealth / startingHealth) * 100;
+        if (healthPercentage > 75) {
             return 'green';
-        } else if (health > 50) {
+        } else if (healthPercentage > 50) {
             return 'yellow';
-        } else if (health > 25) {
+        } else if (healthPercentage > 25) {
             return 'orange';
         } else {
             return 'red';

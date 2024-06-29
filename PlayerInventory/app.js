@@ -79,21 +79,21 @@ document.addEventListener('DOMContentLoaded', function() {
             const booksItems = document.getElementById('books-items');
             const valuablesItems = document.getElementById('valuables-items');
             const miscItems = document.getElementById('misc-items');
-        
+
             weaponsItems.innerHTML = '';
             armorItems.innerHTML = '';
             potionsItems.innerHTML = '';
             booksItems.innerHTML = '';
             valuablesItems.innerHTML = '';
             miscItems.innerHTML = '';
-        
+
             for (const key in inventory) {
                 const item = inventory[key];
                 const itemCard = document.createElement('div');
                 itemCard.classList.add('item-card');
                 itemCard.innerHTML = `
-                    <img src="${item.image}" alt="${item.name}" onclick="showItemDetails('${item.image}', '${item.tooltip}')">
                     <p>${item.name}</p>
+                    <img src="${item.image}" alt="${item.name}" onclick="showItemDetails('${item.image}', '${item.tooltip}')">
                     <div class="health-bar" style="width: ${item.health}%; background-color: ${getHealthColor(item.health, item.startingHealth)};"></div>
                 `;
                 if (item.category === 'Weapons') {
@@ -111,7 +111,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
         });
-        
+
         logRef.on('value', snapshot => {
             const log = snapshot.val() || '';
             const logTextarea = document.getElementById('log');
@@ -153,5 +153,4 @@ document.addEventListener('DOMContentLoaded', function() {
             return 'red';
         }
     }
-    
 });
