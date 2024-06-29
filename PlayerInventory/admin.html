@@ -8,6 +8,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
     <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-database.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-storage.js"></script>
     <script src="admin.js" defer></script>
 </head>
 <body>
@@ -35,7 +36,7 @@
             <button id="update-gold">Update Gold</button>
         </div>
         <div class="panel" id="inventory-panel">
-            <h2>Selected Character Name | UserID</h2>
+            <h2 id="selected-character">Selected Character Name | UserID</h2>
             <div id="inventory">
                 <div class="inventory-section" id="weapons-section">
                     <h3>Weapons</h3>
