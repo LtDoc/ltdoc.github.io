@@ -25,9 +25,10 @@ document.addEventListener('DOMContentLoaded', function() {
         const itemHealth = parseInt(document.getElementById('item-health').value) || 100;
         const itemTooltip = document.getElementById('item-tooltip').value.trim();
         const itemImage = document.getElementById('item-image').files[0];
+        const itemCategory = document.getElementById('item-category').value.trim();
 
         // Validate form inputs
-        if (itemName && itemTooltip && itemImage) {
+        if (itemName && itemTooltip && itemImage && itemCategory) {
             const newItemRef = db.ref('items').push();
             const storageRef = storage.ref(`images/${newItemRef.key}`);
 
@@ -48,7 +49,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             health: itemHealth,
                             tooltip: itemTooltip,
                             image: downloadURL,
-                            // Add any additional fields you need here
+                            category: itemCategory
                         };
 
                         // Store item data in Firebase Realtime Database
@@ -159,15 +160,15 @@ document.addEventListener('DOMContentLoaded', function() {
                     showItemDetails(item);
                 });
 
-                if (item.class === 'Weapons') {
+                if (item.category === 'Weapons') {
                     weaponsItems.appendChild(itemCard);
-                } else if (item.class === 'Armor') {
+                } else if (item.category === 'Armor') {
                     armorItems.appendChild(itemCard);
-                } else if (item.class === 'Potions') {
+                } else if (item.category === 'Potions') {
                     potionsItems.appendChild(itemCard);
-                } else if (item.class === 'Books') {
+                } else if (item.category === 'Books') {
                     booksItems.appendChild(itemCard);
-                } else if (item.class === 'Valuables') {
+                } else if (item.category === 'Valuables') {
                     valuablesItems.appendChild(itemCard);
                 }
             }
