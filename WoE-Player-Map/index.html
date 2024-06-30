@@ -564,12 +564,14 @@
 
             // Duplicate marker
             function duplicateMarker(id) {
-                const markerData = markers[id].options;
+                const marker = markers[id];
+                const markerData = marker.options;
+                const latLng = marker.getLatLng();
                 const newMarkerData = {
                     ...markerData,
                     id: database.ref().child('markers').push().key,
-                    lat: markerData.getLatLng().lat,
-                    lng: markerData.getLatLng().lng,
+                    lat: latLng.lat,
+                    lng: latLng.lng,
                     type: markerData.type || 'unknown'
                 };
                 database.ref('markers/' + newMarkerData.id).set(newMarkerData);
@@ -705,18 +707,17 @@
                 });
             }
 
-           // Expose functions to the global scope
-window.removeMarker = removeMarker;
-window.editMarker = editMarker;
-window.toggleFields = toggleFields; // Ensure this function is exposed
-window.addMarker = addMarker; // Expose the addMarker function
-window.searchMarkers = searchMarkers;
-window.duplicateMarker = duplicateMarker; // Expose the duplicateMarker function
-window.toggleAdminOnly = toggleAdminOnly; // Expose the toggleAdminOnly function
+            // Expose functions to the global scope
+            window.removeMarker = removeMarker;
+            window.editMarker = editMarker;
+            window.toggleFields = toggleFields; // Ensure this function is exposed
+            window.addMarker = addMarker; // Expose the addMarker function
+            window.searchMarkers = searchMarkers;
+            window.duplicateMarker = duplicateMarker; // Expose the duplicateMarker function
+            window.toggleAdminOnly = toggleAdminOnly; // Expose the toggleAdminOnly function
 
-// Initial call to set visibility based on default selected marker type
-toggleFields();
-
+            // Initial call to set visibility based on default selected marker type
+            toggleFields();
         })();
     </script>
 </body>
