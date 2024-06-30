@@ -699,15 +699,18 @@
                 });
             }
 
-            // Expose functions to the global scope
-            window.removeMarker = removeMarker;
-            window.editMarker = editMarker;
-            window.toggleFields = toggleFields; // Ensure this function is exposed
-            window.addMarker = addMarker; // Expose the addMarker function
-            window.searchMarkers = searchMarkers;
+           // Expose functions to the global scope
+window.removeMarker = removeMarker;
+window.editMarker = editMarker;
+window.toggleFields = toggleFields; // Ensure this function is exposed
+window.addMarker = addMarker; // Expose the addMarker function
+window.searchMarkers = searchMarkers;
+window.duplicateMarker = duplicateMarker; // Expose the duplicateMarker function
+window.toggleAdminOnly = toggleAdminOnly; // Expose the toggleAdminOnly function
 
-            // Initial call to set visibility based on default selected marker type
-            toggleFields();
+// Initial call to set visibility based on default selected marker type
+toggleFields();
+
         })();
     </script>
 </body>
