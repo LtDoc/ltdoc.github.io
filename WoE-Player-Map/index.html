@@ -138,6 +138,18 @@
         .content.show {
             display: block;
         }
+        .custom-div-icon {
+            width: 50px; /* Fixed width */
+            height: 50px; /* Fixed height */
+            border-radius: 50%;
+            object-fit: cover;
+        }
+
+        .circular-icon, .portrait-icon {
+            width: 50px; /* Ensure these match the size */
+            height: 50px; /* Ensure these match the size */
+        }
+
     </style>
 </head>
 <body>
@@ -480,7 +492,8 @@
             function createPlayerMarker(markerData) {
                 const icon = L.divIcon({
                     html: `<img src="${markerData.iconUrl}" class="circular-icon" onerror="this.src='assets/placeholder.png'">`,
-                    className: ''
+                    className: 'custom-div-icon',
+                    iconSize: [50, 50] // Fixed size
                 });
                 const marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
                 if (markerData.tooltipType === 'image') {
@@ -498,7 +511,12 @@
                 } else {
                     iconHtml = '❓';
                 }
-                const marker = L.marker([markerData.lat, markerData.lng], { icon: L.divIcon({ html: iconHtml, className: 'custom-div-icon' }), draggable: hasEditPermissions });
+                const icon = L.divIcon({
+                    html: iconHtml,
+                    className: 'custom-div-icon',
+                    iconSize: [50, 50] // Fixed size
+                });
+                const marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
                 if (markerData.tooltipType === 'image') {
                     marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br><img src="${markerData.tooltipContent}" width="200"></div>`);
                 } else {
@@ -507,16 +525,17 @@
                 return marker;
             }
 
+
             function createArmyMarker(markerData) {
                 const icon = L.divIcon({
                     html: `<img src="${markerData.iconUrl}" class="portrait-icon" onerror="this.src='assets/placeholder.png'">`,
-                    className: '',
-                    iconSize: [50, 70]
+                    className: 'custom-div-icon',
+                    iconSize: [50, 70] // Fixed size
                 });
                 const marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
                 const tooltipHtml = `<div style="font-size: 16px;">
                                     <strong>${markerData.name}</strong><br>
-                                    <img src="${markerData.iconUrl}" width="50" height="70"><br>
+                                    <img src="${markerData.iconUrl}" width="50" height="50"><br>
                                     <strong>Faction:</strong> ${markerData.faction}<br>
                                     <strong>Level:</strong> ${markerData.level}<br>
                                     <strong>Levies:</strong> ${markerData.levies}<br>
@@ -527,10 +546,11 @@
                                     <strong>Noble Retinue:</strong> ${markerData.retinue}<br>
                                     <strong>Household Guard:</strong> ${markerData.guard}<br>
                                     <strong>Archers:</strong> ${markerData.archers}
-                                   </div>`;
+                                </div>`;
                 marker.bindPopup(tooltipHtml);
                 return marker;
             }
+
 
             // Placeholder function for 'unit' marker type
             function createUnitMarker(markerData) {
