@@ -65,11 +65,9 @@
             text-align: center;
             line-height: 24px;
         }
-
         .leaflet-container {
             background: #1E170F;
         }
-        
         .circular-icon {
             border-radius: 50%;
             width: 50px;
@@ -148,6 +146,7 @@
 <body>
     <button id="toggleSidebar" style="display:none;">☰</button>
     <div id="sidebar" class="hidden">
+        <input type="text" id="searchInput" placeholder="Search markers..." oninput="searchMarkers()">
         <button type="button" class="collapsible">Marker Management</button>
         <div class="content">
             <form id="markerForm">
@@ -288,6 +287,8 @@
             const sidebar = document.getElementById('sidebar');
             const toggleSidebarBtn = document.getElementById('toggleSidebar');
             const markerList = document.getElementById('markerList');
+            const playerMarkerList = document.getElementById('playerMarkerList');
+            const searchInput = document.getElementById('searchInput');
             const coll = document.getElementsByClassName("collapsible");
 
             // Toggle icon and other fields visibility
@@ -489,9 +490,17 @@
                 });
                 const marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
                 if (markerData.tooltipType === 'image') {
-                    marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br><img src="${markerData.tooltipContent}" width="200"></div>`);
+                    marker.bindPopup(`<div style="font-size: 16px;">
+                                      <strong>${markerData.name}</strong><br>
+                                      <img src="${markerData.tooltipContent}" width="200"><br>
+                                      ${getAdminOptions(markerData)}
+                                      </div>`);
                 } else {
-                    marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br>${markerData.tooltipContent}</div>`);
+                    marker.bindPopup(`<div style="font-size: 16px;">
+                                      <strong>${markerData.name}</strong><br>
+                                      ${markerData.tooltipContent}<br>
+                                      ${getAdminOptions(markerData)}
+                                      </div>`);
                 }
                 return marker;
             }
@@ -505,9 +514,17 @@
                 }
                 const marker = L.marker([markerData.lat, markerData.lng], { icon: L.divIcon({ html: iconHtml, className: 'custom-div-icon' }), draggable: hasEditPermissions });
                 if (markerData.tooltipType === 'image') {
-                    marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br><img src="${markerData.tooltipContent}" width="200"></div>`);
+                    marker.bindPopup(`<div style="font-size: 16px;">
+                                      <strong>${markerData.name}</strong><br>
+                                      <img src="${markerData.tooltipContent}" width="200"><br>
+                                      ${getAdminOptions(markerData)}
+                                      </div>`);
                 } else {
-                    marker.bindPopup(`<div style="font-size: 16px;"><strong>${markerData.name}</strong><br>${markerData.tooltipContent}</div>`);
+                    marker.bindPopup(`<div style="font-size: 16px;">
+                                      <strong>${markerData.name}</strong><br>
+                                      ${markerData.tooltipContent}<br>
+                                      ${getAdminOptions(markerData)}
+                                      </div>`);
                 }
                 return marker;
             }
@@ -531,28 +548,32 @@
                                     <strong>Knights:</strong> ${markerData.knights}<br>
                                     <strong>Noble Retinue:</strong> ${markerData.retinue}<br>
                                     <strong>Household Guard:</strong> ${markerData.guard}<br>
-                                    <strong>Archers:</strong> ${markerData.archers}
+                                    <strong>Archers:</strong> ${markerData.archers}<br>
+                                    ${getAdminOptions(markerData)}
                                    </div>`;
                 marker.bindPopup(tooltipHtml);
                 return marker;
             }
 
-            // Placeholder function for 'unit' marker type
-            function createUnitMarker(markerData) {
-                console.log('Creating unit marker:', markerData);
-                const icon = L.divIcon({
-                    html: `<img src="${markerData.iconUrl}" class="portrait-icon" onerror="this.src='assets/placeholder.png'">`,
-                    className: '',
-                    iconSize: [50, 70]
-                });
-                const marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
-                const tooltipHtml = `<div style="font-size: 16px;">
-                                    <strong>${markerData.name}</strong><br>
-                                    <img src="${markerData.iconUrl}" width="50" height="70"><br>
-                                    <!-- Add additional unit-specific tooltip content here -->
-                                   </div>`;
-                marker.bindPopup(tooltipHtml);
-                return marker;
+            // Function to get admin options for the marker
+            function getAdminOptions(markerData) {
+                if (!hasEditPermissions) return '';
+                return `<button onclick="duplicateMarker('${markerData.id}')">Duplicate</button>
+                        <input type="checkbox" ${markerData.adminOnly ? 'checked' : ''} onchange="toggleAdminOnly('${markerData.id}', this.checked)"> Admin Only`;
+            }
+
+            // Duplicate marker
+            function duplicateMarker(id) {
+                const markerData = markers[id].options;
+                const newMarkerData = { ...markerData, id: database.ref().child('markers').push().key };
+                database.ref('markers/' + newMarkerData.id).set(newMarkerData);
+                createMarker(newMarkerData.id, newMarkerData);
+            }
+
+            // Toggle admin-only view
+            function toggleAdminOnly(id, isAdminOnly) {
+                database.ref('markers/' + id).update({ adminOnly: isAdminOnly });
+                markers[id].options.adminOnly = isAdminOnly;
             }
 
             // Reset marker form fields
@@ -561,9 +582,11 @@
                 toggleFields();
             }
 
-            // Update sidebar
+            // Update sidebar with markers
             function updateSidebar() {
                 markerList.innerHTML = '';
+                playerMarkerList.innerHTML = '';
+                const searchQuery = searchInput.value.toLowerCase();
                 Object.keys(markers).forEach(id => {
                     const marker = markers[id];
                     const markerData = marker.getPopup().getContent().split('<br>');
@@ -573,8 +596,19 @@
                         listItem.innerHTML += `<button onclick="editMarker('${id}')">Edit</button>
                                                <button onclick="removeMarker('${id}')">Remove</button>`;
                     }
-                    markerList.appendChild(listItem);
+                    if (markerData[0].toLowerCase().includes(searchQuery)) {
+                        if (marker.options.type === 'player') {
+                            playerMarkerList.appendChild(listItem);
+                        } else {
+                            markerList.appendChild(listItem);
+                        }
+                    }
                 });
+            }
+
+            // Search markers
+            function searchMarkers() {
+                updateSidebar();
             }
 
             // Edit marker
@@ -670,6 +704,7 @@
             window.editMarker = editMarker;
             window.toggleFields = toggleFields; // Ensure this function is exposed
             window.addMarker = addMarker; // Expose the addMarker function
+            window.searchMarkers = searchMarkers;
 
             // Initial call to set visibility based on default selected marker type
             toggleFields();
