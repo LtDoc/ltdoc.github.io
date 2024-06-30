@@ -565,7 +565,13 @@
             // Duplicate marker
             function duplicateMarker(id) {
                 const markerData = markers[id].options;
-                const newMarkerData = { ...markerData, id: database.ref().child('markers').push().key };
+                const newMarkerData = {
+                    ...markerData,
+                    id: database.ref().child('markers').push().key,
+                    lat: markerData.getLatLng().lat,
+                    lng: markerData.getLatLng().lng,
+                    type: markerData.type || 'unknown'
+                };
                 database.ref('markers/' + newMarkerData.id).set(newMarkerData);
                 createMarker(newMarkerData.id, newMarkerData);
             }
