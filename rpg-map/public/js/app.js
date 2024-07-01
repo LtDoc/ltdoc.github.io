@@ -46,7 +46,7 @@ function create() {
     loadMap(this);
 
     createGrid(this);
-    setupFirebaseListeners();
+    setupFirebaseListeners(this);
 
     fetch('https://api.ipify.org?format=json')
         .then(response => response.json())
@@ -78,7 +78,7 @@ function createGrid(scene) {
     }
 }
 
-function setupFirebaseListeners() {
+function setupFirebaseListeners(scene) {
     db.ref('players').on('child_added', snapshot => {
         const playerData = snapshot.val();
         addPlayer(playerData.x, playerData.y, playerData);
@@ -97,9 +97,9 @@ function setupFirebaseListeners() {
     db.ref('map').on('value', snapshot => {
         const mapData = snapshot.val();
         if (mapData && mapData.url) {
-            loadImage(mapData.url);
+            loadImage(mapData.url, scene);
         } else {
-            loadDefaultMap();
+            loadDefaultMap(scene);
         }
     });
 }
@@ -190,8 +190,8 @@ function showTooltip(entity) {
 
     const tooltip = document.getElementById('tooltip');
     tooltip.style.display = 'block';
-    tooltip.style.left = entity.x + 'px';
-    tooltip.style.top = entity.y + 'px';
+    tooltip.style.left = `${entity.x}px`;
+    tooltip.style.top = `${entity.y}px`;
 
     if (isAdmin) {
         document.getElementById('admin-options').style.display = 'block';
