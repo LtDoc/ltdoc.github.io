@@ -1,6 +1,6 @@
 # Terms of Service (TOS) for World of Elyndor
 
-**Effective Date:** [Immediately]
+**Effective Date:** July 1, 2024
 
 ## 1. Acceptance of Terms
 By accessing or using **World of Elyndor** (referred to as "the Service"), you agree to be bound by these Terms of Service ("TOS"). If you do not agree to these terms, do not use the Service.
@@ -43,10 +43,10 @@ To the fullest extent permitted by law, **World of Elyndor** and its affiliates,
 - Any errors or omissions in any content or for any loss or damage incurred as a result of the use of any content posted, emailed, transmitted, or otherwise made available through the Service.
 
 ## 11. Governing Law
-These TOS shall be governed and construed in accordance with the laws of **[Your Jurisdiction]**, without regard to its conflict of law principles.
+These TOS shall be governed and construed in accordance with the laws of **The Province of Ontario, Canada**, without regard to its conflict of law principles.
 
 ## 12. Dispute Resolution
-Any disputes arising out of or relating to these TOS or the Service will be resolved through binding arbitration in **[Your Jurisdiction]**, rather than in court, except that you may assert claims in small claims court if your claims qualify.
+Any disputes arising out of or relating to these TOS or the Service will be resolved through binding arbitration in **The Province of Ontario, Canada**, rather than in court, except that you may assert claims in small claims court if your claims qualify.
 
 ## 13. Severability
 If any provision of these TOS is found to be unenforceable or invalid, that provision will be limited or eliminated to the minimum extent necessary so that these TOS will otherwise remain in full force and effect and enforceable.
@@ -55,7 +55,7 @@ If any provision of these TOS is found to be unenforceable or invalid, that prov
 These TOS, together with our Privacy Policy and any other legal notices published by us on the Service, constitute the entire agreement between you and us regarding the Service.
 
 ## 15. Contact Information
-If you have any questions about these TOS, please contact us at **[Your Contact Information]**.
+If you have any questions about these TOS, please contact us at **1793tradingco@gmail.com**.
 
 ---
 
