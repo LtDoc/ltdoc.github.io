@@ -295,7 +295,7 @@ function rollDice(sides) {
     alert(`You rolled a ${result}`);
 }
 
-const adminIPs = ['YOUR_ADMIN_IP'];
+const adminIPs = ['24.57.218.92','98.16.223.9'];
 fetch('https://api.ipify.org?format=json')
     .then(response => response.json())
     .then(data => {
