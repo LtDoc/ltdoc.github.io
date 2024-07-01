@@ -96,7 +96,11 @@ function setupFirebaseListeners() {
 
     db.ref('map').on('value', snapshot => {
         const mapData = snapshot.val();
-        loadImage(mapData.url);
+        if (mapData) {
+            loadImage(mapData.url);
+        } else {
+            loadDefaultMap();
+        }
     });
 }
 
@@ -231,9 +235,16 @@ function loadMap(scene) {
         if (mapData) {
             loadImage(mapData.url, scene);
         } else {
-            scene.add.image(scene.cameras.main.centerX, scene.cameras.main.centerY, 'defaultMap').setOrigin(0.5);
+            loadDefaultMap(scene);
         }
     });
+}
+
+function loadDefaultMap(scene) {
+    if (currentMap) {
+        currentMap.destroy();
+    }
+    currentMap = scene.add.image(scene.cameras.main.centerX, scene.cameras.main.centerY, 'defaultMap').setOrigin(0.5);
 }
 
 function loadImage(url, scene) {
