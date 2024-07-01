@@ -96,7 +96,7 @@ function setupFirebaseListeners() {
 
     db.ref('map').on('value', snapshot => {
         const mapData = snapshot.val();
-        if (mapData) {
+        if (mapData && mapData.url) {
             loadImage(mapData.url);
         } else {
             loadDefaultMap();
@@ -232,11 +232,13 @@ function removeData(path, id) {
 function loadMap(scene) {
     db.ref('map').once('value').then(snapshot => {
         const mapData = snapshot.val();
-        if (mapData) {
+        if (mapData && mapData.url) {
             loadImage(mapData.url, scene);
         } else {
             loadDefaultMap(scene);
         }
+    }).catch(() => {
+        loadDefaultMap(scene);
     });
 }
 
@@ -257,6 +259,8 @@ function loadImage(url, scene) {
             currentMap = scene.add.image(scene.cameras.main.centerX, scene.cameras.main.centerY, 'customMap').setOrigin(0.5);
         });
         scene.load.start();
+    }).catch(() => {
+        loadDefaultMap(scene);
     });
 }
 
