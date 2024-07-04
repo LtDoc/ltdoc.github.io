@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>The World of Elyndor - Battle Map</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.pm/2.10.0/leaflet.pm.css" />
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1E170F;
+        }
+        #map {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            right: 0;
+            left: 0;
+        }
+        #sidebar {
+            width: 300px;
+            height: 100%;
+            overflow: auto;
+            background: #2c3e50;
+            color: white;
+            padding: 15px;
+            border-right: 2px solid #34495e;
+            transition: transform 0.3s ease;
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            z-index: 1000;
+            box-shadow: 3px 0px 10px rgba(0,0,0,0.5);
+        }
+        #sidebar.hidden {
+            display: none;
+        }
+        #toggleSidebar {
+            position: absolute;
+            top: 15px;
+            left: 10px;
+            z-index: 1000;
+            background: #34495e;
+            color: white;
+            border: none;
+            padding: 10px;
+            cursor: pointer;
+            font-size: 16px;
+            box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
+        }
+        .leaflet-top.leaflet-left {
+            left: 10px; /* Adjust to ensure it is not on top of the sidebar */
+        }
+        .leaflet-container .custom-div-icon {
+            font-size: 24px;
+            color: gold;
+            text-align: center;
+            line-height: 24px;
+        }
+        .leaflet-container {
+            background: #1E170F;
+        }
+        .circular-icon {
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            object-fit: cover;
+        }
+        .portrait-icon {
+            width: 50px;
+            height: auto;
+            object-fit: cover;
+        }
+        .hp-bar {
+            width: 50px;
+            height: 5px;
+            background: red;
+            margin-top: 5px;
+        }
+        .hp-bar-inner {
+            height: 100%;
+            background: green;
+        }
+        h2, h3 {
+            font-family: 'Fantasy', cursive;
+        }
+        button {
+            background-color: #2980b9;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            margin: 5px 0;
+            cursor: pointer;
+            font-size: 14px;
+            border-radius: 5px;
+            box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
+        }
+        input, select {
+            width: calc(100% - 30px);
+            padding: 10px;
+            margin: 5px 0;
+            border: none;
+            border-radius: 5px;
+            box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
+        }
+        label {
+            margin: 5px 0;
+        }
+        #sidebar h2, #sidebar h3 {
+            color: #ecf0f1;
+        }
+        .readonly #markerForm,
+        .readonly #startPolygonDraw {
+            display: none;
+        }
+        .collapsible {
+            background-color: #34495e;
+            color: white;
+            cursor: pointer;
+            padding: 10px;
+            width: 100%;
+            border: none;
+            text-align: left;
+            outline: none;
+            font-size: 15px;
+        }
+        .collapsible:after {
+            content: '\002B';
+            color: white;
+            font-weight: bold;
+            float: right;
+            margin-left: 5px;
+        }
+        .collapsible.active:after {
+            content: '\2212';
+        }
+        .content {
+            padding: 0 18px;
+            display: none;
+            overflow: hidden;
+            background-color: #2c3e50;
+        }
+        .content.show {
+            display: block;
+        }
+        #predefinedMarkerBar {
+            width: 100%;
+            height: 80px;
+            background: #34495e;
+            overflow-x: scroll;
+            white-space: nowrap;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            padding: 5px;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.5);
+        }
+        .predefined-marker {
+            width: 50px;
+            height: 50px;
+            margin: 0 5px;
+            cursor: pointer;
+        }
+        .predefined-marker img {
+            width: 100%;
+            height: auto;
+        }
+        #predefinedMarkerSearch {
+            position: absolute;
+            right: 10px;
+            top: 10px;
+            padding: 5px;
+            border-radius: 5px;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="predefinedMarkerBar">
+        <input type="text" id="predefinedMarkerSearch" placeholder="Search markers..." oninput="filterPredefinedMarkers()">
+    </div>
+    <button id="toggleSidebar" style="display:none;">☰</button>
+    <div id="sidebar" class="hidden">
+        <input type="text" id="searchInput" placeholder="Search markers..." oninput="searchMarkers()">
+        <button type="button" class="collapsible">Marker Management</button>
+        <div class="content">
+            <form id="markerForm">
+                <label for="markerType">Type:</label><br>
+                <select id="markerType" onchange="toggleFields();">
+                    <option value="player">Player</option>
+                    <option value="enemy">Enemy</option>
+                </select><br>
+                <label for="markerName">Name:</label><br>
+                <input type="text" id="markerName"><br>
+                <div id="iconFields">
+                    <label for="markerIcon">Icon URL:</label><br>
+                    <input type="text" id="markerIcon"><br>
+                    <input type="file" id="markerIconFile" accept="image/*"><br>
+                </div>
+                <label for="str">STR:</label><br>
+                <input type="text" id="str"><br>
+                <label for="int">INT:</label><br>
+                <input type="text" id="int"><br>
+                <label for="dex">DEX:</label><br>
+                <input type="text" id="dex"><br>
+                <label for="con">CON:</label><br>
+                <input type="text" id="con"><br>
+                <label for="sta">STA:</label><br>
+                <input type="text" id="sta"><br>
+                <label for="per">PER:</label><br>
+                <input type="text" id="per"><br>
+                <label for="cha">CHA:</label><br>
+                <input type="text" id="cha"><br>
+                <label for="maxHp">Max HP:</label><br>
+                <input type="text" id="maxHp"><br>
+                <label for="currentHp">Current HP:</label><br>
+                <input type="text" id="currentHp"><br>
+                <label for="markerTooltipType">Tooltip Type:</label><br>
+                <select id="markerTooltipType" onchange="toggleTooltipFields()">
+                    <option value="image">Image</option>
+                    <option value="text">Text</option>
+                </select><br>
+                <label for="markerTooltip">Tooltip Content:</label><br>
+                <input type="text" id="markerTooltip"><br>
+                <input type="file" id="markerTooltipFile" accept="image/*" style="display:none;"><br>
+                <label for="markerAdminOnly">Admin Only:</label>
+                <input type="checkbox" id="markerAdminOnly"><br>
+                <button type="button" onclick="addMarker()">Add Marker</button>
+            </form>
+        </div>
+
+        <button type="button" class="collapsible">Markers</button>
+        <div class="content">
+            <h3>Markers:</h3>
+            <ul id="markerList"></ul>
+        </div>
+    </div>
+    <div id="map"></div>
+
+    <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-database.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-storage.js"></script>
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.pm/2.10.0/leaflet.pm.min.js"></script>
+    <script>
+        (function() {
+            // Firebase configuration
+            const firebaseConfig = {
+                apiKey: "YOUR_API_KEY",
+                authDomain: "YOUR_AUTH_DOMAIN",
+                databaseURL: "YOUR_DATABASE_URL",
+                projectId: "YOUR_PROJECT_ID",
+                storageBucket: "YOUR_STORAGE_BUCKET",
+                messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+                appId: "YOUR_APP_ID",
+                measurementId: "YOUR_MEASUREMENT_ID"
+            };
+            firebase.initializeApp(firebaseConfig);
+            const database = firebase.database();
+            const storage = firebase.storage();
+
+            // Custom game map image
+            const imageUrl = 'assets/Battle_arenas.png';
+            const imageBounds = [[0, 0], [4320, 8192]];
+
+            // Initialize the map
+            const map = L.map('map', {
+                crs: L.CRS.Simple,
+                maxZoom: 2,
+                minZoom: -2
+            });
+
+            // Add the image overlay to the map
+            L.imageOverlay(imageUrl, imageBounds).addTo(map);
+
+            // Fit the map to the image bounds
+            map.fitBounds(imageBounds);
+
+            // Add grid to the map
+            map.on('zoomend', function() {
+                const zoom = map.getZoom();
+                const tileSize = 256;
+                const gridLayer = L.gridLayer({
+                    pane: 'tilePane',
+                    tileSize: tileSize
+                }).addTo(map);
+                gridLayer.createTile = function(coords) {
+                    const tile = L.DomUtil.create('div', 'grid-tile');
+                    tile.style.width = tile.style.height = tileSize + 'px';
+                    tile.style.border = '1px solid rgba(255,255,255,0.2)';
+                    return tile;
+                };
+            });
+
+            let markers = {};
+            let predefinedMarkers = {};
+            let hasEditPermissions = false;
+
+            // Cache DOM elements
+            const markerForm = document.getElementById('markerForm');
+            const markerTypeSelect = document.getElementById('markerType');
+            const markerNameInput = document.getElementById('markerName');
+            const markerIconInput = document.getElementById('markerIcon');
+            const markerTooltipTypeSelect = document.getElementById('markerTooltipType');
+            const markerTooltipInput = document.getElementById('markerTooltip');
+            const markerIconFileInput = document.getElementById('markerIconFile');
+            const markerTooltipFileInput = document.getElementById('markerTooltipFile');
+            const markerAdminOnlyCheckbox = document.getElementById('markerAdminOnly');
+            const strInput = document.getElementById('str');
+            const intInput = document.getElementById('int');
+            const dexInput = document.getElementById('dex');
+            const conInput = document.getElementById('con');
+            const staInput = document.getElementById('sta');
+            const perInput = document.getElementById('per');
+            const chaInput = document.getElementById('cha');
+            const maxHpInput = document.getElementById('maxHp');
+            const currentHpInput = document.getElementById('currentHp');
+            const sidebar = document.getElementById('sidebar');
+            const toggleSidebarBtn = document.getElementById('toggleSidebar');
+            const markerList = document.getElementById('markerList');
+            const predefinedMarkerBar = document.getElementById('predefinedMarkerBar');
+            const predefinedMarkerSearch = document.getElementById('predefinedMarkerSearch');
+            const searchInput = document.getElementById('searchInput');
+            const coll = document.getElementsByClassName("collapsible");
+
+            // Toggle icon and other fields visibility
+            function toggleFields() {
+                const markerType = markerTypeSelect.value;
+                const iconFields = document.getElementById('iconFields');
+
+                iconFields.style.display = 'block';
+
+                toggleTooltipFields();
+            }
+
+            // Toggle tooltip type input fields
+            function toggleTooltipFields() {
+                const tooltipType = markerTooltipTypeSelect.value;
+                markerTooltipInput.style.display = tooltipType === 'text' ? 'block' : 'none';
+                markerTooltipFileInput.style.display = tooltipType === 'image' ? 'block' : 'none';
+            }
+
+            // Load markers from Firebase
+            database.ref('battle_markers').on('value', snapshot => {
+                const data = snapshot.val();
+                if (data) {
+                    Object.keys(data).forEach(id => {
+                        const correctedData = correctMarkerData(data[id]);
+                        if (!isValidMarkerData(correctedData)) {
+                            console.error(`Removing invalid marker data with id: ${id}`, correctedData);
+                            database.ref('battle_markers/' + id).remove();
+                        } else {
+                            createMarker(id, correctedData);
+                        }
+                    });
+                }
+            });
+
+            // Correct marker data
+            function correctMarkerData(data) {
+                const defaults = {
+                    type: 'unknown',
+                    lat: 0,
+                    lng: 0,
+                    name: 'Unnamed Marker',
+                    iconUrl: 'assets/placeholder.png',
+                    tooltipType: 'text',
+                    tooltipContent: '',
+                    adminOnly: false,
+                    str: 0,
+                    int: 0,
+                    dex: 0,
+                    con: 0,
+                    sta: 0,
+                    per: 0,
+                    cha: 0,
+                    maxHp: 100,
+                    currentHp: 100
+                };
+                return { ...defaults, ...data };
+            }
+
+            // Validate marker data
+            function isValidMarkerData(data) {
+                const requiredFields = ['type', 'lat', 'lng', 'name'];
+                return requiredFields.every(field => data[field] !== undefined && data[field] !== null);
+            }
+
+            // Add marker
+            async function addMarker() {
+                const markerType = markerTypeSelect.value;
+                const name = markerNameInput.value;
+                let iconUrl = markerIconInput.value;
+                const tooltipType = markerTooltipTypeSelect.value;
+                let tooltipContent = markerTooltipInput.value;
+                const adminOnly = markerAdminOnlyCheckbox.checked;
+                const str = parseInt(strInput.value) || 0;
+                const int = parseInt(intInput.value) || 0;
+                const dex = parseInt(dexInput.value) || 0;
+                const con = parseInt(conInput.value) || 0;
+                const sta = parseInt(staInput.value) || 0;
+                const per = parseInt(perInput.value) || 0;
+                const cha = parseInt(chaInput.value) || 0;
+                const maxHp = parseInt(maxHpInput.value) || 100;
+                const currentHp = parseInt(currentHpInput.value) || maxHp;
+                const markerId = database.ref().child('battle_markers').push().key;
+
+                let markerOptions = {
+                    id: markerId,
+                    lat: map.getCenter().lat,
+                    lng: map.getCenter().lng,
+                    name,
+                    type: markerType,
+                    iconUrl,
+                    tooltipType,
+                    tooltipContent,
+                    adminOnly,
+                    str,
+                    int,
+                    dex,
+                    con,
+                    sta,
+                    per,
+                    cha,
+                    maxHp,
+                    currentHp
+                };
+
+                const iconFile = markerIconFileInput.files[0];
+                const tooltipFile = markerTooltipFileInput.files[0];
+
+                if (iconFile) {
+                    const iconStorageRef = storage.ref(`battle_markers/${markerId}/icon`);
+                    try {
+                        const snapshot = await iconStorageRef.put(iconFile);
+                        iconUrl = await snapshot.ref.getDownloadURL();
+                        markerOptions.iconUrl = iconUrl;
+                    } catch (error) {
+                        console.error("Error uploading icon file:", error);
+                    }
+                }
+
+                if (tooltipFile && tooltipType === 'image') {
+                    const tooltipStorageRef = storage.ref(`battle_markers/${markerId}/tooltip`);
+                    try {
+                        const snapshot = await tooltipStorageRef.put(tooltipFile);
+                        tooltipContent = await snapshot.ref.getDownloadURL();
+                        markerOptions.tooltipContent = tooltipContent;
+                    } catch (error) {
+                        console.error("Error uploading tooltip file:", error);
+                    }
+                }
+
+                try {
+                    await database.ref('battle_markers/' + markerId).set(markerOptions);
+                    createMarker(markerId, markerOptions);
+                    resetMarkerForm();
+                } catch (error) {
+                    console.error("Error adding marker:", error);
+                }
+            }
+
+            // Create marker
+            function createMarker(id, markerData) {
+                if (!hasEditPermissions && markerData.adminOnly) {
+                    return;
+                }
+
+                if (markers[id]) {
+                    map.removeLayer(markers[id]);
+                }
+
+                let marker;
+                switch (markerData.type) {
+                    case 'player':
+                    case 'enemy':
+                        marker = createCharacterMarker(markerData);
+                        break;
+                    default:
+                        console.error(`Unknown marker type: ${markerData.type}`, markerData);
+                        database.ref('battle_markers/' + id).remove(); // Remove invalid marker from Firebase
+                        return;
+                }
+
+                // Ensure marker is defined
+                if (!marker) {
+                    console.error(`Failed to create marker for id: ${id}`, markerData);
+                    database.ref('battle_markers/' + id).remove(); // Remove invalid marker from Firebase
+                    return;
+                }
+
+                marker.on('dragend', function(e) {
+                    const newPos = e.target.getLatLng();
+                    database.ref('battle_markers/' + id).update({
+                        lat: newPos.lat,
+                        lng: newPos.lng
+                    });
+                });
+
+                marker.on('click', function() {
+                    if (hasEditPermissions) {
+                        showSidebar();
+                        map.panTo(marker.getLatLng());
+                    }
+                });
+
+                markers[id] = marker.addTo(map);
+                updateSidebar();
+            }
+
+            function createCharacterMarker(markerData) {
+                const icon = L.divIcon({
+                    html: `<img src="${markerData.iconUrl}" class="circular-icon" onerror="this.src='assets/placeholder.png'">
+                           <div class="hp-bar"><div class="hp-bar-inner" style="width: ${calculateHpPercentage(markerData)}%;"></div></div>`,
+                    className: ''
+                });
+                const marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
+                const tooltipHtml = `<div style="font-size: 16px;">
+                                    <strong>${markerData.name}</strong><br>
+                                    <strong>STR:</strong> ${markerData.str}<br>
+                                    <strong>INT:</strong> ${markerData.int}<br>
+                                    <strong>DEX:</strong> ${markerData.dex}<br>
+                                    <strong>CON:</strong> ${markerData.con}<br>
+                                    <strong>STA:</strong> ${markerData.sta}<br>
+                                    <strong>PER:</strong> ${markerData.per}<br>
+                                    <strong>CHA:</strong> ${markerData.cha}<br>
+                                    <strong>HP:</strong> ${markerData.currentHp} / ${markerData.maxHp}<br>
+                                    <img src="${markerData.tooltipContent}" width="100" height="100"><br>
+                                    ${getAdminOptions(markerData)}
+                                   </div>`;
+                marker.bindPopup(tooltipHtml);
+                return marker;
+            }
+
+            // Calculate HP percentage for the HP bar
+            function calculateHpPercentage(markerData) {
+                return (markerData.currentHp / markerData.maxHp) * 100;
+            }
+
+            // Function to get admin options for the marker
+            function getAdminOptions(markerData) {
+                if (!hasEditPermissions) return '';
+                return `<button onclick="editMarker('${markerData.id}')">Edit</button>
+                        <button onclick="duplicateMarker('${markerData.id}')">Duplicate</button>
+                        <button onclick="removeMarker('${markerData.id}')">Remove</button>
+                        <input type="checkbox" ${markerData.adminOnly ? 'checked' : ''} onchange="toggleAdminOnly('${markerData.id}', this.checked)"> Admin Only`;
+            }
+
+            // Duplicate marker
+            function duplicateMarker(id) {
+                const marker = markers[id];
+                const markerData = marker.options;
+                const latLng = marker.getLatLng();
+                const newMarkerData = {
+                    ...markerData,
+                    id: database.ref().child('battle_markers').push().key,
+                    lat: latLng.lat,
+                    lng: latLng.lng,
+                    type: markerData.type || 'unknown'
+                };
+                database.ref('battle_markers/' + newMarkerData.id).set(newMarkerData);
+                createMarker(newMarkerData.id, newMarkerData);
+            }
+
+            // Toggle admin-only view
+            function toggleAdminOnly(id, isAdminOnly) {
+                database.ref('battle_markers/' + id).update({ adminOnly: isAdminOnly });
+                markers[id].options.adminOnly = isAdminOnly;
+            }
+
+            // Reset marker form fields
+            function resetMarkerForm() {
+                markerForm.reset();
+                toggleFields();
+            }
+
+            // Update sidebar with markers
+            function updateSidebar() {
+                markerList.innerHTML = '';
+                const searchQuery = searchInput.value.toLowerCase();
+                Object.keys(markers).forEach(id => {
+                    const marker = markers[id];
+                    const markerData = marker.getPopup().getContent().split('<br>');
+                    const listItem = document.createElement('li');
+                    listItem.innerHTML = `<strong>${markerData[0].replace('<strong>', '').replace('</strong>', '')}</strong>`;
+                    if (hasEditPermissions) {
+                        listItem.innerHTML += `<button onclick="editMarker('${id}')">Edit</button>
+                                               <button onclick="removeMarker('${id}')">Remove</button>`;
+                    }
+                    if (markerData[0].toLowerCase().includes(searchQuery)) {
+                        markerList.appendChild(listItem);
+                    }
+                });
+            }
+
+            // Search markers
+            function searchMarkers() {
+                updateSidebar();
+            }
+
+            // Edit marker
+            function editMarker(id) {
+                const marker = markers[id];
+                const markerData = JSON.parse(marker.getPopup().getContent());
+                const newName = prompt('Enter new name:', markerData.name);
+                let newTooltipContent = markerData.tooltipContent;
+                if (markerData.tooltipType === 'text') {
+                    newTooltipContent = prompt('Enter new tooltip text:', markerData.tooltipContent);
+                } else {
+                    newTooltipContent = prompt('Enter new tooltip image URL:', newTooltipContent);
+                }
+                const newHp = prompt('Enter new HP:', markerData.currentHp);
+                const adminOnly = confirm('Make this marker admin only?');
+                database.ref('battle_markers/' + id).update({
+                    name: newName,
+                    tooltipContent: newTooltipContent,
+                    currentHp: newHp,
+                    adminOnly: adminOnly
+                });
+                markerData.name = newName;
+                markerData.tooltipContent = newTooltipContent;
+                markerData.currentHp = newHp;
+                marker.setPopupContent(`<div style="font-size: 16px;">
+                                        <strong>${markerData.name}</strong><br>
+                                        <strong>STR:</strong> ${markerData.str}<br>
+                                        <strong>INT:</strong> ${markerData.int}<br>
+                                        <strong>DEX:</strong> ${markerData.dex}<br>
+                                        <strong>CON:</strong> ${markerData.con}<br>
+                                        <strong>STA:</strong> ${markerData.sta}<br>
+                                        <strong>PER:</strong> ${markerData.per}<br>
+                                        <strong>CHA:</strong> ${markerData.cha}<br>
+                                        <strong>HP:</strong> ${markerData.currentHp} / ${markerData.maxHp}<br>
+                                        <img src="${markerData.tooltipContent}" width="100" height="100"><br>
+                                        ${getAdminOptions(markerData)}
+                                       </div>`);
+                updateSidebar();
+            }
+
+            // Remove marker
+            function removeMarker(id) {
+                if (markers[id]) {
+                    map.removeLayer(markers[id]);
+                    delete markers[id];
+                    database.ref('battle_markers/' + id).remove();
+                    updateSidebar();
+                }
+            }
+
+            // Check if the user has edit permissions based on their IP
+            function checkIPAccess() {
+                fetch('https://api.ipify.org?format=json')
+                    .then(response => response.json())
+                    .then(data => {
+                        const userIP = data.ip;
+                        const allowedIPs = ['YOUR_ALLOWED_IPS']; // Replace with your allowed IP addresses
+                        hasEditPermissions = allowedIPs.includes(userIP);
+                        document.body.classList.toggle('readonly', !hasEditPermissions);
+                        sidebar.classList.toggle('hidden', !hasEditPermissions);
+                        toggleSidebarBtn.style.display = hasEditPermissions ? 'block' : 'none';
+
+                        Object.values(markers).forEach(marker => {
+                            if (hasEditPermissions) {
+                                marker.dragging.enable();
+                            } else {
+                                marker.dragging.disable();
+                            }
+                        });
+                    })
+                    .catch(error => {
+                        console.error('Error checking IP access:', error);
+                    });
+            }
+
+            checkIPAccess();
+
+            // Sidebar toggle
+            toggleSidebarBtn.addEventListener('click', () => {
+                sidebar.classList.toggle('hidden');
+                const isHidden = sidebar.classList.contains('hidden');
+                toggleSidebarBtn.style.left = isHidden ? '10px' : '310px';
+                document.querySelector('.leaflet-top.leaflet-left').style.left = isHidden ? '10px' : '320px';
+                map.invalidateSize();
+            });
+
+            function showSidebar() {
+                if (sidebar.classList.contains('hidden')) {
+                    sidebar.classList.remove('hidden');
+                    toggleSidebarBtn.style.left = '310px';
+                    document.querySelector('.leaflet-top.leaflet-left').style.left = '320px';
+                    map.invalidateSize();
+                }
+            }
+
+            // Handle collapsible sections
+            for (let i = 0; i < coll.length; i++) {
+                coll[i].addEventListener("click", function() {
+                    this.classList.toggle("active");
+                    this.nextElementSibling.classList.toggle("show");
+                });
+            }
+
+            // Filter predefined markers
+            function filterPredefinedMarkers() {
+                const searchQuery = predefinedMarkerSearch.value.toLowerCase();
+                Object.keys(predefinedMarkers).forEach(id => {
+                    const marker = predefinedMarkers[id];
+                    const markerData = marker.getPopup().getContent().split('<br>');
+                    const markerName = markerData[0].replace('<strong>', '').replace('</strong>', '').toLowerCase();
+                    marker._icon.style.display = markerName.includes(searchQuery) ? 'block' : 'none';
+                });
+            }
+
+            // Expose functions to the global scope
+            window.removeMarker = removeMarker;
+            window.editMarker = editMarker;
+            window.toggleFields = toggleFields;
+            window.addMarker = addMarker;
+            window.searchMarkers = searchMarkers;
+            window.duplicateMarker = duplicateMarker;
+            window.toggleAdminOnly = toggleAdminOnly;
+            window.filterPredefinedMarkers = filterPredefinedMarkers;
+
+            // Initial call to set visibility based on default selected marker type
+            toggleFields();
+        })();
+    </script>
+</body>
+</html>
