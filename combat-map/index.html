@@ -293,7 +293,7 @@
             map.fitBounds(imageBounds);
 
             // Add grid to the map
-            const gridSize = 100; // Set the grid size here
+            const gridSize = 100; // Set the desired grid size in pixels
 
             const gridLayer = L.layerGroup().addTo(map);
 
@@ -302,14 +302,19 @@
                 const bounds = map.getBounds();
                 const start = map.project(bounds.getNorthWest());
                 const end = map.project(bounds.getSouthEast());
-                const size = gridSize;
 
-                for (let x = start.x - (start.x % size); x < end.x; x += size) {
-                    for (let y = start.y - (start.y % size); y < end.y; y += size) {
-                        const nw = map.unproject([x, y]);
-                        const se = map.unproject([x + size, y + size]);
-                        const rect = L.rectangle([nw, se], { color: '#fff', weight: 1, fillOpacity: 0 }).addTo(gridLayer);
-                    }
+                for (let x = Math.floor(start.x / gridSize) * gridSize; x < end.x; x += gridSize) {
+                    const xLine = L.polyline([
+                        map.unproject([x, start.y]),
+                        map.unproject([x, end.y])
+                    ], { color: '#fff', weight: 1, opacity: 0.5 }).addTo(gridLayer);
+                }
+
+                for (let y = Math.floor(start.y / gridSize) * gridSize; y < end.y; y += gridSize) {
+                    const yLine = L.polyline([
+                        map.unproject([start.x, y]),
+                        map.unproject([end.x, y])
+                    ], { color: '#fff', weight: 1, opacity: 0.5 }).addTo(gridLayer);
                 }
             }
 
