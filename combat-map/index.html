@@ -293,20 +293,28 @@
             map.fitBounds(imageBounds);
 
             // Add grid to the map
-            map.on('zoomend', function() {
-                const zoom = map.getZoom();
-                const tileSize = 256;
-                const gridLayer = L.gridLayer({
-                    pane: 'tilePane',
-                    tileSize: tileSize
-                }).addTo(map);
-                gridLayer.createTile = function(coords) {
-                    const tile = L.DomUtil.create('div', 'grid-tile');
-                    tile.style.width = tile.style.height = tileSize + 'px';
-                    tile.style.border = '1px solid rgba(255,255,255,0.2)';
-                    return tile;
-                };
-            });
+const gridSize = 100; // Set the grid size here
+
+const gridLayer = L.layerGroup().addTo(map);
+
+function drawGrid() {
+    gridLayer.clearLayers();
+    const bounds = map.getBounds();
+    const start = map.project(bounds.getNorthWest());
+    const end = map.project(bounds.getSouthEast());
+    const size = gridSize;
+
+    for (let x = start.x - (start.x % size); x < end.x; x += size) {
+        for (let y = start.y - (start.y % size); y < end.y; y += size) {
+            const nw = map.unproject([x, y]);
+            const se = map.unproject([x + size, y + size]);
+            const rect = L.rectangle([nw, se], { color: '#fff', weight: 1, fillOpacity: 0 }).addTo(gridLayer);
+        }
+    }
+}
+
+map.on('zoomend moveend', drawGrid);
+drawGrid();
 
             let markers = {};
             let predefinedMarkers = {};
