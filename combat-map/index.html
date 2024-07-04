@@ -153,21 +153,21 @@
             display: block;
         }
         #predefinedMarkerBar {
-            width: 100%;
+            width: calc(100% - 320px); /* Adjust width to move with the sidebar */
             height: 80px;
             background: #34495e;
             overflow-x: scroll;
             white-space: nowrap;
             position: absolute;
             top: 0;
-            left: 0;
+            left: 320px; /* Start aligned with the sidebar */
             z-index: 1000;
             display: flex;
             align-items: center;
             padding: 5px;
             box-shadow: 0 3px 10px rgba(0,0,0,0.5);
-            transition: left 0.3s ease;
-        }
+            transition: left 0.3s ease, width 0.3s ease;
+}
         .predefined-marker {
             width: 50px;
             height: 50px;
@@ -293,28 +293,28 @@
             map.fitBounds(imageBounds);
 
             // Add grid to the map
-const gridSize = 100; // Set the grid size here
+            const gridSize = 100; // Set the grid size here
 
-const gridLayer = L.layerGroup().addTo(map);
+            const gridLayer = L.layerGroup().addTo(map);
 
-function drawGrid() {
-    gridLayer.clearLayers();
-    const bounds = map.getBounds();
-    const start = map.project(bounds.getNorthWest());
-    const end = map.project(bounds.getSouthEast());
-    const size = gridSize;
+            function drawGrid() {
+                gridLayer.clearLayers();
+                const bounds = map.getBounds();
+                const start = map.project(bounds.getNorthWest());
+                const end = map.project(bounds.getSouthEast());
+                const size = gridSize;
 
-    for (let x = start.x - (start.x % size); x < end.x; x += size) {
-        for (let y = start.y - (start.y % size); y < end.y; y += size) {
-            const nw = map.unproject([x, y]);
-            const se = map.unproject([x + size, y + size]);
-            const rect = L.rectangle([nw, se], { color: '#fff', weight: 1, fillOpacity: 0 }).addTo(gridLayer);
-        }
-    }
-}
+                for (let x = start.x - (start.x % size); x < end.x; x += size) {
+                    for (let y = start.y - (start.y % size); y < end.y; y += size) {
+                        const nw = map.unproject([x, y]);
+                        const se = map.unproject([x + size, y + size]);
+                        const rect = L.rectangle([nw, se], { color: '#fff', weight: 1, fillOpacity: 0 }).addTo(gridLayer);
+                    }
+                }
+            }
 
-map.on('zoomend moveend', drawGrid);
-drawGrid();
+            map.on('zoomend moveend', drawGrid);
+            drawGrid();
 
             let markers = {};
             let predefinedMarkers = {};
@@ -799,9 +799,11 @@ drawGrid();
                 const isHidden = sidebar.classList.contains('hidden');
                 toggleSidebarBtn.style.left = isHidden ? '10px' : '310px';
                 predefinedMarkerBar.style.left = isHidden ? '10px' : '320px';
+                predefinedMarkerBar.style.width = isHidden ? 'calc(100% - 10px)' : 'calc(100% - 320px)';
                 document.querySelector('.leaflet-top.leaflet-left').style.left = isHidden ? '10px' : '320px';
                 map.invalidateSize();
             });
+
 
             function showSidebar() {
                 if (sidebar.classList.contains('hidden')) {
