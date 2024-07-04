@@ -166,6 +166,7 @@
             align-items: center;
             padding: 5px;
             box-shadow: 0 3px 10px rgba(0,0,0,0.5);
+            transition: left 0.3s ease;
         }
         .predefined-marker {
             width: 50px;
@@ -185,10 +186,13 @@
             border-radius: 5px;
             border: none;
         }
+        .admin-only {
+            display: none;
+        }
     </style>
 </head>
 <body>
-    <div id="predefinedMarkerBar">
+    <div id="predefinedMarkerBar" class="admin-only">
         <input type="text" id="predefinedMarkerSearch" placeholder="Search markers..." oninput="filterPredefinedMarkers()">
     </div>
     <button id="toggleSidebar" style="display:none;">☰</button>
@@ -199,8 +203,7 @@
             <form id="markerForm">
                 <label for="markerType">Type:</label><br>
                 <select id="markerType" onchange="toggleFields();">
-                    <option value="player">Player</option>
-                    <option value="enemy">Enemy</option>
+                    <option value="character">Character</option>
                 </select><br>
                 <label for="markerName">Name:</label><br>
                 <input type="text" id="markerName"><br>
@@ -238,6 +241,7 @@
                 <label for="markerAdminOnly">Admin Only:</label>
                 <input type="checkbox" id="markerAdminOnly"><br>
                 <button type="button" onclick="addMarker()">Add Marker</button>
+                <button type="button" onclick="addPredefinedMarker()">Add to Predefined</button>
             </form>
         </div>
 
@@ -368,6 +372,15 @@
                 }
             });
 
+            // Load predefined markers from Firebase
+            database.ref('predefined_markers').on('value', snapshot => {
+                const data = snapshot.val();
+                if (data) {
+                    predefinedMarkers = data;
+                    updatePredefinedMarkerBar();
+                }
+            });
+
             // Correct marker data
             function correctMarkerData(data) {
                 const defaults = {
@@ -472,6 +485,78 @@
                 }
             }
 
+            // Add predefined marker
+            async function addPredefinedMarker() {
+                const markerType = markerTypeSelect.value;
+                const name = markerNameInput.value;
+                let iconUrl = markerIconInput.value;
+                const tooltipType = markerTooltipTypeSelect.value;
+                let tooltipContent = markerTooltipInput.value;
+                const adminOnly = markerAdminOnlyCheckbox.checked;
+                const str = parseInt(strInput.value) || 0;
+                const int = parseInt(intInput.value) || 0;
+                const dex = parseInt(dexInput.value) || 0;
+                const con = parseInt(conInput.value) || 0;
+                const sta = parseInt(staInput.value) || 0;
+                const per = parseInt(perInput.value) || 0;
+                const cha = parseInt(chaInput.value) || 0;
+                const maxHp = parseInt(maxHpInput.value) || 100;
+                const currentHp = parseInt(currentHpInput.value) || maxHp;
+                const markerId = database.ref().child('predefined_markers').push().key;
+
+                let markerOptions = {
+                    id: markerId,
+                    name,
+                    type: markerType,
+                    iconUrl,
+                    tooltipType,
+                    tooltipContent,
+                    adminOnly,
+                    str,
+                    int,
+                    dex,
+                    con,
+                    sta,
+                    per,
+                    cha,
+                    maxHp,
+                    currentHp
+                };
+
+                const iconFile = markerIconFileInput.files[0];
+                const tooltipFile = markerTooltipFileInput.files[0];
+
+                if (iconFile) {
+                    const iconStorageRef = storage.ref(`predefined_markers/${markerId}/icon`);
+                    try {
+                        const snapshot = await iconStorageRef.put(iconFile);
+                        iconUrl = await snapshot.ref.getDownloadURL();
+                        markerOptions.iconUrl = iconUrl;
+                    } catch (error) {
+                        console.error("Error uploading icon file:", error);
+                    }
+                }
+
+                if (tooltipFile && tooltipType === 'image') {
+                    const tooltipStorageRef = storage.ref(`predefined_markers/${markerId}/tooltip`);
+                    try {
+                        const snapshot = await tooltipStorageRef.put(tooltipFile);
+                        tooltipContent = await snapshot.ref.getDownloadURL();
+                        markerOptions.tooltipContent = tooltipContent;
+                    } catch (error) {
+                        console.error("Error uploading tooltip file:", error);
+                    }
+                }
+
+                try {
+                    await database.ref('predefined_markers/' + markerId).set(markerOptions);
+                    updatePredefinedMarkerBar();
+                    resetMarkerForm();
+                } catch (error) {
+                    console.error("Error adding predefined marker:", error);
+                }
+            }
+
             // Create marker
             function createMarker(id, markerData) {
                 if (!hasEditPermissions && markerData.adminOnly) {
@@ -482,17 +567,7 @@
                     map.removeLayer(markers[id]);
                 }
 
-                let marker;
-                switch (markerData.type) {
-                    case 'player':
-                    case 'enemy':
-                        marker = createCharacterMarker(markerData);
-                        break;
-                    default:
-                        console.error(`Unknown marker type: ${markerData.type}`, markerData);
-                        database.ref('battle_markers/' + id).remove(); // Remove invalid marker from Firebase
-                        return;
-                }
+                let marker = createCharacterMarker(markerData);
 
                 // Ensure marker is defined
                 if (!marker) {
@@ -529,14 +604,9 @@
                 const marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
                 const tooltipHtml = `<div style="font-size: 16px;">
                                     <strong>${markerData.name}</strong><br>
-                                    <strong>STR:</strong> ${markerData.str}<br>
-                                    <strong>INT:</strong> ${markerData.int}<br>
-                                    <strong>DEX:</strong> ${markerData.dex}<br>
-                                    <strong>CON:</strong> ${markerData.con}<br>
-                                    <strong>STA:</strong> ${markerData.sta}<br>
-                                    <strong>PER:</strong> ${markerData.per}<br>
-                                    <strong>CHA:</strong> ${markerData.cha}<br>
-                                    <strong>HP:</strong> ${markerData.currentHp} / ${markerData.maxHp}<br>
+                                    STR: ${markerData.str} | CHA: ${markerData.cha} | INT: ${markerData.int} | PER: ${markerData.per}<br>
+                                    STA: ${markerData.sta} | CON: ${markerData.con} | DEX: ${markerData.dex}<br>
+                                    <strong>HP:</strong> <input type="number" value="${markerData.currentHp}" onchange="updateMarkerHp('${markerData.id}', this.value)" ${hasEditPermissions ? '' : 'readonly'}> / ${markerData.maxHp}<br>
                                     <img src="${markerData.tooltipContent}" width="100" height="100"><br>
                                     ${getAdminOptions(markerData)}
                                    </div>`;
@@ -544,16 +614,43 @@
                 return marker;
             }
 
+            // Update marker HP
+            function updateMarkerHp(id, hp) {
+                const newHp = parseInt(hp);
+                if (isNaN(newHp)) return;
+                database.ref('battle_markers/' + id).update({ currentHp: newHp });
+                if (markers[id]) {
+                    const marker = markers[id];
+                    const markerData = marker.options;
+                    markerData.currentHp = newHp;
+                    marker.setPopupContent(`<div style="font-size: 16px;">
+                                            <strong>${markerData.name}</strong><br>
+                                            STR: ${markerData.str} | CHA: ${markerData.cha} | INT: ${markerData.int} | PER: ${markerData.per}<br>
+                                            STA: ${markerData.sta} | CON: ${markerData.con} | DEX: ${markerData.dex}<br>
+                                            <strong>HP:</strong> <input type="number" value="${markerData.currentHp}" onchange="updateMarkerHp('${markerData.id}', this.value)" ${hasEditPermissions ? '' : 'readonly'}> / ${markerData.maxHp}<br>
+                                            <img src="${markerData.tooltipContent}" width="100" height="100"><br>
+                                            ${getAdminOptions(markerData)}
+                                           </div>`);
+                    updateHpBar(marker);
+                }
+            }
+
             // Calculate HP percentage for the HP bar
             function calculateHpPercentage(markerData) {
                 return (markerData.currentHp / markerData.maxHp) * 100;
             }
 
+            // Update HP bar
+            function updateHpBar(marker) {
+                const hpBarInner = marker.getElement().querySelector('.hp-bar-inner');
+                const hpPercentage = calculateHpPercentage(marker.options);
+                hpBarInner.style.width = hpPercentage + '%';
+            }
+
             // Function to get admin options for the marker
             function getAdminOptions(markerData) {
                 if (!hasEditPermissions) return '';
-                return `<button onclick="editMarker('${markerData.id}')">Edit</button>
-                        <button onclick="duplicateMarker('${markerData.id}')">Duplicate</button>
+                return `<button onclick="duplicateMarker('${markerData.id}')">Duplicate</button>
                         <button onclick="removeMarker('${markerData.id}')">Remove</button>
                         <input type="checkbox" ${markerData.adminOnly ? 'checked' : ''} onchange="toggleAdminOnly('${markerData.id}', this.checked)"> Admin Only`;
             }
@@ -596,8 +693,7 @@
                     const listItem = document.createElement('li');
                     listItem.innerHTML = `<strong>${markerData[0].replace('<strong>', '').replace('</strong>', '')}</strong>`;
                     if (hasEditPermissions) {
-                        listItem.innerHTML += `<button onclick="editMarker('${id}')">Edit</button>
-                                               <button onclick="removeMarker('${id}')">Remove</button>`;
+                        listItem.innerHTML += `<button onclick="removeMarker('${id}')">Remove</button>`;
                     }
                     if (markerData[0].toLowerCase().includes(searchQuery)) {
                         markerList.appendChild(listItem);
@@ -607,44 +703,6 @@
 
             // Search markers
             function searchMarkers() {
-                updateSidebar();
-            }
-
-            // Edit marker
-            function editMarker(id) {
-                const marker = markers[id];
-                const markerData = JSON.parse(marker.getPopup().getContent());
-                const newName = prompt('Enter new name:', markerData.name);
-                let newTooltipContent = markerData.tooltipContent;
-                if (markerData.tooltipType === 'text') {
-                    newTooltipContent = prompt('Enter new tooltip text:', markerData.tooltipContent);
-                } else {
-                    newTooltipContent = prompt('Enter new tooltip image URL:', newTooltipContent);
-                }
-                const newHp = prompt('Enter new HP:', markerData.currentHp);
-                const adminOnly = confirm('Make this marker admin only?');
-                database.ref('battle_markers/' + id).update({
-                    name: newName,
-                    tooltipContent: newTooltipContent,
-                    currentHp: newHp,
-                    adminOnly: adminOnly
-                });
-                markerData.name = newName;
-                markerData.tooltipContent = newTooltipContent;
-                markerData.currentHp = newHp;
-                marker.setPopupContent(`<div style="font-size: 16px;">
-                                        <strong>${markerData.name}</strong><br>
-                                        <strong>STR:</strong> ${markerData.str}<br>
-                                        <strong>INT:</strong> ${markerData.int}<br>
-                                        <strong>DEX:</strong> ${markerData.dex}<br>
-                                        <strong>CON:</strong> ${markerData.con}<br>
-                                        <strong>STA:</strong> ${markerData.sta}<br>
-                                        <strong>PER:</strong> ${markerData.per}<br>
-                                        <strong>CHA:</strong> ${markerData.cha}<br>
-                                        <strong>HP:</strong> ${markerData.currentHp} / ${markerData.maxHp}<br>
-                                        <img src="${markerData.tooltipContent}" width="100" height="100"><br>
-                                        ${getAdminOptions(markerData)}
-                                       </div>`);
                 updateSidebar();
             }
 
@@ -658,6 +716,43 @@
                 }
             }
 
+            // Update predefined marker bar
+            function updatePredefinedMarkerBar() {
+                predefinedMarkerBar.innerHTML = '<input type="text" id="predefinedMarkerSearch" placeholder="Search markers..." oninput="filterPredefinedMarkers()">';
+                Object.keys(predefinedMarkers).forEach(id => {
+                    const markerData = predefinedMarkers[id];
+                    const markerElement = document.createElement('div');
+                    markerElement.className = 'predefined-marker';
+                    markerElement.innerHTML = `<img src="${markerData.iconUrl}" alt="${markerData.name}" title="${markerData.name}">`;
+                    markerElement.onclick = () => placePredefinedMarker(id);
+                    predefinedMarkerBar.appendChild(markerElement);
+                });
+            }
+
+            // Place predefined marker
+            function placePredefinedMarker(id) {
+                const markerData = predefinedMarkers[id];
+                const newMarkerData = {
+                    ...markerData,
+                    id: database.ref().child('battle_markers').push().key,
+                    lat: map.getCenter().lat,
+                    lng: map.getCenter().lng,
+                    type: markerData.type || 'unknown'
+                };
+                database.ref('battle_markers/' + newMarkerData.id).set(newMarkerData);
+                createMarker(newMarkerData.id, newMarkerData);
+            }
+
+            // Filter predefined markers
+            function filterPredefinedMarkers() {
+                const searchQuery = predefinedMarkerSearch.value.toLowerCase();
+                Object.keys(predefinedMarkers).forEach(id => {
+                    const markerData = predefinedMarkers[id];
+                    const markerElement = predefinedMarkerBar.querySelector(`.predefined-marker[title="${markerData.name}"]`);
+                    markerElement.style.display = markerData.name.toLowerCase().includes(searchQuery) ? 'block' : 'none';
+                });
+            }
+
             // Check if the user has edit permissions based on their IP
             function checkIPAccess() {
                 fetch('https://api.ipify.org?format=json')
@@ -669,6 +764,11 @@
                         document.body.classList.toggle('readonly', !hasEditPermissions);
                         sidebar.classList.toggle('hidden', !hasEditPermissions);
                         toggleSidebarBtn.style.display = hasEditPermissions ? 'block' : 'none';
+                        if (hasEditPermissions) {
+                            predefinedMarkerBar.classList.add('admin-only');
+                        } else {
+                            predefinedMarkerBar.classList.remove('admin-only');
+                        }
 
                         Object.values(markers).forEach(marker => {
                             if (hasEditPermissions) {
@@ -690,6 +790,7 @@
                 sidebar.classList.toggle('hidden');
                 const isHidden = sidebar.classList.contains('hidden');
                 toggleSidebarBtn.style.left = isHidden ? '10px' : '310px';
+                predefinedMarkerBar.style.left = isHidden ? '10px' : '320px';
                 document.querySelector('.leaflet-top.leaflet-left').style.left = isHidden ? '10px' : '320px';
                 map.invalidateSize();
             });
@@ -698,6 +799,7 @@
                 if (sidebar.classList.contains('hidden')) {
                     sidebar.classList.remove('hidden');
                     toggleSidebarBtn.style.left = '310px';
+                    predefinedMarkerBar.style.left = '320px';
                     document.querySelector('.leaflet-top.leaflet-left').style.left = '320px';
                     map.invalidateSize();
                 }
@@ -711,22 +813,12 @@
                 });
             }
 
-            // Filter predefined markers
-            function filterPredefinedMarkers() {
-                const searchQuery = predefinedMarkerSearch.value.toLowerCase();
-                Object.keys(predefinedMarkers).forEach(id => {
-                    const marker = predefinedMarkers[id];
-                    const markerData = marker.getPopup().getContent().split('<br>');
-                    const markerName = markerData[0].replace('<strong>', '').replace('</strong>', '').toLowerCase();
-                    marker._icon.style.display = markerName.includes(searchQuery) ? 'block' : 'none';
-                });
-            }
-
             // Expose functions to the global scope
             window.removeMarker = removeMarker;
-            window.editMarker = editMarker;
+            window.updateMarkerHp = updateMarkerHp;
             window.toggleFields = toggleFields;
             window.addMarker = addMarker;
+            window.addPredefinedMarker = addPredefinedMarker;
             window.searchMarkers = searchMarkers;
             window.duplicateMarker = duplicateMarker;
             window.toggleAdminOnly = toggleAdminOnly;
