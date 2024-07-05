@@ -195,7 +195,7 @@
     <div id="predefinedMarkerBar" class="admin-only">
         <input type="text" id="predefinedMarkerSearch" placeholder="Search markers..." oninput="filterPredefinedMarkers()">
     </div>
-    <button id="toggleSidebar" style="display:none;">☰</button>
+    <button id="toggleSidebar" class="admin-only" style="display:none;">☰</button>
     <div id="sidebar" class="hidden">
         <input type="text" id="searchInput" placeholder="Search markers..." oninput="searchMarkers()">
         <button type="button" class="collapsible">Marker Management</button>
@@ -221,12 +221,20 @@
                 <label for="currentHp">Current HP:</label><br>
                 <input type="text" id="currentHp"><br>
                 <label for="speed">Speed:</label><br>
-                <input type="text" id="speed"><br>
-                <label for="stats">Stats (STR | CHA | INT | PER | STA | CON | DEX):</label><br>
-                <input type="text" id="str" placeholder="STR"><input type="text" id="cha" placeholder="CHA"><br>
-                <input type="text" id="int" placeholder="INT"><input type="text" id="per" placeholder="PER"><br>
-                <input type="text" id="sta" placeholder="STA"><input type="text" id="con" placeholder="CON"><br>
-                <input type="text" id="dex" placeholder="DEX"><br>
+                <label for="str">STR:</label><br>
+                <input type="text" id="str"><br>
+                <label for="cha">CHA:</label><br>
+                <input type="text" id="cha"><br>
+                <label for="int">INT:</label><br>
+                <input type="text" id="int"><br>
+                <label for="per">PER:</label><br>
+                <input type="text" id="per"><br>
+                <label for="sta">STA:</label><br>
+                <input type="text" id="sta"><br>
+                <label for="con">CON:</label><br>
+                <input type="text" id="con"><br>
+                <label for="dex">DEX:</label><br>
+                <input type="text" id="dex"><br>
                 <label for="details">Details:</label><br>
                 <textarea id="details"></textarea><br>
                 <label for="senses">Senses:</label><br>
@@ -477,6 +485,11 @@
 
             // Add marker
             async function addMarker() {
+                if (!hasEditPermissions) {
+                    alert("You do not have permission to add markers.");
+                    return;
+                }
+
                 const markerType = markerTypeSelect.value;
                 const name = markerNameInput.value;
                 const shortDesc = markerShortDescInput.value;
@@ -567,6 +580,11 @@
 
             // Add predefined marker
             async function addPredefinedMarker() {
+                if (!hasEditPermissions) {
+                    alert("You do not have permission to add predefined markers.");
+                    return;
+                }
+
                 const markerType = markerTypeSelect.value;
                 const name = markerNameInput.value;
                 const shortDesc = markerShortDescInput.value;
@@ -694,7 +712,7 @@
             function createCharacterMarker(markerData) {
                 const icon = L.divIcon({
                     html: `<img src="${markerData.iconUrl}" class="circular-icon" onerror="this.src='assets/placeholder.png'">
-                           <div class="hp-bar"><div class="hp-bar-inner" style="width: ${calculateHpPercentage(markerData)}%;"></div></div>`,
+                        <div class="hp-bar"><div class="hp-bar-inner" style="width: ${calculateHpPercentage(markerData)}%;"></div></div>`,
                     className: ''
                 });
                 const marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
@@ -878,12 +896,9 @@
                         hasEditPermissions = allowedIPs.includes(userIP);
                         document.body.classList.toggle('readonly', !hasEditPermissions);
                         sidebar.classList.toggle('hidden', !hasEditPermissions);
-                        toggleSidebarBtn.style.display = hasEditPermissions ? 'block' : 'none';
-                        if (hasEditPermissions) {
-                            predefinedMarkerBar.classList.add('admin-only');
-                        } else {
-                            predefinedMarkerBar.classList.remove('admin-only');
-                        }
+                        document.querySelectorAll('.admin-only').forEach(el => {
+                            el.style.display = hasEditPermissions ? 'block' : 'none';
+                        });
 
                         Object.values(markers).forEach(marker => {
                             if (hasEditPermissions) {
@@ -944,6 +959,7 @@
             // Initial call to set visibility based on default selected marker type
             toggleFields();
         })();
+
     </script>
 </body>
 </html>
