@@ -343,6 +343,8 @@
                         map.unproject([end.x, y])
                     ], { color: '#fff', weight: 1, opacity: 0.5 }).addTo(gridLayer);
                 }
+
+                console.log('Current zoom level:', map.getZoom());
             }
 
             map.on('zoomend moveend', drawGrid);
