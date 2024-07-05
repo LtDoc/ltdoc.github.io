@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Character Card App</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-database.js"></script>
+</head>
+<body>
+  <div id="root">
+    <div id="home">
+      <h1>Welcome to Character Card App</h1>
+      <input id="username" type="text" placeholder="Username">
+      <input id="password" type="password" placeholder="Password">
+      <button id="sign-in">Sign In</button>
+    </div>
+    <div id="dashboard" style="display:none;">
+      <h1>Dashboard</h1>
+      <div id="card"></div>
+      <div id="edit-card">
+        <div id="edit-categories">
+          <button id="edit-abilities">Abilities</button>
+          <button id="edit-spells">Spells</button>
+          <button id="edit-languages">Languages</button>
+          <!-- Add more categories as needed -->
+        </div>
+        <div id="pagination" style="display: none;">
+          <input type="text" id="search" placeholder="Search...">
+          <div id="options-list"></div>
+          <button id="prev-page">Previous</button>
+          <button id="next-page">Next</button>
+        </div>
+      </div>
+    </div>
+    <div id="admin" style="display:none;">
+      <h1>Admin Panel</h1>
+      <input id="level-up-points" type="number" placeholder="Level Up Points">
+      <button id="level-up">Level Up</button>
+      <ul id="player-cards"></ul>
+      <div id="add-option">
+        <input id="option-category" type="text" placeholder="Category">
+        <input id="option-name" type="text" placeholder="Name">
+        <input id="option-description" type="text" placeholder="Description">
+        <button id="add-option-button">Add Option</button>
+      </div>
+    </div>
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>
