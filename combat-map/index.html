@@ -709,11 +709,11 @@
                             <strong>${markerData.name}</strong><br>
                             ${markerData.shortDesc ? `<em>${markerData.shortDesc}</em><br><hr>` : ''}`;
 
-                html += `AC: ${markerData.ac}<br>`;
-                html += `HP: ${markerData.currentHp} / ${markerData.maxHp}<br>`;
-                html += `Speed: ${markerData.speed} ft.<br><hr>`;
-                html += `STR: ${markerData.str} | CHA: ${markerData.cha} | INT: ${markerData.int} | PER: ${markerData.per}<br>`;
-                html += `STA: ${markerData.sta} | CON: ${markerData.con} | DEX: ${markerData.dex}<br><hr>`;
+                html += `AC: ${markerData.ac || 'undefined'}<br>`;
+                html += `HP: ${markerData.currentHp || 'undefined'} / ${markerData.maxHp || 'undefined'}<br>`;
+                html += `Speed: ${markerData.speed || 'undefined'} ft.<br><hr>`;
+                html += `STR: ${markerData.str || 'undefined'} | CHA: ${markerData.cha || 'undefined'} | INT: ${markerData.int || 'undefined'} | PER: ${markerData.per || 'undefined'}<br>`;
+                html += `STA: ${markerData.sta || 'undefined'} | CON: ${markerData.con || 'undefined'} | DEX: ${markerData.dex || 'undefined'}<br><hr>`;
 
                 if (markerData.details) {
                     html += `<strong>Details:</strong><br>${markerData.details}<br><hr>`;
@@ -742,12 +742,12 @@
                 database.ref('battle_markers/' + id).update({ currentHp: newHp });
                 if (markers[id]) {
                     const marker = markers[id];
-                    const markerData = marker.options;
-                    markerData.currentHp = newHp;
+                    const markerData = { ...marker.options, currentHp: newHp }; // Update the current HP in markerData
                     marker.setPopupContent(generateTooltipHtml(markerData));
                     updateHpBar(marker);
                 }
             }
+
 
             // Calculate HP percentage for the HP bar
             function calculateHpPercentage(markerData) {
