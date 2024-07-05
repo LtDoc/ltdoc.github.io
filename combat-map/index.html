@@ -306,34 +306,38 @@
 
             setBackground('assets/Battle_arenas.png'); // Default background
 
-            // Add grid to the map
-            const gridSize = 100; // Set the grid size here
-
-            const gridLayer = L.layerGroup().addTo(map);
+            // Define a constant grid size in pixels
+            const GRID_PIXEL_SIZE = 50; // Adjust this value to your preference
 
             function drawGrid() {
                 gridLayer.clearLayers();
                 const bounds = map.getBounds();
-                const start = map.project(bounds.getNorthWest());
-                const end = map.project(bounds.getSouthEast());
+                const zoom = map.getZoom();
+                
+                // Calculate the grid size in map units based on the current zoom level
+                const gridSizeInMapUnits = GRID_PIXEL_SIZE * map.distance(
+                    map.containerPointToLatLng([0, 0]),
+                    map.containerPointToLatLng([GRID_PIXEL_SIZE, 0])
+                ) / GRID_PIXEL_SIZE;
 
-                for (let x = Math.floor(start.x / gridSize) * gridSize; x < end.x; x += gridSize) {
-                    const xLine = L.polyline([
-                        map.unproject([x, start.y]),
-                        map.unproject([x, end.y])
-                    ], { color: '#fff', weight: 1, opacity: 0.5 }).addTo(gridLayer);
+                const north = bounds.getNorth();
+                const west = bounds.getWest();
+                const east = bounds.getEast();
+                const south = bounds.getSouth();
+
+                // Draw vertical lines
+                for (let x = Math.floor(west / gridSizeInMapUnits) * gridSizeInMapUnits; x < east; x += gridSizeInMapUnits) {
+                    L.polyline([[north, x], [south, x]], { color: '#fff', weight: 1, opacity: 0.5 }).addTo(gridLayer);
                 }
 
-                for (let y = Math.floor(start.y / gridSize) * gridSize; y < end.y; y += gridSize) {
-                    const yLine = L.polyline([
-                        map.unproject([start.x, y]),
-                        map.unproject([end.x, y])
-                    ], { color: '#fff', weight: 1, opacity: 0.5 }).addTo(gridLayer);
+                // Draw horizontal lines
+                for (let y = Math.floor(south / gridSizeInMapUnits) * gridSizeInMapUnits; y < north; y += gridSizeInMapUnits) {
+                    L.polyline([[y, west], [y, east]], { color: '#fff', weight: 1, opacity: 0.5 }).addTo(gridLayer);
                 }
             }
 
+            // Make sure to call drawGrid on zoom as well
             map.on('zoomend moveend', drawGrid);
-            drawGrid();
 
             let markers = {};
             let predefinedMarkers = {};
