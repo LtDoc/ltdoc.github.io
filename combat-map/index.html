@@ -58,7 +58,7 @@
             box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
         }
         .leaflet-top.leaflet-left {
-            left: 10px; /* Adjust to ensure it is not on top of the sidebar */
+            left: 10px;
         }
         .leaflet-container .custom-div-icon {
             font-size: 24px;
@@ -104,7 +104,7 @@
             border-radius: 5px;
             box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
         }
-        input, select {
+        input, select, textarea {
             width: calc(100% - 30px);
             padding: 10px;
             margin: 5px 0;
@@ -153,21 +153,21 @@
             display: block;
         }
         #predefinedMarkerBar {
-            width: calc(100% - 320px); /* Adjust width to move with the sidebar */
+            width: calc(100% - 320px);
             height: 80px;
             background: #34495e;
             overflow-x: scroll;
             white-space: nowrap;
             position: absolute;
             top: 0;
-            left: 320px; /* Start aligned with the sidebar */
+            left: 320px;
             z-index: 1000;
             display: flex;
             align-items: center;
             padding: 5px;
             box-shadow: 0 3px 10px rgba(0,0,0,0.5);
             transition: left 0.3s ease, width 0.3s ease;
-}
+        }
         .predefined-marker {
             width: 50px;
             height: 50px;
@@ -207,29 +207,31 @@
                 </select><br>
                 <label for="markerName">Name:</label><br>
                 <input type="text" id="markerName"><br>
+                <label for="markerShortDesc">Short Description:</label><br>
+                <textarea id="markerShortDesc"></textarea><br>
                 <div id="iconFields">
                     <label for="markerIcon">Icon URL:</label><br>
                     <input type="text" id="markerIcon"><br>
                     <input type="file" id="markerIconFile" accept="image/*"><br>
                 </div>
-                <label for="str">STR:</label><br>
-                <input type="text" id="str"><br>
-                <label for="int">INT:</label><br>
-                <input type="text" id="int"><br>
-                <label for="dex">DEX:</label><br>
-                <input type="text" id="dex"><br>
-                <label for="con">CON:</label><br>
-                <input type="text" id="con"><br>
-                <label for="sta">STA:</label><br>
-                <input type="text" id="sta"><br>
-                <label for="per">PER:</label><br>
-                <input type="text" id="per"><br>
-                <label for="cha">CHA:</label><br>
-                <input type="text" id="cha"><br>
+                <label for="ac">Armor Class (AC):</label><br>
+                <input type="text" id="ac"><br>
                 <label for="maxHp">Max HP:</label><br>
                 <input type="text" id="maxHp"><br>
                 <label for="currentHp">Current HP:</label><br>
                 <input type="text" id="currentHp"><br>
+                <label for="speed">Speed:</label><br>
+                <input type="text" id="speed"><br>
+                <label for="details">Details:</label><br>
+                <textarea id="details"></textarea><br>
+                <label for="senses">Senses:</label><br>
+                <textarea id="senses"></textarea><br>
+                <label for="resistances">Resistances:</label><br>
+                <textarea id="resistances"></textarea><br>
+                <label for="actions">Actions:</label><br>
+                <textarea id="actions"></textarea><br>
+                <label for="legendaryActions">Legendary Actions:</label><br>
+                <textarea id="legendaryActions"></textarea><br>
                 <label for="markerTooltipType">Tooltip Type:</label><br>
                 <select id="markerTooltipType" onchange="toggleTooltipFields()">
                     <option value="image">Image</option>
@@ -242,6 +244,12 @@
                 <input type="checkbox" id="markerAdminOnly"><br>
                 <button type="button" onclick="addMarker()">Add Marker</button>
                 <button type="button" onclick="addPredefinedMarker()">Add to Predefined</button>
+                <label for="backgroundImage">Background Image:</label><br>
+                <select id="backgroundImage" onchange="changeBackgroundImage(this.value)">
+                    <option value="Battle_arenas.png">Battle Arenas</option>
+                    <option value="Another_image.png">Another Image</option>
+                    <!-- Add more options as needed -->
+                </select>
             </form>
         </div>
 
@@ -286,14 +294,20 @@
                 minZoom: -2
             });
 
-            // Add the image overlay to the map
-            L.imageOverlay(imageUrl, imageBounds).addTo(map);
+            let currentBackgroundImage = null;
 
-            // Fit the map to the image bounds
-            map.fitBounds(imageBounds);
+            function setBackground(imageUrl) {
+                if (currentBackgroundImage) {
+                    map.removeLayer(currentBackgroundImage);
+                }
+                currentBackgroundImage = L.imageOverlay(imageUrl, imageBounds).addTo(map);
+                map.fitBounds(imageBounds);
+            }
+
+            setBackground('assets/Battle_arenas.png'); // Default background
 
             // Add grid to the map
-            const gridSize = 100; // Set the desired grid size in pixels
+            const gridSize = 100; // Set the grid size here
 
             const gridLayer = L.layerGroup().addTo(map);
 
@@ -329,27 +343,29 @@
             const markerForm = document.getElementById('markerForm');
             const markerTypeSelect = document.getElementById('markerType');
             const markerNameInput = document.getElementById('markerName');
+            const markerShortDescInput = document.getElementById('markerShortDesc');
             const markerIconInput = document.getElementById('markerIcon');
             const markerTooltipTypeSelect = document.getElementById('markerTooltipType');
             const markerTooltipInput = document.getElementById('markerTooltip');
             const markerIconFileInput = document.getElementById('markerIconFile');
             const markerTooltipFileInput = document.getElementById('markerTooltipFile');
             const markerAdminOnlyCheckbox = document.getElementById('markerAdminOnly');
-            const strInput = document.getElementById('str');
-            const intInput = document.getElementById('int');
-            const dexInput = document.getElementById('dex');
-            const conInput = document.getElementById('con');
-            const staInput = document.getElementById('sta');
-            const perInput = document.getElementById('per');
-            const chaInput = document.getElementById('cha');
+            const acInput = document.getElementById('ac');
             const maxHpInput = document.getElementById('maxHp');
             const currentHpInput = document.getElementById('currentHp');
+            const speedInput = document.getElementById('speed');
+            const detailsInput = document.getElementById('details');
+            const sensesInput = document.getElementById('senses');
+            const resistancesInput = document.getElementById('resistances');
+            const actionsInput = document.getElementById('actions');
+            const legendaryActionsInput = document.getElementById('legendaryActions');
             const sidebar = document.getElementById('sidebar');
             const toggleSidebarBtn = document.getElementById('toggleSidebar');
             const markerList = document.getElementById('markerList');
             const predefinedMarkerBar = document.getElementById('predefinedMarkerBar');
             const predefinedMarkerSearch = document.getElementById('predefinedMarkerSearch');
             const searchInput = document.getElementById('searchInput');
+            const backgroundImageSelect = document.getElementById('backgroundImage');
             const coll = document.getElementsByClassName("collapsible");
 
             // Toggle icon and other fields visibility
@@ -368,6 +384,21 @@
                 markerTooltipInput.style.display = tooltipType === 'text' ? 'block' : 'none';
                 markerTooltipFileInput.style.display = tooltipType === 'image' ? 'block' : 'none';
             }
+
+            // Change background image
+            function changeBackgroundImage(image) {
+                setBackground('assets/' + image);
+                database.ref('backgroundImage').set(image);
+            }
+
+            // Load background image from Firebase
+            database.ref('backgroundImage').on('value', snapshot => {
+                const image = snapshot.val();
+                if (image) {
+                    setBackground('assets/' + image);
+                    backgroundImageSelect.value = image;
+                }
+            });
 
             // Load markers from Firebase
             database.ref('battle_markers').on('value', snapshot => {
@@ -401,19 +432,20 @@
                     lat: 0,
                     lng: 0,
                     name: 'Unnamed Marker',
+                    shortDesc: '',
                     iconUrl: 'assets/placeholder.png',
                     tooltipType: 'text',
                     tooltipContent: '',
                     adminOnly: false,
-                    str: 0,
-                    int: 0,
-                    dex: 0,
-                    con: 0,
-                    sta: 0,
-                    per: 0,
-                    cha: 0,
+                    ac: 0,
                     maxHp: 100,
-                    currentHp: 100
+                    currentHp: 100,
+                    speed: 0,
+                    details: '',
+                    senses: '',
+                    resistances: '',
+                    actions: '',
+                    legendaryActions: ''
                 };
                 return { ...defaults, ...data };
             }
@@ -428,19 +460,20 @@
             async function addMarker() {
                 const markerType = markerTypeSelect.value;
                 const name = markerNameInput.value;
+                const shortDesc = markerShortDescInput.value;
                 let iconUrl = markerIconInput.value;
                 const tooltipType = markerTooltipTypeSelect.value;
                 let tooltipContent = markerTooltipInput.value;
                 const adminOnly = markerAdminOnlyCheckbox.checked;
-                const str = parseInt(strInput.value) || 0;
-                const int = parseInt(intInput.value) || 0;
-                const dex = parseInt(dexInput.value) || 0;
-                const con = parseInt(conInput.value) || 0;
-                const sta = parseInt(staInput.value) || 0;
-                const per = parseInt(perInput.value) || 0;
-                const cha = parseInt(chaInput.value) || 0;
+                const ac = parseInt(acInput.value) || 0;
                 const maxHp = parseInt(maxHpInput.value) || 100;
                 const currentHp = parseInt(currentHpInput.value) || maxHp;
+                const speed = parseInt(speedInput.value) || 0;
+                const details = detailsInput.value;
+                const senses = sensesInput.value;
+                const resistances = resistancesInput.value;
+                const actions = actionsInput.value;
+                const legendaryActions = legendaryActionsInput.value;
                 const markerId = database.ref().child('battle_markers').push().key;
 
                 let markerOptions = {
@@ -448,20 +481,21 @@
                     lat: map.getCenter().lat,
                     lng: map.getCenter().lng,
                     name,
+                    shortDesc,
                     type: markerType,
                     iconUrl,
                     tooltipType,
                     tooltipContent,
                     adminOnly,
-                    str,
-                    int,
-                    dex,
-                    con,
-                    sta,
-                    per,
-                    cha,
+                    ac,
                     maxHp,
-                    currentHp
+                    currentHp,
+                    speed,
+                    details,
+                    senses,
+                    resistances,
+                    actions,
+                    legendaryActions
                 };
 
                 const iconFile = markerIconFileInput.files[0];
@@ -502,38 +536,40 @@
             async function addPredefinedMarker() {
                 const markerType = markerTypeSelect.value;
                 const name = markerNameInput.value;
+                const shortDesc = markerShortDescInput.value;
                 let iconUrl = markerIconInput.value;
                 const tooltipType = markerTooltipTypeSelect.value;
                 let tooltipContent = markerTooltipInput.value;
                 const adminOnly = markerAdminOnlyCheckbox.checked;
-                const str = parseInt(strInput.value) || 0;
-                const int = parseInt(intInput.value) || 0;
-                const dex = parseInt(dexInput.value) || 0;
-                const con = parseInt(conInput.value) || 0;
-                const sta = parseInt(staInput.value) || 0;
-                const per = parseInt(perInput.value) || 0;
-                const cha = parseInt(chaInput.value) || 0;
+                const ac = parseInt(acInput.value) || 0;
                 const maxHp = parseInt(maxHpInput.value) || 100;
                 const currentHp = parseInt(currentHpInput.value) || maxHp;
+                const speed = parseInt(speedInput.value) || 0;
+                const details = detailsInput.value;
+                const senses = sensesInput.value;
+                const resistances = resistancesInput.value;
+                const actions = actionsInput.value;
+                const legendaryActions = legendaryActionsInput.value;
                 const markerId = database.ref().child('predefined_markers').push().key;
 
                 let markerOptions = {
                     id: markerId,
                     name,
+                    shortDesc,
                     type: markerType,
                     iconUrl,
                     tooltipType,
                     tooltipContent,
                     adminOnly,
-                    str,
-                    int,
-                    dex,
-                    con,
-                    sta,
-                    per,
-                    cha,
+                    ac,
                     maxHp,
-                    currentHp
+                    currentHp,
+                    speed,
+                    details,
+                    senses,
+                    resistances,
+                    actions,
+                    legendaryActions
                 };
 
                 const iconFile = markerIconFileInput.files[0];
@@ -615,16 +651,39 @@
                     className: ''
                 });
                 const marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
-                const tooltipHtml = `<div style="font-size: 16px;">
-                                    <strong>${markerData.name}</strong><br>
-                                    STR: ${markerData.str} | CHA: ${markerData.cha} | INT: ${markerData.int} | PER: ${markerData.per}<br>
-                                    STA: ${markerData.sta} | CON: ${markerData.con} | DEX: ${markerData.dex}<br>
-                                    <strong>HP:</strong> <input type="number" value="${markerData.currentHp}" onchange="updateMarkerHp('${markerData.id}', this.value)" ${hasEditPermissions ? '' : 'readonly'}> / ${markerData.maxHp}<br>
-                                    <img src="${markerData.tooltipContent}" width="100" height="100"><br>
-                                    ${getAdminOptions(markerData)}
-                                   </div>`;
+                const tooltipHtml = generateTooltipHtml(markerData);
                 marker.bindPopup(tooltipHtml);
                 return marker;
+            }
+
+            // Generate tooltip HTML
+            function generateTooltipHtml(markerData) {
+                let html = `<div style="font-family: 'Georgia', serif; color: #5b3924; background: #fff4e6; padding: 10px; border: 1px solid #d8a555; border-radius: 5px;">
+                            <strong>${markerData.name}</strong><br>
+                            ${markerData.shortDesc ? `<em>${markerData.shortDesc}</em><br><hr>` : ''}`;
+
+                html += `AC: ${markerData.ac}<br>`;
+                html += `HP: ${markerData.currentHp} / ${markerData.maxHp}<br>`;
+                html += `Speed: ${markerData.speed} ft.<br><hr>`;
+
+                if (markerData.details) {
+                    html += `<strong>Details:</strong><br>${markerData.details}<br><hr>`;
+                }
+                if (markerData.senses) {
+                    html += `<strong>Senses:</strong><br>${markerData.senses}<br><hr>`;
+                }
+                if (markerData.resistances) {
+                    html += `<strong>Resistances:</strong><br>${markerData.resistances}<br><hr>`;
+                }
+                if (markerData.actions) {
+                    html += `<strong>Actions:</strong><br>${markerData.actions}<br><hr>`;
+                }
+                if (markerData.legendaryActions) {
+                    html += `<strong>Legendary Actions:</strong><br>${markerData.legendaryActions}<br>`;
+                }
+
+                html += `${getAdminOptions(markerData)}</div>`;
+                return html;
             }
 
             // Update marker HP
@@ -636,14 +695,7 @@
                     const marker = markers[id];
                     const markerData = marker.options;
                     markerData.currentHp = newHp;
-                    marker.setPopupContent(`<div style="font-size: 16px;">
-                                            <strong>${markerData.name}</strong><br>
-                                            STR: ${markerData.str} | CHA: ${markerData.cha} | INT: ${markerData.int} | PER: ${markerData.per}<br>
-                                            STA: ${markerData.sta} | CON: ${markerData.con} | DEX: ${markerData.dex}<br>
-                                            <strong>HP:</strong> <input type="number" value="${markerData.currentHp}" onchange="updateMarkerHp('${markerData.id}', this.value)" ${hasEditPermissions ? '' : 'readonly'}> / ${markerData.maxHp}<br>
-                                            <img src="${markerData.tooltipContent}" width="100" height="100"><br>
-                                            ${getAdminOptions(markerData)}
-                                           </div>`);
+                    marker.setPopupContent(generateTooltipHtml(markerData));
                     updateHpBar(marker);
                 }
             }
@@ -809,7 +861,6 @@
                 map.invalidateSize();
             });
 
-
             function showSidebar() {
                 if (sidebar.classList.contains('hidden')) {
                     sidebar.classList.remove('hidden');
@@ -838,6 +889,7 @@
             window.duplicateMarker = duplicateMarker;
             window.toggleAdminOnly = toggleAdminOnly;
             window.filterPredefinedMarkers = filterPredefinedMarkers;
+            window.changeBackgroundImage = changeBackgroundImage;
 
             // Initial call to set visibility based on default selected marker type
             toggleFields();
