@@ -222,6 +222,11 @@
                 <input type="text" id="currentHp"><br>
                 <label for="speed">Speed:</label><br>
                 <input type="text" id="speed"><br>
+                <label for="stats">Stats (STR | CHA | INT | PER | STA | CON | DEX):</label><br>
+                <input type="text" id="str" placeholder="STR"><input type="text" id="cha" placeholder="CHA"><br>
+                <input type="text" id="int" placeholder="INT"><input type="text" id="per" placeholder="PER"><br>
+                <input type="text" id="sta" placeholder="STA"><input type="text" id="con" placeholder="CON"><br>
+                <input type="text" id="dex" placeholder="DEX"><br>
                 <label for="details">Details:</label><br>
                 <textarea id="details"></textarea><br>
                 <label for="senses">Senses:</label><br>
@@ -306,38 +311,34 @@
 
             setBackground('assets/Battle_arenas.png'); // Default background
 
-            // Define a constant grid size in pixels
-        const GRID_PIXEL_SIZE = 50; // Adjust this value to your preference
+            // Add grid to the map
+            const gridSize = 100; // Set the grid size here
 
-        function drawGrid() {
-            gridLayer.clearLayers();
-            const bounds = map.getBounds();
-            const zoom = map.getZoom();
-            
-            // Calculate the grid size in map units based on the current zoom level
-            const gridSizeInMapUnits = GRID_PIXEL_SIZE * map.distance(
-                map.containerPointToLatLng([0, 0]),
-                map.containerPointToLatLng([GRID_PIXEL_SIZE, 0])
-            ) / GRID_PIXEL_SIZE;
+            const gridLayer = L.layerGroup().addTo(map);
 
-            const north = bounds.getNorth();
-            const west = bounds.getWest();
-            const east = bounds.getEast();
-            const south = bounds.getSouth();
+            function drawGrid() {
+                gridLayer.clearLayers();
+                const bounds = map.getBounds();
+                const start = map.project(bounds.getNorthWest());
+                const end = map.project(bounds.getSouthEast());
 
-            // Draw vertical lines
-            for (let x = Math.floor(west / gridSizeInMapUnits) * gridSizeInMapUnits; x < east; x += gridSizeInMapUnits) {
-                L.polyline([[north, x], [south, x]], { color: '#fff', weight: 1, opacity: 0.5 }).addTo(gridLayer);
+                for (let x = Math.floor(start.x / gridSize) * gridSize; x < end.x; x += gridSize) {
+                    const xLine = L.polyline([
+                        map.unproject([x, start.y]),
+                        map.unproject([x, end.y])
+                    ], { color: '#fff', weight: 1, opacity: 0.5 }).addTo(gridLayer);
+                }
+
+                for (let y = Math.floor(start.y / gridSize) * gridSize; y < end.y; y += gridSize) {
+                    const yLine = L.polyline([
+                        map.unproject([start.x, y]),
+                        map.unproject([end.x, y])
+                    ], { color: '#fff', weight: 1, opacity: 0.5 }).addTo(gridLayer);
+                }
             }
 
-            // Draw horizontal lines
-            for (let y = Math.floor(south / gridSizeInMapUnits) * gridSizeInMapUnits; y < north; y += gridSizeInMapUnits) {
-                L.polyline([[y, west], [y, east]], { color: '#fff', weight: 1, opacity: 0.5 }).addTo(gridLayer);
-            }
-        }
-
-        // Make sure to call drawGrid on zoom as well
-        map.on('zoomend moveend', drawGrid);
+            map.on('zoomend moveend', drawGrid);
+            drawGrid();
 
             let markers = {};
             let predefinedMarkers = {};
@@ -358,6 +359,13 @@
             const maxHpInput = document.getElementById('maxHp');
             const currentHpInput = document.getElementById('currentHp');
             const speedInput = document.getElementById('speed');
+            const strInput = document.getElementById('str');
+            const chaInput = document.getElementById('cha');
+            const intInput = document.getElementById('int');
+            const perInput = document.getElementById('per');
+            const staInput = document.getElementById('sta');
+            const conInput = document.getElementById('con');
+            const dexInput = document.getElementById('dex');
             const detailsInput = document.getElementById('details');
             const sensesInput = document.getElementById('senses');
             const resistancesInput = document.getElementById('resistances');
@@ -445,6 +453,13 @@
                     maxHp: 100,
                     currentHp: 100,
                     speed: 0,
+                    str: 0,
+                    cha: 0,
+                    int: 0,
+                    per: 0,
+                    sta: 0,
+                    con: 0,
+                    dex: 0,
                     details: '',
                     senses: '',
                     resistances: '',
@@ -473,6 +488,13 @@
                 const maxHp = parseInt(maxHpInput.value) || 100;
                 const currentHp = parseInt(currentHpInput.value) || maxHp;
                 const speed = parseInt(speedInput.value) || 0;
+                const str = parseInt(strInput.value) || 0;
+                const cha = parseInt(chaInput.value) || 0;
+                const int = parseInt(intInput.value) || 0;
+                const per = parseInt(perInput.value) || 0;
+                const sta = parseInt(staInput.value) || 0;
+                const con = parseInt(conInput.value) || 0;
+                const dex = parseInt(dexInput.value) || 0;
                 const details = detailsInput.value;
                 const senses = sensesInput.value;
                 const resistances = resistancesInput.value;
@@ -495,6 +517,13 @@
                     maxHp,
                     currentHp,
                     speed,
+                    str,
+                    cha,
+                    int,
+                    per,
+                    sta,
+                    con,
+                    dex,
                     details,
                     senses,
                     resistances,
@@ -549,6 +578,13 @@
                 const maxHp = parseInt(maxHpInput.value) || 100;
                 const currentHp = parseInt(currentHpInput.value) || maxHp;
                 const speed = parseInt(speedInput.value) || 0;
+                const str = parseInt(strInput.value) || 0;
+                const cha = parseInt(chaInput.value) || 0;
+                const int = parseInt(intInput.value) || 0;
+                const per = parseInt(perInput.value) || 0;
+                const sta = parseInt(staInput.value) || 0;
+                const con = parseInt(conInput.value) || 0;
+                const dex = parseInt(dexInput.value) || 0;
                 const details = detailsInput.value;
                 const senses = sensesInput.value;
                 const resistances = resistancesInput.value;
@@ -569,6 +605,13 @@
                     maxHp,
                     currentHp,
                     speed,
+                    str,
+                    cha,
+                    int,
+                    per,
+                    sta,
+                    con,
+                    dex,
                     details,
                     senses,
                     resistances,
@@ -669,6 +712,8 @@
                 html += `AC: ${markerData.ac}<br>`;
                 html += `HP: ${markerData.currentHp} / ${markerData.maxHp}<br>`;
                 html += `Speed: ${markerData.speed} ft.<br><hr>`;
+                html += `STR: ${markerData.str} | CHA: ${markerData.cha} | INT: ${markerData.int} | PER: ${markerData.per}<br>`;
+                html += `STA: ${markerData.sta} | CON: ${markerData.con} | DEX: ${markerData.dex}<br><hr>`;
 
                 if (markerData.details) {
                     html += `<strong>Details:</strong><br>${markerData.details}<br><hr>`;
@@ -721,7 +766,8 @@
                 if (!hasEditPermissions) return '';
                 return `<button onclick="duplicateMarker('${markerData.id}')">Duplicate</button>
                         <button onclick="removeMarker('${markerData.id}')">Remove</button>
-                        <input type="checkbox" ${markerData.adminOnly ? 'checked' : ''} onchange="toggleAdminOnly('${markerData.id}', this.checked)"> Admin Only`;
+                        <input type="checkbox" ${markerData.adminOnly ? 'checked' : ''} onchange="toggleAdminOnly('${markerData.id}', this.checked)"> Admin Only
+                        <br>Update HP: <input type="number" onchange="updateMarkerHp('${markerData.id}', this.value)" value="${markerData.currentHp}">`;
             }
 
             // Duplicate marker
