@@ -156,8 +156,8 @@
             width: calc(100% - 320px);
             height: 80px;
             background: #34495e;
-            overflow-x: auto; /* Enable horizontal scrolling */
-            overflow-y: hidden; /* Disable vertical scrolling */
+            overflow-x: auto;
+            overflow-y: hidden;
             white-space: nowrap;
             position: absolute;
             top: 0;
@@ -170,6 +170,7 @@
             transition: left 0.3s ease, width 0.3s ease;
         }
         .predefined-marker {
+            display: inline-block;
             width: 50px;
             height: 50px;
             margin: 0 5px;
@@ -177,7 +178,8 @@
         }
         .predefined-marker img {
             width: 100%;
-            height: auto;
+            height: 100%;
+            object-fit: cover;
         }
         #predefinedMarkerSearch {
             position: absolute;
@@ -186,6 +188,7 @@
             padding: 5px;
             border-radius: 5px;
             border: none;
+            width: 200px;
         }
         .admin-only {
             display: none;
@@ -824,14 +827,23 @@
 
             function updatePredefinedMarkerBar() {
                 predefinedMarkerBar.innerHTML = '<input type="text" id="predefinedMarkerSearch" placeholder="Search markers..." oninput="filterPredefinedMarkers()">';
+                const markerContainer = document.createElement('div');
+                markerContainer.style.display = 'flex';
+                markerContainer.style.alignItems = 'center';
+                markerContainer.style.overflowX = 'auto';
+                markerContainer.style.width = '100%';
+                markerContainer.style.height = '100%';
+                
                 Object.keys(predefinedMarkers).forEach(id => {
                     const markerData = predefinedMarkers[id];
                     const markerElement = document.createElement('div');
                     markerElement.className = 'predefined-marker';
                     markerElement.innerHTML = `<img src="${markerData.iconUrl}" alt="${markerData.name}" title="${markerData.name}">`;
                     markerElement.onclick = () => placePredefinedMarker(id);
-                    predefinedMarkerBar.appendChild(markerElement);
+                    markerContainer.appendChild(markerElement);
                 });
+                
+                predefinedMarkerBar.appendChild(markerContainer);
             }
 
             function placePredefinedMarker(id) {
@@ -848,11 +860,12 @@
             }
 
             function filterPredefinedMarkers() {
-                const searchQuery = predefinedMarkerSearch.value.toLowerCase();
-                Object.keys(predefinedMarkers).forEach(id => {
-                    const markerData = predefinedMarkers[id];
-                    const markerElement = predefinedMarkerBar.querySelector(`.predefined-marker[title="${markerData.name}"]`);
-                    markerElement.style.display = markerData.name.toLowerCase().includes(searchQuery) ? 'inline-block' : 'none';
+                const searchQuery = document.getElementById('predefinedMarkerSearch').value.toLowerCase();
+                const markerElements = predefinedMarkerBar.querySelectorAll('.predefined-marker');
+                
+                markerElements.forEach(markerElement => {
+                    const markerName = markerElement.querySelector('img').getAttribute('title').toLowerCase();
+                    markerElement.style.display = markerName.includes(searchQuery) ? 'inline-block' : 'none';
                 });
             }
 
