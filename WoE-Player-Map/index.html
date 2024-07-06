@@ -212,6 +212,16 @@
                         <option value="🏺">🏺 Fish Oil Press</option>
                         <option value="⛏️">⛏️ Mine</option>
                         <option value="⚒️">⚒️ Forge Workshop</option>
+                        <option value="🌲">🌲 Raw Lumber</option>
+                        <option value="🪓">🪓 Lumber Mill</option>
+                        <option value="🍞">🍞 Bakery</option>
+                        <option value="🥖">🥖 Artisnal Bakery</option>
+                        <option value="🐟">🐟 Fishery</option>
+                        <option value="🐋">🐋 Whaling</option>
+                        <option value="🐑">🐑 Mutton</option>
+                        <option value="🦞">🦞 Lobster</option>
+                        <option value="🐄">🐄 Cows</option>
+                        <option value="🐎">🐎 Wild Horses</option>
                     </select><br>
                     <label for="resourceQuantity">Per Session Quantity:</label><br>
                     <input type="number" id="resourceQuantity"><br>
@@ -290,6 +300,9 @@
 
             let markers = {};
             let hasEditPermissions = false;
+
+            // Create a layer group for resource node markers
+            const resourceNodeLayerGroup = L.layerGroup().addTo(map);
 
             // Cache DOM elements
             const markerForm = document.getElementById('markerForm');
@@ -528,7 +541,13 @@
                     }
                 });
 
-                markers[id] = marker.addTo(map);
+                // Add the marker to the appropriate layer group
+                if (markerData.type === 'resourceNode') {
+                    resourceNodeLayerGroup.addLayer(marker);
+                } else {
+                    markers[id] = marker.addTo(map);
+                }
+
                 updateSidebar();
             }
 
@@ -771,6 +790,16 @@
                     this.nextElementSibling.classList.toggle("show");
                 });
             }
+
+            // Listen for zoom level changes
+            map.on('zoomend', () => {
+                const currentZoom = map.getZoom();
+                if (currentZoom > 1) { // Modify this value to set the desired zoom level cutoff
+                    map.addLayer(resourceNodeLayerGroup);
+                } else {
+                    map.removeLayer(resourceNodeLayerGroup);
+                }
+            });
 
             // Expose functions to the global scope
             window.removeMarker = removeMarker;
