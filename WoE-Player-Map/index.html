@@ -93,7 +93,7 @@
             border-radius: 5px;
             box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
         }
-        input, select, textarea {
+        input, select {
             width: calc(100% - 30px);
             padding: 10px;
             margin: 5px 0;
@@ -156,7 +156,6 @@
                     <option value="town">Town</option>
                     <option value="poi">POI</option>
                     <option value="army">Army</option>
-                    <option value="resourceNode">Resource Node</option>
                 </select><br>
                 <label for="markerName">Name:</label><br>
                 <input type="text" id="markerName"><br>
@@ -195,43 +194,14 @@
                     <label for="armyArchers">Archers:</label><br>
                     <input type="text" id="armyArchers"><br>
                 </div>
-                <div id="resourceNodeFields" style="display: none;">
-                    <label for="resourceEmoji">Resource Emoji:</label><br>
-                    <select id="resourceEmoji">
-                        <option value="🍇">🍇 Grapes</option>
-                        <option value="🍊">🍊 Orange</option>
-                        <option value="🍋">🍋 Lemon</option>
-                        <option value="🍌">🍌 Banana</option>
-                        <option value="🍏">🍏 Apple</option>
-                        <option value="🥔">🥔 Potato</option>
-                        <option value="🌽">🌽 Corn</option>
-                        <option value="🌾">🌾 Wheat</option>
-                        <option value="🧅">🧅 Onion</option>
-                        <option value="🍺">🍺 Brewery</option>
-                        <option value="🍷">🍷 Winery</option>
-                        <option value="🏺">🏺 Fish Oil Press</option>
-                        <option value="⛏️">⛏️ Mine</option>
-                        <option value="⚒️">⚒️ Forge Workshop</option>
-                        <option value="🌲">🌲 Raw Lumber</option>
-                        <option value="🪓">🪓 Lumber Mill</option>
-                        <option value="🍞">🍞 Bakery</option>
-                        <option value="🥖">🥖 Artisnal Bakery</option>
-                        <option value="🐟">🐟 Fishery</option>
-                        <option value="🐋">🐋 Whaling</option>
-                        <option value="🐑">🐑 Mutton</option>
-                        <option value="🦞">🦞 Lobster</option>
-                        <option value="🐄">🐄 Cows</option>
-                        <option value="🐎">🐎 Wild Horses</option>
-                    </select><br>
-                    <label for="resourceQuantity">Per Session Quantity:</label><br>
-                    <input type="number" id="resourceQuantity"><br>
-                    <label for="resourceOwner">Owner:</label><br>
-                    <input type="text" id="resourceOwner"><br>
-                    <label for="resourcePrice">Price:</label><br>
-                    <input type="number" id="resourcePrice"><br>
-                    <label for="resourceDescription">Description:</label><br>
-                    <textarea id="resourceDescription"></textarea><br>
-                </div>
+                <label for="markerTooltipType">Tooltip Type:</label><br>
+                <select id="markerTooltipType" onchange="toggleTooltipFields()">
+                    <option value="image">Image</option>
+                    <option value="text">Text</option>
+                </select><br>
+                <label for="markerTooltip">Tooltip Content:</label><br>
+                <input type="text" id="markerTooltip"><br>
+                <input type="file" id="markerTooltipFile" accept="image/*" style="display:none;"><br>
                 <label for="markerAdminOnly">Admin Only:</label>
                 <input type="checkbox" id="markerAdminOnly"><br>
                 <button type="button" onclick="addMarker()">Add Marker</button>
@@ -293,16 +263,14 @@
             let markers = {};
             let hasEditPermissions = false;
 
-            // Create a layer group for resource node markers
-            const resourceNodeLayerGroup = L.layerGroup().addTo(map);
-
             // Cache DOM elements
             const markerForm = document.getElementById('markerForm');
             const markerTypeSelect = document.getElementById('markerType');
             const markerNameInput = document.getElementById('markerName');
             const markerIconInput = document.getElementById('markerIcon');
-            const markerIconFileInput = document.getElementById('markerIconFile');
+            const markerTooltipTypeSelect = document.getElementById('markerTooltipType');
             const markerTooltipInput = document.getElementById('markerTooltip');
+            const markerIconFileInput = document.getElementById('markerIconFile');
             const markerTooltipFileInput = document.getElementById('markerTooltipFile');
             const markerAdminOnlyCheckbox = document.getElementById('markerAdminOnly');
             const townSizeSelect = document.getElementById('townSize');
@@ -316,11 +284,6 @@
             const armyRetinueInput = document.getElementById('armyRetinue');
             const armyGuardInput = document.getElementById('armyGuard');
             const armyArchersInput = document.getElementById('armyArchers');
-            const resourceEmojiSelect = document.getElementById('resourceEmoji');
-            const resourceQuantityInput = document.getElementById('resourceQuantity');
-            const resourceOwnerInput = document.getElementById('resourceOwner');
-            const resourcePriceInput = document.getElementById('resourcePrice');
-            const resourceDescriptionInput = document.getElementById('resourceDescription');
             const sidebar = document.getElementById('sidebar');
             const toggleSidebarBtn = document.getElementById('toggleSidebar');
             const markerList = document.getElementById('markerList');
@@ -334,12 +297,20 @@
                 const iconFields = document.getElementById('iconFields');
                 const townFields = document.getElementById('townFields');
                 const armyFields = document.getElementById('armyFields');
-                const resourceNodeFields = document.getElementById('resourceNodeFields');
 
                 iconFields.style.display = (markerType === 'player' || markerType === 'army') ? 'block' : 'none';
                 townFields.style.display = markerType === 'town' ? 'block' : 'none';
                 armyFields.style.display = markerType === 'army' ? 'block' : 'none';
-                resourceNodeFields.style.display = markerType === 'resourceNode' ? 'block' : 'none';
+
+                toggleTooltipFields();
+            }
+
+            // Toggle tooltip type input fields
+            function toggleTooltipFields() {
+                const tooltipType = markerTooltipTypeSelect.value;
+                const markerType = markerTypeSelect.value;
+                markerTooltipInput.style.display = tooltipType === 'text' && markerType !== 'player' && markerType !== 'army' ? 'block' : 'none';
+                markerTooltipFileInput.style.display = tooltipType === 'image' || markerType === 'player' || markerType === 'army' ? 'block' : 'none';
             }
 
             // Load markers from Firebase
@@ -384,6 +355,7 @@
                 const markerType = markerTypeSelect.value;
                 const name = markerNameInput.value;
                 let iconUrl = markerIconInput.value;
+                const tooltipType = markerTooltipTypeSelect.value;
                 let tooltipContent = markerTooltipInput.value;
                 const adminOnly = markerAdminOnlyCheckbox.checked;
                 const markerId = database.ref().child('markers').push().key;
@@ -395,6 +367,7 @@
                     name,
                     type: markerType,
                     iconUrl,
+                    tooltipType,
                     tooltipContent,
                     adminOnly
                 };
@@ -413,7 +386,7 @@
                     }
                 }
 
-                if (tooltipFile && markerType !== 'resourceNode') {
+                if (tooltipFile && tooltipType === 'image') {
                     const tooltipStorageRef = storage.ref(`markers/${markerId}/tooltip`);
                     try {
                         const snapshot = await tooltipStorageRef.put(tooltipFile);
@@ -441,17 +414,6 @@
                         retinue: armyRetinueInput.value,
                         guard: armyGuardInput.value,
                         archers: armyArchersInput.value
-                    };
-                }
-
-                if (markerType === 'resourceNode') {
-                    markerOptions = {
-                        ...markerOptions,
-                        emoji: resourceEmojiSelect.value,
-                        quantity: resourceQuantityInput.value,
-                        owner: resourceOwnerInput.value,
-                        price: resourcePriceInput.value,
-                        description: resourceDescriptionInput.value
                     };
                 }
 
@@ -486,8 +448,8 @@
                     case 'army':
                         marker = createArmyMarker(markerData);
                         break;
-                    case 'resourceNode':
-                        marker = createResourceNodeMarker(markerData);
+                    case 'unit':
+                        marker = createUnitMarker(markerData);
                         break;
                     default:
                         console.error(`Unknown marker type: ${markerData.type}`, markerData);
@@ -517,13 +479,7 @@
                     }
                 });
 
-                // Add the marker to the appropriate layer group
-                if (markerData.type === 'resourceNode') {
-                    resourceNodeLayerGroup.addLayer(marker);
-                } else {
-                    markers[id] = marker.addTo(map);
-                }
-
+                markers[id] = marker.addTo(map);
                 updateSidebar();
             }
 
@@ -599,22 +555,6 @@
                 return marker;
             }
 
-            function createResourceNodeMarker(markerData) {
-                const iconHtml = markerData.emoji;
-                const marker = L.marker([markerData.lat, markerData.lng], { icon: L.divIcon({ html: iconHtml, className: 'custom-div-icon' }), draggable: hasEditPermissions });
-                const tooltipHtml = `<div style="font-size: 16px;">
-                                    <strong>${markerData.name}</strong><br>
-                                    <strong>Resource:</strong> ${markerData.emoji}<br>
-                                    <strong>Quantity per Session:</strong> ${markerData.quantity}<br>
-                                    <strong>Owner:</strong> ${markerData.owner}<br>
-                                    <strong>Price:</strong> ${markerData.price}<br>
-                                    <strong>Description:</strong> ${markerData.description}<br>
-                                    ${getAdminOptions(markerData)}
-                                   </div>`;
-                marker.bindPopup(tooltipHtml);
-                return marker;
-            }
-
             // Function to get admin options for the marker
             function getAdminOptions(markerData) {
                 if (!hasEditPermissions) return '';
@@ -632,7 +572,7 @@
                     id: database.ref().child('markers').push().key,
                     lat: latLng.lat,
                     lng: latLng.lng,
-                    type: markerData.type
+                    type: markerData.type || 'unknown'
                 };
                 database.ref('markers/' + newMarkerData.id).set(newMarkerData);
                 createMarker(newMarkerData.id, newMarkerData);
@@ -766,16 +706,6 @@
                     this.nextElementSibling.classList.toggle("show");
                 });
             }
-
-            // Listen for zoom level changes
-            map.on('zoomend', () => {
-                const currentZoom = map.getZoom();
-                if (currentZoom > 1) { // Modify this value to set the desired zoom level cutoff
-                    map.addLayer(resourceNodeLayerGroup);
-                } else {
-                    map.removeLayer(resourceNodeLayerGroup);
-                }
-            });
 
             // Expose functions to the global scope
             window.removeMarker = removeMarker;
