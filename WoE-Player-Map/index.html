@@ -156,6 +156,7 @@
                     <option value="town">Town</option>
                     <option value="poi">POI</option>
                     <option value="army">Army</option>
+                    <option value="resourceNode">Resource Node</option>
                 </select><br>
                 <label for="markerName">Name:</label><br>
                 <input type="text" id="markerName"><br>
@@ -193,6 +194,33 @@
                     <input type="text" id="armyGuard"><br>
                     <label for="armyArchers">Archers:</label><br>
                     <input type="text" id="armyArchers"><br>
+                </div>
+                <div id="resourceNodeFields" style="display: none;">
+                    <label for="resourceEmoji">Resource Emoji:</label><br>
+                    <select id="resourceEmoji">
+                        <option value="🍇">🍇 Grapes</option>
+                        <option value="🍊">🍊 Orange</option>
+                        <option value="🍋">🍋 Lemon</option>
+                        <option value="🍌">🍌 Banana</option>
+                        <option value="🍏">🍏 Apple</option>
+                        <option value="🥔">🥔 Potato</option>
+                        <option value="🌽">🌽 Corn</option>
+                        <option value="🌾">🌾 Wheat</option>
+                        <option value="🧅">🧅 Onion</option>
+                        <option value="🍺">🍺 Beer</option>
+                        <option value="🍷">🍷 Wine</option>
+                        <option value="🏺">🏺 Jar</option>
+                        <option value="⛏️">⛏️ Pickaxe</option>
+                        <option value="⚒️">⚒️ Hammer and Pick</option>
+                    </select><br>
+                    <label for="resourceQuantity">Per Session Quantity:</label><br>
+                    <input type="number" id="resourceQuantity"><br>
+                    <label for="resourceOwner">Owner:</label><br>
+                    <input type="text" id="resourceOwner"><br>
+                    <label for="resourcePrice">Price:</label><br>
+                    <input type="number" id="resourcePrice"><br>
+                    <label for="resourceDescription">Description:</label><br>
+                    <textarea id="resourceDescription"></textarea><br>
                 </div>
                 <label for="markerTooltipType">Tooltip Type:</label><br>
                 <select id="markerTooltipType" onchange="toggleTooltipFields()">
@@ -284,6 +312,11 @@
             const armyRetinueInput = document.getElementById('armyRetinue');
             const armyGuardInput = document.getElementById('armyGuard');
             const armyArchersInput = document.getElementById('armyArchers');
+            const resourceEmojiSelect = document.getElementById('resourceEmoji');
+            const resourceQuantityInput = document.getElementById('resourceQuantity');
+            const resourceOwnerInput = document.getElementById('resourceOwner');
+            const resourcePriceInput = document.getElementById('resourcePrice');
+            const resourceDescriptionInput = document.getElementById('resourceDescription');
             const sidebar = document.getElementById('sidebar');
             const toggleSidebarBtn = document.getElementById('toggleSidebar');
             const markerList = document.getElementById('markerList');
@@ -297,10 +330,12 @@
                 const iconFields = document.getElementById('iconFields');
                 const townFields = document.getElementById('townFields');
                 const armyFields = document.getElementById('armyFields');
+                const resourceNodeFields = document.getElementById('resourceNodeFields');
 
                 iconFields.style.display = (markerType === 'player' || markerType === 'army') ? 'block' : 'none';
                 townFields.style.display = markerType === 'town' ? 'block' : 'none';
                 armyFields.style.display = markerType === 'army' ? 'block' : 'none';
+                resourceNodeFields.style.display = markerType === 'resourceNode' ? 'block' : 'none';
 
                 toggleTooltipFields();
             }
@@ -417,6 +452,17 @@
                     };
                 }
 
+                if (markerType === 'resourceNode') {
+                    markerOptions = {
+                        ...markerOptions,
+                        emoji: resourceEmojiSelect.value,
+                        quantity: resourceQuantityInput.value,
+                        owner: resourceOwnerInput.value,
+                        price: resourcePriceInput.value,
+                        description: resourceDescriptionInput.value
+                    };
+                }
+
                 try {
                     await database.ref('markers/' + markerId).set(markerOptions);
                     createMarker(markerId, markerOptions);
@@ -447,6 +493,9 @@
                         break;
                     case 'army':
                         marker = createArmyMarker(markerData);
+                        break;
+                    case 'resourceNode':
+                        marker = createResourceNodeMarker(markerData);
                         break;
                     case 'unit':
                         marker = createUnitMarker(markerData);
@@ -549,6 +598,22 @@
                                     <strong>Noble Retinue:</strong> ${markerData.retinue}<br>
                                     <strong>Household Guard:</strong> ${markerData.guard}<br>
                                     <strong>Archers:</strong> ${markerData.archers}<br>
+                                    ${getAdminOptions(markerData)}
+                                   </div>`;
+                marker.bindPopup(tooltipHtml);
+                return marker;
+            }
+
+            function createResourceNodeMarker(markerData) {
+                const iconHtml = markerData.emoji;
+                const marker = L.marker([markerData.lat, markerData.lng], { icon: L.divIcon({ html: iconHtml, className: 'custom-div-icon' }), draggable: hasEditPermissions });
+                const tooltipHtml = `<div style="font-size: 16px;">
+                                    <strong>${markerData.name}</strong><br>
+                                    <strong>Resource:</strong> ${markerData.emoji}<br>
+                                    <strong>Quantity per Session:</strong> ${markerData.quantity}<br>
+                                    <strong>Owner:</strong> ${markerData.owner}<br>
+                                    <strong>Price:</strong> ${markerData.price}<br>
+                                    <strong>Description:</strong> ${markerData.description}<br>
                                     ${getAdminOptions(markerData)}
                                    </div>`;
                 marker.bindPopup(tooltipHtml);
