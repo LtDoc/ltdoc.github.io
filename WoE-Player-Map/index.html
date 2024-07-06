@@ -93,7 +93,7 @@
             border-radius: 5px;
             box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
         }
-        input, select {
+        input, select, textarea {
             width: calc(100% - 30px);
             padding: 10px;
             margin: 5px 0;
@@ -232,14 +232,6 @@
                     <label for="resourceDescription">Description:</label><br>
                     <textarea id="resourceDescription"></textarea><br>
                 </div>
-                <label for="markerTooltipType">Tooltip Type:</label><br>
-                <select id="markerTooltipType" onchange="toggleTooltipFields()">
-                    <option value="image">Image</option>
-                    <option value="text">Text</option>
-                </select><br>
-                <label for="markerTooltip">Tooltip Content:</label><br>
-                <input type="text" id="markerTooltip"><br>
-                <input type="file" id="markerTooltipFile" accept="image/*" style="display:none;"><br>
                 <label for="markerAdminOnly">Admin Only:</label>
                 <input type="checkbox" id="markerAdminOnly"><br>
                 <button type="button" onclick="addMarker()">Add Marker</button>
@@ -268,15 +260,15 @@
         (function() {
             // Firebase configuration
             const firebaseConfig = {
-                apiKey: "AIzaSyCo9QPVrLCXS6li_kcTu3e-GOoiiwpHvLs",
-                authDomain: "woe-world.firebaseapp.com",
-                databaseURL: "https://woe-world-default-rtdb.firebaseio.com",
-                projectId: "woe-world",
-                storageBucket: "woe-world.appspot.com",
-                messagingSenderId: "706865712365",
-                appId: "1:706865712365:web:e080b1ef45b8d8b27190e4",
-                measurementId: "G-789BN2WECG"
-            };
+            apiKey: "AIzaSyCo9QPVrLCXS6li_kcTu3e-GOoiiwpHvLs",
+            authDomain: "woe-world.firebaseapp.com",
+            databaseURL: "https://woe-world-default-rtdb.firebaseio.com",
+            projectId: "woe-world",
+            storageBucket: "woe-world.appspot.com",
+            messagingSenderId: "706865712365",
+            appId: "1:706865712365:web:e080b1ef45b8d8b27190e4",
+            measurementId: "G-789BN2WECG"
+        };
             firebase.initializeApp(firebaseConfig);
             const database = firebase.database();
             const storage = firebase.storage();
@@ -309,9 +301,8 @@
             const markerTypeSelect = document.getElementById('markerType');
             const markerNameInput = document.getElementById('markerName');
             const markerIconInput = document.getElementById('markerIcon');
-            const markerTooltipTypeSelect = document.getElementById('markerTooltipType');
-            const markerTooltipInput = document.getElementById('markerTooltip');
             const markerIconFileInput = document.getElementById('markerIconFile');
+            const markerTooltipInput = document.getElementById('markerTooltip');
             const markerTooltipFileInput = document.getElementById('markerTooltipFile');
             const markerAdminOnlyCheckbox = document.getElementById('markerAdminOnly');
             const townSizeSelect = document.getElementById('townSize');
@@ -349,16 +340,6 @@
                 townFields.style.display = markerType === 'town' ? 'block' : 'none';
                 armyFields.style.display = markerType === 'army' ? 'block' : 'none';
                 resourceNodeFields.style.display = markerType === 'resourceNode' ? 'block' : 'none';
-
-                toggleTooltipFields();
-            }
-
-            // Toggle tooltip type input fields
-            function toggleTooltipFields() {
-                const tooltipType = markerTooltipTypeSelect.value;
-                const markerType = markerTypeSelect.value;
-                markerTooltipInput.style.display = tooltipType === 'text' && markerType !== 'player' && markerType !== 'army' ? 'block' : 'none';
-                markerTooltipFileInput.style.display = tooltipType === 'image' || markerType === 'player' || markerType === 'army' ? 'block' : 'none';
             }
 
             // Load markers from Firebase
@@ -403,7 +384,6 @@
                 const markerType = markerTypeSelect.value;
                 const name = markerNameInput.value;
                 let iconUrl = markerIconInput.value;
-                const tooltipType = markerTooltipTypeSelect.value;
                 let tooltipContent = markerTooltipInput.value;
                 const adminOnly = markerAdminOnlyCheckbox.checked;
                 const markerId = database.ref().child('markers').push().key;
@@ -415,7 +395,6 @@
                     name,
                     type: markerType,
                     iconUrl,
-                    tooltipType,
                     tooltipContent,
                     adminOnly
                 };
@@ -434,7 +413,7 @@
                     }
                 }
 
-                if (tooltipFile && tooltipType === 'image') {
+                if (tooltipFile && markerType !== 'resourceNode') {
                     const tooltipStorageRef = storage.ref(`markers/${markerId}/tooltip`);
                     try {
                         const snapshot = await tooltipStorageRef.put(tooltipFile);
@@ -509,9 +488,6 @@
                         break;
                     case 'resourceNode':
                         marker = createResourceNodeMarker(markerData);
-                        break;
-                    case 'unit':
-                        marker = createUnitMarker(markerData);
                         break;
                     default:
                         console.error(`Unknown marker type: ${markerData.type}`, markerData);
