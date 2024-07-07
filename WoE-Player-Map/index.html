@@ -323,7 +323,16 @@
                             console.error(`Removing invalid marker data with id: ${id}`, correctedData);
                             database.ref('markers/' + id).remove();
                         } else {
-                            createMarker(id, correctedData);
+                            if (markers[id]) {
+                                // Update existing marker's position without creating a new marker
+                                const marker = markers[id];
+                                const newLatLng = new L.LatLng(correctedData.lat, correctedData.lng);
+                                if (!marker.getLatLng().equals(newLatLng)) {
+                                    marker.setLatLng(newLatLng);
+                                }
+                            } else {
+                                createMarker(id, correctedData);
+                            }
                         }
                     });
                 }
@@ -349,6 +358,20 @@
                 const requiredFields = ['type', 'lat', 'lng', 'name'];
                 return requiredFields.every(field => data[field] !== undefined && data[field] !== null);
             }
+
+            // Debounce function to handle rapid updates
+            function debounce(func, wait) {
+                let timeout;
+                return function(...args) {
+                    clearTimeout(timeout);
+                    timeout = setTimeout(() => func.apply(this, args), wait);
+                };
+            }
+
+            // Debounce the marker position update
+            const debouncedUpdateMarkerPosition = debounce((id, lat, lng) => {
+                database.ref('markers/' + id).update({ lat, lng });
+            }, 300); // Adjust the delay as needed
 
             // Add marker
             async function addMarker() {
@@ -382,6 +405,7 @@
                         iconUrl = await snapshot.ref.getDownloadURL();
                         markerOptions.iconUrl = iconUrl;
                     } catch (error) {
+                        alert("Error uploading icon file: " + error.message);
                         console.error("Error uploading icon file:", error);
                     }
                 }
@@ -393,6 +417,7 @@
                         tooltipContent = await snapshot.ref.getDownloadURL();
                         markerOptions.tooltipContent = tooltipContent;
                     } catch (error) {
+                        alert("Error uploading tooltip file: " + error.message);
                         console.error("Error uploading tooltip file:", error);
                     }
                 }
@@ -428,12 +453,14 @@
 
             // Create marker
             function createMarker(id, markerData) {
-                if (!hasEditPermissions && markerData.adminOnly) {
-                    return;
-                }
-
+                // Remove existing marker if it exists
                 if (markers[id]) {
                     map.removeLayer(markers[id]);
+                }
+
+                // Check if the marker should be visible to the current user
+                if (!hasEditPermissions && markerData.adminOnly) {
+                    return;
                 }
 
                 let marker;
@@ -466,10 +493,7 @@
 
                 marker.on('dragend', function(e) {
                     const newPos = e.target.getLatLng();
-                    database.ref('markers/' + id).update({
-                        lat: newPos.lat,
-                        lng: newPos.lng
-                    });
+                    debouncedUpdateMarkerPosition(id, newPos.lat, newPos.lng);
                 });
 
                 marker.on('click', function() {
@@ -582,6 +606,12 @@
             function toggleAdminOnly(id, isAdminOnly) {
                 database.ref('markers/' + id).update({ adminOnly: isAdminOnly });
                 markers[id].options.adminOnly = isAdminOnly;
+                if (!hasEditPermissions && isAdminOnly) {
+                    map.removeLayer(markers[id]);
+                } else if (hasEditPermissions && !map.hasLayer(markers[id])) {
+                    markers[id].addTo(map);
+                }
+                updateSidebar();
             }
 
             // Reset marker form fields
