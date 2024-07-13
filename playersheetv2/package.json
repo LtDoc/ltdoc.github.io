@@ -1,31 +1,37 @@
 {
   "name": "playersheetv2",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "private": true,
   "dependencies": {
-    "@testing-library/jest-dom": "^5.17.0",
-    "@testing-library/react": "^13.4.0",
-    "@testing-library/user-event": "^13.5.0",
+    "@emotion/react": "^11.11.4",
+    "@emotion/styled": "^11.11.5",
+    "@mui/material": "^5.16.0",
     "firebase": "^10.12.3",
+    "gh-pages": "^6.1.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-scripts": "^3.0.1",
-    "web-vitals": "^2.1.4"
+    "react-script": "^2.0.5",
+    "react-scripts": "^5.0.1"
   },
   "scripts": {
-    "predeploy": "npm run build",
-    "deploy": "gh-pages -d build",
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },
-  "eslintConfig": {
-    "extends": [
-      "react-app",
-      "react-app/jest"
-    ]
+  "description": "A playersheet builder for The World of Elyndor by Robert Doc Champagne",
+  "main": "index.js",
+  "devDependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LtDoc/ltdoc.github.io.git"
   },
+  "author": "Ontario 7571829 Inc. 1793 Trading Co.",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/LtDoc/ltdoc.github.io/issues"
+  },
+  "homepage": "https://github.com/LtDoc/ltdoc.github.io#readme",
   "browserslist": {
     "production": [
       ">0.2%",
