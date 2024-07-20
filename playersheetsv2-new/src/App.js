@@ -2,13 +2,14 @@
 
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Route, Routes, Navigate } from 'react-router-dom';
-import { Container, Box, Typography, TextField, Button } from '@mui/material';
+import { Container } from '@mui/material';
 import CharacterForm from './components/CharacterForm';
 import AdminDashboard from './components/AdminDashboard';
 import AdminListManagement from './components/AdminListManagement';
 import PlayerDashboard from './components/PlayerDashboard';
 import Home from './components/Home';
 import Register from './components/Register';
+import UserManagement from './components/UserManagement';
 import ProtectedRoute from './components/ProtectedRoute';
 import { getDatabase, ref, get, child } from 'firebase/database';
 
@@ -61,7 +62,8 @@ function App() {
                       <AdminDashboard characters={characters} updateCharacter={updateCharacter} />
                     </ProtectedRoute>
                   } />
-                  <Route path="/admin/lists" element={<AdminListManagement />} />
+                  <Route path="/admin/list-management" element={<AdminListManagement />} />
+                  <Route path="/admin/users" element={<UserManagement />} />
                   <Route path="/" element={<Navigate to="/admin" />} />
                 </>
               ) : (

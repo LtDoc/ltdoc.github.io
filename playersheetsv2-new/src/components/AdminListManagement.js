@@ -1,56 +1,52 @@
+// src/components/AdminListManagement.js
+
 import React, { useState, useEffect } from 'react';
-import { getDatabase, ref, get, child, push, update } from 'firebase/database';
-import { Box, Typography, TextField, Button, Select, MenuItem, FormControl, InputLabel } from '@mui/material';
+import { getDatabase, ref, child, get, push, update } from 'firebase/database';
+import { Box, Typography, TextField, Grid, Button, MenuItem, Select, FormControl, InputLabel } from '@mui/material';
 
 const AdminListManagement = () => {
-  const [selectedList, setSelectedList] = useState('');
-  const [items, setItems] = useState([]);
-  const [newItem, setNewItem] = useState({});
+  const [listType, setListType] = useState('skills');
+  const [listItems, setListItems] = useState([]);
+  const [newItem, setNewItem] = useState({ name: '', desc: '', level: '' });
 
   useEffect(() => {
-    const fetchItems = async () => {
-      if (selectedList) {
-        const dbRef = ref(getDatabase());
-        const snapshot = await get(child(dbRef, selectedList));
-        if (snapshot.exists()) {
-          setItems(Object.entries(snapshot.val()).map(([id, item]) => ({ id, ...item })));
-        } else {
-          setItems([]);
-        }
+    const fetchListItems = async () => {
+      const dbRef = ref(getDatabase());
+      const snapshot = await get(child(dbRef, listType));
+      if (snapshot.exists()) {
+        setListItems(Object.entries(snapshot.val()).map(([id, item]) => ({ id, ...item })));
+      } else {
+        setListItems([]);
       }
     };
 
-    fetchItems();
-  }, [selectedList]);
+    fetchListItems();
+  }, [listType]);
 
-  const handleListChange = (event) => {
-    setSelectedList(event.target.value);
+  const handleListTypeChange = (event) => {
+    setListType(event.target.value);
+    setNewItem({ name: '', desc: '', level: '' });
   };
 
-  const handleNewItemChange = (event) => {
+  const handleInputChange = (event) => {
     const { name, value } = event.target;
-    setNewItem(prevState => ({ ...prevState, [name]: value }));
+    setNewItem((prevItem) => ({ ...prevItem, [name]: value }));
   };
 
-  const handleAddItem = async () => {
+  const addItem = async () => {
     const dbRef = ref(getDatabase());
-    const newItemRef = push(child(dbRef, selectedList));
+    const newItemRef = push(child(dbRef, listType));
     await update(newItemRef, newItem);
-    setItems([...items, { id: newItemRef.key, ...newItem }]);
-    setNewItem({});
+    setListItems((prevItems) => [...prevItems, { id: newItemRef.key, ...newItem }]);
+    setNewItem({ name: '', desc: '', level: '' });
   };
 
   return (
     <Box>
-      <Typography variant="h4" gutterBottom>Manage Lists</Typography>
+      <Typography variant="h4" gutterBottom>Admin List Management</Typography>
       <FormControl fullWidth sx={{ mb: 2 }}>
-        <InputLabel id="list-select-label">Select List</InputLabel>
-        <Select
-          labelId="list-select-label"
-          value={selectedList}
-          onChange={handleListChange}
-        >
-          <MenuItem value=""><em>None</em></MenuItem>
+        <InputLabel id="list-type-select-label">Select List Type</InputLabel>
+        <Select labelId="list-type-select-label" value={listType} onChange={handleListTypeChange}>
           <MenuItem value="skills">Skills</MenuItem>
           <MenuItem value="senses">Senses</MenuItem>
           <MenuItem value="languages">Languages</MenuItem>
@@ -62,50 +58,53 @@ const AdminListManagement = () => {
           <MenuItem value="reactions">Reactions</MenuItem>
         </Select>
       </FormControl>
-      {selectedList && (
-        <Box>
-          <Typography variant="h6" gutterBottom>Add New Item to {selectedList}</Typography>
+      <Grid container spacing={2}>
+        <Grid item xs={4}>
           <TextField
             label="Name"
             name="name"
-            value={newItem.name || ''}
-            onChange={handleNewItemChange}
+            value={newItem.name}
+            onChange={handleInputChange}
             fullWidth
             sx={{ mb: 2 }}
           />
+        </Grid>
+        <Grid item xs={4}>
           <TextField
             label="Description"
             name="desc"
-            value={newItem.desc || ''}
-            onChange={handleNewItemChange}
+            value={newItem.desc}
+            onChange={handleInputChange}
             fullWidth
             sx={{ mb: 2 }}
           />
-          {['spellcasting', 'abilities', 'actions'].includes(selectedList) && (
+        </Grid>
+        {['spellcasting', 'abilities', 'actions'].includes(listType) && (
+          <Grid item xs={4}>
             <TextField
               label="Level"
               name="level"
-              value={newItem.level || ''}
-              onChange={handleNewItemChange}
+              value={newItem.level}
+              onChange={handleInputChange}
               fullWidth
               sx={{ mb: 2 }}
             />
-          )}
-          <Button variant="contained" color="primary" onClick={handleAddItem}>
+          </Grid>
+        )}
+        <Grid item xs={12}>
+          <Button variant="contained" color="primary" onClick={addItem}>
             Add Item
           </Button>
-          <Box mt={4}>
-            <Typography variant="h6">Current Items in {selectedList}</Typography>
-            {items.map((item) => (
-              <Box key={item.id} sx={{ mb: 2 }}>
-                <Typography variant="body1"><strong>Name:</strong> {item.name}</Typography>
-                <Typography variant="body1"><strong>Description:</strong> {item.desc}</Typography>
-                {item.level && <Typography variant="body1"><strong>Level:</strong> {item.level}</Typography>}
-              </Box>
-            ))}
-          </Box>
+        </Grid>
+      </Grid>
+      <Typography variant="h6" gutterBottom>Items</Typography>
+      {listItems.map((item) => (
+        <Box key={item.id} sx={{ mb: 2 }}>
+          <Typography>Name: {item.name}</Typography>
+          <Typography>Description: {item.desc}</Typography>
+          {item.level && <Typography>Level: {item.level}</Typography>}
         </Box>
-      )}
+      ))}
     </Box>
   );
 };

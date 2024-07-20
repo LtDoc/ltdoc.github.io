@@ -2,30 +2,28 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { database } from '../firebase';
-import { ref, set, get, child } from 'firebase/database';
-import { Container, Box, Typography, TextField, Button } from '@mui/material';
+import { auth, database } from '../firebase';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { ref, set } from 'firebase/database';
+import { Box, TextField, Button, Typography } from '@mui/material';
 
 const Register = ({ setIsAuthenticated }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
   const navigate = useNavigate();
 
   const handleRegister = async () => {
     try {
-      const dbRef = ref(database);
-      const snapshot = await get(child(dbRef, `users/${username}`));
-      if (snapshot.exists()) {
-        setError("Username already exists");
-        return;
-      }
+      const dummyEmail = `${username}@dummy.com`;
+      const userCredential = await createUserWithEmailAndPassword(auth, dummyEmail, password);
+      const userId = userCredential.user.uid;
 
-      const newCharacter = {
-        id: 'character1', // or generate a unique ID
+      // Create initial character for the user
+      const initialCharacter = {
+        id: 'char1',
         name: 'New Character',
-        class: '',
-        race: '',
+        class: 'Warrior',
+        race: 'Human',
         challenge: 1,
         hp: 10,
         ac: 10,
@@ -36,59 +34,49 @@ const Register = ({ setIsAuthenticated }) => {
           cha: 10,
           sta: 10,
           con: 10,
-          per: 10
+          per: 10,
         },
-        skills: [],
-        senses: [],
-        languages: [],
-        damageResistance: [],
-        magicResistance: [],
-        spellcasting: [],
-        abilities: [],
-        actions: [],
-        reactions: []
       };
 
-      await set(ref(database, `users/${username}`), {
+      // Save user and character to the database
+      await set(ref(database, `users/${userId}`), {
         username,
-        password,
         characters: {
-          [newCharacter.id]: newCharacter
-        }
+          [initialCharacter.id]: initialCharacter,
+        },
       });
 
       setIsAuthenticated(true);
-      navigate('/character-form');
+      navigate('/player', { state: { userId } });
     } catch (error) {
-      setError(error.message);
+      console.error('Error registering new user:', error);
     }
   };
 
   return (
-    <Container>
-      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mt: 4 }}>
-        <Typography variant="h4">Register</Typography>
-        <TextField
-          label="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          fullWidth
-          sx={{ mb: 2 }}
-        />
-        <TextField
-          label="Password"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          fullWidth
-          sx={{ mb: 2 }}
-        />
-        {error && <Typography color="error">{error}</Typography>}
-        <Button variant="contained" color="primary" onClick={handleRegister}>
-          Register
-        </Button>
-      </Box>
-    </Container>
+    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mt: 4 }}>
+      <Typography variant="h4" gutterBottom>
+        Register
+      </Typography>
+      <TextField
+        label="Username"
+        value={username}
+        onChange={(e) => setUsername(e.target.value)}
+        fullWidth
+        sx={{ mb: 2 }}
+      />
+      <TextField
+        label="Password"
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        fullWidth
+        sx={{ mb: 2 }}
+      />
+      <Button variant="contained" color="primary" onClick={handleRegister}>
+        Register
+      </Button>
+    </Box>
   );
 };
 
