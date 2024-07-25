@@ -1,13 +1,14 @@
 {
   "files": {
-    "main.css": "/claims-tracker/static/css/main.62000a33.css",
-    "main.js": "/claims-tracker/static/js/main.e1f14c94.js",
+    "main.css": "/claims-tracker/static/css/main.e076639a.css",
+    "main.js": "/claims-tracker/static/js/main.963fd781.js",
+    "static/media/logo_4x.png": "/claims-tracker/static/media/logo_4x.edb8cc29533c43fa6514.png",
     "index.html": "/claims-tracker/index.html",
-    "main.62000a33.css.map": "/claims-tracker/static/css/main.62000a33.css.map",
-    "main.e1f14c94.js.map": "/claims-tracker/static/js/main.e1f14c94.js.map"
+    "main.e076639a.css.map": "/claims-tracker/static/css/main.e076639a.css.map",
+    "main.963fd781.js.map": "/claims-tracker/static/js/main.963fd781.js.map"
   },
   "entrypoints": [
-    "static/css/main.62000a33.css",
-    "static/js/main.e1f14c94.js"
+    "static/css/main.e076639a.css",
+    "static/js/main.963fd781.js"
   ]
 }
