@@ -6,6 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/1.4.1/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/1.4.1/MarkerCluster.Default.css" />
     <style>
         html, body {
             margin: 0;
@@ -226,6 +228,7 @@
     <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-database.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-storage.js"></script>
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster/1.4.1/leaflet.markercluster.js"></script>
     <script>
         (function() {
             // Firebase configuration
@@ -247,12 +250,14 @@
             const imageUrl = 'assets/high_res_image.png';
             const imageBounds = [[0, 0], [4320, 8192]];
 
-            // Initialize the map
+            // Initialize the map with marker clustering
             const map = L.map('map', {
                 crs: L.CRS.Simple,
                 maxZoom: 2,
                 minZoom: -2
             });
+            const markersClusterGroup = L.markerClusterGroup(); // Create a marker cluster group
+            map.addLayer(markersClusterGroup);
 
             // Add the image overlay to the map
             L.imageOverlay(imageUrl, imageBounds).addTo(map);
@@ -313,7 +318,7 @@
                 markerTooltipFileInput.style.display = tooltipType === 'image' || markerType === 'player' || markerType === 'army' ? 'block' : 'none';
             }
 
-            // Load markers from Firebase
+            // Load markers from Firebase with enhanced error handling
             database.ref('markers').on('value', snapshot => {
                 const data = snapshot.val();
                 if (data) {
@@ -321,7 +326,11 @@
                         const correctedData = correctMarkerData(data[id]);
                         if (!isValidMarkerData(correctedData)) {
                             console.error(`Removing invalid marker data with id: ${id}`, correctedData);
-                            database.ref('markers/' + id).remove();
+                            database.ref('markers/' + id).remove()
+                                .catch(error => {
+                                    alert("Error removing invalid marker: " + error.message);
+                                    console.error("Error removing invalid marker:", error);
+                                });
                         } else {
                             if (markers[id]) {
                                 // Update existing marker's position without creating a new marker
@@ -336,6 +345,9 @@
                         }
                     });
                 }
+            }, error => {
+                alert("Error loading markers: " + error.message);
+                console.error("Error loading markers:", error);
             });
 
             // Correct marker data
@@ -370,10 +382,14 @@
 
             // Debounce the marker position update
             const debouncedUpdateMarkerPosition = debounce((id, lat, lng) => {
-                database.ref('markers/' + id).update({ lat, lng });
-            }, 300); // Adjust the delay as needed
+                database.ref('markers/' + id).update({ lat, lng })
+                    .catch(error => {
+                        alert("Error updating marker position: " + error.message);
+                        console.error("Error updating marker position:", error);
+                    });
+            }, 300);
 
-            // Add marker
+            // Add marker with enhanced error handling
             async function addMarker() {
                 const markerType = markerTypeSelect.value;
                 const name = markerNameInput.value;
@@ -447,11 +463,12 @@
                     createMarker(markerId, markerOptions);
                     resetMarkerForm();
                 } catch (error) {
+                    alert("Error adding marker: " + error.message);
                     console.error("Error adding marker:", error);
                 }
             }
 
-            // Create marker
+            // Create marker with performance optimization using marker clustering
             function createMarker(id, markerData) {
                 // Remove existing marker if it exists
                 if (markers[id]) {
@@ -480,14 +497,22 @@
                         break;
                     default:
                         console.error(`Unknown marker type: ${markerData.type}`, markerData);
-                        database.ref('markers/' + id).remove(); // Remove invalid marker from Firebase
+                        database.ref('markers/' + id).remove()
+                            .catch(error => {
+                                alert("Error removing invalid marker: " + error.message);
+                                console.error("Error removing invalid marker:", error);
+                            });
                         return;
                 }
 
                 // Ensure marker is defined
                 if (!marker) {
                     console.error(`Failed to create marker for id: ${id}`, markerData);
-                    database.ref('markers/' + id).remove(); // Remove invalid marker from Firebase
+                    database.ref('markers/' + id).remove()
+                        .catch(error => {
+                            alert("Error removing invalid marker: " + error.message);
+                            console.error("Error removing invalid marker:", error);
+                        });
                     return;
                 }
 
@@ -503,7 +528,8 @@
                     }
                 });
 
-                markers[id] = marker.addTo(map);
+                markers[id] = marker;
+                markersClusterGroup.addLayer(marker); // Add marker to cluster group
                 updateSidebar();
             }
 
