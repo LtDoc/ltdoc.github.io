@@ -58,8 +58,35 @@
             font-size: 16px;
             box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
         }
+        #toggleSelectionMode {
+            position: absolute;
+            top: 50px;
+            left: 10px;
+            z-index: 1000;
+            background: #34495e;
+            color: white;
+            border: none;
+            padding: 10px;
+            cursor: pointer;
+            font-size: 16px;
+            box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
+        }
+        #moveSelectedMarkers {
+            position: absolute;
+            top: 85px;
+            left: 10px;
+            z-index: 1000;
+            background: #34495e;
+            color: white;
+            border: none;
+            padding: 10px;
+            cursor: pointer;
+            font-size: 16px;
+            box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
+            display: none;
+        }
         .leaflet-top.leaflet-left {
-            left: 10px; /* Adjust to ensure it is not on top of the sidebar */
+            left: 10px;
         }
         .leaflet-container .custom-div-icon {
             font-size: 24px;
@@ -80,6 +107,9 @@
             width: 50px;
             height: auto;
             object-fit: cover;
+        }
+        .marker-selected {
+            border: 2px solid red;
         }
         h2, h3 {
             font-family: 'Fantasy', cursive;
@@ -147,6 +177,8 @@
 </head>
 <body>
     <button id="toggleSidebar" style="display:none;">☰</button>
+    <button id="toggleSelectionMode">Enable Selection Mode</button>
+    <button id="moveSelectedMarkers" style="display:none;">Move Selected Markers</button>
     <div id="sidebar" class="hidden">
         <input type="text" id="searchInput" placeholder="Search markers..." oninput="searchMarkers()">
         <button type="button" class="collapsible">Marker Management</button>
@@ -266,6 +298,8 @@
             map.fitBounds(imageBounds);
 
             let markers = {};
+            let selectedMarkers = [];
+            let selectionMode = false;
             let hasEditPermissions = false;
 
             // Cache DOM elements
@@ -299,18 +333,13 @@
             // Toggle icon and other fields visibility
             function toggleFields() {
                 const markerType = markerTypeSelect.value;
-                const iconFields = document.getElementById('iconFields');
-                const townFields = document.getElementById('townFields');
-                const armyFields = document.getElementById('armyFields');
-
-                iconFields.style.display = (markerType === 'player' || markerType === 'army') ? 'block' : 'none';
-                townFields.style.display = markerType === 'town' ? 'block' : 'none';
-                armyFields.style.display = markerType === 'army' ? 'block' : 'none';
+                document.getElementById('iconFields').style.display = (markerType === 'player' || markerType === 'army') ? 'block' : 'none';
+                document.getElementById('townFields').style.display = markerType === 'town' ? 'block' : 'none';
+                document.getElementById('armyFields').style.display = markerType === 'army' ? 'block' : 'none';
 
                 toggleTooltipFields();
             }
 
-            // Toggle tooltip type input fields
             function toggleTooltipFields() {
                 const tooltipType = markerTooltipTypeSelect.value;
                 const markerType = markerTypeSelect.value;
@@ -333,7 +362,6 @@
                                 });
                         } else {
                             if (markers[id]) {
-                                // Update existing marker's position without creating a new marker
                                 const marker = markers[id];
                                 const newLatLng = new L.LatLng(correctedData.lat, correctedData.lng);
                                 if (!marker.getLatLng().equals(newLatLng)) {
@@ -350,7 +378,6 @@
                 console.error("Error loading markers:", error);
             });
 
-            // Correct marker data
             function correctMarkerData(data) {
                 const defaults = {
                     type: 'unknown',
@@ -365,13 +392,11 @@
                 return { ...defaults, ...data };
             }
 
-            // Validate marker data
             function isValidMarkerData(data) {
                 const requiredFields = ['type', 'lat', 'lng', 'name'];
                 return requiredFields.every(field => data[field] !== undefined && data[field] !== null);
             }
 
-            // Debounce function to handle rapid updates
             function debounce(func, wait) {
                 let timeout;
                 return function(...args) {
@@ -380,7 +405,6 @@
                 };
             }
 
-            // Debounce the marker position update
             const debouncedUpdateMarkerPosition = debounce((id, lat, lng) => {
                 database.ref('markers/' + id).update({ lat, lng })
                     .catch(error => {
@@ -389,7 +413,6 @@
                     });
             }, 300);
 
-            // Add marker with enhanced error handling
             async function addMarker() {
                 const markerType = markerTypeSelect.value;
                 const name = markerNameInput.value;
@@ -468,14 +491,11 @@
                 }
             }
 
-            // Create marker with performance optimization using marker clustering
             function createMarker(id, markerData) {
-                // Remove existing marker if it exists
                 if (markers[id]) {
                     map.removeLayer(markers[id]);
                 }
 
-                // Check if the marker should be visible to the current user
                 if (!hasEditPermissions && markerData.adminOnly) {
                     return;
                 }
@@ -492,9 +512,6 @@
                     case 'army':
                         marker = createArmyMarker(markerData);
                         break;
-                    case 'unit':
-                        marker = createUnitMarker(markerData);
-                        break;
                     default:
                         console.error(`Unknown marker type: ${markerData.type}`, markerData);
                         database.ref('markers/' + id).remove()
@@ -505,7 +522,6 @@
                         return;
                 }
 
-                // Ensure marker is defined
                 if (!marker) {
                     console.error(`Failed to create marker for id: ${id}`, markerData);
                     database.ref('markers/' + id).remove()
@@ -522,14 +538,16 @@
                 });
 
                 marker.on('click', function() {
-                    if (hasEditPermissions) {
+                    if (selectionMode) {
+                        toggleMarkerSelection(id);
+                    } else if (hasEditPermissions) {
                         showSidebar();
                         map.panTo(marker.getLatLng());
                     }
                 });
 
                 markers[id] = marker;
-                markersClusterGroup.addLayer(marker); // Add marker to cluster group
+                markersClusterGroup.addLayer(marker);
                 updateSidebar();
             }
 
@@ -605,14 +623,12 @@
                 return marker;
             }
 
-            // Function to get admin options for the marker
             function getAdminOptions(markerData) {
                 if (!hasEditPermissions) return '';
                 return `<button onclick="duplicateMarker('${markerData.id}')">Duplicate</button>
                         <input type="checkbox" ${markerData.adminOnly ? 'checked' : ''} onchange="toggleAdminOnly('${markerData.id}', this.checked)"> Admin Only`;
             }
 
-            // Duplicate marker
             function duplicateMarker(id) {
                 const marker = markers[id];
                 const markerData = marker.options;
@@ -628,7 +644,6 @@
                 createMarker(newMarkerData.id, newMarkerData);
             }
 
-            // Toggle admin-only view
             function toggleAdminOnly(id, isAdminOnly) {
                 database.ref('markers/' + id).update({ adminOnly: isAdminOnly });
                 markers[id].options.adminOnly = isAdminOnly;
@@ -640,13 +655,11 @@
                 updateSidebar();
             }
 
-            // Reset marker form fields
             function resetMarkerForm() {
                 markerForm.reset();
                 toggleFields();
             }
 
-            // Update sidebar with markers
             function updateSidebar() {
                 markerList.innerHTML = '';
                 playerMarkerList.innerHTML = '';
@@ -670,12 +683,10 @@
                 });
             }
 
-            // Search markers
             function searchMarkers() {
                 updateSidebar();
             }
 
-            // Edit marker
             function editMarker(id) {
                 const marker = markers[id];
                 const markerData = marker.getPopup().getContent().split('<br>');
@@ -700,7 +711,6 @@
                 updateSidebar();
             }
 
-            // Remove marker
             function removeMarker(id) {
                 if (markers[id]) {
                     map.removeLayer(markers[id]);
@@ -710,13 +720,12 @@
                 }
             }
 
-            // Check if the user has edit permissions based on their IP
             function checkIPAccess() {
                 fetch('https://api.ipify.org?format=json')
                     .then(response => response.json())
                     .then(data => {
                         const userIP = data.ip;
-                        const allowedIPs = ['24.57.218.92','98.16.223.9']; // Replace with your allowed IP addresses
+                        const allowedIPs = ['24.57.218.92','98.16.223.9'];
                         hasEditPermissions = allowedIPs.includes(userIP);
                         document.body.classList.toggle('readonly', !hasEditPermissions);
                         sidebar.classList.toggle('hidden', !hasEditPermissions);
@@ -737,7 +746,6 @@
 
             checkIPAccess();
 
-            // Sidebar toggle
             toggleSidebarBtn.addEventListener('click', () => {
                 sidebar.classList.toggle('hidden');
                 const isHidden = sidebar.classList.contains('hidden');
@@ -745,6 +753,62 @@
                 document.querySelector('.leaflet-top.leaflet-left').style.left = isHidden ? '10px' : '320px';
                 map.invalidateSize();
             });
+
+            document.getElementById('toggleSelectionMode').addEventListener('click', function() {
+                selectionMode = !selectionMode;
+                this.textContent = selectionMode ? 'Disable Selection Mode' : 'Enable Selection Mode';
+                document.getElementById('moveSelectedMarkers').style.display = selectionMode && selectedMarkers.length > 0 ? 'block' : 'none';
+            });
+
+            document.getElementById('moveSelectedMarkers').addEventListener('click', function() {
+                if (selectedMarkers.length > 0) {
+                    moveSelectedMarkers();
+                }
+            });
+
+            function toggleMarkerSelection(id) {
+                const marker = markers[id];
+                if (selectedMarkers.includes(id)) {
+                    selectedMarkers = selectedMarkers.filter(markerId => markerId !== id);
+                    marker.getElement().classList.remove('marker-selected');
+                } else {
+                    selectedMarkers.push(id);
+                    marker.getElement().classList.add('marker-selected');
+                }
+
+                document.getElementById('moveSelectedMarkers').style.display = selectedMarkers.length > 0 ? 'block' : 'none';
+            }
+
+            function moveSelectedMarkers() {
+                const initialPosition = map.getCenter();
+                const tempMarker = L.marker(initialPosition, { draggable: true }).addTo(map);
+
+                tempMarker.on('dragend', function(e) {
+                    const newPosition = e.target.getLatLng();
+                    const latDiff = newPosition.lat - initialPosition.lat;
+                    const lngDiff = newPosition.lng - initialPosition.lng;
+
+                    selectedMarkers.forEach(id => {
+                        const marker = markers[id];
+                        const currentLatLng = marker.getLatLng();
+                        const newLatLng = {
+                            lat: currentLatLng.lat + latDiff,
+                            lng: currentLatLng.lng + lngDiff
+                        };
+                        marker.setLatLng(newLatLng);
+
+                        debouncedUpdateMarkerPosition(id, newLatLng.lat, newLatLng.lng);
+                    });
+
+                    selectedMarkers.forEach(id => {
+                        markers[id].getElement().classList.remove('marker-selected');
+                    });
+
+                    selectedMarkers = [];
+                    tempMarker.remove();
+                    document.getElementById('moveSelectedMarkers').style.display = 'none';
+                });
+            }
 
             function showSidebar() {
                 if (sidebar.classList.contains('hidden')) {
@@ -755,7 +819,6 @@
                 }
             }
 
-            // Handle collapsible sections
             for (let i = 0; i < coll.length; i++) {
                 coll[i].addEventListener("click", function() {
                     this.classList.toggle("active");
@@ -763,16 +826,13 @@
                 });
             }
 
-            // Expose functions to the global scope
             window.removeMarker = removeMarker;
             window.editMarker = editMarker;
-            window.toggleFields = toggleFields; // Ensure this function is exposed
-            window.addMarker = addMarker; // Expose the addMarker function
+            window.toggleFields = toggleFields;
+            window.addMarker = addMarker;
             window.searchMarkers = searchMarkers;
-            window.duplicateMarker = duplicateMarker; // Expose the duplicateMarker function
-            window.toggleAdminOnly = toggleAdminOnly; // Expose the toggleAdminOnly function
-
-            // Initial call to set visibility based on default selected marker type
+            window.duplicateMarker = duplicateMarker;
+            window.toggleAdminOnly = toggleAdminOnly;
             toggleFields();
         })();
     </script>
