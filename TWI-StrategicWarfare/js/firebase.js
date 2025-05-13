@@ -8,13 +8,14 @@ import {
 } from 'https://www.gstatic.com/firebasejs/9.22.2/firebase-storage.js';
 
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_AUTH_DOMAIN",
-  databaseURL: "YOUR_DATABASE_URL",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_STORAGE_BUCKET",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+    apiKey: "AIzaSyCo9QPVrLCXS6li_kcTu3e-GOoiiwpHvLs",
+    authDomain: "woe-world.firebaseapp.com",
+    databaseURL: "https://woe-world-default-rtdb.firebaseio.com",
+    projectId: "woe-world",
+    storageBucket: "woe-world.appspot.com",
+    messagingSenderId: "706865712365",
+    appId: "1:706865712365:web:e080b1ef45b8d8b27190e4",
+    measurementId: "G-789BN2WECG"
 };
 
 const app = initializeApp(firebaseConfig);
