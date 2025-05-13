@@ -1,0 +1,1864 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Winchester Strategic Warfare</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"/>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a202c; /* Darker background */
+            color: #e2e8f0; /* Light text */
+        }
+        #map {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            right: 0;
+            left: 0;
+            background-color: #1a202c; /* Match body background */
+        }
+        #sidebar {
+            width: 350px; /* Slightly wider for more fields */
+            height: 100%;
+            overflow-y: auto; /* Use y for vertical scrolling */
+            background: #2d3748; /* Darker sidebar */
+            color: #e2e8f0;
+            padding: 15px;
+            border-right: 2px solid #4a5568; /* Darker border */
+            transition: transform 0.3s ease;
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            z-index: 1000;
+            box-shadow: 3px 0px 10px rgba(0,0,0,0.5);
+        }
+        #sidebar.hidden {
+            transform: translateX(-100%); /* Slide out */
+        }
+        #toggleSidebar {
+            position: absolute;
+            top: 15px;
+            left: 15px; /* Slightly adjusted */
+            z-index: 1001; /* Higher z-index than sidebar */
+            background: #4a5568; /* Button background */
+            color: white;
+            border: none;
+            padding: 10px;
+            cursor: pointer;
+            font-size: 16px;
+            border-radius: 5px;
+            box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
+        }
+        #sidebar.hidden + #toggleSidebar {
+             left: 15px; /* Button position when sidebar is hidden */
+        }
+         #sidebar:not(.hidden) + #toggleSidebar {
+             left: 365px; /* Button position when sidebar is visible (sidebar width + padding) */
+        }
+        /* Adjust Leaflet controls position to avoid sidebar */
+        .leaflet-control-container .leaflet-top.leaflet-left {
+            left: 400px !important;
+            top: 10px !important;
+        }
+         #sidebar.hidden ~ .leaflet-control-container .leaflet-top.leaflet-left {
+             left: 10px !important; /* Reset Leaflet controls when sidebar is hidden */
+         }
+
+
+        .leaflet-container {
+            background: #1a202c; /* Match body background */
+        }
+         /* Custom marker icon styles */
+        .unit-icon {
+            position: relative;
+            width: 40px; /* Base width for the unit icon */
+            height: 40px; /* Base height for the unit icon */
+            display: flex;
+            justify-content: center; /* Center unit image */
+            align-items: center; /* Center unit image */
+        }
+         .unit-icon img.unit-image {
+             display: block;
+             width: 100%; /* Unit image fills the container */
+             height: 100%;
+             object-fit: contain; /* or 'cover' depending on desired scaling */
+             position: absolute; /* Position unit image within container */
+             top: 0;
+             left: 0;
+             z-index: 1; /* Unit image below flag */
+         }
+         .unit-icon img.flag-image {
+             position: absolute;
+             top: -10px; /* Adjust to position flag above unit */
+             left: 50%; /* Start flag at horizontal center */
+             transform: translateX(-50%); /* Center flag horizontally */
+             width: 20px; /* Adjust flag size */
+             height: auto;
+             z-index: 2; /* Flag image above unit */
+             border: 1px solid #e2e8f0; /* Optional border for flag */
+             box-shadow: 1px 1px 3px rgba(0,0,0,0.5);
+         }
+
+         /* Style for Object Markers */
+         .object-icon img {
+              width: 30px; /* Adjust object icon size */
+              height: 30px;
+              object-fit: contain;
+         }
+
+
+        h2, h3 {
+            font-family: 'Arial', sans-serif; /* More standard font */
+            color: #edf2f7; /* Lighter text */
+        }
+        button {
+            background-color: #4299e1; /* Blue button */
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            margin: 8px 0; /* More margin */
+            cursor: pointer;
+            font-size: 14px;
+            border-radius: 5px;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
+            transition: background-color 0.2s ease;
+        }
+        button:hover {
+            background-color: #3182ce; /* Darker blue on hover */
+        }
+         button:disabled {
+             background-color: #a0aec0; /* Grey when disabled */
+             cursor: not-allowed;
+         }
+
+        input[type="text"], input[type="file"], select {
+            width: calc(100% - 20px); /* Account for padding */
+            padding: 10px;
+            margin: 5px 0;
+            border: 1px solid #4a5568; /* Border color */
+            border-radius: 5px;
+            box-sizing: border-box; /* Include padding and border in width */
+            background-color: #2d3748; /* Match sidebar background */
+            color: #e2e8f0; /* Match text color */
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
+        }
+         input[type="checkbox"] {
+             margin-top: 10px;
+             margin-right: 5px;
+         }
+        label {
+            margin: 8px 0 2px 0; /* Adjust label spacing */
+            display: block; /* Make labels block elements */
+            font-weight: bold;
+        }
+         form div {
+             margin-bottom: 15px; /* Space between form groups */
+         }
+
+        #sidebar h2, #sidebar h3 {
+            color: #e2e8f0;
+        }
+        .readonly #addMarkerSection, /* Hide the whole add marker section */
+        .readonly #manageUnitTypesForm,
+        .readonly #manageNationsForm {
+            display: none; /* Hide manage forms in readonly mode */
+        }
+        .collapsible {
+            background-color: #4a5568; /* Darker collapsible header */
+            color: white;
+            cursor: pointer;
+            padding: 10px;
+            width: 100%;
+            border: none;
+            text-align: left;
+            outline: none;
+            font-size: 15px;
+            border-radius: 5px;
+            margin-bottom: 5px;
+        }
+        .collapsible:after {
+            content: '\002B';
+            color: white;
+            font-weight: bold;
+            float: right;
+            margin-left: 5px;
+        }
+        .collapsible.active:after {
+            content: '\2212';
+        }
+        .content {
+            padding: 0 10px; /* Adjust padding */
+            display: none;
+            overflow: hidden;
+            background-color: #2d3748; /* Match sidebar background */
+            border-bottom: 1px solid #4a5568;
+            margin-bottom: 10px;
+        }
+        .content.show {
+            display: block;
+        }
+         #markerList li,
+         #unitTypeList li,
+         #nationList li,
+         #drawnFeaturesList li { /* Added list for drawn features */
+             list-style: none;
+             padding: 8px 0;
+             border-bottom: 1px solid #4a5568;
+             display: flex;
+             justify-content: space-between;
+             align-items: center;
+             font-size: 14px;
+         }
+         #markerList li span,
+         #unitTypeList li span,
+         #nationList li span,
+         #drawnFeaturesList li span {
+             flex-grow: 1;
+             margin-right: 10px;
+         }
+         #markerList li span {
+              cursor: pointer; /* Indicate clickable for editing */
+         }
+         #unitTypeList li span,
+         #nationList li span {
+              display: flex;
+              align-items: center;
+         }
+          #nationList li span img {
+              width: 20px;
+              height: auto;
+              margin-right: 8px;
+              border: 1px solid #e2e8f0;
+          }
+           #unitTypeList li span img {
+              width: 30px;
+              height: auto;
+              margin-right: 8px;
+              object-fit: contain;
+           }
+           #drawnFeaturesList li span {
+                display: flex;
+                align-items: center;
+           }
+
+
+         #markerList li button,
+         #unitTypeList li button,
+         #nationList li button,
+         #drawnFeaturesList li button {
+             padding: 5px 10px;
+             font-size: 12px;
+             margin: 0 2px;
+         }
+         #markerList,
+         #unitTypeList,
+         #nationList,
+         #drawnFeaturesList {
+             padding: 0;
+         }
+
+         .popup-content {
+             font-size: 14px;
+             color: #2d3748; /* Dark text for popup */
+         }
+         .popup-content strong {
+             display: block;
+             margin-bottom: 5px;
+             font-size: 16px;
+         }
+          .popup-content .popup-images {
+              display: flex;
+              align-items: center;
+              margin-bottom: 10px;
+          }
+           .popup-content .popup-images img {
+               height: 40px; /* Adjust popup image size */
+               width: auto;
+               object-fit: contain;
+           }
+            .popup-content .popup-images img.popup-unit-image {
+                 margin-right: 10px;
+            }
+             .popup-content .popup-images img.popup-flag-image {
+                 height: 25px; /* Smaller flag in popup */
+                 border: 1px solid #2d3748;
+                 box-shadow: none; /* No shadow in popup */
+             }
+
+
+         .popup-content p {
+             margin: 3px 0;
+         }
+         .admin-options button, .admin-options input[type="checkbox"] {
+             margin-top: 10px;
+             margin-right: 5px;
+             font-size: 12px;
+             padding: 3px 8px;
+         }
+
+         /* Styles for drawing mode selection buttons */
+         #drawingModeControls {
+             position: absolute;
+             bottom: 10px; /* Position at the bottom */
+             left: 50%;
+             transform: translateX(-50%);
+             z-index: 1000;
+             background: rgba(45, 55, 72, 0.8); /* Semi-transparent background */
+             padding: 10px;
+             border-radius: 8px;
+             box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+             display: flex;
+             gap: 10px; /* Space between buttons */
+         }
+         #drawingModeControls button {
+             margin: 0; /* Remove margin */
+             padding: 8px 12px;
+             font-size: 13px;
+         }
+          #drawingModeControls button.active {
+               background-color: #3182ce; /* Highlight active button */
+               box-shadow: inset 1px 1px 3px rgba(0,0,0,0.5);
+          }
+          #drawingModeControls button:disabled {
+              background-color: #a0aec0;
+              cursor: not-allowed;
+          }
+    </style>
+</head>
+<body>
+    <button id="toggleSidebar">☰</button>
+    <div id="sidebar" class="hidden">
+        <h2>Winchester Strategic Warfare</h2>
+        <input type="text" id="searchInput" placeholder="Search map items..." oninput="searchMapItems()">
+
+        <button type="button" class="collapsible active" id="addMarkerSection">Add Map Item</button>
+        <div class="content show">
+            <form id="itemForm">
+                 <input type="hidden" id="itemId"> <div>
+                    <label for="itemTypeSelect">Item Type:</label>
+                    <select id="itemTypeSelect">
+                        <option value="unit">Military Unit</option>
+                        <option value="object">Map Object</option>
+                    </select>
+                </div>
+
+                 <div id="unitFields">
+                     <div>
+                         <label for="unitName">Unit Name:</label>
+                         <input type="text" id="unitName" required>
+                     </div>
+                      <div>
+                         <label for="unitTypeSelect">Unit Type:</label>
+                         <select id="unitTypeSelect">
+                             <option value="">Select Unit Type</option>
+                         </select>
+                     </div>
+                      <div>
+                         <label for="nationSelect">Nation:</label>
+                         <select id="nationSelect">
+                              <option value="">Select Nation</option>
+                         </select>
+                     </div>
+                     <div>
+                         <label for="unitIconFile">Specific Icon Image (Optional Override):</label>
+                         <input type="file" id="unitIconFile" accept="image/*">
+                         <p style="font-size: 12px; margin-top: 5px; color: #a0aec0;">Upload to override default type icon. Max 1MB.</p>
+                          <input type="text" id="unitIconUrl" placeholder="Or enter icon URL (overrides file)">
+                     </div>
+
+                      <h3>Stats:</h3>
+                      <div>
+                          <label for="unitAttack">Attack:</label>
+                          <input type="text" id="unitAttack">
+                      </div>
+                      <div>
+                          <label for="unitDefence">Defence:</label>
+                          <input type="text" id="unitDefence">
+                      </div>
+                      <div>
+                          <label for="unitAP">Action Points:</label>
+                          <input type="text" id="unitAP">
+                      </div>
+                      <div>
+                          <label for="unitRange">Range:</label>
+                          <input type="text" id="unitRange">
+                      </div>
+                      <div>
+                          <label for="unitAction1">Action 1:</label>
+                          <input type="text" id="unitAction1">
+                      </div>
+                      <div>
+                          <label for="unitAction2">Action 2:</label>
+                          <input type="text" id="unitAction2">
+                      </div>
+                      <div>
+                          <label for="unitAction3">Action 3:</label>
+                          <input type="text" id="unitAction3">
+                      </div>
+                      <div>
+                          <label for="unitAbility">Special Ability:</label>
+                          <input type="text" id="unitAbility">
+                      </div>
+                      <div>
+                          <label for="unitNotes">Ability Notes:</label>
+                          <input type="text" id="unitNotes">
+                      </div>
+                 </div>
+
+                 <div id="objectFields" style="display:none;">
+                     <div>
+                         <label for="objectName">Object Name:</label>
+                         <input type="text" id="objectName" required>
+                     </div>
+                      <div>
+                         <label for="objectTypeSelect">Object Type:</label>
+                         <select id="objectTypeSelect">
+                              <option value="">Select Object Type</option>
+                              <option value="city">City</option>
+                              <option value="shipyard">Shipyard</option>
+                              <option value="airfield">Airfield</option>
+                              <option value="factory">Factory</option>
+                              <option value="base">Base</option>
+                              <option value="depot">Depot</option>
+                         </select>
+                     </div>
+                 </div>
+
+
+                <div>
+                    <label for="itemAdminOnly">Admin Only:</label>
+                    <input type="checkbox" id="itemAdminOnly">
+                </div>
+
+                <button type="submit" id="addUpdateItemBtn">Add Item</button>
+                 <button type="button" id="cancelEditBtn" style="display:none;">Cancel Edit</button>
+            </form>
+        </div>
+
+         <button type="button" class="collapsible">Manage Unit Types</button>
+         <div class="content">
+              <form id="manageUnitTypesForm">
+                   <div>
+                        <label for="newUnitTypeName">New Unit Type Name:</label>
+                        <input type="text" id="newUnitTypeName" required>
+                   </div>
+                    <div>
+                         <label for="newUnitTypeDefaultIconFile">Default Icon Image:</label>
+                         <input type="file" id="newUnitTypeDefaultIconFile" accept="image/*">
+                          <p style="font-size: 12px; margin-top: 5px; color: #a0aec0;">Default icon for this type. Max 1MB.</p>
+                    </div>
+                   <button type="button" id="addUnitTypeBtn">Add Unit Type</button>
+              </form>
+              <h3>Existing Unit Types:</h3>
+              <ul id="unitTypeList">
+                   </ul>
+         </div>
+
+         <button type="button" class="collapsible">Manage Nations</button>
+         <div class="content">
+              <form id="manageNationsForm">
+                   <div>
+                        <label for="newNationName">New Nation Name:</label>
+                        <input type="text" id="newNationName" required>
+                   </div>
+                    <div>
+                         <label for="newNationFlagFile">Flag Image:</label>
+                         <input type="file" id="newNationFlagFile" accept="image/*" required>
+                          <p style="font-size: 12px; margin-top: 5px; color: #a0aec0;">Flag image for this nation. Max 1MB.</p>
+                    </div>
+                   <button type="button" id="addNationBtn">Add Nation</button>
+              </form>
+              <h3>Existing Nations:</h3>
+              <ul id="nationList">
+                   </ul>
+         </div>
+
+        <button type="button" class="collapsible active">Map Items List</button>
+        <div class="content show">
+            <ul id="markerList"></ul> </div>
+
+         <button type="button" class="collapsible">Drawn Features</button>
+         <div class="content">
+             <h3>Railways, Roads, Trenches:</h3>
+             <ul id="drawnFeaturesList">
+                 </ul>
+         </div>
+    </div>
+    <div id="map"></div>
+
+     <div id="drawingModeControls" style="display: none;">
+         <button id="drawRailwayBtn" data-type="railway">Draw Railway</button>
+         <button id="drawRoadBtn" data-type="road">Draw Road</button>
+         <button id="drawTrenchBtn" data-type="trench">Draw Trench</button>
+         <button id="stopDrawingBtn" style="display:none;">Stop Drawing</button>
+     </div>
+
+
+    <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-database.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-storage.js"></script>
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+    <script>
+        (function() {
+            // --- Firebase Configuration ---
+            // !!! IMPORTANT !!! Replace with your actual Firebase config
+            const firebaseConfig = {
+                apiKey: "AIzaSyCo9QPVrLCXS6li_kcTu3e-GOoiiwpHvLs",
+                authDomain: "woe-world.firebaseapp.com",
+                databaseURL: "https://woe-world-default-rtdb.firebaseio.com",
+                projectId: "woe-world",
+                storageBucket: "woe-world.appspot.com",
+                messagingSenderId: "706865712365",
+                appId: "1:706865712365:web:e080b1ef45b8d8b27190e4",
+                measurementId: "G-789BN2WECG"
+                // measurementId: "G-..." // Optional: If you use Analytics
+            };
+
+            // Initialize Firebase
+            if (!firebase.apps.length) {
+                firebase.initializeApp(firebaseConfig);
+            }
+            const database = firebase.database();
+            const storage = firebase.storage();
+
+            // --- Map Configuration ---
+            // !!! IMPORTANT !!! Replace with your global map image and bounds
+            const imageUrl = 'assets/global_map.png'; // Replace with the path to your global map image
+            // Adjust these bounds based on the dimensions of your global map image
+            // For example, if your image is 8192x4320 pixels: [[0, 0], [4320, 8192]]
+            const imageBounds = [[0, 0], [4320, 8192]]; // Placeholder bounds
+
+            // Initialize the map
+            const map = L.map('map', {
+                crs: L.CRS.Simple, // Use simple CRS for image overlays
+                maxZoom: 3, // Increased max zoom slightly
+                minZoom: -2,
+                // Set initial view or fit bounds later
+            });
+
+            // Add the image overlay to the map
+            L.imageOverlay(imageUrl, imageBounds).addTo(map);
+
+            // Fit the map to the image bounds
+            map.fitBounds(imageBounds);
+
+            // --- Leaflet.draw Setup ---
+            // FeatureGroup to store drawn items (polylines)
+            const drawnItems = new L.FeatureGroup();
+            map.addLayer(drawnItems);
+
+             // Configure the draw control
+             const drawControl = new L.Control.Draw({
+                 position: 'topleft', // Position of the drawing controls
+                 draw: {
+                     polyline: {
+                         shapeOptions: {
+                             color: '#f03', // Default color (will be overridden by type)
+                             weight: 5
+                         },
+                         repeatMode: false // Do not automatically continue drawing after finishing one
+                     },
+                     polygon: false, // Disable other drawing tools
+                     rectangle: false,
+                     circle: false,
+                     circlemarker: false,
+                     marker: false
+                 },
+                 edit: {
+                     featureGroup: drawnItems, // Allow editing/deleting drawn items
+                     remove: true // Enable delete
+                 }
+             });
+             // Add the control later based on edit permissions
+
+            // --- Application State ---
+            let markers = {}; // Store Leaflet marker objects (units and objects) keyed by Firebase ID
+            let drawnFeatures = {}; // Store Leaflet drawn layer objects (polylines) keyed by Firebase ID
+            let unitTypes = {}; // Cache of unit types from Firebase
+            let nations = {}; // Cache of nations from Firebase
+            let hasEditPermissions = false; // Flag for edit mode
+            let selectedItemId = null; // Track the ID of the item (unit/object) being edited
+            let activeDrawingType = null; // Track which type of line is being drawn (railway, road, trench)
+
+
+            // --- Cached DOM Elements ---
+            const sidebar = document.getElementById('sidebar');
+            const toggleSidebarBtn = document.getElementById('toggleSidebar');
+            const searchInput = document.getElementById('searchInput');
+            const markerList = document.getElementById('markerList'); // This will list items
+            const drawnFeaturesList = document.getElementById('drawnFeaturesList'); // List for drawn features
+            const collapsibleButtons = document.getElementsByClassName("collapsible");
+
+            // Add/Edit Item Form Elements
+            const itemForm = document.getElementById('itemForm');
+            const itemIdInput = document.getElementById('itemId');
+             const itemTypeSelect = document.getElementById('itemTypeSelect');
+             const unitFieldsDiv = document.getElementById('unitFields');
+             const objectFieldsDiv = document.getElementById('objectFields');
+
+            // Unit Form Elements (within unitFieldsDiv)
+            const unitNameInput = document.getElementById('unitName');
+             const unitTypeSelect = document.getElementById('unitTypeSelect');
+             const nationSelect = document.getElementById('nationSelect');
+            const unitIconFileInput = document.getElementById('unitIconFile');
+            const unitIconUrlInput = document.getElementById('unitIconUrl');
+            const unitAttackInput = document.getElementById('unitAttack');
+            const unitDefenceInput = document.getElementById('unitDefence');
+            const unitAPInput = document.getElementById('unitAP');
+            const unitRangeInput = document.getElementById('unitRange');
+            const unitAction1Input = document.getElementById('unitAction1');
+            const unitAction2Input = document.getElementById('unitAction2');
+            const unitAction3Input = document.getElementById('unitAction3');
+            const unitAbilityInput = document.getElementById('unitAbility');
+            const unitNotesInput = document.getElementById('unitNotes');
+
+             // Object Form Elements (within objectFieldsDiv)
+             const objectNameInput = document.getElementById('objectName');
+             const objectTypeSelect = document.getElementById('objectTypeSelect');
+
+
+            const itemAdminOnlyCheckbox = document.getElementById('itemAdminOnly');
+            const addUpdateItemBtn = document.getElementById('addUpdateItemBtn');
+             const cancelEditBtn = document.getElementById('cancelEditBtn');
+
+             // Manage Unit Types Elements
+             const manageUnitTypesForm = document.getElementById('manageUnitTypesForm');
+             const newUnitTypeNameInput = document.getElementById('newUnitTypeName');
+             const newUnitTypeDefaultIconFileInput = document.getElementById('newUnitTypeDefaultIconFile');
+             const addUnitTypeBtn = document.getElementById('addUnitTypeBtn');
+             const unitTypeList = document.getElementById('unitTypeList');
+
+             // Manage Nations Elements
+             const manageNationsForm = document.getElementById('manageNationsForm');
+             const newNationNameInput = document.getElementById('newNationName');
+             const newNationFlagFileInput = document.getElementById('newNationFlagFile');
+             const addNationBtn = document.getElementById('addNationBtn');
+             const nationList = document.getElementById('nationList');
+
+             // Drawing Mode Controls
+             const drawingModeControls = document.getElementById('drawingModeControls');
+             const drawRailwayBtn = document.getElementById('drawRailwayBtn');
+             const drawRoadBtn = document.getElementById('drawRoadBtn');
+             const drawTrenchBtn = document.getElementById('drawTrenchBtn');
+             const stopDrawingBtn = document.getElementById('stopDrawingBtn');
+
+
+            // --- Firebase Data Handling ---
+
+            // Load units from Firebase
+            database.ref('units').on('value', snapshot => {
+                const unitsData = snapshot.val();
+                const currentUnitIds = Object.keys(markers).filter(id => markers[id].itemType === 'unit');
+                const firebaseUnitIds = unitsData ? Object.keys(unitsData) : [];
+
+                // Process units from Firebase
+                firebaseUnitIds.forEach(id => {
+                     const unitData = unitsData[id];
+                     if (markers[id]) {
+                         // Update existing marker if data changed (e.g., position, type, nation, etc.)
+                          const newLatLng = new L.LatLng(unitData.lat, unitData.lng);
+                          if (!markers[id].getLatLng().equals(newLatLng)) {
+                              markers[id].setLatLng(newLatLng);
+                          }
+                         // Recreate marker if icon or popup content might change
+                         if (JSON.stringify(markers[id].itemData) !== JSON.stringify(unitData)) {
+                             map.removeLayer(markers[id]);
+                             delete markers[id]; // Remove from markers cache
+                             createMarker(id, {...unitData, itemType: 'unit'}); // Pass itemType
+                         } else {
+                             // Only update popup content if it exists (might not be open)
+                              markers[id].setPopupContent(createItemPopupContent(id, {...unitData, itemType: 'unit'}));
+                         }
+
+                     } else {
+                         // Create new marker
+                         createMarker(id, {...unitData, itemType: 'unit'}); // Pass itemType
+                     }
+                });
+
+                // Remove units from the map that are no longer in Firebase
+                currentUnitIds.forEach(id => {
+                    if (!firebaseUnitIds.includes(id)) {
+                        if (markers[id]) {
+                            map.removeLayer(markers[id]);
+                            delete markers[id]; // Remove from markers cache
+                        }
+                    }
+                });
+
+                 updateSidebar(); // Always update sidebar after data changes
+            });
+
+             // Load objects from Firebase
+             database.ref('objects').on('value', snapshot => {
+                 const objectsData = snapshot.val();
+                 const currentObjectIds = Object.keys(markers).filter(id => markers[id].itemType === 'object');
+                 const firebaseObjectIds = objectsData ? Object.keys(objectsData) : [];
+
+                 // Process objects from Firebase
+                 firebaseObjectIds.forEach(id => {
+                      const objectData = objectsData[id];
+                      if (markers[id]) {
+                          // Update existing object marker if data changed
+                           const newLatLng = new L.LatLng(objectData.lat, objectData.lng);
+                           if (!markers[id].getLatLng().equals(newLatLng)) {
+                               markers[id].setLatLng(newLatLng);
+                           }
+                          // Recreate marker if icon or popup content might change
+                          if (JSON.stringify(markers[id].itemData) !== JSON.stringify(objectData)) {
+                              map.removeLayer(markers[id]);
+                              delete markers[id]; // Remove from markers cache
+                              createMarker(id, {...objectData, itemType: 'object'}); // Pass itemType
+                          } else {
+                              // Only update popup content
+                              markers[id].setPopupContent(createItemPopupContent(id, {...objectData, itemType: 'object'}));
+                          }
+
+                      } else {
+                          // Create new object marker
+                          createMarker(id, {...objectData, itemType: 'object'}); // Pass itemType
+                      }
+                 });
+
+                 // Remove objects from map that are no longer in Firebase
+                 currentObjectIds.forEach(id => {
+                      if (!firebaseObjectIds.includes(id)) {
+                          if (markers[id]) {
+                              map.removeLayer(markers[id]);
+                              delete markers[id]; // Remove from markers cache
+                          }
+                      }
+                 });
+                  updateSidebar(); // Update sidebar list
+             });
+
+
+            // Load Unit Types from Firebase
+            database.ref('unitTypes').on('value', snapshot => {
+                 unitTypes = snapshot.val() || {};
+                 populateUnitTypeSelect();
+                 populateUnitTypeList();
+                 // Re-render unit markers if unit types change (e.g., default icon updated)
+                  Object.keys(markers).filter(id => markers[id].itemType === 'unit').forEach(id => {
+                       const unitData = markers[id].itemData; // Get the original unit data
+                        map.removeLayer(markers[id]); // Remove old marker instance
+                        delete markers[id]; // Remove from cache
+                        createMarker(id, {...unitData, itemType: 'unit'}); // Create new marker with updated settings
+                  });
+                 updateSidebar(); // Update sidebar list (might show default icons)
+            });
+
+            // Load Nations from Firebase
+            database.ref('nations').on('value', snapshot => {
+                 nations = snapshot.val() || {};
+                 populateNationSelect();
+                 populateNationList();
+                 // Re-render unit markers if nations change (e.g., flag updated)
+                  Object.keys(markers).filter(id => markers[id].itemType === 'unit').forEach(id => {
+                       const unitData = markers[id].itemData; // Get the original unit data
+                        map.removeLayer(markers[id]); // Remove old marker instance
+                        delete markers[id]; // Remove from cache
+                        createMarker(id, {...unitData, itemType: 'unit'}); // Create new marker with updated settings
+                  });
+                 updateSidebar(); // Update sidebar list (might show flags)
+            });
+
+             // Load Drawn Features (Railways, Roads, Trenches) from Firebase
+             database.ref('drawnFeatures').on('value', snapshot => {
+                 const drawnFeaturesData = snapshot.val() || {};
+                 const currentFeatureIds = Object.keys(drawnFeatures);
+                 const firebaseFeatureIds = Object.keys(drawnFeaturesData);
+
+                 // Process drawn features from Firebase
+                 firebaseFeatureIds.forEach(id => {
+                     const featureData = drawnFeaturesData[id];
+                      if (!drawnFeatures[id]) { // Add if it doesn't exist
+                         createDrawnFeature(id, featureData);
+                     } else {
+                         // Could add logic here to update existing drawn features if their data changes in Firebase
+                         // For now, we assume drawn features are static once created.
+                     }
+                 });
+
+                 // Remove drawn features from map that are no longer in Firebase
+                 currentFeatureIds.forEach(id => {
+                     if (!firebaseFeatureIds.includes(id)) {
+                         if (drawnFeatures[id]) {
+                             drawnItems.removeLayer(drawnFeatures[id]); // Remove from the FeatureGroup
+                             delete drawnFeatures[id]; // Remove from cache
+                         }
+                     }
+                 });
+
+                 updateSidebar(); // Update the drawn features list
+             });
+
+
+            // --- Marker Creation and Management ---
+
+            // Debounce function to handle rapid updates (e.g., dragging)
+            function debounce(func, wait) {
+                let timeout;
+                return function(...args) {
+                    clearTimeout(timeout);
+                    timeout = setTimeout(() => func.apply(this, args), wait);
+                };
+            }
+
+            // Debounce the item position update (applies to units and objects)
+            const debouncedUpdateItemPosition = debounce((id, itemType, lat, lng) => {
+                 const dbNode = itemType === 'unit' ? 'units' : 'objects';
+                database.ref(`${dbNode}/` + id).update({ lat, lng });
+            }, 200); // Adjust the delay as needed (milliseconds)
+
+
+            // Create a Leaflet marker for a unit or object
+            function createMarker(id, itemData) {
+                 const itemType = itemData.itemType; // 'unit' or 'object'
+
+                 // Do not create marker if it's admin only and user doesn't have permissions
+                 if (!hasEditPermissions && itemData.adminOnly) {
+                     return;
+                 }
+
+                 let marker;
+                 if (itemType === 'unit') {
+                     // Determine the unit image URL
+                     const unitType = unitTypes[itemData.unitType];
+                     const defaultUnitImageUrl = unitType ? unitType.defaultImageUrl : 'assets/placeholder_unit.png';
+                     const unitImageUrl = itemData.iconUrl || defaultUnitImageUrl; // Use override if provided, otherwise default
+
+                     // Determine the flag image URL
+                     const nation = nations[itemData.nation];
+                     const flagImageUrl = nation ? nation.flagImageUrl : 'assets/placeholder_flag.png'; // Placeholder if no nation or flag
+
+                     // Create the custom divIcon HTML for a unit
+                     const iconHtml = `
+                         <div class="unit-icon">
+                             <img src="${unitImageUrl}" class="unit-image" onerror="this.src='assets/placeholder_unit.png'" title="${itemData.name || 'Unnamed Unit'}">
+                             <img src="${flagImageUrl}" class="flag-image" onerror="this.src='assets/placeholder_flag.png'" title="${nation ? nation.name : 'Unknown Nation'}">
+                         </div>
+                     `;
+
+                     const unitIcon = L.divIcon({
+                          html: iconHtml,
+                          className: 'custom-unit-div-icon', // Custom class for styling
+                          iconSize: [40, 55], // Adjust size to accommodate flag above
+                          iconAnchor: [20, 55], // Point of the icon which will correspond to marker's location (bottom center)
+                          popupAnchor: [0, -55] // Point from which the popup should open relative to the iconAnchor
+                     });
+
+                      marker = L.marker([itemData.lat, itemData.lng], {
+                          icon: unitIcon,
+                          draggable: hasEditPermissions // Only draggable with edit permissions
+                      });
+
+                 } else if (itemType === 'object') {
+                      // Determine the object image URL based on subtype
+                      const objectImageUrl = `assets/${itemData.objectType || 'placeholder_object'}.png`; // Assumes image names match object types
+
+                      const objectIcon = L.icon({
+                           iconUrl: objectImageUrl,
+                           iconSize: [30, 30], // Adjust size
+                           iconAnchor: [15, 15], // Center the icon
+                           popupAnchor: [0, -15] // Position popup above icon
+                      });
+
+                       marker = L.marker([itemData.lat, itemData.lng], {
+                           icon: objectIcon,
+                           draggable: hasEditPermissions // Only draggable with edit permissions
+                       });
+                 } else {
+                      console.error("Attempted to create marker with unknown itemType:", itemData.itemType);
+                       // Optionally create a generic placeholder marker or return
+                       return;
+                 }
+
+
+                 // Store the Firebase ID and data on the marker object
+                 marker.firebaseId = id;
+                 marker.itemType = itemType; // Store item type
+                 marker.itemData = itemData; // Store the original data
+
+                 // Set the popup content
+                 marker.bindPopup(createItemPopupContent(id, itemData));
+
+
+                 // Event listeners for the marker
+                 marker.on('dragstart', function() {
+                      map.closePopup(); // Close popup when dragging starts
+                 });
+
+                 marker.on('dragend', function(e) {
+                     const newPos = e.target.getLatLng();
+                     debouncedUpdateItemPosition(id, itemType, newPos.lat, newPos.lng);
+                 });
+
+                 marker.on('click', function() {
+                      // If editing is allowed, select this item for editing
+                     if (hasEditPermissions) {
+                          selectItemForEditing(id, itemType);
+                     }
+                 });
+
+                 // Add to map and store in markers object
+                 markers[id] = marker.addTo(map);
+            }
+
+             // Create the HTML content for the item popup
+             function createItemPopupContent(id, itemData) {
+                 const itemType = itemData.itemType; // 'unit' or 'object'
+                  let content = `<div class="popup-content">`;
+
+                 if (itemType === 'unit') {
+                      const unitType = unitTypes[itemData.unitType];
+                      const nation = nations[itemData.nation];
+                       const unitImageUrl = itemData.iconUrl || (unitType ? unitType.defaultImageUrl : 'assets/placeholder_unit.png');
+                      const flagImageUrl = nation ? nation.flagImageUrl : 'assets/placeholder_flag.png';
+
+                      content += `<strong>${itemData.name || 'Unnamed Unit'}</strong>`;
+                       content += `<div class="popup-images">
+                                   <img src="${unitImageUrl}" class="popup-unit-image" onerror="this.src='assets/placeholder_unit.png'" alt="Unit Icon">
+                                    <img src="${flagImageUrl}" class="popup-flag-image" onerror="this.src='assets/placeholder_flag.png'" alt="Nation Flag">
+                               </div>`;
+
+                       content += `<p><strong>Type:</strong> ${unitType ? unitType.name : 'Unknown Type'}</p>
+                                <p><strong>Nation:</strong> ${nation ? nation.name : 'Unknown Nation'}</p>
+                                <p><strong>Attack:</strong> ${itemData.attack || 'N/A'}</p>
+                                <p><strong>Defence:</strong> ${itemData.defence || 'N/A'}</p>
+                                <p><strong>Action Points:</strong> ${itemData.ap || 'N/A'}</p>
+                                <p><strong>Range:</strong> ${itemData.range || 'N/A'}</p>
+                                <p><strong>Action 1:</strong> ${itemData.action1 || 'N/A'}</p>
+                                <p><strong>Action 2:</strong> ${itemData.action2 || 'N/A'}</p>
+                                <p><strong>Action 3:</strong> ${itemData.action3 || 'N/A'}</p>
+                                <p><strong>Special Ability:</strong> ${itemData.ability || 'N/A'}</p>
+                                <p><strong>Ability Notes:</strong> ${itemData.notes || 'N/A'}</p>`;
+
+                 } else if (itemType === 'object') {
+                      content += `<strong>${itemData.name || 'Unnamed Object'}</strong>`;
+                       const objectImageUrl = `assets/${itemData.objectType || 'placeholder_object'}.png`;
+                       content += `<img src="${objectImageUrl}" alt="${itemData.objectType || 'Unknown'} Object Icon" style="max-width: 80px; height: auto; display: block; margin: 10px auto;">`;
+                       content += `<p><strong>Type:</strong> ${itemData.objectType || 'Unknown Type'}</p>`;
+                       // Add other object-specific details if needed later
+                 }
+
+
+                 // Add admin options if user has edit permissions
+                 if (hasEditPermissions) {
+                      content += `<div class="admin-options">
+                                    <button onclick="duplicateItem('${id}', '${itemType}')">Duplicate</button>
+                                    <button onclick="removeItem('${id}', '${itemType}')">Remove</button><br>
+                                    <input type="checkbox" id="adminOnlyCheckbox_${id}" ${itemData.adminOnly ? 'checked' : ''} onchange="toggleAdminOnly('${id}', '${itemType}', this.checked)"> <label for="adminOnlyCheckbox_${id}" style="display:inline; font-weight:normal;">Admin Only</label>
+                                   </div>`;
+                 }
+
+                 content += `</div>`;
+                 return content;
+             }
+
+
+            // --- Drawn Features Creation and Management ---
+
+             // Create a Leaflet polyline for a drawn feature
+             function createDrawnFeature(id, featureData) {
+                  const featureType = featureData.type; // railway, road, trench
+
+                  let polylineOptions = {
+                      color: '#f03', // Default red
+                      weight: 5,
+                      opacity: 0.7,
+                       interactive: hasEditPermissions // Only interactive (clickable for delete) with permissions
+                  };
+
+                  // Customize style based on type
+                  switch (featureType) {
+                      case 'railway':
+                           polylineOptions.color = '#5a3b1c'; // Brown/Dark Orange
+                           polylineOptions.weight = 3;
+                           polylineOptions.dashArray = '10, 10'; // Dashed line for railway
+                          break;
+                      case 'road':
+                           polylineOptions.color = '#718096'; // Grey
+                           polylineOptions.weight = 4;
+                          break;
+                      case 'trench':
+                           polylineOptions.color = '#8b4513'; // SaddleBrown
+                           polylineOptions.weight = 6;
+                           // Maybe a different dashArray or custom renderer for visual trench effect?
+                          break;
+                  }
+
+                  const polyline = L.polyline(featureData.coords, polylineOptions);
+
+                   // Store Firebase ID and data on the layer object
+                   polyline.firebaseId = id;
+                   polyline.featureData = featureData; // Store the original data
+
+                   // Add click listener for removing in edit mode
+                   if (hasEditPermissions) {
+                       polyline.on('click', function() {
+                            if (confirm(`Are you sure you want to remove this ${featureType}?`)) {
+                                removeItem(id, 'drawnFeature'); // Use a specific type for removal logic
+                            }
+                       });
+                   }
+
+
+                  drawnFeatures[id] = polyline; // Store in cache
+                  drawnItems.addLayer(polyline); // Add to the FeatureGroup on the map
+             }
+
+
+            // --- Sidebar and Form Management ---
+
+             // Toggle visibility of Unit and Object fields in the form
+             itemTypeSelect.addEventListener('change', function() {
+                 const selectedType = this.value;
+                 if (selectedType === 'unit') {
+                     unitFieldsDiv.style.display = 'block';
+                     objectFieldsDiv.style.display = 'none';
+                 } else if (selectedType === 'object') {
+                     unitFieldsDiv.style.display = 'none';
+                     objectFieldsDiv.style.display = 'block';
+                 }
+                  // Reset relevant fields when switching
+                  itemForm.reset(); // Resets all visible form fields
+                  itemIdInput.value = ''; // Clear ID
+                  selectedItemId = null;
+                  addUpdateItemBtn.textContent = 'Add Item';
+                  cancelEditBtn.style.display = 'none';
+                   populateUnitTypeSelect(); // Ensure unit type dropdown is populated
+                   populateNationSelect(); // Ensure nation dropdown is populated
+             });
+
+
+             // Handle form submission (Add or Update)
+             itemForm.addEventListener('submit', async function(e) {
+                 e.preventDefault(); // Prevent default form submission
+
+                 const id = itemIdInput.value; // Get hidden ID field
+                 const isEditing = !!id; // Check if we are editing (ID exists)
+                 const itemType = itemTypeSelect.value; // 'unit' or 'object'
+
+                 let itemData = {
+                      adminOnly: itemAdminOnlyCheckbox.checked,
+                       // lat and lng will be added when creating/updating
+                 };
+
+                 const dbNode = itemType === 'unit' ? 'units' : 'objects';
+
+                 if (itemType === 'unit') {
+                      itemData = {
+                          ...itemData, // Include adminOnly
+                          name: unitNameInput.value || 'Unnamed Unit',
+                           unitType: unitTypeSelect.value,
+                           nation: nationSelect.value,
+                          attack: unitAttackInput.value,
+                          defence: unitDefenceInput.value,
+                          ap: unitAPInput.value,
+                          range: unitRangeInput.value,
+                          action1: unitAction1Input.value,
+                          action2: unitAction2Input.value,
+                          action3: unitAction3Input.value,
+                          ability: unitAbilityInput.value,
+                          notes: unitNotesInput.value,
+                      };
+
+                      const iconFile = unitIconFileInput.files[0];
+                      const iconUrl = unitIconUrlInput.value;
+
+                      // Handle icon image upload/URL (Optional override for units)
+                      if (iconFile) {
+                           const storageRef = storage.ref(`unit_specific_icons/${id || database.ref(dbNode).push().key}/${iconFile.name}`);
+                           try {
+                               const snapshot = await storageRef.put(iconFile);
+                               itemData.iconUrl = await snapshot.ref.getDownloadURL(); // Store the specific icon URL
+                           } catch (error) {
+                               console.error("Error uploading specific unit icon file:", error);
+                               alert("Error uploading specific unit icon file: " + error.message);
+                                itemData.iconUrl = ''; // Clear iconUrl on failure
+                               // Decide if you want to stop here or proceed without the override icon
+                               // return; // Option to stop
+                           }
+                      } else if (iconUrl) {
+                           itemData.iconUrl = iconUrl; // Use provided URL
+                      } else {
+                           itemData.iconUrl = ''; // Clear if no file and no URL provided during edit
+                      }
+
+                 } else if (itemType === 'object') {
+                      itemData = {
+                           ...itemData, // Include adminOnly
+                          name: objectNameInput.value || 'Unnamed Object',
+                           objectType: objectTypeSelect.value,
+                      };
+                       // Object types don't have specific icons or stats in this current plan,
+                       // their icon is determined by the objectType field.
+                 }
+
+
+                 if (isEditing) {
+                      // Update existing item
+                       // Keep existing lat/lng if marker hasn't been dragged during edit
+                       itemData.lat = markers[id].getLatLng().lat;
+                       itemData.lng = markers[id].getLatLng().lng;
+
+                      try {
+                          await database.ref(`${dbNode}/` + id).update(itemData);
+                           // Firebase listener will handle updating the marker on the map
+                          alert(`${itemType === 'unit' ? 'Unit' : 'Object'} updated successfully!`);
+                          resetItemForm(); // Reset form after update
+
+                      } catch (error) {
+                          console.error("Error updating item:", error);
+                           alert(`Failed to update ${itemType === 'unit' ? 'unit' : 'object'}: ` + error.message);
+                      }
+
+                 } else {
+                     // Add new item
+                     const newItemId = database.ref().child(dbNode).push().key;
+                     itemData.lat = map.getCenter().lat; // Add at map center
+                     itemData.lng = map.getCenter().lng;
+
+                     try {
+                         await database.ref(`${dbNode}/` + newItemId).set(itemData);
+                         // createMarker will be called by the Firebase listener
+                         alert(`${itemType === 'unit' ? 'Unit' : 'Object'} added successfully!`);
+                         resetItemForm(); // Reset form after adding
+
+                     } catch (error) {
+                         console.error("Error adding item:", error);
+                          alert(`Failed to add ${itemType === 'unit' ? 'unit' : 'object'}: ` + error.message);
+                     }
+                 }
+             });
+
+             // Select an item (unit or object) for editing
+             function selectItemForEditing(id, itemType) {
+                  const itemData = markers[id].itemData; // Get the original data stored on the marker
+
+                  selectedItemId = id;
+                  itemIdInput.value = id; // Set the hidden ID field
+                  itemTypeSelect.value = itemType; // Set the item type dropdown
+                   // Trigger change event to show/hide relevant fields
+                   itemTypeSelect.dispatchEvent(new Event('change'));
+
+                  // Populate relevant fields based on item type
+                  itemAdminOnlyCheckbox.checked = itemData.adminOnly || false;
+
+                  if (itemType === 'unit') {
+                      unitNameInput.value = itemData.name || '';
+                      unitTypeSelect.value = itemData.unitType || '';
+                      nationSelect.value = itemData.nation || '';
+                       unitIconUrlInput.value = itemData.iconUrl || ''; // Pre-fill specific icon URL if exists
+                      // File input cannot be pre-filled for security
+
+                      unitAttackInput.value = itemData.attack || '';
+                      unitDefenceInput.value = itemData.defence || '';
+                      unitAPInput.value = itemData.ap || '';
+                      unitRangeInput.value = itemData.range || '';
+                      unitAction1Input.value = itemData.action1 || '';
+                      unitAction2Input.value = itemData.action2 || '';
+                      unitAction3Input.value = itemData.action3 || '';
+                      unitAbilityInput.value = itemData.ability || '';
+                      unitNotesInput.value = itemData.notes || '';
+
+                  } else if (itemType === 'object') {
+                       objectNameInput.value = itemData.name || '';
+                       objectTypeSelect.value = itemData.objectType || '';
+                  }
+
+
+                  addUpdateItemBtn.textContent = 'Update Item'; // Change button text
+                  cancelEditBtn.style.display = 'inline-block'; // Show cancel button
+
+                  showSidebar(); // Ensure sidebar is visible
+                  map.panTo(markers[id].getLatLng()); // Pan to the selected marker
+             }
+
+             // Reset the item form
+             function resetItemForm() {
+                 itemIdInput.value = '';
+                 itemForm.reset(); // Resets all visible form fields
+                 selectedItemId = null;
+                 addUpdateItemBtn.textContent = 'Add Item';
+                  cancelEditBtn.style.display = 'none'; // Hide cancel button
+                  // Reset item type dropdown and trigger change to show default fields (unit)
+                  itemTypeSelect.value = 'unit';
+                   itemTypeSelect.dispatchEvent(new Event('change'));
+             }
+
+             // Event listener for the cancel edit button
+              cancelEditBtn.addEventListener('click', resetItemForm);
+
+             // Remove an item (unit, object, or drawn feature)
+             function removeItem(id, itemType) {
+                 let dbNode;
+                 let confirmationMessage;
+                 let successMessage;
+                 let errorMessage;
+
+                 switch (itemType) {
+                     case 'unit':
+                         dbNode = 'units';
+                         confirmationMessage = 'Are you sure you want to remove this Unit?';
+                         successMessage = 'Unit removed successfully';
+                         errorMessage = 'Failed to remove unit: ';
+                         break;
+                     case 'object':
+                         dbNode = 'objects';
+                         confirmationMessage = 'Are you sure you want to remove this Object?';
+                         successMessage = 'Object removed successfully';
+                         errorMessage = 'Failed to remove object: ';
+                         break;
+                     case 'drawnFeature':
+                         dbNode = 'drawnFeatures';
+                         confirmationMessage = 'Are you sure you want to remove this drawn feature?';
+                         successMessage = 'Drawn feature removed successfully';
+                         errorMessage = 'Failed to remove drawn feature: ';
+                         // No need to remove from map here, Firebase listener handles it
+                         break;
+                     default:
+                         console.error("Attempted to remove item with unknown itemType:", itemType);
+                         return;
+                 }
+
+
+                 if (confirm(confirmationMessage)) {
+                     database.ref(`${dbNode}/` + id).remove()
+                         .then(() => {
+                             console.log(successMessage);
+                             // The Firebase listener for the respective node will handle removing the item/feature from the map/FeatureGroup
+                             if (selectedItemId === id) {
+                                 resetItemForm(); // Reset form if the removed item was being edited
+                             }
+                         })
+                         .catch(error => {
+                             console.error("Error removing item:", error);
+                              alert(errorMessage + error.message);
+                         });
+                 }
+             }
+
+             // Duplicate an item (unit or object)
+             function duplicateItem(id, itemType) {
+                  const item = markers[id];
+                  if (!item) {
+                       console.error("Attempted to duplicate non-existent item with id:", id);
+                       return;
+                  }
+                  const itemDataToDuplicate = item.itemData; // Get the original data
+                  const itemLatLng = item.getLatLng();
+
+                  const dbNode = itemType === 'unit' ? 'units' : 'objects';
+                  const newItemId = database.ref().child(dbNode).push().key;
+
+                  const duplicatedData = {
+                      ...itemDataToDuplicate,
+                       // Adjust position slightly for duplicates
+                       lat: itemLatLng.lat + 10,
+                       lng: itemLatLng.lng + 10,
+                       // Ensure adminOnly status is copied
+                       adminOnly: itemDataToDuplicate.adminOnly || false
+                  };
+
+                  database.ref(`${dbNode}/` + newItemId).set(duplicatedData)
+                      .then(() => {
+                           console.log(`${itemType === 'unit' ? 'Unit' : 'Object'} duplicated successfully`);
+                           // createMarker will be called by the Firebase listener
+                      })
+                      .catch(error => {
+                           console.error(`Error duplicating ${itemType === 'unit' ? 'unit' : 'object'}:`, error);
+                           alert(`Failed to duplicate ${itemType === 'unit' ? 'unit' : 'object'}: ` + error.message);
+                      });
+             }
+
+             // Toggle admin-only visibility and draggability for an item (unit or object)
+             function toggleAdminOnly(id, itemType, isAdminOnly) {
+                 const dbNode = itemType === 'unit' ? 'units' : 'objects';
+                 database.ref(`${dbNode}/` + id).update({ adminOnly: isAdminOnly })
+                     .then(() => {
+                          // Update local marker object and trigger re-creation/sidebar update
+                          if (markers[id]) {
+                              markers[id].itemData.adminOnly = isAdminOnly;
+                               // Re-create marker to apply visibility changes immediately
+                               const itemData = markers[id].itemData;
+                               const currentItemType = markers[id].itemType; // Use the stored itemType
+                               map.removeLayer(markers[id]); // Remove old marker instance
+                               delete markers[id]; // Remove from cache
+                               createMarker(id, {...itemData, itemType: currentItemType}); // Create new marker with updated settings
+                          }
+                           updateSidebar(); // Ensure sidebar list reflects visibility
+                          console.log(`Admin Only set to ${isAdminOnly} for ${itemType} ${id}`);
+                     })
+                     .catch(error => {
+                          console.error("Error toggling adminOnly:", error);
+                          alert("Failed to update admin only status: " + error.message);
+                     });
+             }
+
+
+            // --- Manage Unit Types ---
+
+             // Populate the Unit Type dropdown
+             function populateUnitTypeSelect() {
+                  unitTypeSelect.innerHTML = '<option value="">Select Unit Type</option>'; // Reset
+                  Object.keys(unitTypes).forEach(typeId => {
+                       const option = document.createElement('option');
+                       option.value = typeId;
+                       option.textContent = unitTypes[typeId].name;
+                       unitTypeSelect.appendChild(option);
+                  });
+             }
+
+             // Populate the Unit Type list in the sidebar
+             function populateUnitTypeList() {
+                  unitTypeList.innerHTML = ''; // Clear current list
+                  Object.keys(unitTypes).forEach(typeId => {
+                       const listItem = document.createElement('li');
+                       const typeSpan = document.createElement('span');
+                        const defaultIconUrl = unitTypes[typeId].defaultImageUrl || 'assets/placeholder_unit.png';
+                        typeSpan.innerHTML = `<img src="${defaultIconUrl}" onerror="this.src='assets/placeholder_unit.png'" alt="Icon" style="height: 20px; vertical-align: middle; margin-right: 5px;"> ${unitTypes[typeId].name}`;
+                       listItem.appendChild(typeSpan);
+
+                       // Add remove button if allowed (implies edit permissions)
+                       if(hasEditPermissions) {
+                            const removeButton = document.createElement('button');
+                            removeButton.textContent = 'Remove';
+                            removeButton.style.backgroundColor = '#e53e3e'; // Red color
+                            removeButton.addEventListener('click', () => removeUnitType(typeId));
+                            listItem.appendChild(removeButton);
+                       }
+
+                       unitTypeList.appendChild(listItem);
+                  });
+             }
+
+             // Add new Unit Type
+             addUnitTypeBtn.addEventListener('click', async () => {
+                 const typeName = newUnitTypeNameInput.value.trim();
+                 const defaultIconFile = newUnitTypeDefaultIconFileInput.files[0];
+
+                 if (!hasEditPermissions) {
+                      alert("You do not have permission to add Unit Types.");
+                      return;
+                 }
+                 if (!typeName) {
+                      alert("Please enter a Unit Type Name.");
+                      return;
+                 }
+                  if (!defaultIconFile) {
+                      alert("Please select a Default Icon Image for the Unit Type.");
+                       return;
+                  }
+
+                 const newTypeId = database.ref().child('unitTypes').push().key;
+                 const storageRef = storage.ref(`unit_type_icons/${newTypeId}/${defaultIconFile.name}`);
+
+                 try {
+                      const snapshot = await storageRef.put(defaultIconFile);
+                      const defaultImageUrl = await snapshot.ref.getDownloadURL();
+
+                      const unitTypeData = {
+                           name: typeName,
+                           defaultImageUrl: defaultImageUrl
+                      };
+
+                      await database.ref('unitTypes/' + newTypeId).set(unitTypeData);
+                      alert('Unit Type added successfully!');
+                       newUnitTypeNameInput.value = '';
+                       newUnitTypeDefaultIconFileInput.value = ''; // Clear file input
+
+                 } catch (error) {
+                      console.error("Error adding Unit Type:", error);
+                      alert("Failed to add Unit Type: " + error.message);
+                 }
+             });
+
+             // Remove Unit Type
+             function removeUnitType(typeId) {
+                 if (!hasEditPermissions) {
+                      alert("You do not have permission to remove Unit Types.");
+                      return;
+                 }
+                  if (confirm('Are you sure you want to remove this Unit Type? Units using this type will revert to a placeholder icon.')) {
+                      database.ref('unitTypes/' + typeId).remove()
+                          .then(() => {
+                               console.log("Unit Type removed successfully");
+                               // Firebase listener will re-populate the lists and potentially update markers
+                          })
+                          .catch(error => {
+                               console.error("Error removing Unit Type:", error);
+                               alert("Failed to remove Unit Type: " + error.message);
+                          });
+                  }
+             }
+
+
+            // --- Manage Nations ---
+
+             // Populate the Nation dropdown
+             function populateNationSelect() {
+                  nationSelect.innerHTML = '<option value="">Select Nation</option>'; // Reset
+                  Object.keys(nations).forEach(nationId => {
+                       const option = document.createElement('option');
+                       option.value = nationId;
+                       option.textContent = nations[nationId].name;
+                       nationSelect.appendChild(option);
+                  });
+             }
+
+             // Populate the Nation list in the sidebar
+             function populateNationList() {
+                  nationList.innerHTML = ''; // Clear current list
+                  Object.keys(nations).forEach(nationId => {
+                       const listItem = document.createElement('li');
+                        const nationSpan = document.createElement('span');
+                         const flagImageUrl = nations[nationId].flagImageUrl || 'assets/placeholder_flag.png';
+                         nationSpan.innerHTML = `<img src="${flagImageUrl}" onerror="this.src='assets/placeholder_flag.png'" alt="Flag" style="height: 15px; vertical-align: middle; margin-right: 5px;"> ${nations[nationId].name}`;
+                       listItem.appendChild(nationSpan);
+
+                       // Add remove button if allowed (implies edit permissions)
+                       if(hasEditPermissions) {
+                            const removeButton = document.createElement('button');
+                            removeButton.textContent = 'Remove';
+                            removeButton.style.backgroundColor = '#e53e3e'; // Red color
+                            removeButton.addEventListener('click', () => removeNation(nationId));
+                            listItem.appendChild(removeButton);
+                       }
+
+                       nationList.appendChild(listItem);
+                  });
+             }
+
+             // Add new Nation
+             addNationBtn.addEventListener('click', async () => {
+                 const nationName = newNationNameInput.value.trim();
+                 const flagFile = newNationFlagFileInput.files[0];
+
+                  if (!hasEditPermissions) {
+                      alert("You do not have permission to add Nations.");
+                      return;
+                  }
+                 if (!nationName) {
+                      alert("Please enter a Nation Name.");
+                      return;
+                 }
+                  if (!flagFile) {
+                      alert("Please select a Flag Image for the Nation.");
+                       return;
+                       return;
+                  }
+
+                 const newNationId = database.ref().child('nations').push().key;
+                 const storageRef = storage.ref(`nation_flags/${newNationId}/${flagFile.name}`);
+
+                 try {
+                      const snapshot = await storageRef.put(flagFile);
+                      const flagImageUrl = await snapshot.ref.getDownloadURL();
+
+                      const nationData = {
+                           name: nationName,
+                           flagImageUrl: flagImageUrl
+                      };
+
+                      await database.ref('nations/' + newNationId).set(nationData);
+                      alert('Nation added successfully!');
+                       newNationNameInput.value = '';
+                       newNationFlagFileInput.value = ''; // Clear file input
+
+                 } catch (error) {
+                      console.error("Error adding Nation:", error);
+                      alert("Failed to add Nation: " + error.message);
+                 }
+             });
+
+             // Remove Nation
+             function removeNation(nationId) {
+                  if (!hasEditPermissions) {
+                      alert("You do not have permission to remove Nations.");
+                      return;
+                  }
+                  if (confirm('Are you sure you want to remove this Nation? Units using this nation will revert to a placeholder flag.')) {
+                      database.ref('nations/' + nationId).remove()
+                          .then(() => {
+                               console.log("Nation removed successfully");
+                               // Firebase listener will re-populate the lists and potentially update markers
+                          })
+                          .catch(error => {
+                               console.error("Error removing Nation:", error);
+                               alert("Failed to remove Nation: " + error.message);
+                          });
+                  }
+             }
+
+
+            // --- Drawing Tools ---
+
+             // Enable a specific drawing mode
+             function enableDrawingMode(type) {
+                  if (!hasEditPermissions) {
+                       alert("You do not have permission to draw features.");
+                       return;
+                  }
+                 activeDrawingType = type;
+                 drawControl.setDrawingOptions({
+                      polyline: {
+                           shapeOptions: {
+                               color: type === 'railway' ? '#5a3b1c' : (type === 'road' ? '#718096' : '#8b4513'), // Set color based on type
+                               weight: type === 'trench' ? 6 : (type === 'railway' ? 3 : 4), // Set weight
+                               dashArray: type === 'railway' ? '10, 10' : null // Set dash for railway
+                           }
+                      }
+                 });
+                  drawControl.enable(); // Enable the draw control
+                  drawControl._toolbars.draw._modes.polyline.handler.enable(); // Explicitly enable polyline drawing
+                  map.on('draw:created', handleDrawnFeature); // Listen for created features
+
+                  // Update button states
+                 drawRailwayBtn.classList.remove('active');
+                 drawRoadBtn.classList.remove('active');
+                 drawTrenchBtn.classList.remove('active');
+                  stopDrawingBtn.style.display = 'inline-block';
+
+                  if (type === 'railway') drawRailwayBtn.classList.add('active');
+                  else if (type === 'road') drawRoadBtn.classList.add('active');
+                  else if (type === 'trench') drawTrenchBtn.classList.add('active');
+
+                  alert(`Drawing ${type} mode enabled. Click points on the map to draw. Double-click or click the last point to finish.`);
+             }
+
+             // Disable drawing mode
+             function disableDrawingMode() {
+                  if (drawControl._toolbars.draw._modes.polyline.handler.enabled()) {
+                      drawControl._toolbars.draw._modes.polyline.handler.disable(); // Disable polyline drawing
+                  }
+                 drawControl.disable(); // Disable the overall draw control
+                 map.off('draw:created', handleDrawnFeature); // Stop listening
+
+                 activeDrawingType = null;
+
+                  // Reset button states
+                  drawRailwayBtn.classList.remove('active');
+                  drawRoadBtn.classList.remove('active');
+                  drawTrenchBtn.classList.remove('active');
+                  stopDrawingBtn.style.display = 'none';
+
+                  alert('Drawing mode disabled.');
+             }
+
+             // Handle a drawn feature being created
+             function handleDrawnFeature(e) {
+                 const type = e.layerType; // Should be 'polyline'
+                 const layer = e.layer; // The drawn polyline layer
+
+                 if (type === 'polyline' && activeDrawingType) {
+                      const coords = layer.getLatLngs().map(latlng => [latlng.lat, latlng.lng]); // Extract coordinates
+
+                      const featureData = {
+                           type: activeDrawingType, // railway, road, or trench
+                           coords: coords,
+                            adminOnly: itemAdminOnlyCheckbox.checked // Can drawn features be admin only? Using itemAdminOnly for now.
+                      };
+
+                      // Save the drawn feature to Firebase
+                      const newFeatureId = database.ref().child('drawnFeatures').push().key;
+                      database.ref(`drawnFeatures/${newFeatureId}`).set(featureData)
+                          .then(() => {
+                               console.log(`${activeDrawingType} drawn and saved successfully`);
+                                // The Firebase listener will create the actual map layer
+                                disableDrawingMode(); // Automatically disable drawing after saving
+                               // No need to add to drawnItems here, listener handles it
+                          })
+                          .catch(error => {
+                               console.error(`Error saving drawn ${activeDrawingType}:`, error);
+                               alert(`Failed to save drawn ${activeDrawingType}: ` + error.message);
+                                // Remove the drawn layer from the map if saving fails
+                                map.removeLayer(layer);
+                                disableDrawingMode(); // Still disable drawing mode
+                          });
+                 } else {
+                      // If not a polyline or activeDrawingType is null, just remove the layer
+                      map.removeLayer(layer);
+                      disableDrawingMode(); // Disable drawing mode in case of unexpected behavior
+                 }
+             }
+
+             // Populate the Drawn Features List
+             function populateDrawnFeaturesList() {
+                  drawnFeaturesList.innerHTML = ''; // Clear current list
+                  Object.keys(drawnFeatures).forEach(featureId => {
+                       const feature = drawnFeatures[featureId];
+                       const featureData = feature.featureData; // Get the stored data
+
+                        // Filter based on adminOnly
+                        if (!hasEditPermissions && featureData.adminOnly) {
+                            return;
+                        }
+
+                       const listItem = document.createElement('li');
+                       const featureSpan = document.createElement('span');
+                        featureSpan.textContent = `${featureData.type} (Points: ${featureData.coords.length})`; // Display type and point count
+                       listItem.appendChild(featureSpan);
+
+                       // Add remove button if allowed (implies edit permissions)
+                       if(hasEditPermissions) {
+                            const removeButton = document.createElement('button');
+                            removeButton.textContent = 'Remove';
+                            removeButton.style.backgroundColor = '#e53e3e'; // Red color
+                            removeButton.addEventListener('click', () => removeItem(featureId, 'drawnFeature'));
+                            listItem.appendChild(removeButton);
+                       }
+
+                       drawnFeaturesList.appendChild(listItem);
+                  });
+             }
+
+             // Add event listeners to drawing mode buttons
+              drawRailwayBtn.addEventListener('click', () => enableDrawingMode('railway'));
+              drawRoadBtn.addEventListener('click', () => enableDrawingMode('road'));
+              drawTrenchBtn.addEventListener('click', () => enableDrawingMode('trench'));
+              stopDrawingBtn.addEventListener('click', disableDrawingMode);
+
+
+            // --- Sidebar UI and Interaction ---
+
+            // Update sidebar list with units and objects
+            function updateSidebar() {
+                markerList.innerHTML = ''; // Clear current list
+                drawnFeaturesList.innerHTML = ''; // Clear drawn features list
+                const searchQuery = searchInput.value.toLowerCase();
+
+                // Combine units and objects, filter, and sort for the main list
+                const allItems = Object.values(markers).filter(marker => {
+                     // Filter based on adminOnly and search query
+                     const isVisible = hasEditPermissions || !marker.itemData.adminOnly;
+                     const name = marker.itemData.name || '';
+                     const matchesSearch = name.toLowerCase().includes(searchQuery);
+                     return isVisible && matchesSearch;
+                }).sort((a, b) => {
+                     // Sort by name
+                     const nameA = (a.itemData.name || '').toLowerCase();
+                     const nameB = (b.itemData.name || '').toLowerCase();
+                     if (nameA < nameB) return -1;
+                     if (nameA > nameB) return 1;
+                     return 0;
+                });
+
+
+                allItems.forEach(marker => {
+                    const listItem = document.createElement('li');
+                    const itemNameSpan = document.createElement('span');
+                     const itemType = marker.itemType === 'unit' ? 'Unit' : 'Object';
+                     const name = marker.itemData.name || `Unnamed ${itemType}`;
+                     itemNameSpan.textContent = `${itemType}: ${name}`; // Show type and name
+                     listItem.appendChild(itemNameSpan);
+
+                     // Add click listener to the name span to select for editing
+                      if(hasEditPermissions) {
+                          itemNameSpan.style.cursor = 'pointer';
+                           itemNameSpan.addEventListener('click', () => selectItemForEditing(marker.firebaseId, marker.itemType));
+                      } else {
+                           itemNameSpan.style.cursor = 'default';
+                      }
+
+
+                    if (hasEditPermissions) {
+                         const editButton = document.createElement('button');
+                         editButton.textContent = 'Edit';
+                         editButton.addEventListener('click', (e) => {
+                             e.stopPropagation(); // Prevent li click from triggering
+                             selectItemForEditing(marker.firebaseId, marker.itemType);
+                         });
+                          listItem.appendChild(editButton);
+
+                         const removeButton = document.createElement('button');
+                         removeButton.textContent = 'Remove';
+                          removeButton.style.backgroundColor = '#e53e3e'; // Red color
+                          removeButton.style.marginLeft = '5px';
+                         removeButton.addEventListener('click', (e) => {
+                             e.stopPropagation(); // Prevent li click from triggering
+                             removeItem(marker.firebaseId, marker.itemType); // Use correct item type for removal
+                         });
+                         listItem.appendChild(removeButton);
+                    }
+                    markerList.appendChild(listItem);
+                });
+
+                 // Populate Drawn Features List separately
+                 populateDrawnFeaturesList();
+
+            }
+
+            // Search map items (units and objects) and drawn features
+            function searchMapItems() {
+                updateSidebar(); // Re-render sidebar based on search input
+            }
+
+            // Sidebar toggle
+            toggleSidebarBtn.addEventListener('click', () => {
+                sidebar.classList.toggle('hidden');
+                // Update map size and control positions after sidebar transition
+                setTimeout(() => {
+                    map.invalidateSize();
+                    // CSS handles control position based on sidebar.hidden class
+                }, 300); // Match CSS transition duration
+            });
+
+            // Ensure sidebar is visible in edit mode
+            function showSidebar() {
+                 if (sidebar.classList.contains('hidden')) {
+                      sidebar.classList.remove('hidden');
+                       setTimeout(() => {
+                           map.invalidateSize();
+                           // CSS handles control position
+                       }, 300);
+                 }
+            }
+
+
+            // Handle collapsible sections
+            for (let i = 0; i < collapsibleButtons.length; i++) {
+                collapsibleButtons[i].addEventListener("click", function() {
+                    this.classList.toggle("active");
+                    const content = this.nextElementSibling;
+                    if (content.style.display === "block") {
+                        content.style.display = "none";
+                    } else {
+                        content.style.display = "block";
+                    }
+                });
+            }
+
+
+            // --- Access Control ---
+
+            // Check if the user has edit permissions based on their IP
+            function checkIPAccess() {
+                 // During development, rely on IP. Implement proper auth for production.
+                fetch('https://api.ipify.org?format=json')
+                    .then(response => {
+                         if (!response.ok) {
+                              throw new Error(`HTTP error! status: ${response.status}`);
+                         }
+                         return response.json();
+                    })
+                    .then(data => {
+                        const userIP = data.ip;
+                         // !!! IMPORTANT !!! Replace with your allowed IP addresses for development
+                        const allowedIPs = ['24.57.218.92']; // Add your development IPs here
+                        hasEditPermissions = allowedIPs.includes(userIP);
+                        console.log(`User IP: ${userIP}, Edit Permissions: ${hasEditPermissions}`);
+
+                        // Apply readonly class to body to hide edit-only elements via CSS
+                        document.body.classList.toggle('readonly', !hasEditPermissions);
+
+                        // Adjust UI based on permissions
+                         toggleSidebarBtn.style.display = 'block'; // Always show toggle
+                        if (!hasEditPermissions) {
+                            // If no edit permissions, ensure sidebar is hidden by default
+                             sidebar.classList.add('hidden');
+                             // Disable drawing controls
+                             drawingModeControls.style.display = 'none';
+                             // Remove draw control from map
+                             if (map.hasControl(drawControl)) {
+                                 map.removeControl(drawControl);
+                             }
+                        } else {
+                            // If has permissions, show sidebar by default (or keep it hidden based on initial state)
+                             sidebar.classList.remove('hidden');
+                             // Update map size immediately if sidebar is shown
+                             map.invalidateSize();
+                              // Show drawing controls
+                             drawingModeControls.style.display = 'flex';
+                              // Add draw control to map if not already added
+                             if (!map.hasControl(drawControl)) {
+                                 map.addControl(drawControl);
+                             }
+                        }
+
+
+                        // Re-create all markers to ensure correct visibility, draggability, and popup admin options
+                         // Get current markers before clearing
+                         const currentMarkers = {...markers};
+                         markers = {}; // Clear the cache before re-creation
+                         Object.keys(currentMarkers).forEach(id => {
+                              const marker = currentMarkers[id];
+                              const itemData = marker.itemData;
+                               map.removeLayer(marker); // Remove old marker instance
+                               // No need to delete from markers cache here, it was cleared
+                               createMarker(id, {...itemData, itemType: marker.itemType}); // Create new marker with updated settings
+                         });
+
+                         // Re-create all drawn features to ensure interactivity
+                          const currentDrawnFeatures = {...drawnFeatures};
+                          drawnFeatures = {}; // Clear cache
+                          drawnItems.clearLayers(); // Clear from map FeatureGroup
+                          Object.keys(currentDrawnFeatures).forEach(id => {
+                              const featureData = currentDrawnFeatures[id].featureData;
+                               createDrawnFeature(id, featureData); // Re-create with updated interactivity
+                          });
+
+
+                         updateSidebar(); // Refresh sidebar lists based on permissions
+                         populateUnitTypeList(); // Refresh manage lists visibility
+                         populateNationList(); // Refresh manage lists visibility
+
+                    })
+                    .catch(error => {
+                        console.error('Error checking IP access:', error);
+                         // Assume no edit permissions if IP check fails
+                         hasEditPermissions = false;
+                         document.body.classList.add('readonly');
+                         sidebar.classList.add('hidden');
+                         toggleSidebarBtn.style.display = 'block'; // Still show toggle
+                          drawingModeControls.style.display = 'none'; // Hide drawing controls
+                           if (map.hasControl(drawControl)) { // Remove draw control
+                                 map.removeControl(drawControl);
+                            }
+                         alert("Could not verify IP access. Edit features disabled.");
+                         updateSidebar(); // Update sidebar in readonly mode
+                         populateUnitTypeList(); // Ensure lists are updated in readonly mode
+                         populateNationList(); // Ensure lists are updated in readonly mode
+                    });
+            }
+
+            // Run IP check on page load
+            checkIPAccess();
+
+
+            // --- Expose functions to the global scope for inline event handlers (used in popups) ---
+             window.removeItem = removeItem; // Renamed from removeUnit
+             window.duplicateItem = duplicateItem; // Renamed from duplicateUnit
+             window.toggleAdminOnly = toggleAdminOnly;
+             window.removeUnitType = removeUnitType; // Expose remove type
+             window.removeNation = removeNation; // Expose remove nation
+             window.searchMapItems = searchMapItems; // Renamed search function
+
+
+            // --- Initial Setup ---
+             // Trigger the item type select change to show correct fields initially
+             itemTypeSelect.dispatchEvent(new Event('change'));
+
+            // Initialize collapsible sections state
+            for (let i = 0; i < collapsibleButtons.length; i++) {
+                 const content = collapsibleButtons[i].nextElementSibling;
+                 if (collapsibleButtons[i].classList.contains('active')) {
+                      content.style.display = 'block';
+                 }
+            }
+        })();
+    </script>
+</body>
+</html>
