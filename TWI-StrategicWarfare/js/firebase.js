@@ -1,6 +1,6 @@
 // js/firebase.js
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js';
-import { getDatabase }    from 'https://www.gstatic.com/firebasejs/9.22.2/firebase-database.js';
+import firebase from 'https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js';
+import 'https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js';
 import {
   getStorage,
   ref   as storageRef,
@@ -11,7 +11,7 @@ import {
 const firebaseConfig = {
   apiKey:            "AIzaSyCo9QPVrLCXS6li_kcTu3e-GOoiiwpHvLs",
   authDomain:        "woe-world.firebaseapp.com",
-  databaseURL:       "https://woe-world-default-rtdb.firebaseio.com/",   // ← note the trailing slash
+  databaseURL:       "https://woe-world-default-rtdb.firebaseio.com",  // your existing URL
   projectId:         "woe-world",
   storageBucket:     "woe-world.appspot.com",
   messagingSenderId: "706865712365",
@@ -19,11 +19,11 @@ const firebaseConfig = {
   measurementId:     "G-789BN2WECG"
 };
 
-const app = initializeApp(firebaseConfig);
-
-// Pass the URL in directly to bypass the parser’s strict default check:
-export const db      = getDatabase(app, firebaseConfig.databaseURL);
-export const storage = getStorage(app);
+// initialize with compat
+firebase.initializeApp(firebaseConfig);
+// now this works with your default-rtdb URL
+export const db      = firebase.database();
+export const storage = getStorage(firebase.app());
 
 export async function uploadFile(path, file) {
   const ref = storageRef(storage, path);
