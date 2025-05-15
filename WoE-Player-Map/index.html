@@ -558,22 +558,30 @@
             function updateSidebar() {
                 markerList.innerHTML = '';
                 playerMarkerList.innerHTML = '';
-                const q = searchInput.value.toLowerCase();
-                Object.keys(markers).forEach(id => {
-                    const m = markers[id];
-                    const content = m.getPopup().getContent();
-                    const name = content.match(/<strong>(.*?)<\/strong>/)[1];
-                    if (!name.toLowerCase().includes(q)) return;
+                const query = searchInput.value.toLowerCase();
+
+                Object.entries(markers).forEach(([id, m]) => {
+                    const data = m._rawData;
+                    if (!data) return;                          // safety
+                    if (!data.name.toLowerCase().includes(query)) return;
+
                     const li = document.createElement('li');
-                    li.innerHTML = `<strong>${name}</strong>` +
-                                   (hasEditPermissions
-                                     ? `<button onclick="editMarker('${id}')">Edit</button>
-                                        <button onclick="removeMarker('${id}')">Remove</button>`
-                                     : '');
-                    if (m.options.type==='player') playerMarkerList.appendChild(li);
-                    else markerList.appendChild(li);
+                    li.innerHTML = `<strong>${data.name}</strong>`;
+
+                    if (hasEditPermissions) {
+                    li.innerHTML += `
+                        <button onclick="editMarker('${id}')">Edit</button>
+                        <button onclick="removeMarker('${id}')">Remove</button>`;
+                    }
+
+                    if (data.type === 'player') {
+                    playerMarkerList.appendChild(li);
+                    } else {
+                    markerList.appendChild(li);
+                    }
                 });
-            }
+                }
+
 
             function searchMarkers() { updateSidebar(); }
 
