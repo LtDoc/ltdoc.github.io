@@ -68,6 +68,12 @@
         .leaflet-container {
             background: #1E170F;
         }
+
+        /* make sure our scale is centered on each icon */
+        .leaflet-marker-icon {
+            transform-origin: center center;
+        }
+
         .circular-icon {
             border-radius: 50%;
             width: 50px;
@@ -608,6 +614,23 @@
                     .catch(e=> console.error('Error checking IP:', e));
             }
             checkIPAccess();
+
+            function updateMarkerScales() {
+                const z = map.getZoom();
+                // choose a base scale factor; tweak these constants to taste
+                const scale = 0.3 + (z / 6);
+                Object.values(markers).forEach(m => {
+                    if (m._icon) {
+                    // Leaflet already positions the icon via translate(-50%, -50%)
+                    // so we just append our scale(...)
+                    m._icon.style.transform = `translate(-50%, -50%) scale(${scale})`;
+                    }
+                });
+                }
+
+                // run once now, and then on every zoom
+                updateMarkerScales();
+                map.on('zoomend', updateMarkerScales);
 
             toggleSidebarBtn.addEventListener('click',()=>{
                 sidebar.classList.toggle('hidden');
