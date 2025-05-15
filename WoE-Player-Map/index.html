@@ -406,7 +406,7 @@
             function createPlayerMarker(d) {
                 const icon = L.icon({
                     iconUrl: d.iconUrl,
-                    iconSize: [16,16],
+                    iconSize: [26,26],
                     className: 'circular-icon'
                 });
                 const m = L.marker([d.lat,d.lng], { icon, draggable: hasEditPermissions });
@@ -449,7 +449,7 @@
             function createArmyMarker(d) {
                 const icon = L.icon({
                     iconUrl: d.iconUrl,
-                    iconSize: [16,20],
+                    iconSize: [26,30],
                     className: 'portrait-icon'
                 });
                 const m = L.marker([d.lat,d.lng], { icon, draggable: hasEditPermissions });
