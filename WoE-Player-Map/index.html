@@ -173,26 +173,28 @@
                     </select><br>
                 </div>
                 <div id="armyFields" style="display: none;">
-                    <label for="armyFaction">Faction:</label><br>
-                    <input type="text" id="armyFaction"><br>
-                    <label for="armyLevel">Level:</label><br>
-                    <input type="text" id="armyLevel"><br>
-                    <label for="armyLevies">Levies:</label><br>
-                    <input type="text" id="armyLevies"><br>
-                    <label for="armyVeterans">Veterans:</label><br>
-                    <input type="text" id="armyVeterans"><br>
-                    <label for="armySergeant">Sergeant-at-Arms:</label><br>
-                    <input type="text" id="armySergeant"><br>
-                    <label for="armySquires">Squires:</label><br>
-                    <input type="text" id="armySquires"><br>
-                    <label for="armyKnights">Knights:</label><br>
-                    <input type="text" id="armyKnights"><br>
-                    <label for="armyRetinue">Noble Retinue:</label><br>
-                    <input type="text" id="armyRetinue"><br>
-                    <label for="armyGuard">Household Guard:</label><br>
-                    <input type="text" id="armyGuard"><br>
-                    <label for="armyArchers">Archers:</label><br>
-                    <input type="text" id="armyArchers"><br>
+                    <label for="armyNation">Nation:</label><br>
+                    <input type="text" id="armyNation"><br>
+                    <label for="armyUnitType">Unit Type:</label><br>
+                    <input type="text" id="armyUnitType"><br>
+                    <label for="armyAttack">Attack:</label><br>
+                    <input type="number" id="armyAttack"><br>
+                    <label for="armyDefend">Defend:</label><br>
+                    <input type="number" id="armyDefend"><br>
+                    <label for="armyActionPoints">Action Points:</label><br>
+                    <input type="number" id="armyActionPoints"><br>
+                    <label for="armyRange">Range:</label><br>
+                    <input type="number" id="armyRange"><br>
+                    <label for="armyMovement">Movement:</label><br>
+                    <input type="number" id="armyMovement"><br>
+                    <label for="armyAP1">AP1:</label><br>
+                    <input type="text" id="armyAP1"><br>
+                    <label for="armyAP2">AP2:</label><br>
+                    <input type="text" id="armyAP2"><br>
+                    <label for="armyAP3">AP3:</label><br>
+                    <input type="text" id="armyAP3"><br>
+                    <label for="armyAbilityDesc">Ability Desc:</label><br>
+                    <textarea id="armyAbilityDesc" rows="2" style="width:calc(100% - 30px);"></textarea><br>
                 </div>
                 <label for="markerTooltipType">Tooltip Type:</label><br>
                 <select id="markerTooltipType" onchange="toggleTooltipFields()">
@@ -245,7 +247,7 @@
 
             // Custom game map image
             const imageUrl = 'assets/high_res_image.png';
-            const imageBounds = [[0, 0], [4320, 8192]];
+            const imageBounds = [[0, 0], [3996, 5729]];
 
             // Initialize the map
             const map = L.map('map', {
@@ -254,249 +256,187 @@
                 minZoom: -2
             });
 
-            // Add the image overlay to the map
             L.imageOverlay(imageUrl, imageBounds).addTo(map);
-
-            // Fit the map to the image bounds
             map.fitBounds(imageBounds);
 
             let markers = {};
             let hasEditPermissions = false;
 
             // Cache DOM elements
-            const markerForm = document.getElementById('markerForm');
-            const markerTypeSelect = document.getElementById('markerType');
-            const markerNameInput = document.getElementById('markerName');
-            const markerIconInput = document.getElementById('markerIcon');
+            const markerForm              = document.getElementById('markerForm');
+            const markerTypeSelect        = document.getElementById('markerType');
+            const markerNameInput         = document.getElementById('markerName');
+            const markerIconInput         = document.getElementById('markerIcon');
+            const markerIconFileInput     = document.getElementById('markerIconFile');
             const markerTooltipTypeSelect = document.getElementById('markerTooltipType');
-            const markerTooltipInput = document.getElementById('markerTooltip');
-            const markerIconFileInput = document.getElementById('markerIconFile');
-            const markerTooltipFileInput = document.getElementById('markerTooltipFile');
+            const markerTooltipInput      = document.getElementById('markerTooltip');
+            const markerTooltipFileInput  = document.getElementById('markerTooltipFile');
             const markerAdminOnlyCheckbox = document.getElementById('markerAdminOnly');
-            const townSizeSelect = document.getElementById('townSize');
-            const armyFactionInput = document.getElementById('armyFaction');
-            const armyLevelInput = document.getElementById('armyLevel');
-            const armyLeviesInput = document.getElementById('armyLevies');
-            const armyVeteransInput = document.getElementById('armyVeterans');
-            const armySergeantInput = document.getElementById('armySergeant');
-            const armySquiresInput = document.getElementById('armySquires');
-            const armyKnightsInput = document.getElementById('armyKnights');
-            const armyRetinueInput = document.getElementById('armyRetinue');
-            const armyGuardInput = document.getElementById('armyGuard');
-            const armyArchersInput = document.getElementById('armyArchers');
-            const sidebar = document.getElementById('sidebar');
-            const toggleSidebarBtn = document.getElementById('toggleSidebar');
-            const markerList = document.getElementById('markerList');
-            const playerMarkerList = document.getElementById('playerMarkerList');
-            const searchInput = document.getElementById('searchInput');
-            const coll = document.getElementsByClassName("collapsible");
+            const townSizeSelect          = document.getElementById('townSize');
 
-            // Toggle icon and other fields visibility
+            // ** New army inputs **
+            const armyNationInput     = document.getElementById('armyNation');
+            const armyUnitTypeInput   = document.getElementById('armyUnitType');
+            const armyAttackInput     = document.getElementById('armyAttack');
+            const armyDefendInput     = document.getElementById('armyDefend');
+            const armyActionPointsInput = document.getElementById('armyActionPoints');
+            const armyRangeInput      = document.getElementById('armyRange');
+            const armyMovementInput   = document.getElementById('armyMovement');
+            const armyAP1Input        = document.getElementById('armyAP1');
+            const armyAP2Input        = document.getElementById('armyAP2');
+            const armyAP3Input        = document.getElementById('armyAP3');
+            const armyAbilityDescInput = document.getElementById('armyAbilityDesc');
+
+            const sidebar        = document.getElementById('sidebar');
+            const toggleSidebarBtn = document.getElementById('toggleSidebar');
+            const markerList     = document.getElementById('markerList');
+            const playerMarkerList = document.getElementById('playerMarkerList');
+            const searchInput    = document.getElementById('searchInput');
+            const coll           = document.getElementsByClassName("collapsible");
+
             function toggleFields() {
                 const markerType = markerTypeSelect.value;
-                const iconFields = document.getElementById('iconFields');
-                const townFields = document.getElementById('townFields');
-                const armyFields = document.getElementById('armyFields');
-
-                iconFields.style.display = (markerType === 'player' || markerType === 'army') ? 'block' : 'none';
-                townFields.style.display = markerType === 'town' ? 'block' : 'none';
-                armyFields.style.display = markerType === 'army' ? 'block' : 'none';
-
+                document.getElementById('iconFields').style.display = (markerType === 'player' || markerType === 'army') ? 'block' : 'none';
+                document.getElementById('townFields').style.display = markerType === 'town' ? 'block' : 'none';
+                document.getElementById('armyFields').style.display = markerType === 'army' ? 'block' : 'none';
                 toggleTooltipFields();
             }
 
-            // Toggle tooltip type input fields
             function toggleTooltipFields() {
                 const tooltipType = markerTooltipTypeSelect.value;
-                const markerType = markerTypeSelect.value;
-                markerTooltipInput.style.display = tooltipType === 'text' && markerType !== 'player' && markerType !== 'army' ? 'block' : 'none';
+                const markerType  = markerTypeSelect.value;
+                markerTooltipInput.style.display     = tooltipType === 'text' && markerType !== 'player' && markerType !== 'army' ? 'block' : 'none';
                 markerTooltipFileInput.style.display = tooltipType === 'image' || markerType === 'player' || markerType === 'army' ? 'block' : 'none';
             }
 
-            // Load markers from Firebase
             database.ref('markers').on('value', snapshot => {
-                const data = snapshot.val();
-                if (data) {
-                    Object.keys(data).forEach(id => {
-                        const correctedData = correctMarkerData(data[id]);
-                        if (!isValidMarkerData(correctedData)) {
-                            console.error(`Removing invalid marker data with id: ${id}`, correctedData);
-                            database.ref('markers/' + id).remove();
-                        } else {
-                            if (markers[id]) {
-                                // Update existing marker's position without creating a new marker
-                                const marker = markers[id];
-                                const newLatLng = new L.LatLng(correctedData.lat, correctedData.lng);
-                                if (!marker.getLatLng().equals(newLatLng)) {
-                                    marker.setLatLng(newLatLng);
-                                }
-                            } else {
-                                createMarker(id, correctedData);
-                            }
-                        }
-                    });
-                }
+                const data = snapshot.val() || {};
+                Object.keys(data).forEach(id => {
+                    const d = correctMarkerData(data[id]);
+                    if (!isValidMarkerData(d)) {
+                        console.error(`Removing invalid marker data with id: ${id}`, d);
+                        database.ref('markers/' + id).remove();
+                    } else if (markers[id]) {
+                        const m = markers[id], newLL = L.latLng(d.lat, d.lng);
+                        if (!m.getLatLng().equals(newLL)) m.setLatLng(newLL);
+                    } else {
+                        createMarker(id, d);
+                    }
+                });
             });
 
-            // Correct marker data
             function correctMarkerData(data) {
                 const defaults = {
                     type: 'unknown',
-                    lat: 0,
-                    lng: 0,
+                    lat: 0, lng: 0,
                     name: 'Unnamed Marker',
                     iconUrl: 'assets/placeholder.png',
                     tooltipType: 'text',
                     tooltipContent: '',
                     adminOnly: false
                 };
-                return { ...defaults, ...data };
+                return {...defaults, ...data};
             }
 
-            // Validate marker data
             function isValidMarkerData(data) {
-                const requiredFields = ['type', 'lat', 'lng', 'name'];
-                return requiredFields.every(field => data[field] !== undefined && data[field] !== null);
+                return ['type','lat','lng','name'].every(f => data[f] !== undefined && data[f] !== null);
             }
 
-            // Debounce function to handle rapid updates
-            function debounce(func, wait) {
-                let timeout;
-                return function(...args) {
-                    clearTimeout(timeout);
-                    timeout = setTimeout(() => func.apply(this, args), wait);
+            function debounce(fn, wait) {
+                let t;
+                return (...args) => {
+                    clearTimeout(t);
+                    t = setTimeout(() => fn.apply(this,args), wait);
                 };
             }
+            const debouncedUpdateMarkerPosition = debounce((id,lat,lng)=>{
+                database.ref('markers/'+id).update({lat,lng});
+            },300);
 
-            // Debounce the marker position update
-            const debouncedUpdateMarkerPosition = debounce((id, lat, lng) => {
-                database.ref('markers/' + id).update({ lat, lng });
-            }, 300); // Adjust the delay as needed
-
-            // Add marker
             async function addMarker() {
-                const markerType = markerTypeSelect.value;
-                const name = markerNameInput.value;
-                let iconUrl = markerIconInput.value;
-                const tooltipType = markerTooltipTypeSelect.value;
-                let tooltipContent = markerTooltipInput.value;
-                const adminOnly = markerAdminOnlyCheckbox.checked;
-                const markerId = database.ref().child('markers').push().key;
+                const markerType   = markerTypeSelect.value;
+                const name         = markerNameInput.value;
+                let   iconUrl      = markerIconInput.value;
+                const tooltipType  = markerTooltipTypeSelect.value;
+                let   tooltipContent = markerTooltipInput.value;
+                const adminOnly    = markerAdminOnlyCheckbox.checked;
+                const markerId     = database.ref().child('markers').push().key;
 
-                let markerOptions = {
-                    id: markerId,
-                    lat: map.getCenter().lat,
-                    lng: map.getCenter().lng,
-                    name,
-                    type: markerType,
-                    iconUrl,
-                    tooltipType,
-                    tooltipContent,
-                    adminOnly
-                };
+                let opts = { id: markerId, lat: map.getCenter().lat, lng: map.getCenter().lng,
+                             name, type: markerType, iconUrl, tooltipType, tooltipContent, adminOnly };
 
+                // upload icon if needed
                 const iconFile = markerIconFileInput.files[0];
-                const tooltipFile = markerTooltipFileInput.files[0];
-
-                if (iconFile && (markerType === 'player' || markerType === 'army')) {
-                    const iconStorageRef = storage.ref(`markers/${markerId}/icon`);
+                if (iconFile && (markerType==='player'||markerType==='army')) {
                     try {
-                        const snapshot = await iconStorageRef.put(iconFile);
-                        iconUrl = await snapshot.ref.getDownloadURL();
-                        markerOptions.iconUrl = iconUrl;
-                    } catch (error) {
-                        alert("Error uploading icon file: " + error.message);
-                        console.error("Error uploading icon file:", error);
-                    }
+                        const snap = await storage.ref(`markers/${markerId}/icon`).put(iconFile);
+                        iconUrl = await snap.ref.getDownloadURL();
+                        opts.iconUrl = iconUrl;
+                    } catch(e){ alert("Error uploading icon file: "+e.message); console.error(e); }
                 }
 
-                if (tooltipFile && tooltipType === 'image') {
-                    const tooltipStorageRef = storage.ref(`markers/${markerId}/tooltip`);
+                // upload tooltip image
+                const tipFile = markerTooltipFileInput.files[0];
+                if (tipFile && tooltipType==='image') {
                     try {
-                        const snapshot = await tooltipStorageRef.put(tooltipFile);
-                        tooltipContent = await snapshot.ref.getDownloadURL();
-                        markerOptions.tooltipContent = tooltipContent;
-                    } catch (error) {
-                        alert("Error uploading tooltip file: " + error.message);
-                        console.error("Error uploading tooltip file:", error);
-                    }
+                        const snap = await storage.ref(`markers/${markerId}/tooltip`).put(tipFile);
+                        tooltipContent = await snap.ref.getDownloadURL();
+                        opts.tooltipContent = tooltipContent;
+                    } catch(e){ alert("Error uploading tooltip file: "+e.message); console.error(e); }
                 }
 
-                if (markerType === 'town') {
-                    markerOptions.size = townSizeSelect.value;
+                if (markerType==='town') {
+                    opts.size = townSizeSelect.value;
                 }
-
-                if (markerType === 'army') {
-                    markerOptions = {
-                        ...markerOptions,
-                        faction: armyFactionInput.value,
-                        level: armyLevelInput.value,
-                        levies: armyLeviesInput.value,
-                        veterans: armyVeteransInput.value,
-                        sergeant: armySergeantInput.value,
-                        squires: armySquiresInput.value,
-                        knights: armyKnightsInput.value,
-                        retinue: armyRetinueInput.value,
-                        guard: armyGuardInput.value,
-                        archers: armyArchersInput.value
+                if (markerType==='army') {
+                    opts = {
+                        ...opts,
+                        nation: armyNationInput.value,
+                        unitType: armyUnitTypeInput.value,
+                        attack: armyAttackInput.value,
+                        defend: armyDefendInput.value,
+                        actionPoints: armyActionPointsInput.value,
+                        range: armyRangeInput.value,
+                        movement: armyMovementInput.value,
+                        ap1: armyAP1Input.value,
+                        ap2: armyAP2Input.value,
+                        ap3: armyAP3Input.value,
+                        abilityDesc: armyAbilityDescInput.value
                     };
                 }
 
                 try {
-                    await database.ref('markers/' + markerId).set(markerOptions);
-                    createMarker(markerId, markerOptions);
+                    await database.ref('markers/'+markerId).set(opts);
+                    createMarker(markerId, opts);
                     resetMarkerForm();
-                } catch (error) {
-                    console.error("Error adding marker:", error);
-                }
+                } catch(e){ console.error("Error adding marker:", e); }
             }
 
-            // Create marker
-            function createMarker(id, markerData) {
-                // Remove existing marker if it exists
-                if (markers[id]) {
-                    map.removeLayer(markers[id]);
-                }
-
-                // Check if the marker should be visible to the current user
-                if (!hasEditPermissions && markerData.adminOnly) {
-                    return;
-                }
+            function createMarker(id, data) {
+                if (markers[id]) map.removeLayer(markers[id]);
+                if (!hasEditPermissions && data.adminOnly) return;
 
                 let marker;
-                switch (markerData.type) {
-                    case 'player':
-                        marker = createPlayerMarker(markerData);
-                        break;
-                    case 'town':
-                    case 'poi':
-                        marker = createTownOrPoiMarker(markerData);
-                        break;
-                    case 'army':
-                        marker = createArmyMarker(markerData);
-                        break;
-                    case 'unit':
-                        marker = createUnitMarker(markerData);
-                        break;
+                switch(data.type) {
+                    case 'player': marker = createPlayerMarker(data); break;
+                    case 'town': case 'poi': marker = createTownOrPoiMarker(data); break;
+                    case 'army': marker = createArmyMarker(data); break;
                     default:
-                        console.error(`Unknown marker type: ${markerData.type}`, markerData);
-                        database.ref('markers/' + id).remove(); // Remove invalid marker from Firebase
+                        console.error(`Unknown marker type: ${data.type}`, data);
+                        database.ref('markers/'+id).remove();
                         return;
                 }
-
-                // Ensure marker is defined
                 if (!marker) {
-                    console.error(`Failed to create marker for id: ${id}`, markerData);
-                    database.ref('markers/' + id).remove(); // Remove invalid marker from Firebase
+                    console.error(`Failed to create marker for id: ${id}`, data);
+                    database.ref('markers/'+id).remove();
                     return;
                 }
 
-                marker.on('dragend', function(e) {
-                    const newPos = e.target.getLatLng();
-                    debouncedUpdateMarkerPosition(id, newPos.lat, newPos.lng);
+                marker.on('dragend', e => {
+                    const ll = e.target.getLatLng();
+                    debouncedUpdateMarkerPosition(id, ll.lat, ll.lng);
                 });
-
-                marker.on('click', function() {
+                marker.on('click', () => {
                     if (hasEditPermissions) {
                         showSidebar();
                         map.panTo(marker.getLatLng());
@@ -507,219 +447,175 @@
                 updateSidebar();
             }
 
-            function createPlayerMarker(markerData) {
-                const icon = L.divIcon({
-                    html: `<img src="${markerData.iconUrl}" class="circular-icon" onerror="this.src='assets/placeholder.png'">`,
-                    className: ''
+            function createPlayerMarker(d) {
+                const icon = L.divIcon({ html:`<img src="${d.iconUrl}" class="circular-icon" onerror="this.src='assets/placeholder.png'">` });
+                const m = L.marker([d.lat,d.lng],{icon, draggable:hasEditPermissions});
+                if (d.tooltipType==='image') {
+                    m.bindPopup(`<div style="font-size:16px;">
+                                  <strong>${d.name}</strong><br>
+                                  <img src="${d.tooltipContent}" width="200"><br>
+                                  ${getAdminOptions(d)}</div>`);
+                } else {
+                    m.bindPopup(`<div style="font-size:16px;">
+                                  <strong>${d.name}</strong><br>
+                                  ${d.tooltipContent}<br>
+                                  ${getAdminOptions(d)}</div>`);
+                }
+                return m;
+            }
+
+            function createTownOrPoiMarker(d) {
+                let html = d.type==='town'
+                         ? (d.size==='capital'?'⭐':(d.size==='city'?'⚫':'🔵'))
+                         : '❓';
+                const m = L.marker([d.lat,d.lng],{
+                    icon: L.divIcon({ html, className:'custom-div-icon' }),
+                    draggable: hasEditPermissions
                 });
-                const marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
-                if (markerData.tooltipType === 'image') {
-                    marker.bindPopup(`<div style="font-size: 16px;">
-                                      <strong>${markerData.name}</strong><br>
-                                      <img src="${markerData.tooltipContent}" width="200"><br>
-                                      ${getAdminOptions(markerData)}
-                                      </div>`);
+                if (d.tooltipType==='image') {
+                    m.bindPopup(`<div style="font-size:16px;">
+                                  <strong>${d.name}</strong><br>
+                                  <img src="${d.tooltipContent}" width="200"><br>
+                                  ${getAdminOptions(d)}</div>`);
                 } else {
-                    marker.bindPopup(`<div style="font-size: 16px;">
-                                      <strong>${markerData.name}</strong><br>
-                                      ${markerData.tooltipContent}<br>
-                                      ${getAdminOptions(markerData)}
-                                      </div>`);
+                    m.bindPopup(`<div style="font-size:16px;">
+                                  <strong>${d.name}</strong><br>
+                                  ${d.tooltipContent}<br>
+                                  ${getAdminOptions(d)}</div>`);
                 }
-                return marker;
+                return m;
             }
 
-            function createTownOrPoiMarker(markerData) {
-                let iconHtml;
-                if (markerData.type === 'town') {
-                    iconHtml = markerData.size === 'capital' ? '⭐' : (markerData.size === 'city' ? '⚫' : '🔵');
-                } else {
-                    iconHtml = '❓';
-                }
-                const marker = L.marker([markerData.lat, markerData.lng], { icon: L.divIcon({ html: iconHtml, className: 'custom-div-icon' }), draggable: hasEditPermissions });
-                if (markerData.tooltipType === 'image') {
-                    marker.bindPopup(`<div style="font-size: 16px;">
-                                      <strong>${markerData.name}</strong><br>
-                                      <img src="${markerData.tooltipContent}" width="200"><br>
-                                      ${getAdminOptions(markerData)}
-                                      </div>`);
-                } else {
-                    marker.bindPopup(`<div style="font-size: 16px;">
-                                      <strong>${markerData.name}</strong><br>
-                                      ${markerData.tooltipContent}<br>
-                                      ${getAdminOptions(markerData)}
-                                      </div>`);
-                }
-                return marker;
-            }
-
-            function createArmyMarker(markerData) {
+            function createArmyMarker(d) {
                 const icon = L.divIcon({
-                    html: `<img src="${markerData.iconUrl}" class="portrait-icon" onerror="this.src='assets/placeholder.png'">`,
-                    className: '',
-                    iconSize: [50, 70]
+                    html:`<img src="${d.iconUrl}" class="portrait-icon" onerror="this.src='assets/placeholder.png'">`,
+                    iconSize:[50,70]
                 });
-                const marker = L.marker([markerData.lat, markerData.lng], { icon: icon, draggable: hasEditPermissions });
-                const tooltipHtml = `<div style="font-size: 16px;">
-                                    <strong>${markerData.name}</strong><br>
-                                    <img src="${markerData.iconUrl}" width="50" height="70"><br>
-                                    <strong>Faction:</strong> ${markerData.faction}<br>
-                                    <strong>Level:</strong> ${markerData.level}<br>
-                                    <strong>Levies:</strong> ${markerData.levies}<br>
-                                    <strong>Veterans:</strong> ${markerData.veterans}<br>
-                                    <strong>Sergeant-at-Arms:</strong> ${markerData.sergeant}<br>
-                                    <strong>Squires:</strong> ${markerData.squires}<br>
-                                    <strong>Knights:</strong> ${markerData.knights}<br>
-                                    <strong>Noble Retinue:</strong> ${markerData.retinue}<br>
-                                    <strong>Household Guard:</strong> ${markerData.guard}<br>
-                                    <strong>Archers:</strong> ${markerData.archers}<br>
-                                    ${getAdminOptions(markerData)}
-                                   </div>`;
-                marker.bindPopup(tooltipHtml);
-                return marker;
+                const m = L.marker([d.lat,d.lng],{icon, draggable:hasEditPermissions});
+                const html = `<div style="font-size:16px;">
+                              <strong>${d.name}</strong><br>
+                              <img src="${d.iconUrl}" width="50" height="70"><br>
+                              <strong>Nation:</strong> ${d.nation}<br>
+                              <strong>Unit Type:</strong> ${d.unitType}<br>
+                              <strong>Attack:</strong> ${d.attack}<br>
+                              <strong>Defend:</strong> ${d.defend}<br>
+                              <strong>Action Points:</strong> ${d.actionPoints}<br>
+                              <strong>Range:</strong> ${d.range}<br>
+                              <strong>Movement:</strong> ${d.movement}<br>
+                              <strong>AP1:</strong> ${d.ap1}<br>
+                              <strong>AP2:</strong> ${d.ap2}<br>
+                              <strong>AP3:</strong> ${d.ap3}<br>
+                              <strong>Ability Desc:</strong> ${d.abilityDesc}<br>
+                              ${getAdminOptions(d)}
+                              </div>`;
+                m.bindPopup(html);
+                return m;
             }
 
-            // Function to get admin options for the marker
-            function getAdminOptions(markerData) {
+            function getAdminOptions(d) {
                 if (!hasEditPermissions) return '';
-                return `<button onclick="duplicateMarker('${markerData.id}')">Duplicate</button>
-                        <input type="checkbox" ${markerData.adminOnly ? 'checked' : ''} onchange="toggleAdminOnly('${markerData.id}', this.checked)"> Admin Only`;
+                return `<button onclick="duplicateMarker('${d.id}')">Duplicate</button>
+                        <input type="checkbox" ${d.adminOnly?'checked':''} onchange="toggleAdminOnly('${d.id}',this.checked)"> Admin Only`;
             }
 
-            // Duplicate marker
             function duplicateMarker(id) {
-                const marker = markers[id];
-                const markerData = marker.options;
-                const latLng = marker.getLatLng();
-                const newMarkerData = {
-                    ...markerData,
-                    id: database.ref().child('markers').push().key,
-                    lat: latLng.lat,
-                    lng: latLng.lng,
-                    type: markerData.type || 'unknown'
-                };
-                database.ref('markers/' + newMarkerData.id).set(newMarkerData);
-                createMarker(newMarkerData.id, newMarkerData);
+                const m = markers[id];
+                const opts = {...m.options, id: database.ref().child('markers').push().key, lat: m.getLatLng().lat, lng: m.getLatLng().lng, type: m.options.type||'unknown'};
+                database.ref('markers/'+opts.id).set(opts);
+                createMarker(opts.id, opts);
             }
 
-            // Toggle admin-only view
-            function toggleAdminOnly(id, isAdminOnly) {
-                database.ref('markers/' + id).update({ adminOnly: isAdminOnly });
-                markers[id].options.adminOnly = isAdminOnly;
-                if (!hasEditPermissions && isAdminOnly) {
-                    map.removeLayer(markers[id]);
-                } else if (hasEditPermissions && !map.hasLayer(markers[id])) {
-                    markers[id].addTo(map);
-                }
+            function toggleAdminOnly(id, val) {
+                database.ref('markers/'+id).update({adminOnly: val});
+                markers[id].options.adminOnly = val;
+                if (!hasEditPermissions && val) map.removeLayer(markers[id]);
+                else if (hasEditPermissions && !map.hasLayer(markers[id])) markers[id].addTo(map);
                 updateSidebar();
             }
 
-            // Reset marker form fields
             function resetMarkerForm() {
                 markerForm.reset();
                 toggleFields();
             }
 
-            // Update sidebar with markers
             function updateSidebar() {
                 markerList.innerHTML = '';
                 playerMarkerList.innerHTML = '';
-                const searchQuery = searchInput.value.toLowerCase();
+                const query = searchInput.value.toLowerCase();
                 Object.keys(markers).forEach(id => {
-                    const marker = markers[id];
-                    const markerData = marker.getPopup().getContent().split('<br>');
-                    const listItem = document.createElement('li');
-                    listItem.innerHTML = `<strong>${markerData[0].replace('<strong>', '').replace('</strong>', '')}</strong>`;
-                    if (hasEditPermissions) {
-                        listItem.innerHTML += `<button onclick="editMarker('${id}')">Edit</button>
-                                               <button onclick="removeMarker('${id}')">Remove</button>`;
-                    }
-                    if (markerData[0].toLowerCase().includes(searchQuery)) {
-                        if (marker.options.type === 'player') {
-                            playerMarkerList.appendChild(listItem);
-                        } else {
-                            markerList.appendChild(listItem);
-                        }
-                    }
+                    const m      = markers[id];
+                    const content = m.getPopup().getContent();
+                    const name   = content.match(/<strong>(.*?)<\/strong>/)[1];
+                    if (!name.toLowerCase().includes(query)) return;
+                    const li = document.createElement('li');
+                    li.innerHTML = `<strong>${name}</strong>` +
+                                   (hasEditPermissions
+                                     ? `<button onclick="editMarker('${id}')">Edit</button>
+                                        <button onclick="removeMarker('${id}')">Remove</button>`
+                                     : '');
+                    if (m.options.type==='player') playerMarkerList.appendChild(li);
+                    else markerList.appendChild(li);
                 });
             }
 
-            // Search markers
-            function searchMarkers() {
-                updateSidebar();
-            }
+            function searchMarkers() { updateSidebar(); }
 
-            // Edit marker
             function editMarker(id) {
-                const marker = markers[id];
-                const markerData = marker.getPopup().getContent().split('<br>');
-                const newName = prompt('Enter new name:', markerData[0].replace('<strong>', '').replace('</strong>', ''));
-                let newTooltipContent = markerData[1].replace('<img src="', '').replace('" width="200">', '');
-                if (markerData.tooltipType === 'text') {
-                    newTooltipContent = prompt('Enter new tooltip text:', markerData[1]);
+                const m = markers[id];
+                const popup = m.getPopup().getContent();
+                const name = popup.match(/<strong>(.*?)<\/strong>/)[1];
+                const newName = prompt('Enter new name:', name);
+                let newTooltip = '';
+                if (popup.includes('<img')) {
+                    const url = popup.match(/<img src="(.*?)"/)[1];
+                    newTooltip = prompt('New image URL:', url);
                 } else {
-                    newTooltipContent = prompt('Enter new tooltip image URL:', newTooltipContent);
+                    const txt = popup.replace(/<[^>]+>/g,'').split('\n')[1].trim();
+                    newTooltip = prompt('New tooltip text:', txt);
                 }
-                const adminOnly = confirm('Make this marker admin only?');
-                database.ref('markers/' + id).update({
-                    name: newName,
-                    tooltipContent: newTooltipContent,
-                    adminOnly: adminOnly
-                });
-                if (markerData.tooltipType === 'image') {
-                    marker.setPopupContent(`<div style="font-size: 16px;"><strong>${newName}</strong><br><img src="${newTooltipContent}" width="200"></div>`);
+                const adminOnly = confirm('Make admin only?');
+                database.ref('markers/'+id).update({name:newName, tooltipContent:newTooltip, adminOnly});
+                if (popup.includes('<img')) {
+                    m.setPopupContent(`<div style="font-size:16px;"><strong>${newName}</strong><br><img src="${newTooltip}" width="200"></div>`);
                 } else {
-                    marker.setPopupContent(`<div style="font-size: 16px;"><strong>${newName}</strong><br>${newTooltipContent}</div>`);
+                    m.setPopupContent(`<div style="font-size:16px;"><strong>${newName}</strong><br>${newTooltip}</div>`);
                 }
                 updateSidebar();
             }
 
-            // Remove marker
             function removeMarker(id) {
                 if (markers[id]) {
                     map.removeLayer(markers[id]);
                     delete markers[id];
-                    database.ref('markers/' + id).remove();
-                    updateSidebar();
                 }
+                database.ref('markers/'+id).remove();
+                updateSidebar();
             }
 
-            // Check if the user has edit permissions based on their IP
             function checkIPAccess() {
                 fetch('https://api.ipify.org?format=json')
-                    .then(response => response.json())
-                    .then(data => {
-                        const userIP = data.ip;
-                        const allowedIPs = ['24.57.218.92','98.16.223.9']; // Replace with your allowed IP addresses
-                        hasEditPermissions = allowedIPs.includes(userIP);
-                        document.body.classList.toggle('readonly', !hasEditPermissions);
-                        sidebar.classList.toggle('hidden', !hasEditPermissions);
-                        toggleSidebarBtn.style.display = hasEditPermissions ? 'block' : 'none';
-
-                        Object.values(markers).forEach(marker => {
-                            if (hasEditPermissions) {
-                                marker.dragging.enable();
-                            } else {
-                                marker.dragging.disable();
-                            }
-                        });
+                    .then(r=>r.json())
+                    .then(d=>{
+                        const allowed = ['24.57.218.92','98.16.223.9'];
+                        hasEditPermissions = allowed.includes(d.ip);
+                        document.body.classList.toggle('readonly',!hasEditPermissions);
+                        sidebar.classList.toggle('hidden',!hasEditPermissions);
+                        toggleSidebarBtn.style.display = hasEditPermissions?'block':'none';
+                        Object.values(markers).forEach(m=>
+                            hasEditPermissions? m.dragging.enable() : m.dragging.disable()
+                        );
                     })
-                    .catch(error => {
-                        console.error('Error checking IP access:', error);
-                    });
+                    .catch(e=> console.error('Error checking IP:', e));
             }
-
             checkIPAccess();
 
-            // Sidebar toggle
-            toggleSidebarBtn.addEventListener('click', () => {
+            toggleSidebarBtn.addEventListener('click',()=>{
                 sidebar.classList.toggle('hidden');
-                const isHidden = sidebar.classList.contains('hidden');
-                toggleSidebarBtn.style.left = isHidden ? '10px' : '310px';
-                document.querySelector('.leaflet-top.leaflet-left').style.left = isHidden ? '10px' : '320px';
+                const hidden = sidebar.classList.contains('hidden');
+                toggleSidebarBtn.style.left = hidden?'10px':'310px';
+                document.querySelector('.leaflet-top.leaflet-left').style.left = hidden?'10px':'320px';
                 map.invalidateSize();
             });
-
             function showSidebar() {
                 if (sidebar.classList.contains('hidden')) {
                     sidebar.classList.remove('hidden');
@@ -728,25 +624,21 @@
                     map.invalidateSize();
                 }
             }
-
-            // Handle collapsible sections
-            for (let i = 0; i < coll.length; i++) {
-                coll[i].addEventListener("click", function() {
-                    this.classList.toggle("active");
-                    this.nextElementSibling.classList.toggle("show");
+            for (let i=0; i<coll.length; i++) {
+                coll[i].addEventListener('click',function(){
+                    this.classList.toggle('active');
+                    this.nextElementSibling.classList.toggle('show');
                 });
             }
 
-            // Expose functions to the global scope
             window.removeMarker = removeMarker;
-            window.editMarker = editMarker;
-            window.toggleFields = toggleFields; // Ensure this function is exposed
-            window.addMarker = addMarker; // Expose the addMarker function
-            window.searchMarkers = searchMarkers;
-            window.duplicateMarker = duplicateMarker; // Expose the duplicateMarker function
-            window.toggleAdminOnly = toggleAdminOnly; // Expose the toggleAdminOnly function
+            window.editMarker   = editMarker;
+            window.toggleFields = toggleFields;
+            window.addMarker    = addMarker;
+            window.searchMarkers= searchMarkers;
+            window.duplicateMarker = duplicateMarker;
+            window.toggleAdminOnly = toggleAdminOnly;
 
-            // Initial call to set visibility based on default selected marker type
             toggleFields();
         })();
     </script>
