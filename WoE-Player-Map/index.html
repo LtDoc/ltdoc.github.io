@@ -489,49 +489,56 @@
         closeEditModalBtn.addEventListener('click', () => {
             editModal.classList.add('hidden');
         });
+        // Save‐edits button listener
         saveEditBtn.addEventListener('click', () => {
-            const id = editIdInput.value;
-            if (!markers[id]) return;
-            const d = markers[id]._rawData;
-            const updated = {
-                ...d,
-                name:           editNameInput.value,
-                iconUrl:        editIconUrlInput.value,
-                tooltipType:    editTooltipTypeSelect.value,
-                tooltipContent: editTooltipContent.value,
-                adminOnly:      editAdminOnlyCheckbox.checked
-            };
-            if (d.type==='town') {
-                updated.size = editTownSizeSelect.value;
+        const id = editIdInput.value;
+        if (!markers[id]) return;
+
+        // Build the updated data object
+        const original = markers[id]._rawData;
+        const updated = {
+            ...original,
+            name:           editNameInput.value,
+            iconUrl:        editIconUrlInput.value,
+            tooltipType:    editTooltipTypeSelect.value,
+            tooltipContent: editTooltipContent.value,
+            adminOnly:      editAdminOnlyCheckbox.checked
+        };
+
+        if (original.type === 'town') {
+            updated.size = editTownSizeSelect.value;
+        }
+        if (original.type === 'army') {
+            Object.assign(updated, {
+            nation:       editNationInput.value,
+            unitType:     editUnitTypeInput.value,
+            attack:       editAttackInput.value,
+            defend:       editDefendInput.value,
+            actionPoints: editActionPointsInput.value,
+            range:        editRangeInput.value,
+            movement:     editMovementInput.value,
+            ap1:           editAP1Input.value,
+            ap2:           editAP2Input.value,
+            ap3:           editAP3Input.value,
+            abilityDesc:   editAbilityDescInput.value
+            });
+        }
+
+        // 1) Write the updated marker back to Firebase
+        database.ref('markers/' + id).set(updated)
+            .then(() => {
+            // 2) Remove the old layer and entry so that the Firebase listener will recreate it
+            if (markers[id]) {
+                map.removeLayer(markers[id]);
+                delete markers[id];
             }
-            if (d.type==='army') {
-                Object.assign(updated, {
-                    nation:       editNationInput.value,
-                    unitType:     editUnitTypeInput.value,
-                    attack:       editAttackInput.value,
-                    defend:       editDefendInput.value,
-                    actionPoints: editActionPointsInput.value,
-                    range:        editRangeInput.value,
-                    movement:     editMovementInput.value,
-                    ap1:           editAP1Input.value,
-                    ap2:           editAP2Input.value,
-                    ap3:           editAP3Input.value,
-                    abilityDesc:   editAbilityDescInput.value
-                });
-            }
-            database.ref('markers/'+id).set(updated)
-                .then(() => {
-                    // remove old marker
-                    if (markers[id]) {
-                        map.removeLayer(markers[id]);
-                        delete markers[id];
-                    }
-                    // recreate
-                    createMarker(id, updated);
-                    editModal.classList.add('hidden');
-                })
-                .catch(console.error);
+            // 3) Close the modal (don't call createMarker here)
+            editModal.classList.add('hidden');
+            // 4) Let your `database.ref('markers').on('value', …)` listener pick up the change
+            })
+            .catch(err => console.error('Error saving edits:', err));
         });
+
 
         // Permissions & UI
         function checkIPAccess() {
