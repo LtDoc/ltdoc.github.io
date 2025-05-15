@@ -532,6 +532,12 @@
         }
       });
       markers[id] = marker.addTo(map);
+
+      if (hasEditPermissions) {
+        marker.dragging.enable();
+        } else {
+        marker.dragging.disable();
+        }
       updateSidebar();
     }
 
@@ -733,20 +739,34 @@
 
     // Permissions & UI
     function checkIPAccess() {
-      fetch('https://api.ipify.org?format=json')
-        .then(r => r.json())
-        .then(data => {
-          const allowed = ['24.57.218.92','98.16.223.9'];
-          hasEditPermissions = allowed.includes(data.ip);
-          document.body.classList.toggle('readonly', !hasEditPermissions);
-          sidebar.classList.toggle('hidden', !hasEditPermissions);
-          toggleSidebarBtn.style.display = hasEditPermissions ? 'block' : 'none';
-          Object.values(markers).forEach(m =>
-            hasEditPermissions ? m.dragging.enable() : m.dragging.disable()
-          );
-        })
-        .catch(console.error);
-    }
+        fetch('https://api.ipify.org?format=json')
+            .then(r => r.json())
+            .then(data => {
+            const allowed = ['24.57.218.92','98.16.223.9'];
+            hasEditPermissions = allowed.includes(data.ip);
+
+            // Show or hide the sidebar container
+            if (hasEditPermissions) {
+                sidebar.classList.remove('hidden');
+                // Position the toggle button & controls
+                toggleSidebarBtn.style.display = 'block';
+                toggleSidebarBtn.style.left = '310px';
+                document.querySelector('.leaflet-top.leaflet-left').style.left = '320px';
+            } else {
+                sidebar.classList.add('hidden');
+                toggleSidebarBtn.style.display = 'none';
+            }
+
+            // Enable/disable dragging on every existing marker
+            Object.values(markers).forEach(m =>
+                hasEditPermissions ? m.dragging.enable() : m.dragging.disable()
+            );
+            })
+            .catch(err => {
+            console.error('Error checking IP access:', err);
+            // in case of error, you might default to no-permissions
+            });
+        }
 
     toggleSidebarBtn.addEventListener('click', () => {
       sidebar.classList.toggle('hidden');
