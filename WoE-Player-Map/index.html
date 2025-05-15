@@ -7,238 +7,90 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
     <style>
-        html, body {
-            margin: 0;
-            padding: 0;
-            height: 100%;
-            overflow: hidden;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #1E170F;
-        }
-        #map {
-            width: 100%;
-            height: 100%;
-        }
-        #sidebar {
-            width: 300px;
-            height: 100%;
-            overflow: auto;
-            background: #2c3e50;
-            color: white;
-            padding: 15px;
-            border-right: 2px solid #34495e;
-            position: absolute;
-            left: 0;
-            top: 0;
-            bottom: 0;
-            z-index: 1000;
-            box-shadow: 3px 0px 10px rgba(0,0,0,0.5);
-        }
-        #sidebar.hidden {
-            display: none;
-        }
-        #toggleSidebar {
-            position: absolute;
-            top: 15px;
-            left: 10px;
-            z-index: 1000;
-            background: #34495e;
-            color: white;
-            border: none;
-            padding: 10px;
-            cursor: pointer;
-            font-size: 16px;
-            box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
-        }
-        .leaflet-top.leaflet-left {
-            left: 10px;
-        }
-        .circular-icon {
-            width: 16px;
-            height: 16px;
-            border-radius: 50%;
-            object-fit: cover;
-        }
-        .portrait-icon {
-            width: 16px;
-            height: 20px;
-            object-fit: cover;
-        }
-        h2, h3 {
-            font-family: 'Fantasy', cursive;
-        }
-        button {
-            background-color: #2980b9;
-            color: white;
-            border: none;
-            padding: 10px 15px;
-            margin: 5px 0;
-            cursor: pointer;
-            font-size: 14px;
-            border-radius: 5px;
-            box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
-        }
-        input, select, textarea {
-            width: calc(100% - 30px);
-            padding: 10px;
-            margin: 5px 0;
-            border: none;
-            border-radius: 5px;
-            box-shadow: 3px 3px 10px rgba(0,0,0,0.5);
-            background: white;
-            color: #333;
-        }
-        label {
-            margin: 5px 0;
-        }
-        .collapsible {
-            background-color: #34495e;
-            color: white;
-            cursor: pointer;
-            padding: 10px;
-            width: 100%;
-            border: none;
-            text-align: left;
-            outline: none;
-            font-size: 15px;
-        }
-        .collapsible:after {
-            content: '\002B';
-            color: white;
-            font-weight: bold;
-            float: right;
-            margin-left: 5px;
-        }
-        .collapsible.active:after {
-            content: '\2212';
-        }
-        .content {
-            padding: 0 18px;
-            display: none;
-            overflow: hidden;
-            background-color: #2c3e50;
-        }
-        .content.show {
-            display: block;
-        }
+        html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#1E170F; font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        #map { width:100%; height:100%; }
+        #sidebar { width:300px; height:100%; overflow:auto; background:#2c3e50; color:white; padding:15px; border-right:2px solid #34495e; position:absolute; left:0; top:0; bottom:0; z-index:1000; box-shadow:3px 0 10px rgba(0,0,0,0.5); }
+        #sidebar.hidden { display:none; }
+        #toggleSidebar { position:absolute; top:15px; left:10px; z-index:1000; background:#34495e; color:white; border:none; padding:10px; cursor:pointer; font-size:16px; box-shadow:3px 3px 10px rgba(0,0,0,0.5); }
+        .leaflet-top.leaflet-left { left:10px; }
+        .circular-icon { width:16px; height:16px; border-radius:50%; object-fit:cover; }
+        .portrait-icon { width:16px; height:20px; object-fit:cover; }
+        button { background:#2980b9; color:white; border:none; padding:10px 15px; margin:5px 0; cursor:pointer; font-size:14px; border-radius:5px; box-shadow:3px 3px 10px rgba(0,0,0,0.5); }
+        input, select, textarea { width:calc(100% - 30px); padding:10px; margin:5px 0; border:none; border-radius:5px; box-shadow:3px 3px 10px rgba(0,0,0,0.5); background:white; color:#333; }
+        label { margin:5px 0; display:block; color:white; }
+        .collapsible { background:#34495e; color:white; cursor:pointer; padding:10px; width:100%; border:none; text-align:left; outline:none; font-size:15px; }
+        .collapsible:after { content:'\002B'; float:right; font-weight:bold; }
+        .collapsible.active:after { content:'\2212'; }
+        .content { padding:0 18px; display:none; overflow:hidden; background:#2c3e50; }
+        .content.show { display:block; }
 
-        /* Edit Modal Styles */
-        .modal {
-          position: fixed;
-          top: 0; left: 0;
-          width: 100%; height: 100%;
-          background: rgba(0,0,0,0.6);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          z-index: 2000;
-        }
-        .modal.hidden {
-          display: none;
-        }
-        .modal-content {
-          background: #2c3e50;
-          padding: 20px;
-          width: 320px;
-          max-height: 90%;
-          overflow-y: auto;
-          border-radius: 8px;
-          color: white;
-          position: relative;
-        }
-        .modal-close {
-          position: absolute;
-          top: 8px; right: 12px;
-          font-size: 24px;
-          cursor: pointer;
-        }
-        .subfields {
-          margin-left: 10px;
-          border-left: 2px solid #34495e;
-          padding-left: 8px;
-        }
-        .subfields.hidden {
-          display: none;
-        }
+        /* Edit Modal */
+        .modal { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:2000; }
+        .modal.hidden { display:none; }
+        .modal-content { background:#2c3e50; padding:20px; width:320px; max-height:90%; overflow-y:auto; border-radius:8px; color:white; position:relative; }
+        .modal-close { position:absolute; top:8px; right:12px; font-size:24px; cursor:pointer; color:white; }
+        .subfields { margin-left:10px; border-left:2px solid #34495e; padding-left:8px; }
+        .subfields.hidden { display:none; }
     </style>
 </head>
 <body>
     <button id="toggleSidebar" style="display:none;">☰</button>
     <div id="sidebar" class="hidden">
         <input type="text" id="searchInput" placeholder="Search markers..." oninput="searchMarkers()">
-        <button type="button" class="collapsible">Marker Management</button>
+        <button class="collapsible">Marker Management</button>
         <div class="content">
             <form id="markerForm">
-                <label for="markerType">Type:</label><br>
-                <select id="markerType" onchange="toggleFields();">
+                <label>Type</label>
+                <select id="markerType" onchange="toggleFields()">
                     <option value="player">Player</option>
                     <option value="town">Town</option>
                     <option value="poi">POI</option>
                     <option value="army">Army</option>
-                </select><br>
-                <label for="markerName">Name:</label><br>
-                <input type="text" id="markerName"><br>
+                </select>
+                <label>Name</label>
+                <input type="text" id="markerName">
                 <div id="iconFields">
-                    <label for="markerIcon">Icon URL:</label><br>
-                    <input type="text" id="markerIcon"><br>
-                    <input type="file" id="markerIconFile" accept="image/*"><br>
+                    <label>Icon URL</label>
+                    <input type="text" id="markerIcon">
+                    <input type="file" id="markerIconFile" accept="image/*">
                 </div>
-                <div id="townFields" style="display: none;">
-                    <label for="townSize">Town Size:</label><br>
+                <div id="townFields" style="display:none;">
+                    <label>Town Size</label>
                     <select id="townSize">
-                        <option value="capital">Capital (⭐)</option>
-                        <option value="city">City (⚫)</option>
-                        <option value="village">Village (🔵)</option>
-                    </select><br>
+                        <option value="capital">Capital</option>
+                        <option value="city">City</option>
+                        <option value="village">Village</option>
+                    </select>
                 </div>
-                <div id="armyFields" style="display: none;">
-                    <label for="armyNation">Nation:</label><br>
-                    <input type="text" id="armyNation"><br>
-                    <label for="armyUnitType">Unit Type:</label><br>
-                    <input type="text" id="armyUnitType"><br>
-                    <label for="armyAttack">Attack:</label><br>
-                    <input type="number" id="armyAttack"><br>
-                    <label for="armyDefend">Defend:</label><br>
-                    <input type="number" id="armyDefend"><br>
-                    <label for="armyActionPoints">Action Points:</label><br>
-                    <input type="number" id="armyActionPoints"><br>
-                    <label for="armyRange">Range:</label><br>
-                    <input type="number" id="armyRange"><br>
-                    <label for="armyMovement">Movement:</label><br>
-                    <input type="number" id="armyMovement"><br>
-                    <label for="armyAP1">AP1:</label><br>
-                    <input type="text" id="armyAP1"><br>
-                    <label for="armyAP2">AP2:</label><br>
-                    <input type="text" id="armyAP2"><br>
-                    <label for="armyAP3">AP3:</label><br>
-                    <input type="text" id="armyAP3"><br>
-                    <label for="armyAbilityDesc">Ability Desc:</label><br>
-                    <textarea id="armyAbilityDesc" rows="2"></textarea><br>
+                <div id="armyFields" style="display:none;">
+                    <label>Nation</label><input type="text" id="armyNation">
+                    <label>Unit Type</label><input type="text" id="armyUnitType">
+                    <label>Attack</label><input type="number" id="armyAttack">
+                    <label>Defend</label><input type="number" id="armyDefend">
+                    <label>Action Points</label><input type="number" id="armyActionPoints">
+                    <label>Range</label><input type="number" id="armyRange">
+                    <label>Movement</label><input type="number" id="armyMovement">
+                    <label>AP1</label><input type="text" id="armyAP1">
+                    <label>AP2</label><input type="text" id="armyAP2">
+                    <label>AP3</label><input type="text" id="armyAP3">
+                    <label>Ability Desc</label><textarea id="armyAbilityDesc" rows="2"></textarea>
                 </div>
-                <label for="markerTooltipType">Tooltip Type:</label><br>
+                <label>Tooltip Type</label>
                 <select id="markerTooltipType" onchange="toggleTooltipFields()">
                     <option value="image">Image</option>
                     <option value="text">Text</option>
-                </select><br>
-                <label for="markerTooltip">Tooltip Content:</label><br>
-                <input type="text" id="markerTooltip"><br>
-                <input type="file" id="markerTooltipFile" accept="image/*" style="display:none;"><br>
-                <label><input type="checkbox" id="markerAdminOnly"> Admin Only</label><br>
+                </select>
+                <label>Tooltip Content</label>
+                <input type="text" id="markerTooltip">
+                <input type="file" id="markerTooltipFile" accept="image/*" style="display:none;">
+                <label><input type="checkbox" id="markerAdminOnly"> Admin Only</label>
                 <button type="button" onclick="addMarker()">Add Marker</button>
             </form>
         </div>
-
-        <button type="button" class="collapsible">Town and POI Markers</button>
-        <div class="content">
-            <h3>Markers:</h3>
-            <ul id="markerList"></ul>
-        </div>
-
-        <button type="button" class="collapsible">Player Markers</button>
-        <div class="content">
-            <h3>Markers:</h3>
-            <ul id="playerMarkerList"></ul>
-        </div>
+        <button class="collapsible">Town and POI Markers</button>
+        <div class="content"><ul id="markerList"></ul></div>
+        <button class="collapsible">Player Markers</button>
+        <div class="content"><ul id="playerMarkerList"></ul></div>
     </div>
     <div id="map"></div>
 
@@ -249,66 +101,43 @@
         <h3>Edit Marker</h3>
         <form id="editForm">
           <input type="hidden" id="editId">
-
-          <label for="editName">Name</label>
-          <input type="text" id="editName">
-
-          <label for="editType">Type</label>
+          <label>Name</label><input type="text" id="editName">
+          <label>Type</label>
           <select id="editType" disabled>
             <option value="player">Player</option>
             <option value="town">Town</option>
             <option value="poi">POI</option>
             <option value="army">Army</option>
           </select>
-
-          <label for="editIconUrl">Icon URL</label>
-          <input type="text" id="editIconUrl">
-
-          <label for="editTooltipType">Tooltip Type</label>
+          <label>Icon URL</label><input type="text" id="editIconUrl">
+          <label>Tooltip Type</label>
           <select id="editTooltipType">
             <option value="image">Image</option>
             <option value="text">Text</option>
           </select>
-
-          <label for="editTooltipContent">Tooltip Content</label>
-          <input type="text" id="editTooltipContent">
-
+          <label>Tooltip Content</label><input type="text" id="editTooltipContent">
           <div id="editTownFields" class="subfields hidden">
-            <label for="editTownSize">Town Size</label>
+            <label>Town Size</label>
             <select id="editTownSize">
               <option value="capital">Capital</option>
               <option value="city">City</option>
               <option value="village">Village</option>
             </select>
           </div>
-
           <div id="editArmyFields" class="subfields hidden">
-            <label for="editNation">Nation</label>
-            <input type="text" id="editNation">
-            <label for="editUnitType">Unit Type</label>
-            <input type="text" id="editUnitType">
-            <label for="editAttack">Attack</label>
-            <input type="number" id="editAttack">
-            <label for="editDefend">Defend</label>
-            <input type="number" id="editDefend">
-            <label for="editActionPoints">Action Points</label>
-            <input type="number" id="editActionPoints">
-            <label for="editRange">Range</label>
-            <input type="number" id="editRange">
-            <label for="editMovement">Movement</label>
-            <input type="number" id="editMovement">
-            <label for="editAP1">AP1</label>
-            <input type="text" id="editAP1">
-            <label for="editAP2">AP2</label>
-            <input type="text" id="editAP2">
-            <label for="editAP3">AP3</label>
-            <input type="text" id="editAP3">
-            <label for="editAbilityDesc">Ability Desc</label>
-            <textarea id="editAbilityDesc" rows="2"></textarea>
+            <label>Nation</label><input type="text" id="editNation">
+            <label>Unit Type</label><input type="text" id="editUnitType">
+            <label>Attack</label><input type="number" id="editAttack">
+            <label>Defend</label><input type="number" id="editDefend">
+            <label>Action Points</label><input type="number" id="editActionPoints">
+            <label>Range</label><input type="number" id="editRange">
+            <label>Movement</label><input type="number" id="editMovement">
+            <label>AP1</label><input type="text" id="editAP1">
+            <label>AP2</label><input type="text" id="editAP2">
+            <label>AP3</label><input type="text" id="editAP3">
+            <label>Ability Desc</label><textarea id="editAbilityDesc" rows="2"></textarea>
           </div>
-
           <label><input type="checkbox" id="editAdminOnly"> Admin Only</label><br>
-
           <button type="button" id="saveEditBtn">Save Changes</button>
         </form>
       </div>
@@ -320,32 +149,23 @@
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
     <script>
     (function() {
-        // Firebase setup
-        const firebaseConfig = {
-            apiKey: "...",
-            authDomain: "woe-world.firebaseapp.com",
-            databaseURL: "https://woe-world-default-rtdb.firebaseio.com",
-            projectId: "woe-world",
-            storageBucket: "woe-world.appspot.com",
-            messagingSenderId: "706865712365",
-            appId: "1:706865712365:web:e080b1ef45b8d8b27190e4",
-            measurementId: "G-789BN2WECG"
-        };
+        // Firebase config
+        const firebaseConfig = { /* your creds */ };
         firebase.initializeApp(firebaseConfig);
         const database = firebase.database();
-        const storage = firebase.storage();
+        const storage  = firebase.storage();
 
         // Map init
         const imageUrl = 'assets/high_res_image.png';
         const imageBounds = [[0,0],[3996,5729]];
-        const map = L.map('map',{crs:L.CRS.Simple, maxZoom:2, minZoom:-2});
+        const map = L.map('map',{ crs:L.CRS.Simple, maxZoom:2, minZoom:-2 });
         L.imageOverlay(imageUrl,imageBounds).addTo(map);
         map.fitBounds(imageBounds);
 
         let markers = {};
         let hasEditPermissions = false;
 
-        // DOM cache
+        // Cached DOM nodes
         const markerForm               = document.getElementById('markerForm');
         const markerTypeSelect         = document.getElementById('markerType');
         const markerNameInput          = document.getElementById('markerName');
@@ -372,9 +192,9 @@
         const markerList               = document.getElementById('markerList');
         const playerMarkerList         = document.getElementById('playerMarkerList');
         const searchInput              = document.getElementById('searchInput');
-        const coll                     = document.getElementsByClassName("collapsible");
+        const coll                     = document.getElementsByClassName('collapsible');
 
-        // Modal elements
+        // Edit modal nodes
         const editModal                = document.getElementById('editModal');
         const closeEditModalBtn        = document.getElementById('closeEditModal');
         const saveEditBtn              = document.getElementById('saveEditBtn');
@@ -400,7 +220,7 @@
         const editAbilityDescInput     = document.getElementById('editAbilityDesc');
         const editAdminOnlyCheckbox    = document.getElementById('editAdminOnly');
 
-        // Utility
+        // Toggle form fields
         function toggleFields() {
             const t = markerTypeSelect.value;
             document.getElementById('iconFields').style.display = (t==='player'||t==='army')?'block':'none';
@@ -410,165 +230,136 @@
         }
         function toggleTooltipFields() {
             const tt = markerTooltipTypeSelect.value, t = markerTypeSelect.value;
-            markerTooltipInput.style.display     = (tt==='text' && t!=='player' && t!=='army')?'block':'none';
+            markerTooltipInput.style.display     = (tt==='text'&&t!=='player'&&t!=='army')?'block':'none';
             markerTooltipFileInput.style.display = (tt==='image'||t==='player'||t==='army')?'block':'none';
         }
+
         function correctMarkerData(d) {
-            return {
-                type:'unknown', lat:0, lng:0, name:'Unnamed Marker',
-                iconUrl:'assets/placeholder.png',
-                tooltipType:'text', tooltipContent:'',
-                adminOnly:false,
-                ...d
-            };
+            return { type:'unknown', lat:0, lng:0, name:'Unnamed Marker', iconUrl:'assets/placeholder.png',
+                     tooltipType:'text', tooltipContent:'', adminOnly:false, ...d };
         }
         function isValidMarkerData(d) {
             return ['type','lat','lng','name'].every(f=>d[f]!=null);
         }
 
-        // CRUD
-        database.ref('markers').on('value', snap => {
+        // Load markers
+        database.ref('markers').on('value', snap=>{
             const data = snap.val()||{};
-            Object.entries(data).forEach(([id,d]) => {
-                const mData = correctMarkerData(d);
-                if (!isValidMarkerData(mData)) {
-                    database.ref('markers/'+id).remove();
-                } else if (markers[id]) {
-                    const m = markers[id], ll = L.latLng(mData.lat,mData.lng);
+            Object.entries(data).forEach(([id,d])=>{
+                const md = correctMarkerData(d);
+                if (!isValidMarkerData(md)) return database.ref('markers/'+id).remove();
+                if (markers[id]) {
+                    const m = markers[id], ll=L.latLng(md.lat,md.lng);
                     if (!m.getLatLng().equals(ll)) m.setLatLng(ll);
-                } else {
-                    createMarker(id,mData);
-                }
+                } else createMarker(id,md);
             });
         });
 
         async function addMarker() {
-            const type   = markerTypeSelect.value;
-            const name   = markerNameInput.value;
-            let   iconUrl = markerIconInput.value;
-            const tt     = markerTooltipTypeSelect.value;
-            let   tooltip = markerTooltipInput.value;
-            const admin  = markerAdminOnlyCheckbox.checked;
-            const id     = database.ref().child('markers').push().key;
+            const type = markerTypeSelect.value, name=markerNameInput.value;
+            let iconUrl=markerIconInput.value;
+            const tt = markerTooltipTypeSelect.value;
+            let tooltip=markerTooltipInput.value;
+            const admin=markerAdminOnlyCheckbox.checked;
+            const id = database.ref().child('markers').push().key;
 
-            let mOpts = { id, lat:map.getCenter().lat, lng:map.getCenter().lng,
-                          type, name, iconUrl, tooltipType:tt,
-                          tooltipContent:tooltip, adminOnly:admin };
+            let opts={ id, lat:map.getCenter().lat, lng:map.getCenter().lng, type,name,iconUrl,tooltipType:tt,tooltipContent:tooltip,adminOnly:admin };
 
-            const iFile = markerIconFileInput.files[0];
-            if (iFile && (type==='player'||type==='army')) {
-                const snap = await storage.ref(`markers/${id}/icon`).put(iFile);
-                iconUrl = await snap.ref.getDownloadURL();
-                mOpts.iconUrl = iconUrl;
+            const iFile=markerIconFileInput.files[0];
+            if (iFile&&(type==='player'||type==='army')) {
+                const snap=await storage.ref(`markers/${id}/icon`).put(iFile);
+                iconUrl=await snap.ref.getDownloadURL();
+                opts.iconUrl=iconUrl;
             }
-            const tFile = markerTooltipFileInput.files[0];
-            if (tFile && tt==='image') {
-                const snap = await storage.ref(`markers/${id}/tooltip`).put(tFile);
-                tooltip   = await snap.ref.getDownloadURL();
-                mOpts.tooltipContent = tooltip;
+            const tFile=markerTooltipFileInput.files[0];
+            if (tFile&&tt==='image') {
+                const snap=await storage.ref(`markers/${id}/tooltip`).put(tFile);
+                tooltip=await snap.ref.getDownloadURL();
+                opts.tooltipContent=tooltip;
             }
-
-            if (type==='town') {
-                mOpts.size = townSizeSelect.value;
-            }
-            if (type==='army') {
-                Object.assign(mOpts,{
-                    nation:       armyNationInput.value,
-                    unitType:     armyUnitTypeInput.value,
-                    attack:       armyAttackInput.value,
-                    defend:       armyDefendInput.value,
-                    actionPoints: armyActionPointsInput.value,
-                    range:        armyRangeInput.value,
-                    movement:     armyMovementInput.value,
-                    ap1:           armyAP1Input.value,
-                    ap2:           armyAP2Input.value,
-                    ap3:           armyAP3Input.value,
-                    abilityDesc:   armyAbilityDescInput.value
-                });
-            }
-
-            await database.ref('markers/'+id).set(mOpts);
-            createMarker(id,mOpts);
-            markerForm.reset();
-            toggleFields();
+            if (type==='town') opts.size=townSizeSelect.value;
+            if (type==='army') Object.assign(opts,{
+                nation:armyNationInput.value,
+                unitType:armyUnitTypeInput.value,
+                attack:armyAttackInput.value,
+                defend:armyDefendInput.value,
+                actionPoints:armyActionPointsInput.value,
+                range:armyRangeInput.value,
+                movement:armyMovementInput.value,
+                ap1:armyAP1Input.value,
+                ap2:armyAP2Input.value,
+                ap3:armyAP3Input.value,
+                abilityDesc:armyAbilityDescInput.value
+            });
+            await database.ref('markers/'+id).set(opts);
+            createMarker(id,opts);
+            markerForm.reset(); toggleFields();
         }
 
         function createMarker(id,data) {
             if (markers[id]) map.removeLayer(markers[id]);
-            if (!hasEditPermissions && data.adminOnly) return;
-
+            if (!hasEditPermissions&&data.adminOnly) return;
             let m;
             switch(data.type) {
-                case 'player': m = createPlayerMarker(data); break;
-                case 'town': case 'poi': m = createTownOrPoiMarker(data); break;
-                case 'army': m = createArmyMarker(data); break;
-                default: database.ref('markers/'+id).remove(); return;
+                case 'player': m=createPlayerMarker(data);break;
+                case 'town': case 'poi': m=createTownOrPoiMarker(data);break;
+                case 'army': m=createArmyMarker(data);break;
+                default: return database.ref('markers/'+id).remove();
             }
-
-            // stash raw
-            m._rawData = data;
-
-            m.on('dragend', e=>{
-                const ll = e.target.getLatLng();
+            m._rawData=data;
+            m.on('dragend',e=>{
+                const ll=e.target.getLatLng();
                 database.ref('markers/'+id).update({lat:ll.lat,lng:ll.lng});
             });
-            m.on('click', ()=>{
-                if (hasEditPermissions) {
-                    showSidebar();
-                    map.panTo(m.getLatLng());
-                }
-            });
-
-            markers[id] = m.addTo(map);
+            m.on('click',()=>{ if(hasEditPermissions){ showSidebar(); map.panTo(m.getLatLng()); } });
+            markers[id]=m.addTo(map);
             updateSidebar();
         }
 
         function createPlayerMarker(d) {
-            const icon = L.icon({ iconUrl:d.iconUrl, iconSize:[16,16], className:'circular-icon' });
-            const m = L.marker([d.lat,d.lng],{icon, draggable:hasEditPermissions});
-            const html = `<div style="font-size:16px;"><strong>${d.name}</strong><br>` +
-                         (d.tooltipType==='image'
-                            ? `<img src="${d.tooltipContent}" width="200"><br>`
-                            : `${d.tooltipContent}<br>`) +
-                         getAdminOptions(d) + '</div>';
+            const icon=L.icon({iconUrl:d.iconUrl,iconSize:[16,16],className:'circular-icon'});
+            const m=L.marker([d.lat,d.lng],{icon,draggable:hasEditPermissions});
+            const html=`<div style="font-size:16px;"><strong>${d.name}</strong><br>${
+                d.tooltipType==='image'
+                  ? `<img src="${d.tooltipContent}" width="200"><br>`
+                  : `${d.tooltipContent}<br>`
+            }${getAdminOptions(d)}</div>`;
             m.bindPopup(html);
             return m;
         }
-
         function createTownOrPoiMarker(d) {
-            const sym = d.type==='town'
+            const sym=d.type==='town'
                       ? (d.size==='capital'?'⭐':d.size==='city'?'⚫':'🔵')
                       : '❓';
-            const m = L.marker([d.lat,d.lng], {
+            const m=L.marker([d.lat,d.lng],{
                 icon:L.divIcon({html:sym,className:'custom-div-icon'}),
                 draggable:hasEditPermissions
             });
-            const html = `<div style="font-size:16px;"><strong>${d.name}</strong><br>` +
-                         (d.tooltipType==='image'
-                            ? `<img src="${d.tooltipContent}" width="200"><br>`
-                            : `${d.tooltipContent}<br>`) +
-                         getAdminOptions(d) + '</div>';
+            const html=`<div style="font-size:16px;"><strong>${d.name}</strong><br>${
+                d.tooltipType==='image'
+                  ? `<img src="${d.tooltipContent}" width="200"><br>`
+                  : `${d.tooltipContent}<br>`
+            }${getAdminOptions(d)}</div>`;
             m.bindPopup(html);
             return m;
         }
-
         function createArmyMarker(d) {
-            const icon = L.icon({ iconUrl:d.iconUrl, iconSize:[16,20], className:'portrait-icon' });
-            const m = L.marker([d.lat,d.lng],{icon, draggable:hasEditPermissions});
-            let html = `<div style="font-size:16px;"><strong>${d.name}</strong><br>` +
-                       `<img src="${d.iconUrl}" width="16" height="20"><br>` +
-                       `<strong>Nation:</strong> ${d.nation}<br>` +
-                       `<strong>Unit Type:</strong> ${d.unitType}<br>` +
-                       `<strong>Attack:</strong> ${d.attack}<br>` +
-                       `<strong>Defend:</strong> ${d.defend}<br>` +
-                       `<strong>Action Points:</strong> ${d.actionPoints}<br>` +
-                       `<strong>Range:</strong> ${d.range}<br>` +
-                       `<strong>Movement:</strong> ${d.movement}<br>` +
-                       `<strong>AP1:</strong> ${d.ap1}<br>` +
-                       `<strong>AP2:</strong> ${d.ap2}<br>` +
-                       `<strong>AP3:</strong> ${d.ap3}<br>` +
-                       `<strong>Ability Desc:</strong> ${d.abilityDesc}<br>` +
-                       getAdminOptions(d) + '</div>';
+            const icon=L.icon({iconUrl:d.iconUrl,iconSize:[16,20],className:'portrait-icon'});
+            const m=L.marker([d.lat,d.lng],{icon,draggable:hasEditPermissions});
+            let html=`<div style="font-size:16px;"><strong>${d.name}</strong><br>
+                      <img src="${d.iconUrl}" width="16" height="20"><br>
+                      <strong>Nation:</strong> ${d.nation}<br>
+                      <strong>Unit Type:</strong> ${d.unitType}<br>
+                      <strong>Attack:</strong> ${d.attack}<br>
+                      <strong>Defend:</strong> ${d.defend}<br>
+                      <strong>Action Points:</strong> ${d.actionPoints}<br>
+                      <strong>Range:</strong> ${d.range}<br>
+                      <strong>Movement:</strong> ${d.movement}<br>
+                      <strong>AP1:</strong> ${d.ap1}<br>
+                      <strong>AP2:</strong> ${d.ap2}<br>
+                      <strong>AP3:</strong> ${d.ap3}<br>
+                      <strong>Ability Desc:</strong> ${d.abilityDesc}<br>
+                      ${getAdminOptions(d)}</div>`;
             m.bindPopup(html);
             return m;
         }
@@ -579,181 +370,163 @@
                     <input type="checkbox" ${d.adminOnly?'checked':''}
                       onchange="toggleAdminOnly('${d.id}',this.checked)"> Admin Only`;
         }
-
         function duplicateMarker(id) {
-            const orig = markers[id]._rawData;
-            if (!orig) return console.error("No rawData");
-            const {id:_, lat, lng, ...rest} = orig;
-            const newId = database.ref().child('markers').push().key;
-            const copy = { id:newId, lat, lng, ...rest };
-            database.ref('markers/'+newId).set(copy)
-              .then(()=>createMarker(newId,copy))
+            const o=markers[id]._rawData;
+            if(!o) return;
+            const{ id:_,lat,lng,...r }=o;
+            const nid=database.ref().child('markers').push().key;
+            const c={id:nid,lat,lng,...r};
+            database.ref('markers/'+nid).set(c)
+              .then(()=>createMarker(nid,c))
               .catch(console.error);
         }
-
         function toggleAdminOnly(id,val) {
             database.ref('markers/'+id).update({adminOnly:val});
-            markers[id]._rawData.adminOnly = val;
-            if (!hasEditPermissions && val) map.removeLayer(markers[id]);
-            else if (hasEditPermissions && !map.hasLayer(markers[id])) markers[id].addTo(map);
+            markers[id]._rawData.adminOnly=val;
+            if(!hasEditPermissions&&val) map.removeLayer(markers[id]);
+            else if(hasEditPermissions&&!map.hasLayer(markers[id])) markers[id].addTo(map);
             updateSidebar();
         }
-
         function updateSidebar() {
-            markerList.innerHTML = '';
-            playerMarkerList.innerHTML = '';
-            const q = searchInput.value.toLowerCase();
+            markerList.innerHTML=''; playerMarkerList.innerHTML='';
+            const q=searchInput.value.toLowerCase();
             Object.entries(markers).forEach(([id,m])=>{
-                const d = m._rawData;
-                if (!d || !d.name.toLowerCase().includes(q)) return;
-                const li = document.createElement('li');
-                li.innerHTML = `<strong>${d.name}</strong>` +
+                const d=m._rawData;
+                if(!d||!d.name.toLowerCase().includes(q)) return;
+                const li=document.createElement('li');
+                li.innerHTML=`<strong>${d.name}</strong>`+
                   (hasEditPermissions
                     ? ` <button onclick="openEditModal('${id}')">Edit</button>
                        <button onclick="removeMarker('${id}')">Remove</button>`
                     : '');
-                if (d.type==='player') playerMarkerList.appendChild(li);
+                if(d.type==='player') playerMarkerList.appendChild(li);
                 else markerList.appendChild(li);
             });
         }
-
-        function searchMarkers() { updateSidebar(); }
-
-        function removeMarker(id) {
-            if (markers[id]) {
-                map.removeLayer(markers[id]);
-                delete markers[id];
-            }
+        function searchMarkers(){ updateSidebar(); }
+        function removeMarker(id){
+            if(markers[id]){ map.removeLayer(markers[id]); delete markers[id]; }
             database.ref('markers/'+id).remove();
             updateSidebar();
         }
 
-        // --- Modal functions ---
-        function toggleEditSubfields(type) {
-          editTownFields.classList.toggle('hidden', type!=='town');
-          editArmyFields.classList.toggle('hidden', type!=='army');
+        // Modal
+        function toggleEditSubfields(type){
+            editTownFields.classList.toggle('hidden',type!=='town');
+            editArmyFields.classList.toggle('hidden',type!=='army');
         }
-        function openEditModal(id) {
-          const m = markers[id];
-          const d = m._rawData;
-          if (!d) return;
-          editIdInput.value              = id;
-          editNameInput.value            = d.name;
-          editTypeSelect.value           = d.type;
-          editIconUrlInput.value         = d.iconUrl;
-          editTooltipTypeSelect.value    = d.tooltipType;
-          editTooltipContent.value       = d.tooltipContent;
-          editAdminOnlyCheckbox.checked  = d.adminOnly;
-          toggleEditSubfields(d.type);
-          if (d.type==='town') {
-            editTownSizeSelect.value = d.size||'village';
-          }
-          if (d.type==='army') {
-            editNationInput.value       = d.nation||'';
-            editUnitTypeInput.value     = d.unitType||'';
-            editAttackInput.value       = d.attack||'';
-            editDefendInput.value       = d.defend||'';
-            editActionPointsInput.value = d.actionPoints||'';
-            editRangeInput.value        = d.range||'';
-            editMovementInput.value     = d.movement||'';
-            editAP1Input.value          = d.ap1||'';
-            editAP2Input.value          = d.ap2||'';
-            editAP3Input.value          = d.ap3||'';
-            editAbilityDescInput.value  = d.abilityDesc||'';
-          }
-          editModal.classList.remove('hidden');
+        function openEditModal(id){
+            const m=markers[id],d=m._rawData;
+            if(!d) return;
+            editIdInput.value=id;
+            editNameInput.value=d.name;
+            editTypeSelect.value=d.type;
+            editIconUrlInput.value=d.iconUrl;
+            editTooltipTypeSelect.value=d.tooltipType;
+            editTooltipContent.value=d.tooltipContent;
+            editAdminOnlyCheckbox.checked=d.adminOnly;
+            toggleEditSubfields(d.type);
+            if(d.type==='town') editTownSizeSelect.value=d.size||'village';
+            if(d.type==='army'){
+                editNationInput.value      =d.nation||'';
+                editUnitTypeInput.value    =d.unitType||'';
+                editAttackInput.value      =d.attack||'';
+                editDefendInput.value      =d.defend||'';
+                editActionPointsInput.value=d.actionPoints||'';
+                editRangeInput.value       =d.range||'';
+                editMovementInput.value    =d.movement||'';
+                editAP1Input.value         =d.ap1||'';
+                editAP2Input.value         =d.ap2||'';
+                editAP3Input.value         =d.ap3||'';
+                editAbilityDescInput.value =d.abilityDesc||'';
+            }
+            editModal.classList.remove('hidden');
         }
-        closeEditModalBtn.addEventListener('click', ()=>{
-          editModal.classList.add('hidden');
-        });
-        saveEditBtn.addEventListener('click', ()=>{
-          const id = editIdInput.value;
-          const d  = markers[id]._rawData;
-          if (!d) return;
-          const updated = {
-            ...d,
-            name:         editNameInput.value,
-            iconUrl:      editIconUrlInput.value,
-            tooltipType:  editTooltipTypeSelect.value,
-            tooltipContent: editTooltipContent.value,
-            adminOnly:    editAdminOnlyCheckbox.checked
-          };
-          if (d.type==='town') {
-            updated.size = editTownSizeSelect.value;
-          }
-          if (d.type==='army') {
-            Object.assign(updated,{
-              nation:       editNationInput.value,
-              unitType:     editUnitTypeInput.value,
-              attack:       editAttackInput.value,
-              defend:       editDefendInput.value,
-              actionPoints: editActionPointsInput.value,
-              range:        editRangeInput.value,
-              movement:     editMovementInput.value,
-              ap1:           editAP1Input.value,
-              ap2:           editAP2Input.value,
-              ap3:           editAP3Input.value,
-              abilityDesc:   editAbilityDescInput.value
+        closeEditModalBtn.addEventListener('click',()=>editModal.classList.add('hidden'));
+        saveEditBtn.addEventListener('click',()=>{
+            const id=editIdInput.value;
+            if(!markers[id]) return;
+            const d=markers[id]._rawData;
+            const updated={
+                ...d,
+                name:editNameInput.value,
+                iconUrl:editIconUrlInput.value,
+                tooltipType:editTooltipTypeSelect.value,
+                tooltipContent:editTooltipContent.value,
+                adminOnly:editAdminOnlyCheckbox.checked
+            };
+            if(d.type==='town') updated.size=editTownSizeSelect.value;
+            if(d.type==='army') Object.assign(updated,{
+                nation:editNationInput.value,
+                unitType:editUnitTypeInput.value,
+                attack:editAttackInput.value,
+                defend:editDefendInput.value,
+                actionPoints:editActionPointsInput.value,
+                range:editRangeInput.value,
+                movement:editMovementInput.value,
+                ap1:editAP1Input.value,
+                ap2:editAP2Input.value,
+                ap3:editAP3Input.value,
+                abilityDesc:editAbilityDescInput.value
             });
-          }
-          database.ref('markers/'+id).set(updated)
-            .then(()=>{
-              map.removeLayer(markers[id]);
-              createMarker(id, updated);
-              editModal.classList.add('hidden');
-            })
-            .catch(console.error);
+            database.ref('markers/'+id).set(updated)
+              .then(()=>{
+                // remove old layer + reference
+                if(markers[id]){
+                  map.removeLayer(markers[id]);
+                  delete markers[id];
+                }
+                // re-create
+                createMarker(id,updated);
+                editModal.classList.add('hidden');
+              })
+              .catch(console.error);
         });
 
-        // Permissions & UI wiring
-        function checkIPAccess() {
+        // Permissions & UI
+        function checkIPAccess(){
             fetch('https://api.ipify.org?format=json')
               .then(r=>r.json())
               .then(data=>{
-                const allowed = ['24.57.218.92','98.16.223.9'];
-                hasEditPermissions = allowed.includes(data.ip);
+                const allowed=['24.57.218.92','98.16.223.9'];
+                hasEditPermissions=allowed.includes(data.ip);
                 document.body.classList.toggle('readonly',!hasEditPermissions);
                 sidebar.classList.toggle('hidden',!hasEditPermissions);
-                toggleSidebarBtn.style.display = hasEditPermissions?'block':'none';
+                toggleSidebarBtn.style.display=hasEditPermissions?'block':'none';
                 Object.values(markers).forEach(m=>
-                  hasEditPermissions? m.dragging.enable() : m.dragging.disable()
+                    hasEditPermissions? m.dragging.enable(): m.dragging.disable()
                 );
-              })
-              .catch(console.error);
+              }).catch(console.error);
         }
         checkIPAccess();
 
-        toggleSidebarBtn.addEventListener('click', ()=>{
+        toggleSidebarBtn.addEventListener('click',()=>{
             sidebar.classList.toggle('hidden');
-            const hidden = sidebar.classList.contains('hidden');
-            toggleSidebarBtn.style.left = hidden?'10px':'310px';
-            document.querySelector('.leaflet-top.leaflet-left').style.left = hidden?'10px':'320px';
+            const hidden=sidebar.classList.contains('hidden');
+            toggleSidebarBtn.style.left=hidden?'10px':'310px';
+            document.querySelector('.leaflet-top.leaflet-left').style.left=hidden?'10px':'320px';
             map.invalidateSize();
         });
-
-        function showSidebar() {
-            if (sidebar.classList.contains('hidden')) {
+        function showSidebar(){
+            if(sidebar.classList.contains('hidden')){
                 sidebar.classList.remove('hidden');
-                toggleSidebarBtn.style.left = '310px';
-                document.querySelector('.leaflet-top.leaflet-left').style.left = '320px';
+                toggleSidebarBtn.style.left='310px';
+                document.querySelector('.leaflet-top.leaflet-left').style.left='320px';
                 map.invalidateSize();
             }
         }
-
-        for (let i=0; i<coll.length; i++) {
-            coll[i].addEventListener('click', function(){
+        for(let i=0;i<coll.length;i++){
+            coll[i].addEventListener('click',function(){
                 this.classList.toggle('active');
                 this.nextElementSibling.classList.toggle('show');
             });
         }
-
-        // Expose globals
-        window.addMarker       = addMarker;
-        window.searchMarkers   = searchMarkers;
-        window.duplicateMarker = duplicateMarker;
-        window.openEditModal   = openEditModal;
-        window.removeMarker    = removeMarker;
-        window.toggleFields    = toggleFields;
+        window.addMarker=addMarker;
+        window.searchMarkers=searchMarkers;
+        window.duplicateMarker=duplicateMarker;
+        window.openEditModal=openEditModal;
+        window.removeMarker=removeMarker;
+        window.toggleFields=toggleFields;
     })();
     </script>
 </body>
