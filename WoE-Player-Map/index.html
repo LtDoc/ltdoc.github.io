@@ -616,19 +616,34 @@
             checkIPAccess();
 
             function updateMarkerScales() {
-                const z = map.getZoom();
-                // choose a base scale factor; tweak these constants to taste
-                const scale = 0.3 + (z / 6);
+                const z       = map.getZoom();
+                const minZ    = map.options.minZoom;
+                const maxZ    = map.options.maxZoom;
+                const t       = (z - minZ) / (maxZ - minZ);   // goes 0 at minZoom → 1 at maxZoom
+
+                // tweak these to taste:
+                const minScale = 0.3;   // how small at minZoom
+                const maxScale = 1.0;   // how big at maxZoom
+
+                // interpolated scale between minScale and maxScale
+                const scale = minScale + (maxScale - minScale) * t;
+
                 Object.values(markers).forEach(m => {
-                    if (m._icon) {
-                    // Leaflet already positions the icon via translate(-50%, -50%)
-                    // so we just append our scale(...)
-                    m._icon.style.transform = `translate(-50%, -50%) scale(${scale})`;
+                    const el = m._icon;
+                    if (!el) return;
+
+                    if (!el.dataset.baseTransform) {
+                    el.dataset.baseTransform = window
+                        .getComputedStyle(el)
+                        .transform
+                        .replace(/^none$/, '');
                     }
+
+                    el.style.transform = `${el.dataset.baseTransform} scale(${scale})`;
                 });
                 }
 
-                // run once now, and then on every zoom
+                // Run initially and again on every zoom change
                 updateMarkerScales();
                 map.on('zoomend', updateMarkerScales);
 
