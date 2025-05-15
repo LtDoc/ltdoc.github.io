@@ -616,36 +616,29 @@
             checkIPAccess();
 
             function updateMarkerScales() {
-                const z       = map.getZoom();
-                const minZ    = map.options.minZoom;
-                const maxZ    = map.options.maxZoom;
-                const t       = (z - minZ) / (maxZ - minZ);   // goes 0 at minZoom → 1 at maxZoom
+  const z       = map.getZoom();
+  const minZ    = map.options.minZoom;
+  const maxZ    = map.options.maxZoom;
+  const t       = (z - minZ) / (maxZ - minZ);   // 0 at minZoom → 1 at maxZoom
 
-                // tweak these to taste:
-                const minScale = 0.3;   // how small at minZoom
-                const maxScale = 1.0;   // how big at maxZoom
+  const minScale = 0.3;   // how small at furthest-out
+  const maxScale = 1.0;   // how big at closest-in
+  const scale    = minScale + (maxScale - minScale) * t;
 
-                // interpolated scale between minScale and maxScale
-                const scale = minScale + (maxScale - minScale) * t;
+  Object.values(markers).forEach(m => {
+    if (!m._icon) return;
+    // 1) project the marker’s true lat/lng into pixel space
+    const pos = map.latLngToLayerPoint(m.getLatLng());
+    // 2) build a translate(...) string
+    const translate = L.DomUtil.getTranslateString(pos);
+    // 3) tack on our scale(...)
+    m._icon.style.transform = `${translate} scale(${scale})`;
+  });
+}
 
-                Object.values(markers).forEach(m => {
-                    const el = m._icon;
-                    if (!el) return;
-
-                    if (!el.dataset.baseTransform) {
-                    el.dataset.baseTransform = window
-                        .getComputedStyle(el)
-                        .transform
-                        .replace(/^none$/, '');
-                    }
-
-                    el.style.transform = `${el.dataset.baseTransform} scale(${scale})`;
-                });
-                }
-
-                // Run initially and again on every zoom change
-                updateMarkerScales();
-                map.on('zoomend', updateMarkerScales);
+// run once immediately, then again on every zoom change:
+updateMarkerScales();
+map.on('zoomend', updateMarkerScales);
 
             toggleSidebarBtn.addEventListener('click',()=>{
                 sidebar.classList.toggle('hidden');
