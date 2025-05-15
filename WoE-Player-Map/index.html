@@ -375,33 +375,58 @@
                 resetMarkerForm();
             }
 
-            function createMarker(id,d) {
-                if (markers[id]) map.removeLayer(markers[id]);
-                if (!hasEditPermissions && d.adminOnly) return;
+            // 1) Updated createMarker: stash the full markerData on the Leaflet marker
+            function createMarker(id, markerData) {
+                // Remove any existing marker
+                if (markers[id]) {
+                    map.removeLayer(markers[id]);
+                }
+                // Skip admin‐only if no permission
+                if (!hasEditPermissions && markerData.adminOnly) {
+                    return;
+                }
 
-                let m;
-                switch(d.type) {
-                    case 'player': m = createPlayerMarker(d); break;
+                // Choose the right factory
+                let marker;
+                switch (markerData.type) {
+                    case 'player':
+                        marker = createPlayerMarker(markerData);
+                        break;
                     case 'town':
-                    case 'poi':    m = createTownOrPoiMarker(d); break;
-                    case 'army':   m = createArmyMarker(d); break;
+                    case 'poi':
+                        marker = createTownOrPoiMarker(markerData);
+                        break;
+                    case 'army':
+                        marker = createArmyMarker(markerData);
+                        break;
                     default:
-                        database.ref('markers/'+id).remove();
+                        console.error(`Unknown marker type: ${markerData.type}`, markerData);
+                        database.ref('markers/' + id).remove();
                         return;
                 }
-                m.on('dragend', e => {
+
+                // Stash the original data object
+                marker._rawData = markerData;
+
+                // Wire up dragging to update Firebase
+                marker.on('dragend', function(e) {
                     const ll = e.target.getLatLng();
-                    database.ref('markers/'+id).update({lat:ll.lat,lng:ll.lng});
+                    database.ref('markers/' + id).update({ lat: ll.lat, lng: ll.lng });
                 });
-                m.on('click', () => {
+
+                // Clicking recenters & reopens sidebar
+                marker.on('click', function() {
                     if (hasEditPermissions) {
                         showSidebar();
-                        map.panTo(m.getLatLng());
+                        map.panTo(marker.getLatLng());
                     }
                 });
-                markers[id] = m.addTo(map);
+
+                // Add to map & to our lookup
+                markers[id] = marker.addTo(map);
                 updateSidebar();
             }
+
 
             function createPlayerMarker(d) {
                 const icon = L.icon({
@@ -480,18 +505,39 @@
                                onchange="toggleAdminOnly('${d.id}',this.checked)"> Admin Only`;
             }
 
+            // 2) New duplicateMarker: read from marker._rawData instead of Leaflet’s .options
             function duplicateMarker(id) {
-                const m = markers[id];
-                const opts = {
-                    ...m.options,
-                    id: database.ref().child('markers').push().key,
-                    lat: m.getLatLng().lat,
-                    lng: m.getLatLng().lng,
-                    type: m.options.type || 'unknown'
+                const original = markers[id]._rawData;
+                if (!original) {
+                    console.error("Cannot duplicate: no rawData on marker", id);
+                    return;
+                }
+
+                // Destructure out the old ID, keep everything else
+                const {
+                    id: _oldId,
+                    lat,
+                    lng,
+                    ...restData
+                } = original;
+
+                // Generate a brand-new key
+                const newId = database.ref().child('markers').push().key;
+
+                // Build the copy object
+                const copy = {
+                    id:         newId,
+                    lat:        lat,
+                    lng:        lng,
+                    ...restData    // name, type, tooltipContent, nation, unitType, etc.
                 };
-                database.ref('markers/'+opts.id).set(opts);
-                createMarker(opts.id, opts);
+
+                // Write to Firebase, then create locally
+                database.ref('markers/' + newId).set(copy)
+                    .then(() => createMarker(newId, copy))
+                    .catch(err => console.error("Error duplicating marker:", err));
             }
+
 
             function toggleAdminOnly(id, val) {
                 database.ref('markers/'+id).update({adminOnly: val});
