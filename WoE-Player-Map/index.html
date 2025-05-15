@@ -408,11 +408,12 @@
             if (!o) return;
             const { id:_, lat, lng, ...rest } = o;
             const newId = database.ref().child('markers').push().key;
-            const copy = { id:newId, lat, lng, ...rest };
-            database.ref('markers/'+newId).set(copy)
-                .then(()=>createMarker(newId,copy))
+            const copy = { id: newId, lat, lng, ...rest };
+
+            // Just write into Firebase — our on('value') listener will pick it up
+            database.ref('markers/' + newId).set(copy)
                 .catch(console.error);
-        }
+            }
 
         // Toggle admin-only
         function toggleAdminOnly(id,val) {
