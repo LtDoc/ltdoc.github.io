@@ -405,28 +405,41 @@
     }
 
     function updateSidebar() {
-      markerList.innerHTML = '';
-      playerMarkerList.innerHTML = '';
-      const q = document.getElementById('searchInput').value.toLowerCase();
-      Object.values(markers).forEach(m => {
-        const d = m.options.data;
-        if(d.name.toLowerCase().includes(q)) {
-          const li = document.createElement('li');
-          li.textContent = d.name;
-          if(hasEditPermissions) {
-            const btn = document.createElement('button');
-            btn.textContent = '✎';
-            btn.onclick = () => openEditModal(d.id);
-            li.appendChild(btn);
-          }
-          if(d.type==='player') {
+        markerList.innerHTML = '';
+        playerMarkerList.innerHTML = '';
+        const q = document.getElementById('searchInput').value.toLowerCase();
+
+        Object.values(markers).forEach(m => {
+            const d = m.options.data;
+            if (!d.name.toLowerCase().includes(q)) return;
+
+            const li = document.createElement('li');
+            li.textContent = d.name;
+
+            if (hasEditPermissions) {
+            // Edit button
+            const editBtn = document.createElement('button');
+            editBtn.textContent = '✎';
+            editBtn.setAttribute('aria-label', `Edit ${d.name}`);
+            editBtn.onclick = () => openEditModal(d.id);
+            li.appendChild(editBtn);
+
+            // Remove button
+            const removeBtn = document.createElement('button');
+            removeBtn.textContent = '🗑';
+            removeBtn.setAttribute('aria-label', `Remove ${d.name}`);
+            removeBtn.onclick = () => removeMarker(d.id);
+            li.appendChild(removeBtn);
+            }
+
+            // Append to appropriate list
+            if (d.type === 'player') {
             playerMarkerList.appendChild(li);
-          } else {
+            } else {
             markerList.appendChild(li);
-          }
+            }
+        });
         }
-      });
-    }
 
     function addMarker() {
       const type = markerTypeSelect.value;
