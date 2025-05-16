@@ -1,35 +1,35 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>The World of Elyndor</title>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"/>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"/>
-    <style>
-      html, body {margin:0; padding:0; height:100%; overflow:hidden; background:#1E170F; font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;}
-      #map {width:100%; height:100%;}
-      #sidebar {width:300px; height:100%; overflow:auto; background:#2c3e50; color:white; padding:15px; border-right:2px solid #34495e; position:absolute; left:0; top:0; bottom:0; z-index:1000; box-shadow:3px 0 10px rgba(0,0,0,0.5);}
-      #sidebar.hidden {display:none;}
-      #toggleSidebar {position:absolute; top:15px; left:10px; z-index:1000; background:#34495e; color:white; border:none; padding:10px; cursor:pointer; font-size:16px; box-shadow:3px 3px 10px rgba(0,0,0,0.5);}
-      .leaflet-top.leaflet-left {left:10px;}
-      .circular-icon {width:16px; height:16px; border-radius:50%; object-fit:cover;}
-      .portrait-icon  {width:16px; height:20px; object-fit:cover;}
-      button {background:#2980b9; color:white; border:none; padding:10px 15px; margin:5px 0; cursor:pointer; font-size:14px; border-radius:5px; box-shadow:3px 3px 10px rgba(0,0,0,0.5);}
-      input, select, textarea {width:calc(100% - 30px); padding:10px; margin:5px 0; border:none; border-radius:5px; box-shadow:3px 3px 10px rgba(0,0,0,0.5); background:white; color:#333;}
-      label {margin:5px 0; display:block; color:white;}
-      .collapsible {background:#34495e; color:white; cursor:pointer; padding:10px; width:100%; border:none; text-align:left; font-size:15px;}
-      .collapsible:after {content:'\002B'; float:right; font-weight:bold;}
-      .collapsible.active:after {content:'\2212';}
-      .content {padding:0 18px; display:none; overflow:hidden; background:#2c3e50;}
-      .content.show {display:block;}
-      .modal {position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:2000;}
-      .modal.hidden {display:none;}
-      .modal-content {background:#2c3e50; padding:20px; width:320px; max-height:90%; overflow-y:auto; border-radius:8px; color:white; position:relative;}
-      .modal-close {position:absolute; top:8px; right:12px; font-size:24px; cursor:pointer; color:white;}
-      .subfields {margin-left:10px; border-left:2px solid #34495e; padding-left:8px;}
-      .subfields.hidden {display:none;}
-    </style>
+  <title>The World of Elyndor</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"/>
+  <style>
+    html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#1E170F; font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; }
+    #map { width:100%; height:100%; }
+    #sidebar { width:300px; height:100%; overflow:auto; background:#2c3e50; color:white; padding:15px; border-right:2px solid #34495e; position:absolute; left:0; top:0; bottom:0; z-index:1000; box-shadow:3px 0 10px rgba(0,0,0,0.5); }
+    #sidebar.hidden { display:none; }
+    #toggleSidebar { position:absolute; top:15px; left:10px; z-index:1000; background:#34495e; color:white; border:none; padding:10px; cursor:pointer; font-size:16px; box-shadow:3px 3px 10px rgba(0,0,0,0.5); }
+    .leaflet-top.leaflet-left { left:10px; }
+    .circular-icon { width:16px; height:16px; border-radius:50%; object-fit:cover; }
+    .portrait-icon { width:16px; height:20px; object-fit:cover; }
+    button { background:#2980b9; color:white; border:none; padding:10px 15px; margin:5px 0; cursor:pointer; font-size:14px; border-radius:5px; box-shadow:3px 3px 10px rgba(0,0,0,0.5); }
+    input, select, textarea { width:calc(100% - 30px); padding:10px; margin:5px 0; border:none; border-radius:5px; box-shadow:3px 3px 10px rgba(0,0,0,0.5); background:white; color:#333; }
+    label { margin:5px 0; display:block; color:white; }
+    .collapsible { background:#34495e; color:white; cursor:pointer; padding:10px; width:100%; border:none; text-align:left; font-size:15px; }
+    .collapsible:after { content:'\002B'; float:right; font-weight:bold; }
+    .collapsible.active:after { content:'\2212'; }
+    .content { padding:0 18px; display:none; overflow:hidden; background:#2c3e50; }
+    .content.show { display:block; }
+    .modal { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:2000; }
+    .modal.hidden { display:none; }
+    .modal-content { background:#2c3e50; padding:20px; width:320px; max-height:90%; overflow-y:auto; border-radius:8px; color:white; position:relative; }
+    .modal-close { position:absolute; top:8px; right:12px; font-size:24px; cursor:pointer; color:white; }
+    .subfields { margin-left:10px; border-left:2px solid #34495e; padding-left:8px; }
+    .subfields.hidden { display:none; }
+  </style>
 </head>
 <body>
   <button id="toggleSidebar" style="display:none;">☰</button>
@@ -45,7 +45,8 @@
           <option value="poi">POI</option>
           <option value="army">Army</option>
         </select>
-        <label>Name</label><input type="text" id="markerName"/>
+        <label>Name</label>
+        <input type="text" id="markerName"/>
         <div id="iconFields">
           <label>Icon URL</label><input type="text" id="markerIcon"/>
           <input type="file" id="markerIconFile" accept="image/*"/>
@@ -53,7 +54,9 @@
         <div id="townFields" style="display:none;">
           <label>Town Size</label>
           <select id="townSize">
-            <option value="capital">Capital</option><option value="city">City</option><option value="village">Village</option>
+            <option value="capital">Capital</option>
+            <option value="city">City</option>
+            <option value="village">Village</option>
           </select>
         </div>
         <div id="armyFields" style="display:none;">
@@ -71,16 +74,20 @@
         </div>
         <label>Tooltip Type</label>
         <select id="markerTooltipType" onchange="toggleTooltipFields()">
-          <option value="image">Image</option><option value="text">Text</option>
+          <option value="image">Image</option>
+          <option value="text">Text</option>
         </select>
-        <label>Tooltip Content</label><input type="text" id="markerTooltip"/>
+        <label>Tooltip Content</label>
+        <input type="text" id="markerTooltip"/>
         <input type="file" id="markerTooltipFile" accept="image/*" style="display:none;"/>
         <label><input type="checkbox" id="markerAdminOnly"/> Admin Only</label>
         <button type="button" onclick="addMarker()">Add Marker</button>
       </form>
     </div>
-    <button class="collapsible">Town and POI Markers</button><div class="content"><ul id="markerList"></ul></div>
-    <button class="collapsible">Player Markers</button><div class="content"><ul id="playerMarkerList"></ul></div>
+    <button class="collapsible">Town and POI Markers</button>
+    <div class="content"><ul id="markerList"></ul></div>
+    <button class="collapsible">Player Markers</button>
+    <div class="content"><ul id="playerMarkerList"></ul></div>
   </div>
   <div id="map"></div>
 
@@ -94,16 +101,25 @@
         <label>Name</label><input type="text" id="editName"/>
         <label>Type</label>
         <select id="editType" disabled>
-          <option value="player">Player</option><option value="town">Town</option><option value="poi">POI</option><option value="army">Army</option>
+          <option value="player">Player</option>
+          <option value="town">Town</option>
+          <option value="poi">POI</option>
+          <option value="army">Army</option>
         </select>
         <label>Icon URL</label><input type="text" id="editIconUrl"/>
         <label>Tooltip Type</label>
         <select id="editTooltipType">
-          <option value="image">Image</option><option value="text">Text</option>
+          <option value="image">Image</option>
+          <option value="text">Text</option>
         </select>
         <label>Tooltip Content</label><input type="text" id="editTooltipContent"/>
         <div id="editTownFields" class="subfields hidden">
-          <label>Town Size</label><select id="editTownSize"><option value="capital">Capital</option><option value="city">City</option><option value="village">Village</option></select>
+          <label>Town Size</label>
+          <select id="editTownSize">
+            <option value="capital">Capital</option>
+            <option value="city">City</option>
+            <option value="village">Village</option>
+          </select>
         </div>
         <div id="editArmyFields" class="subfields hidden">
           <label>Nation</label><input type="text" id="editNation"/>
@@ -130,14 +146,25 @@
   <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
   <script>
   (function(){
-    const firebaseConfig={apiKey:"AIzaSyCo9QPVrLCXS6li_kcTu3e-GOoiiwpHvLs",authDomain:"woe-world.firebaseapp.com",databaseURL:"https://woe-world-default-rtdb.firebaseio.com",projectId:"woe-world",storageBucket:"woe-world.appspot.com",messagingSenderId:"706865712365",appId:"1:706865712365:web:e080b1ef45b8d8b27190e4",measurementId:"G-789BN2WECG"};
+    const firebaseConfig = {
+      apiKey: "AIzaSyCo9QPVrLCXS6li_kcTu3e-GOoiiwpHvLs",
+      authDomain: "woe-world.firebaseapp.com",
+      databaseURL: "https://woe-world-default-rtdb.firebaseio.com",
+      projectId: "woe-world",
+      storageBucket: "woe-world.appspot.com",
+      messagingSenderId: "706865712365",
+      appId: "1:706865712365:web:e080b1ef45b8d8b27190e4",
+      measurementId: "G-789BN2WECG"
+    };
     firebase.initializeApp(firebaseConfig);
-    const database=firebase.database(),storage=firebase.storage();
-    const map=L.map('map',{crs:L.CRS.Simple,maxZoom:2,minZoom:-2}),imageUrl='assets/high_res_image.png',imageBounds=[[0,0],[3996,5729]];
-    L.imageOverlay(imageUrl,imageBounds).addTo(map);
-    map.fitBounds(imageBounds);
-    let markers={},hasEditPermissions=false;
-    // DOM cache
+    const database = firebase.database(), storage = firebase.storage();
+    const map = L.map('map',{ crs:L.CRS.Simple, maxZoom:2, minZoom:-2 });
+    L.imageOverlay('assets/high_res_image.png', [[0,0],[3996,5729]]).addTo(map);
+    map.fitBounds([[0,0],[3996,5729]]);
+
+    let markers = {}, hasEditPermissions = false;
+
+    // DOM cache...
     const markerForm=document.getElementById('markerForm'),
           markerTypeSelect=document.getElementById('markerType'),
           markerNameInput=document.getElementById('markerName'),
@@ -165,7 +192,8 @@
           playerMarkerList=document.getElementById('playerMarkerList'),
           searchInput=document.getElementById('searchInput'),
           coll=document.getElementsByClassName("collapsible");
-    // Edit modal cache
+
+    // Edit modal cache...
     const editModal=document.getElementById('editModal'),
           closeEditModalBtn=document.getElementById('closeEditModalBtn'),
           saveEditBtn=document.getElementById('saveEditBtn'),
@@ -190,6 +218,7 @@
           editAP3Input=document.getElementById('editAP3'),
           editAbilityDescInput=document.getElementById('editAbilityDesc'),
           editAdminOnlyCheckbox=document.getElementById('editAdminOnly');
+
     function toggleFields(){
       const t=markerTypeSelect.value;
       document.getElementById('iconFields').style.display=(t==='player'||t==='army')?'block':'none';
@@ -198,29 +227,40 @@
       toggleTooltipFields();
     }
     function toggleTooltipFields(){
-      const tt=markerTooltipTypeSelect.value, t=markerTypeSelect.value;
+      const tt=markerTooltipTypeSelect.value,t=markerTypeSelect.value;
       markerTooltipInput.style.display=(tt==='text'&&t!=='player'&&t!=='army')?'block':'none';
       markerTooltipFileInput.style.display=(tt==='image'||t==='player'||t==='army')?'block':'none';
     }
-    function correctMarkerData(d){
-      return {type:'unknown',lat:0,lng:0,name:'Unnamed Marker',iconUrl:'assets/placeholder.png',tooltipType:'text',tooltipContent:'',adminOnly:false,...d};
-    }
-    function isValidMarkerData(d){
-      return ['type','lat','lng','name'].every(f=>d[f]!=null);
-    }
+    function correctMarkerData(d){return {type:'unknown',lat:0,lng:0,name:'Unnamed Marker',iconUrl:'assets/placeholder.png',tooltipType:'text',tooltipContent:'',adminOnly:false,...d};}
+    function isValidMarkerData(d){return ['type','lat','lng','name'].every(f=>d[f]!=null);}
+
     const markersRef=database.ref('markers');
     markersRef.on('child_added',snap=>{const id=snap.key,data=correctMarkerData(snap.val());if(!isValidMarkerData(data)){markersRef.child(id).remove();return;}if(!markers[id])createMarker(id,data);});
     markersRef.on('child_changed',snap=>{const id=snap.key,data=correctMarkerData(snap.val());if(!isValidMarkerData(data)){markersRef.child(id).remove();return;}const m=markers[id];if(m){m._rawData=data;const ll=L.latLng(data.lat,data.lng);if(!m.getLatLng().equals(ll))m.setLatLng(ll);let html;switch(data.type){case 'player':html=buildPlayerPopup(data);break;case 'town':case 'poi':html=buildTownPoiPopup(data);break;case 'army':html=buildArmyPopup(data);break;}m.setPopupContent(html);updateSidebar();}else createMarker(id,data);});
     markersRef.on('child_removed',snap=>{const id=snap.key;if(markers[id]){map.removeLayer(markers[id]);delete markers[id];updateSidebar();}});
+
     function buildPlayerPopup(d){return d.tooltipType==='image'?`<div style="font-size:16px;"><strong>${d.name}</strong><br><img src="${d.tooltipContent}" width="200"><br>${getAdminOptions(d)}</div>`:`<div style="font-size:16px;"><strong>${d.name}</strong><br>${d.tooltipContent}<br>${getAdminOptions(d)}</div>`;}
     function buildTownPoiPopup(d){const sym=d.type==='town'?(d.size==='capital'?'⭐':d.size==='city'?'⚫':'🔵'):'❓';return d.tooltipType==='image'?`<div style="font-size:16px;"><strong>${d.name}</strong><br><img src="${d.tooltipContent}" width="200"><br>${getAdminOptions(d)}</div>`:`<div style="font-size:16px;"><strong>${d.name}</strong><br>${d.tooltipContent}<br>${getAdminOptions(d)}</div>`;}
     function buildArmyPopup(d){return `<div style="font-size:16px;"><strong>${d.name}</strong><br><img src="${d.iconUrl}" width="16" height="20"><br><strong>Nation:</strong>${d.nation}<br><strong>Unit Type:</strong>${d.unitType}<br><strong>Attack:</strong>${d.attack}<br><strong>Defend:</strong>${d.defend}<br><strong>Action Points:</strong>${d.actionPoints}<br><strong>Range:</strong>${d.range}<br><strong>Movement:</strong>${d.movement}<br><strong>AP1:</strong>${d.ap1}<br><strong>AP2:</strong>${d.ap2}<br><strong>AP3:</strong>${d.ap3}<br><strong>Ability Desc:</strong>${d.abilityDesc}<br>${getAdminOptions(d)}</div>`;}
+
     async function addMarker(){const t=markerTypeSelect.value,n=markerNameInput.value;let iurl=markerIconInput.value,tt=markerTooltipTypeSelect.value,tc=markerTooltipInput.value;const admin=markerAdminOnlyCheckbox.checked,id=database.ref().child('markers').push().key;let opts={id,lat:map.getCenter().lat,lng:map.getCenter().lng,type:t,name:n,iconUrl:iurl,tooltipType:tt,tooltipContent:tc,adminOnly:admin};const iF=markerIconFileInput.files[0];if(iF&&(t==='player'||t==='army')){const s=await storage.ref(`markers/${id}/icon`).put(iF);opts.iconUrl=await s.ref.getDownloadURL();}const tF=markerTooltipFileInput.files[0];if(tF&&tt==='image'){const s=await storage.ref(`markers/${id}/tooltip`).put(tF);opts.tooltipContent=await s.ref.getDownloadURL();}if(t==='town')opts.size=townSizeSelect.value;if(t==='army')Object.assign(opts,{nation:armyNationInput.value,unitType:armyUnitTypeInput.value,attack:armyAttackInput.value,defend:armyDefendInput.value,actionPoints:armyActionPointsInput.value,range:armyRangeInput.value,movement:armyMovementInput.value,ap1:armyAP1Input.value,ap2:armyAP2Input.value,ap3:armyAP3Input.value,abilityDesc:armyAbilityDescInput.value});await database.ref('markers/'+id).set(opts);createMarker(id,opts);resetMarkerForm();}
+
     function createMarker(id,d){if(markers[id])map.removeLayer(markers[id]);if(!hasEditPermissions&&d.adminOnly)return;let m;switch(d.type){case 'player':m=createPlayerMarker(d);break;case 'town':case 'poi':m=createTownOrPoiMarker(d);break;case 'army':m=createArmyMarker(d);break;default:database.ref('markers/'+id).remove();return;}m._rawData=d;m.on('dragend',e=>{const ll=e.target.getLatLng();database.ref('markers/'+id).update({lat:ll.lat,lng:ll.lng});});m.on('click',()=>{if(hasEditPermissions){showSidebar();map.panTo(m.getLatLng());}});markers[id]=m.addTo(map);if(hasEditPermissions)m.dragging.enable();else m.dragging.disable();updateSidebar();}
     function createPlayerMarker(d){const icon=L.icon({iconUrl:d.iconUrl,iconSize:[16,16],className:'circular-icon'}),m=L.marker([d.lat,d.lng],{icon,draggable:hasEditPermissions});m.bindPopup(buildPlayerPopup(d));return m;}
     function createTownOrPoiMarker(d){const sym=d.type==='town'?(d.size==='capital'?'⭐':d.size==='city'?'⚫':'🔵'):'❓',m=L.marker([d.lat,d.lng],{icon:L.divIcon({html:sym,className:'custom-div-icon'}),draggable:hasEditPermissions});m.bindPopup(buildTownPoiPopup(d));return m;}
     function createArmyMarker(d){const icon=L.icon({iconUrl:d.iconUrl,iconSize:[16,20],className:'portrait-icon'}),m=L.marker([d.lat,d.lng],{icon,draggable:hasEditPermissions});m.bindPopup(buildArmyPopup(d));return m;}
-    function getAdminOptions(d){if(!hasEditPermissions)return'';return `<button onclick="duplicateMarker('${d.id}')">Duplicate</button><input type="checkbox"${d.adminOnly?' checked':''} onchange="toggleAdminOnly('${d.id}',this.checked)"> Admin Only`;}
+
+    function getAdminOptions(d){
+      if(!hasEditPermissions) return '';
+      return `
+        <button onclick="openEditModal('${d.id}')">Edit</button>
+        <button onclick="duplicateMarker('${d.id}')">Duplicate</button>
+        <input type="checkbox" ${d.adminOnly?'checked':''}
+               onchange="toggleAdminOnly('${d.id}', this.checked)">
+        Admin Only
+      `;
+    }
+
     function duplicateMarker(id){const o=markers[id]._rawData,{id:_,lat,lng,...r}=o,nid=database.ref().child('markers').push().key;database.ref('markers/'+nid).set({id:nid,lat,lng,...r});}
     function toggleAdminOnly(id,val){database.ref('markers/'+id).update({adminOnly:val});markers[id]._rawData.adminOnly=val;if(!hasEditPermissions&&val)map.removeLayer(markers[id]);else if(hasEditPermissions&&!map.hasLayer(markers[id]))markers[id].addTo(map);updateSidebar();}
     function resetMarkerForm(){markerForm.reset();toggleFields();}
