@@ -200,8 +200,14 @@
     const imageBounds = [[0,0],[3996,5729]];
     L.imageOverlay('assets/high_res_image.png', imageBounds).addTo(map);
     map.fitBounds(imageBounds);
+
+    // cluster for non-player markers
     const clusterGroup = L.markerClusterGroup();
     map.addLayer(clusterGroup);
+
+    // separate layer for player markers
+    const playerLayer = L.layerGroup();
+    map.addLayer(playerLayer);
 
     // Icon cache
     const iconCache = {};
@@ -341,18 +347,30 @@
     });
     markersRef.on('child_removed', snap => {
       const id = snap.key;
-      if(markers[id]) { clusterGroup.removeLayer(markers[id]); delete markers[id]; updateSidebar(); }
+      if (markers[id]) {
+        const layer = markers[id].options.data.type === 'player'
+                      ? playerLayer
+                      : clusterGroup;
+        layer.removeLayer(markers[id]);
+        delete markers[id];
+        updateSidebar();
+      }
     });
 
     function createOrUpdateMarker(d, isUpdate=false) {
-      if(markers[d.id]&&isUpdate) clusterGroup.removeLayer(markers[d.id]);
-      if(!markers[d.id]||isUpdate) {
+      if (markers[d.id] && isUpdate) {
+        const prevLayer = markers[d.id].options.data.type === 'player'
+                          ? playerLayer
+                          : clusterGroup;
+        prevLayer.removeLayer(markers[d.id]);
+      }
+      if (!markers[d.id] || isUpdate) {
         let m;
         // town/poi -> divIcon with emoji
-        if(d.type==='town'||d.type==='poi') {
+        if (d.type==='town' || d.type==='poi') {
           let emoji='❓';
-          if(d.type==='town'){
-            emoji = (d.size==='capital'?'⭐':(d.size==='city'?'⚫':'🔵'));
+          if (d.type==='town') {
+            emoji = (d.size==='capital' ? '⭐' : (d.size==='city' ? '⚫' : '🔵'));
           }
           const divIcon = L.divIcon({
             html:`<span>${emoji}</span>`,
@@ -361,7 +379,7 @@
           });
           m = L.marker([d.lat,d.lng],{icon:divIcon,draggable:hasEditPermissions});
         } else {
-          const size = d.type==='army'? [16,20] : [16,16];
+          const size = (d.type==='army') ? [16,20] : [16,16];
           const icon = getIcon(d.iconUrl||'assets/placeholder.png', size);
           m = L.marker([d.lat,d.lng],{icon,draggable:hasEditPermissions});
         }
@@ -371,20 +389,24 @@
           const ll=e.target.getLatLng();
           database.ref('markers/'+d.id).update({lat:ll.lat,lng:ll.lng});
         },200));
-        markers[d.id]=m;
-        clusterGroup.addLayer(m);
+        markers[d.id] = m;
+        if (d.type === 'player') {
+          playerLayer.addLayer(m);
+        } else {
+          clusterGroup.addLayer(m);
+        }
         updateSidebar();
       }
     }
 
     function buildPopup(d) {
       let html=`<strong>${d.name}</strong><br>`;
-      if(d.type==='player'){
-        if(d.tooltipType==='image') html+=`<img src="${d.tooltipContent}" width="200"><br>`;
+      if (d.type==='player') {
+        if (d.tooltipType==='image') html+=`<img src="${d.tooltipContent}" width="200"><br>`;
         else html+=`${d.tooltipContent}<br>`;
-      } else if(d.type==='town'||d.type==='poi'){
+      } else if (d.type==='town'||d.type==='poi') {
         html+=renderFields([{label:'Size:',value:d.size},{label:'Tooltip:',value:d.tooltipContent}])+'<br>';
-      } else if(d.type==='army'){
+      } else if (d.type==='army') {
         html+=renderFields([
           {label:'Nation:',value:d.nation},{label:'Unit Type:',value:d.unitType},
           {label:'Attack:',value:d.attack},{label:'Defend:',value:d.defend},
@@ -403,10 +425,10 @@
       const q=document.getElementById('searchInput').value.toLowerCase();
       Object.values(markers).forEach(m=>{
         const d=m.options.data;
-        if(!d.name.toLowerCase().includes(q))return;
+        if(!d.name.toLowerCase().includes(q)) return;
         const li=document.createElement('li');
-        li.textContent=d.name;
-        if(hasEditPermissions){
+        li.textContent = d.name;
+        if (hasEditPermissions) {
           const editBtn=document.createElement('button');
           editBtn.textContent='✎'; editBtn.onclick=()=>openEditModal(d.id);
           li.appendChild(editBtn);
@@ -414,7 +436,7 @@
           removeBtn.textContent='🗑'; removeBtn.onclick=()=>removeMarker(d.id);
           li.appendChild(removeBtn);
         }
-        if(d.type==='player') playerMarkerList.appendChild(li);
+        if (d.type==='player') playerMarkerList.appendChild(li);
         else markerList.appendChild(li);
       });
     }
@@ -430,14 +452,14 @@
       const center=map.getCenter();
       const d={id,type,name,iconUrl,tooltipType,tooltipContent,adminOnly:admin,lat:center.lat,lng:center.lng};
       const f=markerIconFileInput.files[0];
-      if(f&&(type==='player'||type==='army')){
+      if (f && (type==='player'||type==='army')) {
         storage.ref(`markers/${id}/icon`).put(f)
           .then(s=>s.ref.getDownloadURL())
-          .then(url=>{d.iconUrl=url; write(d);});
+          .then(url=>{ d.iconUrl=url; write(d); });
       } else write(d);
       function write(d){
-        if(type==='town') d.size=townSizeSelect.value;
-        if(type==='army') Object.assign(d,{
+        if (type==='town') d.size=townSizeSelect.value;
+        if (type==='army') Object.assign(d,{
           nation:armyNationInput.value,unitType:armyUnitTypeInput.value,
           attack:armyAttackInput.value,defend:armyDefendInput.value,
           actionPoints:armyActionPointsInput.value,range:armyRangeInput.value,
@@ -458,8 +480,13 @@
     }
 
     function removeMarker(id){
-      if(markers[id]){ clusterGroup.removeLayer(markers[id]); delete markers[id]; }
-      database.ref('markers/'+id).remove(); updateSidebar();
+      if (markers[id]) {
+        const layer = markers[id].options.data.type==='player' ? playerLayer : clusterGroup;
+        layer.removeLayer(markers[id]);
+        delete markers[id];
+      }
+      database.ref('markers/'+id).remove();
+      updateSidebar();
     }
 
     function toggleAdminOnly(id,val){
@@ -474,19 +501,36 @@
       editTooltipTypeSelect.value=d.tooltipType; editTooltipContentInput.value=d.tooltipContent;
       editAdminOnlyCheckbox.checked=d.adminOnly; toggleEditSubfields(d);
       if(d.type==='town') editTownSizeSelect.value=d.size||'village';
-      if(d.type==='army') Object.assign(editNationInput,{value:d.nation||''},editUnitTypeInput,{value:d.unitType||''},editAttackInput,{value:d.attack||''},editDefendInput,{value:d.defend||''},editActionPointsInput,{value:d.actionPoints||''},editRangeInput,{value:d.range||''},editMovementInput,{value:d.movement||''},editAP1Input,{value:d.ap1||''},editAP2Input,{value:d.ap2||''},editAP3Input,{value:d.ap3||''},editAbilityDescInput,{value:d.abilityDesc||''});
+      if(d.type==='army') Object.assign(editNationInput,{value:d.nation||''},
+                                         editUnitTypeInput,{value:d.unitType||''},
+                                         editAttackInput,{value:d.attack||''},
+                                         editDefendInput,{value:d.defend||''},
+                                         editActionPointsInput,{value:d.actionPoints||''},
+                                         editRangeInput,{value:d.range||''},
+                                         editMovementInput,{value:d.movement||''},
+                                         editAP1Input,{value:d.ap1||''},
+                                         editAP2Input,{value:d.ap2||''},
+                                         editAP3Input,{value:d.ap3||''},
+                                         editAbilityDescInput,{value:d.abilityDesc||''});
       editModal.classList.remove('hidden');
     }
 
     function toggleEditSubfields(d){
-      editTownFields.classList.toggle('hidden',d.type!=='town');
-      editArmyFields.classList.toggle('hidden',d.type!=='army');
+      editTownFields.classList.toggle('hidden', d.type!=='town');
+      editArmyFields.classList.toggle('hidden', d.type!=='army');
     }
 
-    closeEditModalBtn.addEventListener('click',()=>editModal.classList.add('hidden'));
-    saveEditBtn.addEventListener('click',()=>{
+    closeEditModalBtn.addEventListener('click', ()=>editModal.classList.add('hidden'));
+    saveEditBtn.addEventListener('click', ()=> {
       const id=editIdInput.value, d=markers[id].options.data;
-      const upd={...d,name:editNameInput.value,iconUrl:editIconUrlInput.value,tooltipType:editTooltipTypeSelect.value,tooltipContent:editTooltipContentInput.value,adminOnly:editAdminOnlyCheckbox.checked,lat:d.lat,lng:d.lng};
+      const upd={...d,
+        name:editNameInput.value,
+        iconUrl:editIconUrlInput.value,
+        tooltipType:editTooltipTypeSelect.value,
+        tooltipContent:editTooltipContentInput.value,
+        adminOnly:editAdminOnlyCheckbox.checked,
+        lat:d.lat, lng:d.lng
+      };
       if(d.type==='town') upd.size=editTownSizeSelect.value;
       if(d.type==='army') Object.assign(upd,{
         nation:editNationInput.value,unitType:editUnitTypeInput.value,
@@ -499,37 +543,37 @@
       database.ref('markers/'+id).set(upd).then(()=>editModal.classList.add('hidden'));
     });
 
-    document.querySelectorAll('.collapsible').forEach(btn=>btn.addEventListener('click',()=>{
+    document.querySelectorAll('.collapsible').forEach(btn=>btn.addEventListener('click', ()=> {
       btn.classList.toggle('active'); btn.nextElementSibling.classList.toggle('show');
     }));
-    document.getElementById('toggleSidebar').addEventListener('click',()=>{
+    document.getElementById('toggleSidebar').addEventListener('click', ()=> {
       document.getElementById('sidebar').classList.toggle('hidden'); map.invalidateSize();
     });
 
-    // wire add button
     document.getElementById('addMarkerBtn').addEventListener('click', addMarker);
 
-    // IP check for admin
-    fetch('https://api.ipify.org?format=json').then(r=>r.json()).then(data=>{
+    fetch('https://api.ipify.org?format=json').then(r=>r.json()).then(data=> {
       const allow=['24.57.218.92','98.16.223.9'];
       hasEditPermissions = allow.includes(data.ip);
       if(!hasEditPermissions) alert('Read-only mode: admin rights unverified.');
       else document.getElementById('sidebar').classList.remove('hidden');
-      Object.values(markers).forEach(m=>hasEditPermissions?m.dragging.enable():m.dragging.disable());
-    }).catch(()=>{
+      Object.values(markers).forEach(m=> hasEditPermissions? m.dragging.enable(): m.dragging.disable());
+    }).catch(()=> {
       alert('Could not verify admin rights; entering read-only mode.');
     });
 
-    document.addEventListener('keydown',e=>{ if(e.key==='Escape') editModal.classList.add('hidden'); });
+    document.addEventListener('keydown', e=> { if(e.key==='Escape') editModal.classList.add('hidden'); });
     document.getElementById('searchInput').addEventListener('input', updateSidebar);
     markerTypeSelect.addEventListener('change', toggleFields);
     markerTooltipTypeSelect.addEventListener('change', toggleTooltip);
 
-    // expose for inline handlers
-    window.openEditModal = openEditModal;
+    window.openEditModal   = openEditModal;
     window.duplicateMarker = duplicateMarker;
-    window.removeMarker = removeMarker;
+    window.removeMarker    = removeMarker;
     window.toggleAdminOnly = toggleAdminOnly;
+    window.toggleFields    = toggleFields;
+    window.toggleTooltip   = toggleTooltip;
+    window.searchMarkers   = updateSidebar;
   })();
   </script>
 </body>
