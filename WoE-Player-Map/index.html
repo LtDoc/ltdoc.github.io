@@ -375,7 +375,7 @@
           const divIcon = L.divIcon({
             html:`<span>${emoji}</span>`,
             className:'custom-div-icon',
-            iconSize:[30,30], iconAnchor:[30,50]
+            iconSize:[30,50], iconAnchor:[30,50]
           });
           m = L.marker([d.lat,d.lng],{icon:divIcon,draggable:hasEditPermissions});
         } else {
