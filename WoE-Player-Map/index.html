@@ -237,68 +237,75 @@
     let hasEditPermissions = false;
 
     // Form & DOM elements
-    const markerForm = document.getElementById('markerForm');
-    const markerTypeSelect = document.getElementById('markerType');
-    const markerNameInput = document.getElementById('markerName');
-    const markerIconInput = document.getElementById('markerIcon');
-    const markerIconFileInput = document.getElementById('markerIconFile');
-    const markerTooltipTypeSelect = document.getElementById('markerTooltipType');
-    const markerTooltipInput = document.getElementById('markerTooltip');
-    const markerTooltipFileInput = document.getElementById('markerTooltipFile');
-    const markerAdminOnlyCheckbox = document.getElementById('markerAdminOnly');
-    const townSizeSelect = document.getElementById('townSize');
-    const armyNationInput = document.getElementById('armyNation');
-    const armyUnitTypeInput = document.getElementById('armyUnitType');
-    const armyAttackInput = document.getElementById('armyAttack');
-    const armyDefendInput = document.getElementById('armyDefend');
-    const armyActionPointsInput = document.getElementById('armyActionPoints');
-    const armyRangeInput = document.getElementById('armyRange');
-    const armyMovementInput = document.getElementById('armyMovement');
-    const armyAP1Input = document.getElementById('armyAP1');
-    const armyAP2Input = document.getElementById('armyAP2');
-    const armyAP3Input = document.getElementById('armyAP3');
-    const armyAbilityDescInput = document.getElementById('armyAbilityDesc');
+    const markerForm                  = document.getElementById('markerForm');
+    const markerTypeSelect            = document.getElementById('markerType');
+    const markerNameInput             = document.getElementById('markerName');
+    const markerIconInput             = document.getElementById('markerIcon');
+    const markerIconFileInput         = document.getElementById('markerIconFile');
+    const markerTooltipTypeSelect     = document.getElementById('markerTooltipType');
+    const markerTooltipInput          = document.getElementById('markerTooltip');
+    const markerTooltipFileInput      = document.getElementById('markerTooltipFile');
+    const markerAdminOnlyCheckbox     = document.getElementById('markerAdminOnly');
+    const townSizeSelect              = document.getElementById('townSize');
+    const armyNationInput             = document.getElementById('armyNation');
+    const armyUnitTypeInput           = document.getElementById('armyUnitType');
+    const armyAttackInput             = document.getElementById('armyAttack');
+    const armyDefendInput             = document.getElementById('armyDefend');
+    const armyActionPointsInput       = document.getElementById('armyActionPoints');
+    const armyRangeInput              = document.getElementById('armyRange');
+    const armyMovementInput           = document.getElementById('armyMovement');
+    const armyAP1Input                = document.getElementById('armyAP1');
+    const armyAP2Input                = document.getElementById('armyAP2');
+    const armyAP3Input                = document.getElementById('armyAP3');
+    const armyAbilityDescInput        = document.getElementById('armyAbilityDesc');
 
-    const editModal = document.getElementById('editModal');
-    const closeEditModalBtn = document.getElementById('closeEditModalBtn');
-    const saveEditBtn = document.getElementById('saveEditBtn');
-    const editIdInput = document.getElementById('editId');
-    const editNameInput = document.getElementById('editName');
-    const editTypeSelect = document.getElementById('editType');
-    const editIconUrlInput = document.getElementById('editIconUrl');
-    const editTooltipTypeSelect = document.getElementById('editTooltipType');
-    const editTooltipContentInput = document.getElementById('editTooltipContent');
-    const editTownFields = document.getElementById('editTownFields');
-    const editTownSizeSelect = document.getElementById('editTownSize');
-    const editArmyFields = document.getElementById('editArmyFields');
-    const editNationInput = document.getElementById('editNation');
-    const editUnitTypeInput = document.getElementById('editUnitType');
-    const editAttackInput = document.getElementById('editAttack');
-    const editDefendInput = document.getElementById('editDefend');
-    const editActionPointsInput = document.getElementById('editActionPoints');
-    const editRangeInput = document.getElementById('editRange');
-    const editMovementInput = document.getElementById('editMovement');
-    const editAP1Input = document.getElementById('editAP1');
-    const editAP2Input = document.getElementById('editAP2');
-    const editAP3Input = document.getElementById('editAP3');
-    const editAbilityDescInput = document.getElementById('editAbilityDesc');
-    const editAdminOnlyCheckbox = document.getElementById('editAdminOnly');
+    const editModal                   = document.getElementById('editModal');
+    const closeEditModalBtn           = document.getElementById('closeEditModalBtn');
+    const saveEditBtn                 = document.getElementById('saveEditBtn');
+    const editIdInput                 = document.getElementById('editId');
+    const editNameInput               = document.getElementById('editName');
+    const editTypeSelect              = document.getElementById('editType');
+    const editIconUrlInput            = document.getElementById('editIconUrl');
+    const editTooltipTypeSelect       = document.getElementById('editTooltipType');
+    const editTooltipContentInput     = document.getElementById('editTooltipContent');
+    const editTownFields              = document.getElementById('editTownFields');
+    const editTownSizeSelect          = document.getElementById('editTownSize');
+    const editArmyFields              = document.getElementById('editArmyFields');
+    const editNationInput             = document.getElementById('editNation');
+    const editUnitTypeInput           = document.getElementById('editUnitType');
+    const editAttackInput             = document.getElementById('editAttack');
+    const editDefendInput             = document.getElementById('editDefend');
+    const editActionPointsInput       = document.getElementById('editActionPoints');
+    const editRangeInput              = document.getElementById('editRange');
+    const editMovementInput           = document.getElementById('editMovement');
+    const editAP1Input                = document.getElementById('editAP1');
+    const editAP2Input                = document.getElementById('editAP2');
+    const editAP3Input                = document.getElementById('editAP3');
+    const editAbilityDescInput        = document.getElementById('editAbilityDesc');
+    const editAdminOnlyCheckbox       = document.getElementById('editAdminOnly');
 
     // Sidebar lists
-    const markerList = document.getElementById('markerList');
-    const playerMarkerList = document.getElementById('playerMarkerList');
+    const markerList                  = document.getElementById('markerList');
+    const playerMarkerList            = document.getElementById('playerMarkerList');
+
+    // Initially hide both subfield sections
+    document.getElementById('townFields').style.display  = 'none';
+    document.getElementById('armyFields').style.display = 'none';
+
+    // Ensure the correct fields are shown/hidden on load
+    toggleFields();
 
     function toggleFields() {
       const t = markerTypeSelect.value;
-      document.getElementById('iconFields').style.display = (t==='player'||t==='army')?'block':'none';
-      document.getElementById('townFields').style.display = (t==='town')?'block':'none';
-      document.getElementById('armyFields').style.display = (t==='army')?'block':'none';
+      document.getElementById('iconFields').style.display  = (t==='player'||t==='army')?'block':'none';
+      document.getElementById('townFields').style.display  = (t==='town')?'block':'none';
+      document.getElementById('armyFields').style.display  = (t==='army')?'block':'none';
       toggleTooltip();
     }
 
     function toggleTooltip() {
       const tt = markerTooltipTypeSelect.value;
-      document.getElementById('markerTooltip').style.display = (tt==='text')?'block':'none';
+      document.getElementById('markerTooltip').style.display     = (tt==='text')?'block':'none';
       document.getElementById('markerTooltipFile').style.display = (tt==='image')?'block':'none';
     }
 
