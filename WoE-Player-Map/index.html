@@ -103,7 +103,7 @@
         <label>Tooltip Content<input type="text" id="markerTooltip"></label>
         <label>Tooltip File<input type="file" id="markerTooltipFile" accept="image/*"></label>
         <label><input type="checkbox" id="markerAdminOnly"> Admin Only</label>
-        <button type="button" id="addMarkerBtn" onclick="addMarker()">Add Marker</button>
+        <button type="button" id="addMarkerBtn">Add Marker</button>
       </form>
     </div>
 
@@ -613,6 +613,13 @@ function toggleTooltip() {
       document.getElementById('sidebar').classList.toggle('hidden');
       map.invalidateSize();
     });
+
+    // Cache the button (if you haven’t already)
+const addMarkerBtn = document.getElementById('addMarkerBtn');
+
+// Attach the click handler now that addMarker() is defined
+addMarkerBtn.addEventListener('click', addMarker);
+
 
     // IP check
     fetch('https://api.ipify.org?format=json')
