@@ -379,7 +379,7 @@
           });
           m = L.marker([d.lat,d.lng],{icon:divIcon,draggable:hasEditPermissions});
         } else {
-          const size = (d.type==='army') ? [16,20] : [16,16];
+          const size = (d.type==='army') ? [26,30] : [26,26];
           const icon = getIcon(d.iconUrl||'assets/placeholder.png', size);
           m = L.marker([d.lat,d.lng],{icon,draggable:hasEditPermissions});
         }
