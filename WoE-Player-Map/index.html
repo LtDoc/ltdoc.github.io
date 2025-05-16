@@ -60,13 +60,13 @@
     <div class="content">
       <form id="markerForm">
         <label>Type
-          <select id="markerType" onchange="toggleFields()">
-            <option value="player">Player</option>
-            <option value="town">Town</option>
-            <option value="poi">POI</option>
-            <option value="army">Army</option>
-          </select>
-        </label>
+            <select id="markerType">
+              <option value="player">Player</option>
+              <option value="town">Town</option>
+              <option value="poi">POI</option>
+              <option value="army">Army</option>
+            </select>
+          </label>
         <label>Name<input type="text" id="markerName"></label>
         <div id="iconFields">
           <label>Icon URL<input type="text" id="markerIcon"></label>
@@ -296,18 +296,19 @@
     toggleFields();
 
     function toggleFields() {
-      const t = markerTypeSelect.value;
-      document.getElementById('iconFields').style.display  = (t==='player'||t==='army')?'block':'none';
-      document.getElementById('townFields').style.display  = (t==='town')?'block':'none';
-      document.getElementById('armyFields').style.display  = (t==='army')?'block':'none';
-      toggleTooltip();
-    }
+  const t = markerTypeSelect.value;
+  document.getElementById('iconFields').style.display  = (t === 'player' || t === 'army') ? 'block' : 'none';
+  document.getElementById('townFields').style.display  = (t === 'town') ? 'block' : 'none';
+  document.getElementById('armyFields').style.display  = (t === 'army') ? 'block' : 'none';
+  toggleTooltip();
+}
 
-    function toggleTooltip() {
-      const tt = markerTooltipTypeSelect.value;
-      document.getElementById('markerTooltip').style.display     = (tt==='text')?'block':'none';
-      document.getElementById('markerTooltipFile').style.display = (tt==='image')?'block':'none';
-    }
+function toggleTooltip() {
+  const tt = markerTooltipTypeSelect.value;
+  document.getElementById('markerTooltip').style.display     = (tt === 'text') ? 'block' : 'none';
+  document.getElementById('markerTooltipFile').style.display = (tt === 'image') ? 'block' : 'none';
+}
+
 
     function correctMarkerData(d) {
       return {
@@ -640,8 +641,14 @@
     // Search input
     document.getElementById('searchInput').addEventListener('input', updateSidebar);
 
-    // Initialize fields
-    toggleFields();
+    markerTypeSelect.addEventListener('change', toggleFields);
+markerTooltipTypeSelect.addEventListener('change', toggleTooltip);
+
+// Hide subfields, then fire initial toggle to sync visibility
+document.getElementById('townFields').style.display  = 'none';
+document.getElementById('armyFields').style.display = 'none';
+toggleFields();
+toggleTooltip();
   })();
   </script>
 </body>
