@@ -202,7 +202,12 @@
     map.fitBounds(imageBounds);
 
     // cluster for non-player markers
-    const clusterGroup = L.markerClusterGroup();
+    const clusterGroup = L.markerClusterGroup({
+        // only cluster if markers are within 50px of each other
+        maxClusterRadius: 50,
+        // once you reach the max zoom level, turn clustering off
+        disableClusteringAtZoom: map.getMaxZoom()
+        });
     map.addLayer(clusterGroup);
 
     // separate layer for player markers
