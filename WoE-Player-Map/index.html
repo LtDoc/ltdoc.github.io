@@ -524,31 +524,41 @@
     }
 
     function openEditModal(id) {
-      const d = markers[id].options.data;
-      editIdInput.value = id;
-      editNameInput.value = d.name;
-      editTypeSelect.value = d.type;
-      editIconUrlInput.value = d.iconUrl;
-      editTooltipTypeSelect.value = d.tooltipType;
-      editTooltipContentInput.value = d.tooltipContent;
-      editAdminOnlyCheckbox.checked = d.adminOnly;
-      toggleEditSubfields(d);
-      if (d.type==='town') editTownSizeSelect.value = d.size || 'village';
-      if (d.type==='army') Object.assign(
-        editNationInput,     { value: d.nation     || '' },
-        editUnitTypeInput,   { value: d.unitType   || '' },
-        editAttackInput,     { value: d.attack     || '' },
-        editDefendInput,     { value: d.defend     || '' },
-        editActionPointsInput,{ value: d.actionPoints|| '' },
-        editRangeInput,      { value: d.range      || '' },
-        editMovementInput,   { value: d.movement   || '' },
-        editAP1Input,        { value: d.ap1        || '' },
-        editAP2Input,        { value: d.ap2        || '' },
-        editAP3Input,        { value: d.ap3        || '' },
-        editAbilityDescInput,{ value: d.abilityDesc|| '' }
-      );
-      editModal.classList.remove('hidden');
-    }
+  const d = markers[id].options.data;
+  // core fields
+  editIdInput.value      = id;
+  editNameInput.value    = d.name;
+  editTypeSelect.value   = d.type;
+  editIconUrlInput.value = d.iconUrl;
+  editTooltipTypeSelect.value     = d.tooltipType;
+  editTooltipContentInput.value   = d.tooltipContent;
+  editAdminOnlyCheckbox.checked   = d.adminOnly;
+
+  // show/hide subfields
+  toggleEditSubfields(d);
+
+  // town-specific
+  if (d.type === 'town') {
+    editTownSizeSelect.value = d.size || 'village';
+  }
+
+  // army-specific
+  if (d.type === 'army') {
+    editNationInput.value       = d.nation       || '';
+    editUnitTypeInput.value     = d.unitType     || '';
+    editAttackInput.value       = d.attack       || '';
+    editDefendInput.value       = d.defend       || '';
+    editActionPointsInput.value = d.actionPoints || '';
+    editRangeInput.value        = d.range        || '';
+    editMovementInput.value     = d.movement     || '';
+    editAP1Input.value          = d.ap1          || '';
+    editAP2Input.value          = d.ap2          || '';
+    editAP3Input.value          = d.ap3          || '';
+    editAbilityDescInput.value  = d.abilityDesc  || '';
+  }
+
+  editModal.classList.remove('hidden');
+}
 
     function toggleEditSubfields(d) {
       editTownFields.classList.toggle('hidden', d.type!=='town');
