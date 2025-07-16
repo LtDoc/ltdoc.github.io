@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>The World of Elyndor</title>
+  <title>Global Strategy Map</title>
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"/>
@@ -618,7 +618,7 @@
     fetch('https://api.ipify.org?format=json')
       .then(res => res.json())
       .then(data => {
-        const allow = ['24.57.218.92','98.16.223.9'];
+        const allow = ['24.57.218.92','75.91.235.226'];
         hasEditPermissions = allow.includes(data.ip);
         if (!hasEditPermissions) {
           alert('Read-only mode: admin rights unverified.');
