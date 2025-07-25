@@ -204,5 +204,93 @@
       addNationForm.reset();
     });
   </script>
+
+  <hr>
+  <section>
+    <h2>Manage Existing Items</h2>
+    <label>Tree:
+      <select id="manageTreeSelect">
+        <option value="Navy">Navy</option>
+        <option value="Army">Army</option>
+        <option value="Engineering">Engineering</option>
+        <option value="Society">Society</option>
+      </select>
+    </label>
+    <label>Branch:
+      <select id="manageBranchSelect"></select>
+    </label>
+    <button id="loadItemsBtn">Load Items</button>
+    <div id="itemsList"></div>
+  </section>
+
+  <script type="module">
+    import { db } from './firebase.js';
+    import { ref, get, remove } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+
+    const manageTreeSelect = document.getElementById('manageTreeSelect');
+    const manageBranchSelect = document.getElementById('manageBranchSelect');
+    const itemsList = document.getElementById('itemsList');
+    const loadItemsBtn = document.getElementById('loadItemsBtn');
+
+    async function loadManageBranches(tree) {
+      manageBranchSelect.innerHTML = '';
+      const branchSnap = await get(ref(db, `branches/${tree}`));
+      if (branchSnap.exists()) {
+        branchSnap.val().forEach(b => {
+          const opt = document.createElement('option');
+          opt.value = b;
+          opt.textContent = b;
+          manageBranchSelect.appendChild(opt);
+        });
+      }
+    }
+    manageTreeSelect.addEventListener('change', e => loadManageBranches(e.target.value));
+    loadManageBranches('Navy');
+
+    loadItemsBtn.addEventListener('click', async () => {
+      const tree = manageTreeSelect.value;
+      const branch = manageBranchSelect.value;
+      const branchRef = ref(db, `research_tree/${tree}/${branch}`);
+      const snap = await get(branchRef);
+      itemsList.innerHTML = '';
+      if (!snap.exists()) {
+        itemsList.innerHTML = '<p>No items found.</p>';
+        return;
+      }
+      const data = snap.val();
+      for (let name in data) {
+        const tech = data[name];
+        const div = document.createElement('div');
+        div.innerHTML = `<strong>${name}</strong> (${tech.year}) - Cost: ${tech.cost} 
+          <button onclick="editItem('${tree}','${branch}','${name}')">Edit</button>
+          <button onclick="deleteItem('${tree}','${branch}','${name}')">Delete</button>`;
+        itemsList.appendChild(div);
+      }
+    });
+
+    window.editItem = async function(tree, branch, name) {
+      const snap = await get(ref(db, `research_tree/${tree}/${branch}/${name}`));
+      if (!snap.exists()) return;
+      const tech = snap.val();
+      document.getElementById('treeSelect').value = tree;
+      await loadBranches(tree);
+      document.getElementById('branchSelect').value = branch;
+      document.getElementById('nameInput').value = name;
+      document.getElementById('yearInput').value = tech.year;
+      document.getElementById('costInput').value = tech.cost;
+      document.getElementById('imageInput').value = tech.image;
+      document.getElementById('descInput').value = tech.description || '';
+      document.getElementById('statsInput').value = tech.stats || '';
+      alert('Loaded into Add Research form. Saving will overwrite.');
+    }
+
+    window.deleteItem = async function(tree, branch, name) {
+      if (!confirm(`Delete ${name}?`)) return;
+      await remove(ref(db, `research_tree/${tree}/${branch}/${name}`));
+      alert(`${name} deleted.`);
+      loadItemsBtn.click();
+    }
+  </script>
 </body>
+
 </html>

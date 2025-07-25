@@ -1,7 +1,7 @@
 
 body {
   font-family: "IM Fell English", serif;
-  background: #e6dfd0; /* Solid WW1-era beige */
+  background: #e6dfd0;
   color: #3b2f2f;
   padding: 20px;
 }
@@ -50,21 +50,20 @@ button:hover {
   background: #f9f6f0;
   border: 2px solid #7b5a3a;
   border-radius: 6px;
-  padding: 8px;
+  padding: 6px;
   margin: 10px;
   width: 200px;
-  height: 260px;
+  height: 280px;
   text-align: center;
   box-shadow: 2px 2px 6px rgba(0,0,0,0.2);
-  position: relative;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-start;
 }
 
 .tech-node img {
   max-width: 100%;
-  height: 80px;
+  height: 70px;
   object-fit: cover;
   border: 1px solid #c4b89a;
 }
@@ -74,18 +73,33 @@ button:hover {
   filter: grayscale(80%);
 }
 
+.tech-title {
+  font-size: 14px;
+  font-weight: bold;
+  margin: 4px 0;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  hyphens: auto;
+  max-height: 34px;
+}
+
 .tech-desc {
   font-size: 12px;
-  margin: 4px 0;
-  flex: 1;
+  line-height: 1.2;
   overflow: hidden;
+  text-overflow: ellipsis;
+  max-height: 40px;
+  margin-top: 2px;
 }
 
 .tech-stats {
   font-size: 12px;
   font-style: italic;
   color: #5c4a3a;
-  margin-bottom: 4px;
+  line-height: 1.2;
+  overflow: hidden;
+  max-height: 30px;
+  margin-top: 2px;
 }
 
 .prereq {

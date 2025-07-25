@@ -18,12 +18,15 @@
   <div class="nation-view hidden">
     <h1 id="nationName"></h1>
     <div id="rpStatus"></div>
+    <button id="refreshBtn" onclick="refreshTree()">Refresh Tree</button>
     <div id="treeWrapper"></div>
   </div>
 
   <script type="module">
     import { db } from './firebase.js';
     import { ref, get, update } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+
+    let currentNation = null;
 
     const nationSelect = document.getElementById('nationSelect');
     const nationPasswordInput = document.getElementById('nationPassword');
@@ -55,6 +58,7 @@
         alert('Incorrect password!');
         return;
       }
+      currentNation = selectedNation;
       loadNation(selectedNation, nationData);
     }
 
@@ -112,9 +116,11 @@
 
               node.innerHTML = `
                 <img src="${tech.image}" alt="${tech.name}">
-                <div><strong>${tech.name}</strong></div>
+                <div class="tech-title">${tech.name}</div>
                 <div>Cost: ${tech.cost} RP</div>
-                ${prereqs.length > 0 ? `<div class="prereq">Requires: ${prereqs.join(', ')}</div>` : ''}
+                <div class="tech-desc">${tech.description || ''}</div>
+                <div class="tech-stats">${tech.stats || ''}</div>
+                ${prereqs.length > 0 ? `<div class="prereq">Req: ${prereqs.join(', ')}</div>` : ''}
                 ${unlocked ? '<div><strong>Unlocked</strong></div>' : 
                   (prereqsMet ? `<button onclick="unlockTech('${nationName}','${tech.name}',${tech.cost})">Unlock</button>` :
                   '<div>Locked</div>')}
@@ -148,7 +154,15 @@
         [`unlocked/${techName}`]: true
       });
       alert(`${techName} unlocked!`);
-      loadNation(nation, nationData);
+      refreshTree();
+    }
+
+    window.refreshTree = async function() {
+      if (!currentNation) return;
+      const nationSnap = await get(ref(db, `nations/${currentNation}`));
+      if (!nationSnap.exists()) return;
+      const nationData = nationSnap.val();
+      loadNation(currentNation, nationData);
     }
 
     loadNationsList();
