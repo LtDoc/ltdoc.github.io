@@ -9,6 +9,24 @@
   <h1>Admin Panel</h1>
 
   <section>
+    <h2>Add Branch</h2>
+    <form id="addBranchForm">
+      <label>Tree:
+        <select id="branchTreeSelect">
+          <option value="Navy">Navy</option>
+          <option value="Army">Army</option>
+          <option value="Engineering">Engineering</option>
+          <option value="Society">Society</option>
+        </select>
+      </label><br>
+      <label>Branch Name: <input type="text" id="branchNameInput" placeholder="e.g. Battleships"></label><br>
+      <button type="submit">Add Branch</button>
+    </form>
+  </section>
+
+  <hr>
+
+  <section>
     <h2>Add Research Item</h2>
     <form id="addResearchForm">
       <label>Tree:
@@ -19,14 +37,17 @@
           <option value="Society">Society</option>
         </select>
       </label><br>
-      <label>Branch: <input type="text" id="branchInput" placeholder="e.g. Battleships"></label><br>
+      <label>Branch:
+        <select id="branchSelect"></select>
+      </label><br>
       <label>Name: <input type="text" id="nameInput" placeholder="e.g. Edward-class Battleship"></label><br>
       <label>Year:
         <select id="yearInput"></select>
       </label><br>
       <label>Cost: <input type="number" id="costInput"></label><br>
       <label>Image URL: <input type="text" id="imageInput"></label><br>
-      <label>Prerequisites (comma-separated): <input type="text" id="prereqInput"></label><br>
+      <label>Description:<br><textarea id="descInput" rows="3"></textarea></label><br>
+      <label>Stats:<br><textarea id="statsInput" rows="2"></textarea></label><br>
       <button type="submit">Add Research</button>
     </form>
   </section>
@@ -46,11 +67,15 @@
 
   <script type="module">
     import { db } from './firebase.js';
-    import { ref, set, get } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+    import { ref, set, get, update } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
 
+    const addBranchForm = document.getElementById('addBranchForm');
     const addResearchForm = document.getElementById('addResearchForm');
     const addNationForm = document.getElementById('addNationForm');
+    const branchSelect = document.getElementById('branchSelect');
+    const treeSelect = document.getElementById('treeSelect');
 
+    // Populate year dropdown
     const yearSelect = document.getElementById('yearInput');
     for (let y = 1850; y <= 1925; y++) {
       const opt = document.createElement('option');
@@ -59,20 +84,80 @@
       yearSelect.appendChild(opt);
     }
 
+    // Load branches for a tree
+    async function loadBranches(tree) {
+      branchSelect.innerHTML = '';
+      const branchSnap = await get(ref(db, `branches/${tree}`));
+      if (branchSnap.exists()) {
+        branchSnap.val().forEach(b => {
+          const opt = document.createElement('option');
+          opt.value = b;
+          opt.textContent = b;
+          branchSelect.appendChild(opt);
+        });
+      }
+    }
+
+    treeSelect.addEventListener('change', e => {
+      loadBranches(e.target.value);
+    });
+
+    // Initial load branches for default tree
+    loadBranches('Navy');
+
+    // Add Branch
+    addBranchForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const tree = document.getElementById('branchTreeSelect').value;
+      const branchName = document.getElementById('branchNameInput').value.trim();
+      if (!branchName) {
+        alert('Branch name required!');
+        return;
+      }
+      const branchRef = ref(db, `branches/${tree}`);
+      const snap = await get(branchRef);
+      let branches = [];
+      if (snap.exists()) {
+        branches = snap.val();
+      }
+      if (!branches.includes(branchName)) {
+        branches.push(branchName);
+      }
+      await set(branchRef, branches);
+      alert(`Branch ${branchName} added to ${tree}`);
+      document.getElementById('branchNameInput').value = '';
+      if (tree === treeSelect.value) loadBranches(treeSelect.value);
+    });
+
+    // Add Research
     addResearchForm.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const tree = document.getElementById('treeSelect').value;
-      const branch = document.getElementById('branchInput').value.trim();
+      const tree = treeSelect.value;
+      const branch = branchSelect.value;
       const name = document.getElementById('nameInput').value.trim();
-      const year = parseInt(document.getElementById('yearInput').value);
+      const year = parseInt(yearSelect.value);
       const cost = parseInt(document.getElementById('costInput').value);
       const image = document.getElementById('imageInput').value.trim();
-      const prereqText = document.getElementById('prereqInput').value.trim();
-      const prereqArray = prereqText ? prereqText.split(',').map(p => p.trim()) : [];
+      const desc = document.getElementById('descInput').value.trim();
+      const stats = document.getElementById('statsInput').value.trim();
 
       if (!branch || !name) {
         alert('Branch and Name required!');
         return;
+      }
+
+      // Auto-calc prerequisites
+      const prevRangeStart = year - 5;
+      let prereqs = [];
+      const branchRef = ref(db, `research_tree/${tree}/${branch}`);
+      const branchSnap = await get(branchRef);
+      if (branchSnap.exists()) {
+        for (let tname in branchSnap.val()) {
+          let tech = branchSnap.val()[tname];
+          if (tech.year >= prevRangeStart && tech.year < year) {
+            prereqs.push(tname);
+          }
+        }
       }
 
       const researchRef = ref(db, `research_tree/${tree}/${branch}/${name}`);
@@ -80,25 +165,27 @@
         year: year,
         cost: cost,
         image: image,
-        prerequisites: prereqArray
+        description: desc,
+        stats: stats,
+        prerequisites: prereqs
       });
 
-      alert(`${name} added to ${tree} > ${branch}`);
+      alert(`${name} added to ${tree} > ${branch} with prerequisites: ${prereqs.join(', ')}`);
       addResearchForm.reset();
+      loadBranches(treeSelect.value);
     });
 
+    // Add / Edit Nation
     addNationForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const name = document.getElementById('nationNameInput').value.trim();
       const rpWeek = parseInt(document.getElementById('rpWeekInput').value);
       const banked = parseInt(document.getElementById('bankedInput').value);
       const pass = document.getElementById('nationPassInput').value.trim();
-
       if (!name) {
         alert('Nation name required!');
         return;
       }
-
       const now = Math.floor(Date.now()/1000);
       const nationRef = ref(db, `nations/${name}`);
       const snapshot = await get(nationRef);
@@ -106,7 +193,6 @@
       if (snapshot.exists()) {
         unlocked = snapshot.val().unlocked || {};
       }
-
       await set(nationRef, {
         rp_per_week: rpWeek,
         banked_rp: banked,
@@ -114,7 +200,6 @@
         password: pass || 'default',
         unlocked: unlocked
       });
-
       alert(`${name} saved/updated!`);
       addNationForm.reset();
     });
