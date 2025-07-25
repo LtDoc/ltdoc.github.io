@@ -6,6 +6,16 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+
+<!-- Modal always in DOM -->
+<div id="prereqModal" class="hidden" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;">
+  <div class="modal-content" style="background:#fff;padding:20px;border:2px solid #333;width:300px;text-align:center;">
+    <h3>Prerequisite Modal</h3>
+    <p>Placeholder modal content</p>
+    <button id="modalCloseBtn" onclick="document.getElementById('prereqModal').classList.add('hidden')">Close</button>
+  </div>
+</div>
+
   <h1>Admin Panel (Clean)</h1>
 
   <!-- Add Research Form -->
@@ -80,19 +90,7 @@
     </div>
   </div>
 
-  </section>
-
-  <!-- Simple Modal Placeholder (moved above script to ensure binding) -->
-  <div id="prereqModal" class="hidden" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;">
-    <div class="modal-content" style="background:#fff;padding:20px;border:2px solid #333;width:300px;text-align:center;">
-      <h3>Prerequisite Modal</h3>
-      <p>Placeholder modal content</p>
-      <button id="modalCloseBtn">Close</button>
-    </div>
-  </div>
-
   <script type="module">
-
     import { db } from './firebase.js';
     import { ref, get, set, update, remove } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
 
@@ -258,7 +256,8 @@
       addPrereqBtn.addEventListener('click', () => {
         prereqModal.classList.remove('hidden');
       });
-      modalCloseBtn?.addEventListener('click', () => {
+      // inline close handles button
+modalCloseBtn?.addEventListener('click', () => {
         prereqModal.classList.add('hidden');
       });
       prereqModal.addEventListener('click', (e) => {
