@@ -10,17 +10,17 @@
     <div id="treeWrapper"></div>
   </div>
   <script type="module">
-    import {{ db }} from './firebase.js';
-    import {{ ref, get, update }} from 'https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js';
+    import { db } from './firebase.js';
+    import { ref, get, update } from 'https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js';
     // JS omitted for brevity; similar to previous index.html but includes $ cost display
     // Inside card rendering:
     // node.innerHTML = `
-    //   <img src="${{tech.image}}" alt="${{tech.name}}">
-    //   <div class="tech-title">${{tech.name}}</div>
-    //   <div class="tech-cost">RP: ${{tech.cost}} | $${{tech.moneyCost || 100}}</div>
-    //   <div class="tech-desc" title="${{tech.description || ''}}">${{tech.description || ''}}</div>
+    //   <img src="${tech.image}" alt="${tech.name}">
+    //   <div class="tech-title">${tech.name}</div>
+    //   <div class="tech-cost">RP: ${tech.cost} | $${{tech.moneyCost || 100}}</div>
+    //   <div class="tech-desc" title="${tech.description || ''}}">${tech.description || ''}}</div>
     //   <div class="tech-stats">${{tech.stats || ''}}</div>
-    //   ${{prereqs.length ? `<div class="prereq">Req: ${{prereqs.join(', ')}}</div>` : ''}}
+    //   ${prereqs.length ? `<div class="prereq">Req: ${prereqs.join(', ')}}</div>` : ''}}
     // `;
   </script>
 </body>
