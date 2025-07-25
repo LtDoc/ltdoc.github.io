@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -5,7 +6,7 @@
   <title>WW1 Tech Tree Admin</title>
   <link rel="stylesheet" href="style.css">
   <style>
-    /* Ensure modal is initially hidden and flex when shown */
+    /* Modal styling */
     #prereqModal {
       display: none;
       position: fixed;
@@ -14,6 +15,7 @@
       background: rgba(0,0,0,0.5);
       align-items: center;
       justify-content: center;
+      z-index: 1000;
     }
     #prereqModal.visible {
       display: flex;
@@ -23,22 +25,44 @@
       padding: 20px;
       border: 2px solid #333;
       text-align: center;
-      width: 300px;
+      width: 400px;
+      max-height: 80%;
+      overflow: auto;
     }
-    .modal-close {
-      margin-top: 10px;
+    #prereqResults, #modalSelected {
+      border: 1px solid #ccc;
+      max-height: 200px;
+      overflow-y: auto;
+      margin-bottom: 10px;
+      padding: 5px;
+      text-align: left;
+    }
+    .prereq-item {
+      display: inline-block;
+      margin: 2px; padding: 2px 4px;
+      background: #eee; border: 1px solid #999;
+    }
+    .prereq-item button {
+      margin-left: 4px; font-size: 10px; cursor: pointer;
+    }
+    .modal-close, #prereqDoneBtn {
+      margin: 5px;
       padding: 4px 8px;
       cursor: pointer;
     }
   </style>
 </head>
 <body>
-  <!-- SINGLE modal definition -->
+  <!-- Modal for selecting prerequisites -->
   <div id="prereqModal">
     <div class="modal-content">
-      <h3>Prerequisite Modal</h3>
-      <p>Placeholder modal content</p>
-      <button class="modal-close">Close</button>
+      <h3>Select Prerequisites</h3>
+      <input type="text" id="prereqSearch" placeholder="Search..." style="width:100%; margin-bottom:8px;">
+      <div id="prereqResults"></div>
+      <h4>Selected:</h4>
+      <div id="modalSelected"></div>
+      <button id="prereqDoneBtn">Done</button>
+      <button class="modal-close">Cancel</button>
     </div>
   </div>
 
@@ -124,6 +148,10 @@
       const saveNationBtn = document.getElementById('saveNationBtn');
       const prereqModal = document.getElementById('prereqModal');
       const addPrereqBtn = document.getElementById('addPrereqBtn');
+      const prereqSearch = document.getElementById('prereqSearch');
+      const prereqResults = document.getElementById('prereqResults');
+      const modalSelected = document.getElementById('modalSelected');
+      const prereqDoneBtn = document.getElementById('prereqDoneBtn');
       const closeBtns = document.querySelectorAll('.modal-close');
 
       // Populate years
@@ -135,7 +163,7 @@
         }
       })();
 
-      // Load branches into a select
+      // Load branches
       async function loadBranches(tree, selectEl) {
         selectEl.innerHTML = '';
         const snap = await get(ref(db, `branches/${tree}`));
@@ -147,8 +175,6 @@
           });
         }
       }
-
-      // Init branch selects
       loadBranches(treeSelect.value, branchSelect);
       loadBranches(manageTreeSelect.value, manageBranchSelect);
       treeSelect.addEventListener('change', () => loadBranches(treeSelect.value, branchSelect));
@@ -165,15 +191,14 @@
         const desc = document.getElementById('descInput').value.trim();
         const stats = document.getElementById('statsInput').value.trim();
         if (!branch || !name) return alert('Branch and Name required!');
-        const prereqs = Array.from(document.querySelectorAll('#prereqList .prereq-item'))
-                             .map(el => el.dataset.name);
+        const prereqs = Array.from(document.querySelectorAll('#prereqList .prereq-item')).map(el => el.dataset.name);
         await set(ref(db, `research_tree/${tree}/${branch}/${name}`), {
           year, cost, image, description: desc, stats, prerequisites: prereqs
         });
         alert(`${name} saved to ${tree} > ${branch}`);
       });
 
-      // Load and manage items
+      // Manage items
       loadItemsBtn.addEventListener('click', async () => {
         const tree = manageTreeSelect.value;
         const branch = manageBranchSelect.value;
@@ -189,14 +214,13 @@
         });
       });
 
-      // Edit/Delete delegation
+      // Edit/Delete
       itemsList.addEventListener('click', async e => {
         const btn = e.target;
         if (btn.classList.contains('editBtn')) {
           const { tree, branch, name } = btn.dataset;
           await loadBranches(tree, branchSelect);
-          treeSelect.value = tree;
-          branchSelect.value = branch;
+          treeSelect.value = tree; branchSelect.value = branch;
           const techSnap = await get(ref(db, `research_tree/${tree}/${branch}/${name}`));
           if (!techSnap.exists()) return;
           const tech = techSnap.val();
@@ -206,7 +230,7 @@
           document.getElementById('imageInput').value = tech.image;
           document.getElementById('descInput').value = tech.description || '';
           document.getElementById('statsInput').value = tech.stats || '';
-          alert('Loaded into form. Saving will overwrite.');
+          alert('Loaded into form (overwrite on save).');
         }
         if (btn.classList.contains('delBtn')) {
           const { tree, branch, name } = btn.dataset;
@@ -233,19 +257,73 @@
         alert(`${nation} saved/updated!`);
       });
 
-      // Modal open
-      addPrereqBtn?.addEventListener('click', () => {
+      // Modal logic
+      addPrereqBtn.addEventListener('click', () => {
+        // Load all items for search
+        loadAllResearchItems();
         prereqModal.classList.add('visible');
       });
-      // Modal close via button
-      closeBtns.forEach(btn =>
-        btn.addEventListener('click', () => prereqModal.classList.remove('visible'))
-      );
-      // Modal close via outside click
-      prereqModal.addEventListener('click', e => {
-        if (e.target === prereqModal) {
-          prereqModal.classList.remove('visible');
+      // Close
+      closeBtns.forEach(btn => btn.addEventListener('click', () => prereqModal.classList.remove('visible')));
+      prereqModal.addEventListener('click', e => { if (e.target === prereqModal) prereqModal.classList.remove('visible'); });
+
+      // Prereq modal logic
+      let allItems = [];
+      async function loadAllResearchItems() {
+        allItems = [];
+        const snap = await get(ref(db, 'research_tree'));
+        if (!snap.exists()) return;
+        const data = snap.val();
+        for (const tree in data) {
+          for (const branch in data[tree]) {
+            for (const name in data[tree][branch]) {
+              allItems.push(name);
+            }
+          }
         }
+        renderPrereqResults(allItems);
+      }
+
+      function renderPrereqResults(list) {
+        prereqResults.innerHTML = '';
+        list.forEach(name => {
+          const div = document.createElement('div');
+          div.textContent = name;
+          div.style.cursor = 'pointer';
+          div.onclick = () => addModalPrereq(name);
+          prereqResults.appendChild(div);
+        });
+      }
+
+      prereqSearch.addEventListener('input', () => {
+        const term = prereqSearch.value.toLowerCase();
+        renderPrereqResults(allItems.filter(n => n.toLowerCase().includes(term)));
+      });
+
+      function addModalPrereq(name) {
+        if ([...modalSelected.children].some(ch => ch.dataset.name === name)) return;
+        const span = document.createElement('span');
+        span.classList.add('prereq-item');
+        span.dataset.name = name;
+        span.textContent = name;
+        const xbtn = document.createElement('button');
+        xbtn.textContent = 'x';
+        xbtn.onclick = () => span.remove();
+        span.appendChild(xbtn);
+        modalSelected.appendChild(span);
+      }
+
+      prereqDoneBtn.addEventListener('click', () => {
+        // Copy selections to form
+        const formList = document.getElementById('prereqList');
+        formList.innerHTML = '';
+        [...modalSelected.children].forEach(ch => {
+          const fm = ch.cloneNode(true);
+          const removeBtn = fm.querySelector('button');
+          removeBtn.onclick = () => fm.remove();
+          formList.appendChild(fm);
+        });
+        prereqModal.classList.remove('visible');
       });
     });
   </script>
