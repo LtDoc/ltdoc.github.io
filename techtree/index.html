@@ -1,7 +1,7 @@
-
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="UTF-8">
   <title>WW1 Tech Tree</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -75,7 +75,7 @@
         });
       }
 
-      nationNameEl.textContent = `${nationName}`;
+      nationNameEl.textContent = nationName;
       rpStatusEl.textContent = `Banked RP: ${nationData.banked_rp} (+${nationData.rp_per_week}/week)`;
 
       const treeSnap = await get(ref(db, 'research_tree'));
@@ -90,19 +90,17 @@
           let branchDiv = document.createElement('div');
           branchDiv.innerHTML = `<h3>${branch}</h3>`;
 
-          // Group items by year
-          let yearGroups = {};
-          for (let item in treeData[tree][branch]) {
-            let tech = treeData[tree][branch][item];
-            if (!yearGroups[tech.year]) yearGroups[tech.year] = [];
-            yearGroups[tech.year].push({ name: item, ...tech });
-          }
-
           let branchContainer = document.createElement('div');
           branchContainer.classList.add('tree-container');
 
-          for (let year = 1850; year <= 1925; year++) {
-            if (!yearGroups[year]) continue;
+          // group by year
+          const yearGroups = {};
+          Object.entries(treeData[tree][branch]).forEach(([name, tech]) => {
+            if (!yearGroups[tech.year]) yearGroups[tech.year] = [];
+            yearGroups[tech.year].push({ name, ...tech });
+          });
+
+          Object.keys(yearGroups).sort().forEach(year => {
             let yearCol = document.createElement('div');
             yearCol.classList.add('year-column');
             yearCol.innerHTML = `<h4>${year}</h4>`;
@@ -121,19 +119,17 @@
                 <div class="tech-desc" title="${tech.description || ''}">${tech.description || ''}</div>
                 <div class="tech-stats">${tech.stats || ''}</div>
                 ${prereqs.length > 0 ? `<div class="prereq">Req: ${prereqs.join(', ')}</div>` : ''}
-                ${unlocked ? '<div><strong>Unlocked</strong></div>' : 
+                ${unlocked ? '<div><strong>Unlocked</strong></div>' :
                   (prereqsMet ? `<button onclick="unlockTech('${nationName}','${tech.name}',${tech.cost})">Unlock</button>` :
                   '<div>Locked</div>')}
               `;
               yearCol.appendChild(node);
             });
             branchContainer.appendChild(yearCol);
-          }
-
+          });
           branchDiv.appendChild(branchContainer);
           treeDiv.appendChild(branchDiv);
         }
-
         treeWrapper.appendChild(treeDiv);
       }
 

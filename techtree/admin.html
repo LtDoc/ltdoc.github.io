@@ -1,59 +1,21 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>WW1 Tech Tree Admin</title>
   <link rel="stylesheet" href="style.css">
   <style>
     /* Modal styling */
-    #prereqModal {
-      display: none;
-      position: fixed;
-      top: 0; left: 0;
-      width: 100%; height: 100%;
-      background: rgba(0,0,0,0.5);
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-    }
-    #prereqModal.visible {
-      display: flex;
-    }
-    #prereqModal .modal-content {
-      background: #fff;
-      padding: 20px;
-      border: 2px solid #333;
-      text-align: center;
-      width: 400px;
-      max-height: 80%;
-      overflow: auto;
-    }
-    #prereqResults, #modalSelected {
-      border: 1px solid #ccc;
-      max-height: 200px;
-      overflow-y: auto;
-      margin-bottom: 10px;
-      padding: 5px;
-      text-align: left;
-    }
-    .prereq-item {
-      display: inline-block;
-      margin: 2px; padding: 2px 4px;
-      background: #eee; border: 1px solid #999;
-    }
-    .prereq-item button {
-      margin-left: 4px; font-size: 10px; cursor: pointer;
-    }
-    .modal-close, #prereqDoneBtn {
-      margin: 5px;
-      padding: 4px 8px;
-      cursor: pointer;
-    }
+    #prereqModal { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); align-items:center; justify-content:center; z-index:1000; }
+    #prereqModal.visible { display:flex; }
+    #prereqModal .modal-content { background:#fff; padding:20px; border:2px solid #333; text-align:center; width:400px; max-height:80%; overflow:auto; }
+    #prereqResults, #modalSelected { border:1px solid #ccc; max-height:200px; overflow-y:auto; margin-bottom:10px; padding:5px; text-align:left; }
+    .prereq-item { display:inline-block; margin:2px; padding:2px 4px; background:#eee; border:1px solid #999; }
+    .prereq-item button { margin-left:4px; font-size:10px; cursor:pointer; }
+    .modal-close, #prereqDoneBtn { margin:5px; padding:4px 8px; cursor:pointer; }
   </style>
 </head>
 <body>
-  <!-- Modal for selecting prerequisites -->
   <div id="prereqModal">
     <div class="modal-content">
       <h3>Select Prerequisites</h3>
@@ -67,262 +29,155 @@
   </div>
 
   <h1>Admin Panel</h1>
-
-  <!-- Add Research Item -->
   <section>
     <h2>Add Research Item</h2>
     <label>Tree:
-      <select id="treeSelect">
-        <option value="Navy">Navy</option>
-        <option value="Army">Army</option>
-        <option value="Engineering">Engineering</option>
-        <option value="Society">Society</option>
-      </select>
+      <select id="treeSelect"><option value="Navy">Navy</option><option value="Army">Army</option><option value="Engineering">Engineering</option><option value="Society">Society</option></select>
     </label><br>
-    <label>Branch:
-      <select id="branchSelect"></select>
-    </label><br>
-    <label>Name: <input type="text" id="nameInput" placeholder="e.g. Edward-class Battleship"></label><br>
-    <label>Year:
-      <select id="yearInput"></select>
-    </label><br>
-    <label>Cost: <input type="number" id="costInput"></label><br>
+    <label>Branch:<select id="branchSelect"></select></label><br>
+    <label>Name: <input type="text" id="nameInput" placeholder="Edward-class Battleship"></label><br>
+    <label>Year:<select id="yearInput"></select></label><br>
+    <label>RP Cost: <input type="number" id="costInput"></label><br>
+    <label>$ Cost: <input type="number" id="moneyCostInput" value="100"></label><br>
     <label>Image URL: <input type="text" id="imageInput"></label><br>
     <label>Description:<br><textarea id="descInput" rows="3"></textarea></label><br>
     <label>Stats:<br><textarea id="statsInput" rows="2"></textarea></label><br>
-    <div id="prereqContainer">
-      <strong>Prerequisites:</strong>
-      <div id="prereqList"></div>
-      <button type="button" id="addPrereqBtn">+ Add Prerequisite</button>
-    </div>
-    <br>
+    <div id="prereqContainer"><strong>Prerequisites:</strong><div id="prereqList"></div><button type="button" id="addPrereqBtn">+ Add Prerequisite</button></div><br>
     <button id="saveResearchBtn">Save Research</button>
   </section>
-
   <hr>
-
-  <!-- Manage Existing Items -->
   <section>
     <h2>Manage Existing Items</h2>
-    <label>Tree:
-      <select id="manageTreeSelect">
-        <option value="Navy">Navy</option>
-        <option value="Army">Army</option>
-        <option value="Engineering">Engineering</option>
-        <option value="Society">Society</option>
-      </select>
-    </label>
-    <label>Branch:
-      <select id="manageBranchSelect"></select>
-    </label>
+    <label>Tree:<select id="manageTreeSelect"><option value="Navy">Navy</option><option value="Army">Army</option><option value="Engineering">Engineering</option><option value="Society">Society</option></select></label>
+    <label>Branch:<select id="manageBranchSelect"></select></label>
     <button id="loadItemsBtn">Load Items</button>
     <div id="itemsList"></div>
   </section>
-
   <hr>
-
-  <!-- Add / Edit Nation -->
   <section>
     <h2>Add / Edit Nation</h2>
-    <label>Nation Name: <input type="text" id="nationNameInput" placeholder="e.g. France"></label><br>
+    <label>Nation Name: <input type="text" id="nationNameInput" placeholder="France"></label><br>
     <label>RP per Week: <input type="number" id="rpWeekInput"></label><br>
     <label>Banked RP: <input type="number" id="bankedInput"></label><br>
-    <label>Password: <input type="text" id="nationPassInput" placeholder="Nation password"></label><br>
+    <label>Password: <input type="text" id="nationPassInput" placeholder="password"></label><br>
     <button id="saveNationBtn">Save Nation</button>
   </section>
 
   <script type="module">
     import { db } from './firebase.js';
     import { ref, get, set, remove } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
-
     document.addEventListener('DOMContentLoaded', () => {
-      // Element refs
-      const treeSelect = document.getElementById('treeSelect');
-      const branchSelect = document.getElementById('branchSelect');
-      const yearSelect = document.getElementById('yearInput');
-      const saveResearchBtn = document.getElementById('saveResearchBtn');
-      const manageTreeSelect = document.getElementById('manageTreeSelect');
-      const manageBranchSelect = document.getElementById('manageBranchSelect');
-      const loadItemsBtn = document.getElementById('loadItemsBtn');
-      const itemsList = document.getElementById('itemsList');
+      const treeSelect = document.getElementById('treeSelect'), branchSelect = document.getElementById('branchSelect');
+      const yearSelect = document.getElementById('yearInput'), saveResearchBtn = document.getElementById('saveResearchBtn');
+      const manageTreeSelect = document.getElementById('manageTreeSelect'), manageBranchSelect = document.getElementById('manageBranchSelect');
+      const loadItemsBtn = document.getElementById('loadItemsBtn'), itemsList = document.getElementById('itemsList');
       const saveNationBtn = document.getElementById('saveNationBtn');
-      const prereqModal = document.getElementById('prereqModal');
-      const addPrereqBtn = document.getElementById('addPrereqBtn');
-      const prereqSearch = document.getElementById('prereqSearch');
-      const prereqResults = document.getElementById('prereqResults');
-      const modalSelected = document.getElementById('modalSelected');
-      const prereqDoneBtn = document.getElementById('prereqDoneBtn');
+      const prereqModal = document.getElementById('prereqModal'), addPrereqBtn = document.getElementById('addPrereqBtn');
+      const prereqSearch = document.getElementById('prereqSearch'), prereqResults = document.getElementById('prereqResults');
+      const modalSelected = document.getElementById('modalSelected'), prereqDoneBtn = document.getElementById('prereqDoneBtn');
       const closeBtns = document.querySelectorAll('.modal-close');
 
       // Populate years
-      (function populateYears() {
-        for (let y = 1850; y <= 1925; y++) {
-          let opt = document.createElement('option');
-          opt.value = y; opt.textContent = y;
-          yearSelect.appendChild(opt);
-        }
-      })();
+      for(let y=1850; y<=1925; y++){let o=document.createElement('option');o.value=y;o.textContent=y;yearSelect.appendChild(o);}
 
-      // Load branches
-      async function loadBranches(tree, selectEl) {
-        selectEl.innerHTML = '';
-        const snap = await get(ref(db, `branches/${tree}`));
-        if (snap.exists()) {
-          snap.val().forEach(b => {
-            let opt = document.createElement('option');
-            opt.value = b; opt.textContent = b;
-            selectEl.appendChild(opt);
-          });
-        }
-      }
-      loadBranches(treeSelect.value, branchSelect);
-      loadBranches(manageTreeSelect.value, manageBranchSelect);
-      treeSelect.addEventListener('change', () => loadBranches(treeSelect.value, branchSelect));
-      manageTreeSelect.addEventListener('change', () => loadBranches(manageTreeSelect.value, manageBranchSelect));
+      // Load branches utility
+      async function loadBranches(tree, sel){ sel.innerHTML=''; const s=await get(ref(db,`branches/${tree}`)); if(s.exists()) s.val().forEach(b=>{let o=document.createElement('option');o.value=b;o.textContent=b;sel.appendChild(o);});}
+
+      loadBranches(treeSelect.value,branchSelect); loadBranches(manageTreeSelect.value,manageBranchSelect);
+      treeSelect.addEventListener('change',()=>loadBranches(treeSelect.value,branchSelect));
+      manageTreeSelect.addEventListener('change',()=>loadBranches(manageTreeSelect.value,manageBranchSelect));
+
+      // Add prereq helper
+      function addPrereqToForm(n){let fl=document.getElementById('prereqList'); if([...fl.children].some(c=>c.dataset.name===n)) return; let sp=document.createElement('span');sp.className='prereq-item';sp.dataset.name=n;sp.textContent=n;let b=document.createElement('button');b.textContent='x';b.onclick=()=>sp.remove();sp.appendChild(b);fl.appendChild(sp);}
 
       // Save research
-      saveResearchBtn.addEventListener('click', async () => {
-        const tree = treeSelect.value;
-        const branch = branchSelect.value;
-        const name = document.getElementById('nameInput').value.trim();
-        const year = +yearSelect.value;
-        const cost = +document.getElementById('costInput').value;
-        const image = document.getElementById('imageInput').value.trim();
-        const desc = document.getElementById('descInput').value.trim();
-        const stats = document.getElementById('statsInput').value.trim();
-        if (!branch || !name) return alert('Branch and Name required!');
-        const prereqs = Array.from(document.querySelectorAll('#prereqList .prereq-item')).map(el => el.dataset.name);
-        await set(ref(db, `research_tree/${tree}/${branch}/${name}`), {
-          year, cost, image, description: desc, stats, prerequisites: prereqs
-        });
+      saveResearchBtn.addEventListener('click',async()=>{
+        const tree=treeSelect.value,branch=branchSelect.value,name=document.getElementById('nameInput').value.trim();
+        const year=+yearSelect.value,cost=+document.getElementById('costInput').value,moneyCost=+document.getElementById('moneyCostInput').value||100;
+        const image=document.getElementById('imageInput').value.trim(),desc=document.getElementById('descInput').value.trim(),stats=document.getElementById('statsInput').value.trim();
+        if(!branch||!name)return alert('Branch and Name required!');
+        const prereqs=[...document.querySelectorAll('#prereqList .prereq-item')].map(e=>e.dataset.name);
+        await set(ref(db,`research_tree/${tree}/${branch}/${name}`),{year,cost,moneyCost,image,description:desc,stats,prerequisites:prereqs});
         alert(`${name} saved to ${tree} > ${branch}`);
       });
 
       // Manage items
-      loadItemsBtn.addEventListener('click', async () => {
-        const tree = manageTreeSelect.value;
-        const branch = manageBranchSelect.value;
-        const snap = await get(ref(db, `research_tree/${tree}/${branch}`));
-        itemsList.innerHTML = '';
-        if (!snap.exists()) return itemsList.textContent = 'No items found.';
-        Object.entries(snap.val()).forEach(([name, tech]) => {
-          const div = document.createElement('div');
-          div.innerHTML = `<strong>${name}</strong> (${tech.year}) - Cost: ${tech.cost}
-            <button class="editBtn" data-tree="${tree}" data-branch="${branch}" data-name="${name}">Edit</button>
-            <button class="delBtn" data-tree="${tree}" data-branch="${branch}" data-name="${name}">Delete</button>`;
-          itemsList.appendChild(div);
+      loadItemsBtn.addEventListener('click',async()=>{
+        const tree=manageTreeSelect.value,branch=manageBranchSelect.value;
+        const s=await get(ref(db,`research_tree/${tree}/${branch}`)); itemsList.innerHTML='';
+        if(!s.exists()) return itemsList.textContent='No items found.';
+        Object.entries(s.val()).forEach(([n,t])=>{
+          let d=document.createElement('div');
+          d.innerHTML=`<strong>${n}</strong> (${t.year}) - Cost: ${t.cost} RP | $${t.moneyCost||100}
+            <button class="editBtn" data-tree="${tree}" data-branch="${branch}" data-name="${n}">Edit</button>
+            <button class="delBtn" data-tree="${tree}" data-branch="${branch}" data-name="${n}">Delete</button>`;
+          itemsList.appendChild(d);
         });
       });
 
       // Edit/Delete
-      itemsList.addEventListener('click', async e => {
-        const btn = e.target;
-        if (btn.classList.contains('editBtn')) {
-          const { tree, branch, name } = btn.dataset;
-          await loadBranches(tree, branchSelect);
-          treeSelect.value = tree; branchSelect.value = branch;
-          const techSnap = await get(ref(db, `research_tree/${tree}/${branch}/${name}`));
-          if (!techSnap.exists()) return;
-          const tech = techSnap.val();
-          document.getElementById('nameInput').value = name;
-          yearSelect.value = tech.year;
-          document.getElementById('costInput').value = tech.cost;
-          document.getElementById('imageInput').value = tech.image;
-          document.getElementById('descInput').value = tech.description || '';
-          document.getElementById('statsInput').value = tech.stats || '';
+      itemsList.addEventListener('click',async e=>{
+        const b=e.target;
+        if(b.classList.contains('editBtn')){
+          const {tree,branch,name}=b.dataset; await loadBranches(tree,branchSelect);
+          treeSelect.value=tree;branchSelect.value=branch;
+          const tsnap=await get(ref(db,`research_tree/${tree}/${branch}/${name}`));
+          if(!tsnap.exists())return; const tech=tsnap.val();
+          document.getElementById('nameInput').value=name; yearSelect.value=tech.year;
+          document.getElementById('costInput').value=tech.cost; document.getElementById('moneyCostInput').value=tech.moneyCost||100;
+          document.getElementById('imageInput').value=tech.image; document.getElementById('descInput').value=tech.description||'';
+          document.getElementById('statsInput').value=tech.stats||'';
+          // Clear and load prereqs
+          document.getElementById('prereqList').innerHTML='';
+          (tech.prerequisites||[]).forEach(addPrereqToForm);
           alert('Loaded into form (overwrite on save).');
         }
-        if (btn.classList.contains('delBtn')) {
-          const { tree, branch, name } = btn.dataset;
-          if (confirm(`Delete ${name}?`)) {
-            await remove(ref(db, `research_tree/${tree}/${branch}/${name}`));
-            alert(`${name} deleted.`);
-            loadItemsBtn.click();
+        if(b.classList.contains('delBtn')){
+          const {tree,branch,name}=b.dataset;
+          if(confirm(`Delete ${name}?`)){
+            await remove(ref(db,`research_tree/${tree}/${branch}/${name}`));
+            alert(`${name} deleted.`); loadItemsBtn.click();
           }
         }
       });
 
       // Save nation
-      saveNationBtn.addEventListener('click', async () => {
-        const nation = document.getElementById('nationNameInput').value.trim();
-        const rpWeek = +document.getElementById('rpWeekInput').value;
-        const banked = +document.getElementById('bankedInput').value;
-        const pass = document.getElementById('nationPassInput').value.trim();
-        if (!nation) return alert('Nation name required!');
-        const now = Math.floor(Date.now()/1000);
-        const nationRef = ref(db, `nations/${nation}`);
-        const snap = await get(nationRef);
-        const unlocked = snap.exists() ? snap.val().unlocked || {} : {};
-        await set(nationRef, { rp_per_week: rpWeek, banked_rp: banked, last_update: now, password: pass || 'default', unlocked });
+      saveNationBtn.addEventListener('click',async()=>{
+        const nation=document.getElementById('nationNameInput').value.trim();
+        const rpWeek=+document.getElementById('rpWeekInput').value,banked=+document.getElementById('bankedInput').value;
+        const pass=document.getElementById('nationPassInput').value.trim();
+        if(!nation)return alert('Nation name required!');
+        const now=Math.floor(Date.now()/1000),nref=ref(db,`nations/${nation}`),nsnap=await get(nref);
+        const unlocked=nsnap.exists()?nsnap.val().unlocked||{}:{};
+        await set(nref,{rp_per_week:rpWeek,banked_rp:banked,last_update:now,password:pass||'default',unlocked});
         alert(`${nation} saved/updated!`);
       });
 
-      // Modal logic
-      addPrereqBtn.addEventListener('click', () => {
-        // Load all items for search
-        loadAllResearchItems();
-        prereqModal.classList.add('visible');
-      });
-      // Close
-      closeBtns.forEach(btn => btn.addEventListener('click', () => prereqModal.classList.remove('visible')));
-      prereqModal.addEventListener('click', e => { if (e.target === prereqModal) prereqModal.classList.remove('visible'); });
+      // Modal open/close & logic
+      addPrereqBtn.addEventListener('click',()=>{loadAllResearchItems();prereqModal.classList.add('visible');});
+      closeBtns.forEach(cb=>cb.addEventListener('click',()=>prereqModal.classList.remove('visible')));
+      prereqModal.addEventListener('click',e=>{if(e.target===prereqModal)prereqModal.classList.remove('visible');});
 
-      // Prereq modal logic
-      let allItems = [];
-      async function loadAllResearchItems() {
-        allItems = [];
-        const snap = await get(ref(db, 'research_tree'));
-        if (!snap.exists()) return;
-        const data = snap.val();
-        for (const tree in data) {
-          for (const branch in data[tree]) {
-            for (const name in data[tree][branch]) {
-              allItems.push(name);
-            }
-          }
-        }
+      // Prereq modal selection logic
+      let allItems=[];
+      async function loadAllResearchItems(){
+        allItems=[]; const s=await get(ref(db,'research_tree')); if(!s.exists())return;
+        const d=s.val(); for(const tr in d)for(const br in d[tr])for(const nm in d[tr][br])allItems.push(nm);
         renderPrereqResults(allItems);
       }
-
-      function renderPrereqResults(list) {
-        prereqResults.innerHTML = '';
-        list.forEach(name => {
-          const div = document.createElement('div');
-          div.textContent = name;
-          div.style.cursor = 'pointer';
-          div.onclick = () => addModalPrereq(name);
-          prereqResults.appendChild(div);
-        });
+      function renderPrereqResults(list){
+        prereqResults.innerHTML='';
+        list.forEach(nm=>{const dv=document.createElement('div');dv.textContent=nm;dv.style.cursor='pointer';dv.onclick=()=>addModalPrereq(nm);prereqResults.appendChild(dv);});
       }
-
-      prereqSearch.addEventListener('input', () => {
-        const term = prereqSearch.value.toLowerCase();
-        renderPrereqResults(allItems.filter(n => n.toLowerCase().includes(term)));
-      });
-
-      function addModalPrereq(name) {
-        if ([...modalSelected.children].some(ch => ch.dataset.name === name)) return;
-        const span = document.createElement('span');
-        span.classList.add('prereq-item');
-        span.dataset.name = name;
-        span.textContent = name;
-        const xbtn = document.createElement('button');
-        xbtn.textContent = 'x';
-        xbtn.onclick = () => span.remove();
-        span.appendChild(xbtn);
-        modalSelected.appendChild(span);
+      prereqSearch.addEventListener('input',()=>{const t=prereqSearch.value.toLowerCase();renderPrereqResults(allItems.filter(nm=>nm.toLowerCase().includes(t)));});
+      function addModalPrereq(nm){
+        if([...modalSelected.children].some(ch=>ch.dataset.name===nm))return;
+        const sp=document.createElement('span');sp.className='prereq-item';sp.dataset.name=nm;sp.textContent=nm;
+        const xb=document.createElement('button');xb.textContent='x';xb.onclick=()=>sp.remove();sp.appendChild(xb);modalSelected.appendChild(sp);
       }
-
-      prereqDoneBtn.addEventListener('click', () => {
-        // Copy selections to form
-        const formList = document.getElementById('prereqList');
-        formList.innerHTML = '';
-        [...modalSelected.children].forEach(ch => {
-          const fm = ch.cloneNode(true);
-          const removeBtn = fm.querySelector('button');
-          removeBtn.onclick = () => fm.remove();
-          formList.appendChild(fm);
-        });
+      prereqDoneBtn.addEventListener('click',()=>{
+        const fl=document.getElementById('prereqList');fl.innerHTML='';
+        [...modalSelected.children].forEach(ch=>{const cl=ch.cloneNode(true);cl.querySelector('button').onclick=()=>cl.remove();fl.appendChild(cl);});
         prereqModal.classList.remove('visible');
       });
     });
