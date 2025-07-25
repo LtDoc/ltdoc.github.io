@@ -1,23 +1,23 @@
-
 <!DOCTYPE html>
 <html>
 <head>
-  <title>WW1 Tech Tree Admin (Clean Modal)</title>
+  <meta charset="UTF-8">
+  <title>WW1 Tech Tree Admin</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <!-- SINGLE modal definition -->
-  <div id="prereqModal" class="hidden" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;">
+  <div id="prereqModal" class="hidden" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:none;align-items:center;justify-content:center;">
     <div class="modal-content" style="background:#fff;padding:20px;border:2px solid #333;width:300px;text-align:center;">
       <h3>Prerequisite Modal</h3>
       <p>Placeholder modal content</p>
-      <button id="modalCloseBtn" onclick="document.getElementById('prereqModal').classList.add('hidden')">Close</button>
+      <button class="modal-close" onclick="document.getElementById('prereqModal').classList.add('hidden');document.getElementById('prereqModal').style.display='none';">Close</button>
     </div>
   </div>
 
-  <h1>Admin Panel (Clean)</h1>
+  <h1>Admin Panel</h1>
 
-  <!-- Add Research Form -->
+  <!-- Add Research Item -->
   <section>
     <h2>Add Research Item</h2>
     <label>Tree:
@@ -70,7 +70,7 @@
 
   <hr>
 
-  <!-- Add/Edit Nation -->
+  <!-- Add / Edit Nation -->
   <section>
     <h2>Add / Edit Nation</h2>
     <label>Nation Name: <input type="text" id="nationNameInput" placeholder="e.g. France"></label><br>
@@ -82,58 +82,50 @@
 
   <script type="module">
     import { db } from './firebase.js';
-    import { ref, get, set, update, remove } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+    import { ref, get, set, remove } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
 
     document.addEventListener('DOMContentLoaded', () => {
-      // Elements
+      // Element references
       const treeSelect = document.getElementById('treeSelect');
       const branchSelect = document.getElementById('branchSelect');
       const yearSelect = document.getElementById('yearInput');
       const saveResearchBtn = document.getElementById('saveResearchBtn');
-
       const manageTreeSelect = document.getElementById('manageTreeSelect');
       const manageBranchSelect = document.getElementById('manageBranchSelect');
       const loadItemsBtn = document.getElementById('loadItemsBtn');
       const itemsList = document.getElementById('itemsList');
-
       const saveNationBtn = document.getElementById('saveNationBtn');
-
       const prereqModal = document.getElementById('prereqModal');
       const addPrereqBtn = document.getElementById('addPrereqBtn');
 
-      // Populate year dropdown
+      // Populate Year dropdown
       function populateYearDropdown(select) {
         select.innerHTML = '';
         for (let y = 1850; y <= 1925; y++) {
-          let opt = document.createElement('option');
-          opt.value = y;
-          opt.textContent = y;
+          const opt = document.createElement('option');
+          opt.value = y; opt.textContent = y;
           select.appendChild(opt);
         }
       }
       populateYearDropdown(yearSelect);
 
-      // Load branches for a tree
+      // Load Branches
       async function loadBranches(tree, targetSelect) {
         targetSelect.innerHTML = '';
         const snap = await get(ref(db, `branches/${tree}`));
         if (snap.exists()) {
           snap.val().forEach(b => {
-            let opt = document.createElement('option');
-            opt.value = b;
-            opt.textContent = b;
+            const opt = document.createElement('option');
+            opt.value = b; opt.textContent = b;
             targetSelect.appendChild(opt);
           });
         }
       }
-
-      // Tree change events
-      treeSelect.addEventListener('change', () => loadBranches(treeSelect.value, branchSelect));
-      manageTreeSelect.addEventListener('change', () => loadBranches(manageTreeSelect.value, manageBranchSelect));
-
-      // Initial branch load
+      // Initial load & listeners
       loadBranches(treeSelect.value, branchSelect);
       loadBranches(manageTreeSelect.value, manageBranchSelect);
+      treeSelect.addEventListener('change', () => loadBranches(treeSelect.value, branchSelect));
+      manageTreeSelect.addEventListener('change', () => loadBranches(manageTreeSelect.value, manageBranchSelect));
 
       // Save Research Item
       saveResearchBtn.addEventListener('click', async () => {
@@ -145,19 +137,11 @@
         const image = document.getElementById('imageInput').value.trim();
         const desc = document.getElementById('descInput').value.trim();
         const stats = document.getElementById('statsInput').value.trim();
-        if (!branch || !name) {
-          alert('Branch and Name required!');
-          return;
-        }
-        const prereqs = Array.from(document.querySelectorAll('#prereqList .prereq-item')).map(el => el.dataset.name);
-        const researchRef = ref(db, `research_tree/${tree}/${branch}/${name}`);
-        await set(researchRef, {
-          year: year,
-          cost: cost,
-          image: image,
-          description: desc,
-          stats: stats,
-          prerequisites: prereqs
+        if (!branch || !name) return alert('Branch and Name required!');
+        const prereqs = Array.from(document.querySelectorAll('#prereqList .prereq-item'))
+                             .map(el => el.dataset.name);
+        await set(ref(db, `research_tree/${tree}/${branch}/${name}`), {
+          year, cost, image, description: desc, stats, prerequisites: prereqs
         });
         alert(`${name} saved to ${tree} > ${branch}`);
       });
@@ -166,48 +150,38 @@
       loadItemsBtn.addEventListener('click', async () => {
         const tree = manageTreeSelect.value;
         const branch = manageBranchSelect.value;
-        const branchRef = ref(db, `research_tree/${tree}/${branch}`);
-        const snap = await get(branchRef);
+        const snap = await get(ref(db, `research_tree/${tree}/${branch}`));
         itemsList.innerHTML = '';
-        if (!snap.exists()) {
-          itemsList.textContent = 'No items found.';
-          return;
-        }
-        const data = snap.val();
-        for (let name in data) {
-          const tech = data[name];
+        if (!snap.exists()) return itemsList.textContent = 'No items found.';
+        Object.entries(snap.val()).forEach(([name, tech]) => {
           const div = document.createElement('div');
           div.innerHTML = `<strong>${name}</strong> (${tech.year}) - Cost: ${tech.cost}
             <button class="editBtn" data-tree="${tree}" data-branch="${branch}" data-name="${name}">Edit</button>
             <button class="delBtn" data-tree="${tree}" data-branch="${branch}" data-name="${name}">Delete</button>`;
           itemsList.appendChild(div);
-        }
+        });
       });
 
-      // Edit/Delete delegation
-      itemsList.addEventListener('click', async (e) => {
-        if (e.target.classList.contains('editBtn')) {
-          const tree = e.target.dataset.tree;
-          const branch = e.target.dataset.branch;
-          const name = e.target.dataset.name;
+      // Edit/Delete Delegation
+      itemsList.addEventListener('click', async e => {
+        const btn = e.target;
+        if (btn.classList.contains('editBtn')) {
+          const { tree, branch, name } = btn.dataset;
           await loadBranches(tree, branchSelect);
           treeSelect.value = tree;
           branchSelect.value = branch;
-          const snap = await get(ref(db, `research_tree/${tree}/${branch}/${name}`));
-          if (!snap.exists()) return;
-          const tech = snap.val();
+          const techSnap = await get(ref(db, `research_tree/${tree}/${branch}/${name}`));
+          if (!techSnap.exists()) return;
+          const tech = techSnap.val();
           document.getElementById('nameInput').value = name;
           yearSelect.value = tech.year;
           document.getElementById('costInput').value = tech.cost;
           document.getElementById('imageInput').value = tech.image;
           document.getElementById('descInput').value = tech.description || '';
           document.getElementById('statsInput').value = tech.stats || '';
-          alert('Loaded into form. Saving will overwrite.');
-        }
-        if (e.target.classList.contains('delBtn')) {
-          const tree = e.target.dataset.tree;
-          const branch = e.target.dataset.branch;
-          const name = e.target.dataset.name;
+          alert('Loaded into form (saving will overwrite).');
+        } else if (btn.classList.contains('delBtn')) {
+          const { tree, branch, name } = btn.dataset;
           if (confirm(`Delete ${name}?`)) {
             await remove(ref(db, `research_tree/${tree}/${branch}/${name}`));
             alert(`${name} deleted.`);
@@ -218,37 +192,31 @@
 
       // Save Nation
       saveNationBtn.addEventListener('click', async () => {
-        const name = document.getElementById('nationNameInput').value.trim();
+        const nation = document.getElementById('nationNameInput').value.trim();
         const rpWeek = parseInt(document.getElementById('rpWeekInput').value);
         const banked = parseInt(document.getElementById('bankedInput').value);
         const pass = document.getElementById('nationPassInput').value.trim();
-        if (!name) {
-          alert('Nation name required!');
-          return;
-        }
+        if (!nation) return alert('Nation name required!');
         const now = Math.floor(Date.now()/1000);
-        const nationRef = ref(db, `nations/${name}`);
-        const snapshot = await get(nationRef);
-        let unlocked = {};
-        if (snapshot.exists()) unlocked = snapshot.val().unlocked || {};
-        await set(nationRef, {
-          rp_per_week: rpWeek,
-          banked_rp: banked,
-          last_update: now,
-          password: pass || 'default',
-          unlocked: unlocked
-        });
-        alert(`${name} saved/updated!`);
+        const nationRef = ref(db, `nations/${nation}`);
+        const snap = await get(nationRef);
+        const unlocked = snap.exists() ? snap.val().unlocked || {} : {};
+        await set(nationRef, { rp_per_week: rpWeek, banked_rp: banked, last_update: now, password: pass || 'default', unlocked });
+        alert(`${nation} saved/updated!`);
       });
 
-      // Modal open + outside click close
+      // Modal open / close
       addPrereqBtn.addEventListener('click', () => {
+        prereqModal.style.display = 'flex';
         prereqModal.classList.remove('hidden');
       });
-      prereqModal.addEventListener('click', (e) => {
-        if (e.target === prereqModal) prereqModal.classList.add('hidden');
+      // Close via outside click
+      prereqModal.addEventListener('click', e => {
+        if (e.target === prereqModal) {
+          prereqModal.style.display = 'none';
+          prereqModal.classList.add('hidden');
+        }
       });
-
     });
   </script>
 </body>
