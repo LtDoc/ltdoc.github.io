@@ -117,7 +117,7 @@
               node.innerHTML = `
                 <img src="${tech.image}" alt="${tech.name}">
                 <div class="tech-title">${tech.name}</div>
-                <div class="tech-cost">Cost: ${tech.cost} RP</div>
+                <div class="tech-cost">RP: ${tech.cost} | $${tech.moneyCost || 100}</div>
                 <div class="tech-desc" title="${tech.description || ''}">${tech.description || ''}</div>
                 <div class="tech-stats">${tech.stats || ''}</div>
                 ${prereqs.length > 0 ? `<div class="prereq">Req: ${prereqs.join(', ')}</div>` : ''}
