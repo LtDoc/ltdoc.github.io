@@ -48,7 +48,15 @@
       <label>Image URL: <input type="text" id="imageInput"></label><br>
       <label>Description:<br><textarea id="descInput" rows="3"></textarea></label><br>
       <label>Stats:<br><textarea id="statsInput" rows="2"></textarea></label><br>
-      <button type="submit">Add Research</button>
+      
+<div id="prereqContainer">
+  <strong>Prerequisites:</strong>
+  <div id="prereqList"></div>
+  <button type="button" onclick="openPrereqModal()">+ Add Prerequisite</button>
+</div>
+<br>
+<button type="submit">Add Research</button>
+
     </form>
   </section>
 
@@ -85,7 +93,8 @@
     }
 
     // Load branches for a tree
-    async function loadBranches(tree) {
+    function loadBranches(tree) {
+  return new Promise(async (resolve) => {
       branchSelect.innerHTML = '';
       const branchSnap = await get(ref(db, `branches/${tree}`));
       if (branchSnap.exists()) {
@@ -203,7 +212,135 @@
       showModal(`${name} saved/updated!`);
       addNationForm.reset();
     });
-  </script>
+  
+// --- Prerequisite Modal Logic ---
+let allResearchItems = []; // Will hold all items across all trees/branches
+const prereqModal = document.getElementById('prereqModal');
+const prereqSearch = document.getElementById('prereqSearch');
+const prereqSearchResults = document.getElementById('prereqSearchResults');
+const modalSelectedPrereqs = document.getElementById('modalSelectedPrereqs');
+
+async function openPrereqModal(){
+  // Load all research items once
+  allResearchItems = [];
+  const treeSnap = await get(ref(db, 'research_tree'));
+  if(treeSnap.exists()){
+    const data = treeSnap.val();
+    for(let tree in data){
+      for(let branch in data[tree]){
+        for(let name in data[tree][branch]){
+          allResearchItems.push(name);
+        }
+      }
+    }
+  }
+  renderPrereqSearchResults(allResearchItems);
+  modalSelectedPrereqs.innerHTML = '';
+  prereqSearch.value = '';
+  prereqModal.classList.remove('hidden');
+}
+
+function renderPrereqSearchResults(items){
+  prereqSearchResults.innerHTML = '';
+  items.forEach(item => {
+    const div = document.createElement('div');
+    div.textContent = item;
+    const addBtn = document.createElement('button');
+    addBtn.textContent = 'Add';
+    addBtn.style.marginLeft = '8px';
+    addBtn.onclick = () => {
+      addPrereqToModal(item);
+    };
+    div.appendChild(addBtn);
+    prereqSearchResults.appendChild(div);
+  });
+}
+
+function addPrereqToModal(name){
+  // avoid duplicates
+  if([...modalSelectedPrereqs.querySelectorAll('.prereq-item')].some(el => el.dataset.name === name)) return;
+  const span = document.createElement('span');
+  span.classList.add('prereq-item');
+  span.dataset.name = name;
+  span.style.display = 'inline-block';
+  span.style.margin = '2px';
+  span.style.padding = '2px 4px';
+  span.style.background = '#ddd';
+  span.style.border = '1px solid #999';
+  span.textContent = name + ' ';
+  const removeBtn = document.createElement('button');
+  removeBtn.textContent = 'x';
+  removeBtn.style.fontSize = '10px';
+  removeBtn.onclick = () => span.remove();
+  span.appendChild(removeBtn);
+  modalSelectedPrereqs.appendChild(span);
+}
+
+prereqSearch.addEventListener('input', () => {
+  const term = prereqSearch.value.toLowerCase();
+  const filtered = allResearchItems.filter(name => name.toLowerCase().includes(term));
+  renderPrereqSearchResults(filtered);
+});
+
+document.getElementById('prereqDoneBtn').addEventListener('click', () => {
+  const modalSelected = Array.from(modalSelectedPrereqs.querySelectorAll('.prereq-item')).map(el => el.dataset.name);
+  modalSelected.forEach(item => addPrereqToForm(item));
+  prereqModal.classList.add('hidden');
+});
+
+function addPrereqToForm(name){
+  // avoid duplicates
+  if([...document.querySelectorAll('#prereqList .prereq-item')].some(el => el.dataset.name === name)) return;
+  const span = document.createElement('span');
+  span.classList.add('prereq-item');
+  span.dataset.name = name;
+  span.style.display = 'inline-block';
+  span.style.margin = '2px';
+  span.style.padding = '2px 4px';
+  span.style.background = '#eee';
+  span.style.border = '1px solid #999';
+  span.textContent = name + ' ';
+  const removeBtn = document.createElement('button');
+  removeBtn.textContent = 'x';
+  removeBtn.style.fontSize = '10px';
+  removeBtn.onclick = () => span.remove();
+  span.appendChild(removeBtn);
+  document.getElementById('prereqList').appendChild(span);
+}
+
+// Modify save logic to include prereqs from form
+const oldAddResearchSubmit = addResearchForm.onsubmit;
+addResearchForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const tree = treeSelect.value;
+  const branch = branchSelect.value;
+  const name = document.getElementById('nameInput').value.trim();
+  const year = parseInt(yearSelect.value);
+  const cost = parseInt(document.getElementById('costInput').value);
+  const image = document.getElementById('imageInput').value.trim();
+  const desc = document.getElementById('descInput').value.trim();
+  const stats = document.getElementById('statsInput').value.trim();
+  if (!branch || !name) {
+    showModal('Branch and Name required!');
+    return;
+  }
+  const prereqs = Array.from(document.querySelectorAll('#prereqList .prereq-item')).map(el => el.dataset.name);
+  const researchRef = ref(db, `research_tree/${tree}/${branch}/${name}`);
+  await set(researchRef, {
+    year: year,
+    cost: cost,
+    image: image,
+    description: desc,
+    stats: stats,
+    prerequisites: prereqs
+  });
+  showModal(`${name} added to ${tree} > ${branch}`);
+  addResearchForm.reset();
+  document.getElementById('prereqList').innerHTML = '';
+  loadBranches(treeSelect.value);
+});
+</script>
+
 
   <hr>
   <section>
@@ -274,7 +411,7 @@
       const tech = snap.val();
       // Set tree & reload branches
       document.getElementById('treeSelect').value = tree;
-      await loadBranches(tree);
+      await loadBranches(tree); // wait for branches to populate
       document.getElementById('branchSelect').value = branch;
       document.getElementById('nameInput').value = name;
       document.getElementById('yearInput').value = tech.year;
@@ -288,7 +425,7 @@
       if (!snap.exists()) return;
       const tech = snap.val();
       document.getElementById('treeSelect').value = tree;
-      await loadBranches(tree);
+      await loadBranches(tree); // wait for branches to populate
       document.getElementById('branchSelect').value = branch;
       document.getElementById('nameInput').value = name;
       document.getElementById('yearInput').value = tech.year;
@@ -305,7 +442,135 @@
       alert(`${name} deleted.`);
       loadItemsBtn.click();
     }
-  </script>
+  
+// --- Prerequisite Modal Logic ---
+let allResearchItems = []; // Will hold all items across all trees/branches
+const prereqModal = document.getElementById('prereqModal');
+const prereqSearch = document.getElementById('prereqSearch');
+const prereqSearchResults = document.getElementById('prereqSearchResults');
+const modalSelectedPrereqs = document.getElementById('modalSelectedPrereqs');
+
+async function openPrereqModal(){
+  // Load all research items once
+  allResearchItems = [];
+  const treeSnap = await get(ref(db, 'research_tree'));
+  if(treeSnap.exists()){
+    const data = treeSnap.val();
+    for(let tree in data){
+      for(let branch in data[tree]){
+        for(let name in data[tree][branch]){
+          allResearchItems.push(name);
+        }
+      }
+    }
+  }
+  renderPrereqSearchResults(allResearchItems);
+  modalSelectedPrereqs.innerHTML = '';
+  prereqSearch.value = '';
+  prereqModal.classList.remove('hidden');
+}
+
+function renderPrereqSearchResults(items){
+  prereqSearchResults.innerHTML = '';
+  items.forEach(item => {
+    const div = document.createElement('div');
+    div.textContent = item;
+    const addBtn = document.createElement('button');
+    addBtn.textContent = 'Add';
+    addBtn.style.marginLeft = '8px';
+    addBtn.onclick = () => {
+      addPrereqToModal(item);
+    };
+    div.appendChild(addBtn);
+    prereqSearchResults.appendChild(div);
+  });
+}
+
+function addPrereqToModal(name){
+  // avoid duplicates
+  if([...modalSelectedPrereqs.querySelectorAll('.prereq-item')].some(el => el.dataset.name === name)) return;
+  const span = document.createElement('span');
+  span.classList.add('prereq-item');
+  span.dataset.name = name;
+  span.style.display = 'inline-block';
+  span.style.margin = '2px';
+  span.style.padding = '2px 4px';
+  span.style.background = '#ddd';
+  span.style.border = '1px solid #999';
+  span.textContent = name + ' ';
+  const removeBtn = document.createElement('button');
+  removeBtn.textContent = 'x';
+  removeBtn.style.fontSize = '10px';
+  removeBtn.onclick = () => span.remove();
+  span.appendChild(removeBtn);
+  modalSelectedPrereqs.appendChild(span);
+}
+
+prereqSearch.addEventListener('input', () => {
+  const term = prereqSearch.value.toLowerCase();
+  const filtered = allResearchItems.filter(name => name.toLowerCase().includes(term));
+  renderPrereqSearchResults(filtered);
+});
+
+document.getElementById('prereqDoneBtn').addEventListener('click', () => {
+  const modalSelected = Array.from(modalSelectedPrereqs.querySelectorAll('.prereq-item')).map(el => el.dataset.name);
+  modalSelected.forEach(item => addPrereqToForm(item));
+  prereqModal.classList.add('hidden');
+});
+
+function addPrereqToForm(name){
+  // avoid duplicates
+  if([...document.querySelectorAll('#prereqList .prereq-item')].some(el => el.dataset.name === name)) return;
+  const span = document.createElement('span');
+  span.classList.add('prereq-item');
+  span.dataset.name = name;
+  span.style.display = 'inline-block';
+  span.style.margin = '2px';
+  span.style.padding = '2px 4px';
+  span.style.background = '#eee';
+  span.style.border = '1px solid #999';
+  span.textContent = name + ' ';
+  const removeBtn = document.createElement('button');
+  removeBtn.textContent = 'x';
+  removeBtn.style.fontSize = '10px';
+  removeBtn.onclick = () => span.remove();
+  span.appendChild(removeBtn);
+  document.getElementById('prereqList').appendChild(span);
+}
+
+// Modify save logic to include prereqs from form
+const oldAddResearchSubmit = addResearchForm.onsubmit;
+addResearchForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const tree = treeSelect.value;
+  const branch = branchSelect.value;
+  const name = document.getElementById('nameInput').value.trim();
+  const year = parseInt(yearSelect.value);
+  const cost = parseInt(document.getElementById('costInput').value);
+  const image = document.getElementById('imageInput').value.trim();
+  const desc = document.getElementById('descInput').value.trim();
+  const stats = document.getElementById('statsInput').value.trim();
+  if (!branch || !name) {
+    showModal('Branch and Name required!');
+    return;
+  }
+  const prereqs = Array.from(document.querySelectorAll('#prereqList .prereq-item')).map(el => el.dataset.name);
+  const researchRef = ref(db, `research_tree/${tree}/${branch}/${name}`);
+  await set(researchRef, {
+    year: year,
+    cost: cost,
+    image: image,
+    description: desc,
+    stats: stats,
+    prerequisites: prereqs
+  });
+  showModal(`${name} added to ${tree} > ${branch}`);
+  addResearchForm.reset();
+  document.getElementById('prereqList').innerHTML = '';
+  loadBranches(treeSelect.value);
+});
+</script>
+
 
 <div id="modal" class="modal hidden">
   <div class="modal-content">
@@ -335,7 +600,147 @@ function showModal(message, buttons = [{ text: "OK" }]) {
 function hideModal() {
   document.getElementById('modal').classList.add('hidden');
 }
+
+// --- Prerequisite Modal Logic ---
+let allResearchItems = []; // Will hold all items across all trees/branches
+const prereqModal = document.getElementById('prereqModal');
+const prereqSearch = document.getElementById('prereqSearch');
+const prereqSearchResults = document.getElementById('prereqSearchResults');
+const modalSelectedPrereqs = document.getElementById('modalSelectedPrereqs');
+
+async function openPrereqModal(){
+  // Load all research items once
+  allResearchItems = [];
+  const treeSnap = await get(ref(db, 'research_tree'));
+  if(treeSnap.exists()){
+    const data = treeSnap.val();
+    for(let tree in data){
+      for(let branch in data[tree]){
+        for(let name in data[tree][branch]){
+          allResearchItems.push(name);
+        }
+      }
+    }
+  }
+  renderPrereqSearchResults(allResearchItems);
+  modalSelectedPrereqs.innerHTML = '';
+  prereqSearch.value = '';
+  prereqModal.classList.remove('hidden');
+}
+
+function renderPrereqSearchResults(items){
+  prereqSearchResults.innerHTML = '';
+  items.forEach(item => {
+    const div = document.createElement('div');
+    div.textContent = item;
+    const addBtn = document.createElement('button');
+    addBtn.textContent = 'Add';
+    addBtn.style.marginLeft = '8px';
+    addBtn.onclick = () => {
+      addPrereqToModal(item);
+    };
+    div.appendChild(addBtn);
+    prereqSearchResults.appendChild(div);
+  });
+}
+
+function addPrereqToModal(name){
+  // avoid duplicates
+  if([...modalSelectedPrereqs.querySelectorAll('.prereq-item')].some(el => el.dataset.name === name)) return;
+  const span = document.createElement('span');
+  span.classList.add('prereq-item');
+  span.dataset.name = name;
+  span.style.display = 'inline-block';
+  span.style.margin = '2px';
+  span.style.padding = '2px 4px';
+  span.style.background = '#ddd';
+  span.style.border = '1px solid #999';
+  span.textContent = name + ' ';
+  const removeBtn = document.createElement('button');
+  removeBtn.textContent = 'x';
+  removeBtn.style.fontSize = '10px';
+  removeBtn.onclick = () => span.remove();
+  span.appendChild(removeBtn);
+  modalSelectedPrereqs.appendChild(span);
+}
+
+prereqSearch.addEventListener('input', () => {
+  const term = prereqSearch.value.toLowerCase();
+  const filtered = allResearchItems.filter(name => name.toLowerCase().includes(term));
+  renderPrereqSearchResults(filtered);
+});
+
+document.getElementById('prereqDoneBtn').addEventListener('click', () => {
+  const modalSelected = Array.from(modalSelectedPrereqs.querySelectorAll('.prereq-item')).map(el => el.dataset.name);
+  modalSelected.forEach(item => addPrereqToForm(item));
+  prereqModal.classList.add('hidden');
+});
+
+function addPrereqToForm(name){
+  // avoid duplicates
+  if([...document.querySelectorAll('#prereqList .prereq-item')].some(el => el.dataset.name === name)) return;
+  const span = document.createElement('span');
+  span.classList.add('prereq-item');
+  span.dataset.name = name;
+  span.style.display = 'inline-block';
+  span.style.margin = '2px';
+  span.style.padding = '2px 4px';
+  span.style.background = '#eee';
+  span.style.border = '1px solid #999';
+  span.textContent = name + ' ';
+  const removeBtn = document.createElement('button');
+  removeBtn.textContent = 'x';
+  removeBtn.style.fontSize = '10px';
+  removeBtn.onclick = () => span.remove();
+  span.appendChild(removeBtn);
+  document.getElementById('prereqList').appendChild(span);
+}
+
+// Modify save logic to include prereqs from form
+const oldAddResearchSubmit = addResearchForm.onsubmit;
+addResearchForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const tree = treeSelect.value;
+  const branch = branchSelect.value;
+  const name = document.getElementById('nameInput').value.trim();
+  const year = parseInt(yearSelect.value);
+  const cost = parseInt(document.getElementById('costInput').value);
+  const image = document.getElementById('imageInput').value.trim();
+  const desc = document.getElementById('descInput').value.trim();
+  const stats = document.getElementById('statsInput').value.trim();
+  if (!branch || !name) {
+    showModal('Branch and Name required!');
+    return;
+  }
+  const prereqs = Array.from(document.querySelectorAll('#prereqList .prereq-item')).map(el => el.dataset.name);
+  const researchRef = ref(db, `research_tree/${tree}/${branch}/${name}`);
+  await set(researchRef, {
+    year: year,
+    cost: cost,
+    image: image,
+    description: desc,
+    stats: stats,
+    prerequisites: prereqs
+  });
+  showModal(`${name} added to ${tree} > ${branch}`);
+  addResearchForm.reset();
+  document.getElementById('prereqList').innerHTML = '';
+  loadBranches(treeSelect.value);
+});
 </script>
+
+
+<div id="prereqModal" class="modal hidden">
+  <div class="modal-content" style="width:400px;max-height:80%;overflow:auto;">
+    <h3>Select Prerequisites</h3>
+    <input type="text" id="prereqSearch" placeholder="Search..." style="width:100%;margin-bottom:8px;">
+    <div id="prereqSearchResults" style="max-height:200px;overflow-y:auto;border:1px solid #ccc;margin-bottom:8px;"></div>
+    <h4>Selected:</h4>
+    <div id="modalSelectedPrereqs" style="min-height:40px;border:1px solid #ccc;margin-bottom:8px;padding:4px;"></div>
+    <button id="prereqDoneBtn">Done</button>
+  </div>
+</div>
+
 </body>
 
 
