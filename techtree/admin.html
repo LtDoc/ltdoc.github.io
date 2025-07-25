@@ -2,227 +2,46 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>WW1 Tech Tree Admin</title>
+  <title>WW1 Tech Tree Admin (Refactored)</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h1>Admin Panel</h1>
+  <h1>Admin Panel (Clean)</h1>
 
-  <section>
-    <h2>Add Branch</h2>
-    <form id="addBranchForm">
-      <label>Tree:
-        <select id="branchTreeSelect">
-          <option value="Navy">Navy</option>
-          <option value="Army">Army</option>
-          <option value="Engineering">Engineering</option>
-          <option value="Society">Society</option>
-        </select>
-      </label><br>
-      <label>Branch Name: <input type="text" id="branchNameInput" placeholder="e.g. Battleships"></label><br>
-      <button type="submit">Add Branch</button>
-    </form>
-  </section>
-
-  <hr>
-
+  <!-- Add Research Form -->
   <section>
     <h2>Add Research Item</h2>
-    <form id="addResearchForm">
-      <label>Tree:
-        <select id="treeSelect">
-          <option value="Navy">Navy</option>
-          <option value="Army">Army</option>
-          <option value="Engineering">Engineering</option>
-          <option value="Society">Society</option>
-        </select>
-      </label><br>
-      <label>Branch:
-        <select id="branchSelect"></select>
-      </label><br>
-      <label>Name: <input type="text" id="nameInput" placeholder="e.g. Edward-class Battleship"></label><br>
-      <label>Year:
-        <select id="yearInput"></select>
-      </label><br>
-      <label>Cost: <input type="number" id="costInput"></label><br>
-      <label>Image URL: <input type="text" id="imageInput"></label><br>
-      <label>Description:<br><textarea id="descInput" rows="3"></textarea></label><br>
-      <label>Stats:<br><textarea id="statsInput" rows="2"></textarea></label><br>
-      <button type="submit">Add Research</button>
-    </form>
+    <label>Tree:
+      <select id="treeSelect">
+        <option value="Navy">Navy</option>
+        <option value="Army">Army</option>
+        <option value="Engineering">Engineering</option>
+        <option value="Society">Society</option>
+      </select>
+    </label><br>
+    <label>Branch:
+      <select id="branchSelect"></select>
+    </label><br>
+    <label>Name: <input type="text" id="nameInput" placeholder="e.g. Edward-class Battleship"></label><br>
+    <label>Year:
+      <select id="yearInput"></select>
+    </label><br>
+    <label>Cost: <input type="number" id="costInput"></label><br>
+    <label>Image URL: <input type="text" id="imageInput"></label><br>
+    <label>Description:<br><textarea id="descInput" rows="3"></textarea></label><br>
+    <label>Stats:<br><textarea id="statsInput" rows="2"></textarea></label><br>
+    <div id="prereqContainer">
+      <strong>Prerequisites:</strong>
+      <div id="prereqList"></div>
+      <button type="button" id="addPrereqBtn">+ Add Prerequisite</button>
+    </div>
+    <br>
+    <button id="saveResearchBtn">Save Research</button>
   </section>
 
   <hr>
 
-  <section>
-    <h2>Add / Edit Nation</h2>
-    <form id="addNationForm">
-      <label>Nation Name: <input type="text" id="nationNameInput" placeholder="e.g. France"></label><br>
-      <label>RP per Week: <input type="number" id="rpWeekInput"></label><br>
-      <label>Banked RP: <input type="number" id="bankedInput"></label><br>
-      <label>Password: <input type="text" id="nationPassInput" placeholder="Nation password"></label><br>
-      <button type="submit">Save Nation</button>
-    </form>
-  </section>
-
-  <script type="module">
-    import { db } from './firebase.js';
-    import { ref, set, get, update } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
-
-    const addBranchForm = document.getElementById('addBranchForm');
-    const addResearchForm = document.getElementById('addResearchForm');
-    const addNationForm = document.getElementById('addNationForm');
-    const branchSelect = document.getElementById('branchSelect');
-    const treeSelect = document.getElementById('treeSelect');
-
-    // Populate year dropdown
-    const yearSelect = document.getElementById('yearInput');
-yearSelect.innerHTML='';
-for(let y=1850;y<=1925;y++){let opt=document.createElement('option');opt.value=y;opt.textContent=y;yearSelect.appendChild(opt);}
-    for (let y = 1850; y <= 1925; y++) {
-      const opt = document.createElement('option');
-      opt.value = y;
-      opt.textContent = y;
-      yearSelect.appendChild(opt);
-    }
-
-    // Load branches for a tree
-    
-async function loadBranches(tree, targetSelect) {
-  targetSelect.innerHTML = '';
-  const branchSnap = await get(ref(db, `branches/${tree}`));
-  if (branchSnap.exists()) {
-    branchSnap.val().forEach(b => {
-      let opt = document.createElement('option');
-      opt.value = b;
-      opt.textContent = b;
-      targetSelect.appendChild(opt);
-    });
-  }
-}
-
-  
-      branchSelect.innerHTML = '';
-      const branchSnap = await get(ref(db, `branches/${tree}`));
-      if (branchSnap.exists()) {
-        branchSnap.val().forEach(b => {
-          const opt = document.createElement('option');
-          opt.value = b;
-          opt.textContent = b;
-          branchSelect.appendChild(opt);
-      
-      }
-    }
-
-    treeSelect.addEventListener('change', e => {
-  loadBranches(e.target.value, branchSelect);
-      loadBranches(e.target.value);
-  
-
-    // Initial load branches for default tree
-    loadBranches('Navy');
-
-    // Add Branch
-    addBranchForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const tree = document.getElementById('branchTreeSelect').value;
-      const branchName = document.getElementById('branchNameInput').value.trim();
-      if (!branchName) {
-        showModal('Branch name required!');
-        return;
-      }
-      const branchRef = ref(db, `branches/${tree}`);
-      const branchSnapData = await get(branchRef);
-      let branches = [];
-      if (snap.exists()) {
-        branches = snap.val();
-      }
-      if (!branches.includes(branchName)) {
-        branches.push(branchName);
-      }
-      await set(branchRef, branches);
-      showModal(`Branch ${branchName} added to ${tree}`);
-      document.getElementById('branchNameInput').value = '';
-      if (tree === treeSelect.value) loadBranches(treeSelect.value);
-  
-
-    // Add Research
-    addResearchForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const tree = treeSelect.value;
-      const branch = branchSelect.value;
-      const name = document.getElementById('nameInput').value.trim();
-      const year = parseInt(yearSelect.value);
-      const cost = parseInt(document.getElementById('costInput').value);
-      const image = document.getElementById('imageInput').value.trim();
-      const desc = document.getElementById('descInput').value.trim();
-      const stats = document.getElementById('statsInput').value.trim();
-
-      if (!branch || !name) {
-        alert('Branch and Name required!');
-        return;
-      }
-
-      // Auto-calc prerequisites
-      const prevRangeStart = year - 5;
-      let prereqs = [];
-      const branchRef = ref(db, `research_tree/${tree}/${branch}`);
-      const branchSnap = await get(branchRef);
-      if (branchSnap.exists()) {
-        for (let tname in branchSnap.val()) {
-          let tech = branchSnap.val()[tname];
-          if (tech.year >= prevRangeStart && tech.year < year) {
-            prereqs.push(tname);
-          }
-        }
-      }
-
-      const researchRef = ref(db, `research_tree/${tree}/${branch}/${name}`);
-      await set(researchRef, {
-        year: year,
-        cost: cost,
-        image: image,
-        description: desc,
-        stats: stats,
-        prerequisites: prereqs
-    
-
-      showModal(`${name} added to ${tree} > ${branch} with prerequisites: ${prereqs.join(', ')}`);
-      addResearchForm.reset();
-      loadBranches(treeSelect.value);
-  
-
-    // Add / Edit Nation
-    addNationForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const name = document.getElementById('nationNameInput').value.trim();
-      const rpWeek = parseInt(document.getElementById('rpWeekInput').value);
-      const banked = parseInt(document.getElementById('bankedInput').value);
-      const pass = document.getElementById('nationPassInput').value.trim();
-      if (!name) {
-        showModal('Nation name required!');
-        return;
-      }
-      const now = Math.floor(Date.now()/1000);
-      const nationRef = ref(db, `nations/${name}`);
-      const snapshot = await get(nationRef);
-      let unlocked = {};
-      if (snapshot.exists()) {
-        unlocked = snapshot.val().unlocked || {};
-      }
-      await set(nationRef, {
-        rp_per_week: rpWeek,
-        banked_rp: banked,
-        last_update: now,
-        password: pass || 'default',
-        unlocked: unlocked
-    
-      showModal(`${name} saved/updated!`);
-      addNationForm.reset();
-  
-  </script>
-
-  <hr>
+  <!-- Manage Existing Items -->
   <section>
     <h2>Manage Existing Items</h2>
     <label>Tree:
@@ -240,134 +59,201 @@ async function loadBranches(tree, targetSelect) {
     <div id="itemsList"></div>
   </section>
 
+  <hr>
+
+  <!-- Add/Edit Nation -->
+  <section>
+    <h2>Add / Edit Nation</h2>
+    <label>Nation Name: <input type="text" id="nationNameInput" placeholder="e.g. France"></label><br>
+    <label>RP per Week: <input type="number" id="rpWeekInput"></label><br>
+    <label>Banked RP: <input type="number" id="bankedInput"></label><br>
+    <label>Password: <input type="text" id="nationPassInput" placeholder="Nation password"></label><br>
+    <button id="saveNationBtn">Save Nation</button>
+  </section>
+
+  <!-- Simple Modal Placeholder -->
+  <div id="prereqModal" class="hidden" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;">
+    <div class="modal-content" style="background:#fff;padding:20px;border:2px solid #333;width:300px;text-align:center;">
+      <h3>Prerequisite Modal</h3>
+      <p>Placeholder modal content</p>
+      <button id="modalCloseBtn">Close</button>
+    </div>
+  </div>
+
   <script type="module">
     import { db } from './firebase.js';
-    import { ref, get, remove } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+    import { ref, get, set, update, remove } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
 
-    const manageTreeSelect = document.getElementById('manageTreeSelect');
-    const manageBranchSelect = document.getElementById('manageBranchSelect');
-    const itemsList = document.getElementById('itemsList');
-    const loadItemsBtn = document.getElementById('loadItemsBtn');
+    document.addEventListener('DOMContentLoaded', () => {
+      // Elements
+      const treeSelect = document.getElementById('treeSelect');
+      const branchSelect = document.getElementById('branchSelect');
+      const yearSelect = document.getElementById('yearInput');
+      const saveResearchBtn = document.getElementById('saveResearchBtn');
 
-    async function loadManageBranches(tree) {
-      manageBranchSelect.innerHTML = '';
-      const branchSnap = await get(ref(db, `branches/${tree}`));
-      if (branchSnap.exists()) {
-        branchSnap.val().forEach(b => {
-          const opt = document.createElement('option');
-          opt.value = b;
-          opt.textContent = b;
-          manageBranchSelect.appendChild(opt);
-      
+      const manageTreeSelect = document.getElementById('manageTreeSelect');
+      const manageBranchSelect = document.getElementById('manageBranchSelect');
+      const loadItemsBtn = document.getElementById('loadItemsBtn');
+      const itemsList = document.getElementById('itemsList');
+
+      const saveNationBtn = document.getElementById('saveNationBtn');
+
+      const prereqModal = document.getElementById('prereqModal');
+      const addPrereqBtn = document.getElementById('addPrereqBtn');
+      const modalCloseBtn = document.getElementById('modalCloseBtn');
+
+      // Populate year dropdown
+      function populateYearDropdown(select) {
+        select.innerHTML = '';
+        for (let y = 1850; y <= 1925; y++) {
+          let opt = document.createElement('option');
+          opt.value = y;
+          opt.textContent = y;
+          select.appendChild(opt);
+        }
       }
-    }
-    manageTreeSelect.addEventListener('change', e => loadBranches(e.target.value, manageBranchSelect));
-    loadManageBranches('Navy');
+      populateYearDropdown(yearSelect);
 
-    loadItemsBtn.addEventListener('click', async () => {
-      const tree = manageTreeSelect.value;
-      const branch = manageBranchSelect.value;
-      const branchRef = ref(db, `research_tree/${tree}/${branch}`);
-      const branchSnapData = await get(branchRef);
-      itemsList.innerHTML = '';
-      if (!snap.exists()) {
-        itemsList.innerHTML = '<p>No items found.</p>';
-        return;
+      // Load branches for a tree
+      async function loadBranches(tree, targetSelect) {
+        targetSelect.innerHTML = '';
+        const snap = await get(ref(db, `branches/${tree}`));
+        if (snap.exists()) {
+          snap.val().forEach(b => {
+            let opt = document.createElement('option');
+            opt.value = b;
+            opt.textContent = b;
+            targetSelect.appendChild(opt);
+          });
+        }
       }
-      const data = snap.val();
-      for (let name in data) {
-        const tech = data[name];
-        const div = document.createElement('div');
-        div.innerHTML = `<strong>${name}</strong> (${tech.year}) - Cost: ${tech.cost} 
-          <button onclick="editItem('${tree}','${branch}','${name}')">Edit</button>
-          <button onclick="deleteItem('${tree}','${branch}','${name}')">Delete</button>`;
-        itemsList.appendChild(div);
-      }
-  
 
-    window.editItem = async function(tree, branch, name) {
-      const branchSnapData = await get(ref(db, `research_tree/${tree}/${branch}/${name}`));
-      if (!snap.exists()) return;
-      const tech = snap.val();
-      // Set tree & reload branches
-      document.getElementById('treeSelect').value = tree;
-      await loadBranches(tree); // wait for branches to populate
-      document.getElementById('branchSelect').value = branch;
-      document.getElementById('nameInput').value = name;
-      document.getElementById('yearInput').value = tech.year;
-      document.getElementById('costInput').value = tech.cost;
-      document.getElementById('imageInput').value = tech.image;
-      document.getElementById('descInput').value = tech.description || '';
-      document.getElementById('statsInput').value = tech.stats || '';
-      showModal('Loaded into Add Research form. Saving will overwrite existing data.');
-    
-      const branchSnapData = await get(ref(db, `research_tree/${tree}/${branch}/${name}`));
-      if (!snap.exists()) return;
-      const tech = snap.val();
-      document.getElementById('treeSelect').value = tree;
-      await loadBranches(tree); // wait for branches to populate
-      document.getElementById('branchSelect').value = branch;
-      document.getElementById('nameInput').value = name;
-      document.getElementById('yearInput').value = tech.year;
-      document.getElementById('costInput').value = tech.cost;
-      document.getElementById('imageInput').value = tech.image;
-      document.getElementById('descInput').value = tech.description || '';
-      document.getElementById('statsInput').value = tech.stats || '';
-      alert('Loaded into Add Research form. Saving will overwrite.');
-    }
+      // Tree change events
+      treeSelect.addEventListener('change', () => loadBranches(treeSelect.value, branchSelect));
+      manageTreeSelect.addEventListener('change', () => loadBranches(manageTreeSelect.value, manageBranchSelect));
 
-    window.deleteItem = async function(tree, branch, name) {
-      showModal(`Delete ${name}?`, [ { text: 'Cancel' }, { text: 'Delete', action: () => actuallyDeleteItem(tree, branch, name) } ]); return;
-      async function actuallyDeleteItem(tree, branch, name){ await remove(ref(db, `research_tree/${tree}/${branch}/${name}`)); showModal(`${name} deleted.`); loadItemsBtn.click(); }
-      alert(`${name} deleted.`);
-      loadItemsBtn.click();
-    }
+      // Initial branch load
+      loadBranches(treeSelect.value, branchSelect);
+      loadBranches(manageTreeSelect.value, manageBranchSelect);
+
+      // Save Research Item
+      saveResearchBtn.addEventListener('click', async () => {
+        const tree = treeSelect.value;
+        const branch = branchSelect.value;
+        const name = document.getElementById('nameInput').value.trim();
+        const year = parseInt(yearSelect.value);
+        const cost = parseInt(document.getElementById('costInput').value);
+        const image = document.getElementById('imageInput').value.trim();
+        const desc = document.getElementById('descInput').value.trim();
+        const stats = document.getElementById('statsInput').value.trim();
+        if (!branch || !name) {
+          alert('Branch and Name required!');
+          return;
+        }
+        const prereqs = Array.from(document.querySelectorAll('#prereqList .prereq-item')).map(el => el.dataset.name);
+        const researchRef = ref(db, `research_tree/${tree}/${branch}/${name}`);
+        await set(researchRef, {
+          year: year,
+          cost: cost,
+          image: image,
+          description: desc,
+          stats: stats,
+          prerequisites: prereqs
+        });
+        alert(`${name} saved to ${tree} > ${branch}`);
+      });
+
+      // Load Manage Items
+      loadItemsBtn.addEventListener('click', async () => {
+        const tree = manageTreeSelect.value;
+        const branch = manageBranchSelect.value;
+        const branchRef = ref(db, `research_tree/${tree}/${branch}`);
+        const snap = await get(branchRef);
+        itemsList.innerHTML = '';
+        if (!snap.exists()) {
+          itemsList.textContent = 'No items found.';
+          return;
+        }
+        const data = snap.val();
+        for (let name in data) {
+          const tech = data[name];
+          const div = document.createElement('div');
+          div.innerHTML = `<strong>${name}</strong> (${tech.year}) - Cost: ${tech.cost}
+            <button class="editBtn" data-tree="${tree}" data-branch="${branch}" data-name="${name}">Edit</button>
+            <button class="delBtn" data-tree="${tree}" data-branch="${branch}" data-name="${name}">Delete</button>`;
+          itemsList.appendChild(div);
+        }
+      });
+
+      // Edit/Delete delegation
+      itemsList.addEventListener('click', async (e) => {
+        if (e.target.classList.contains('editBtn')) {
+          const tree = e.target.dataset.tree;
+          const branch = e.target.dataset.branch;
+          const name = e.target.dataset.name;
+          await loadBranches(tree, branchSelect);
+          treeSelect.value = tree;
+          branchSelect.value = branch;
+          const snap = await get(ref(db, `research_tree/${tree}/${branch}/${name}`));
+          if (!snap.exists()) return;
+          const tech = snap.val();
+          document.getElementById('nameInput').value = name;
+          yearSelect.value = tech.year;
+          document.getElementById('costInput').value = tech.cost;
+          document.getElementById('imageInput').value = tech.image;
+          document.getElementById('descInput').value = tech.description || '';
+          document.getElementById('statsInput').value = tech.stats || '';
+          alert('Loaded into form. Saving will overwrite.');
+        }
+        if (e.target.classList.contains('delBtn')) {
+          const tree = e.target.dataset.tree;
+          const branch = e.target.dataset.branch;
+          const name = e.target.dataset.name;
+          if (confirm(`Delete ${name}?`)) {
+            await remove(ref(db, `research_tree/${tree}/${branch}/${name}`));
+            alert(`${name} deleted.`);
+            loadItemsBtn.click();
+          }
+        }
+      });
+
+      // Save Nation
+      saveNationBtn.addEventListener('click', async () => {
+        const name = document.getElementById('nationNameInput').value.trim();
+        const rpWeek = parseInt(document.getElementById('rpWeekInput').value);
+        const banked = parseInt(document.getElementById('bankedInput').value);
+        const pass = document.getElementById('nationPassInput').value.trim();
+        if (!name) {
+          alert('Nation name required!');
+          return;
+        }
+        const now = Math.floor(Date.now()/1000);
+        const nationRef = ref(db, `nations/${name}`);
+        const snapshot = await get(nationRef);
+        let unlocked = {};
+        if (snapshot.exists()) unlocked = snapshot.val().unlocked || {};
+        await set(nationRef, {
+          rp_per_week: rpWeek,
+          banked_rp: banked,
+          last_update: now,
+          password: pass || 'default',
+          unlocked: unlocked
+        });
+        alert(`${name} saved/updated!`);
+      });
+
+      // Modal open/close
+      addPrereqBtn.addEventListener('click', () => {
+        prereqModal.classList.remove('hidden');
+      });
+      modalCloseBtn.addEventListener('click', () => {
+        prereqModal.classList.add('hidden');
+      });
+      prereqModal.addEventListener('click', (e) => {
+        if (e.target === prereqModal) prereqModal.classList.add('hidden');
+      });
+
+    });
   </script>
-
-<div id="modal" class="modal hidden">
-  <div class="modal-content">
-    <p id="modalMessage"></p>
-    <div class="modal-actions" id="modalActions"></div>
-  </div>
-</div>
-
-<script>
-function showModal(message, buttons = [{ text: "OK" }]) {
-  const modal = document.getElementById('modal');
-  const modalMsg = document.getElementById('modalMessage');
-  const modalActions = document.getElementById('modalActions');
-  modalMsg.textContent = message;
-  modalActions.innerHTML = '';
-  buttons.forEach(btn => {
-    const b = document.createElement('button');
-    b.textContent = btn.text;
-    b.onclick = () => {
-      hideModal();
-      if (btn.action) btn.action();
-    };
-    modalActions.appendChild(b);
-
-  modal.classList.remove('hidden');
-}
-function hideModal() {
-  document.getElementById('modal').classList.add('hidden');
-}
-</script>
-
-<div id="prereqModal" class="hidden" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;">
-  <div style="background:#fff;padding:20px;border:2px solid #333;width:300px;text-align:center;">
-    <h3>Prerequisite Modal</h3>
-    <p>This is a placeholder modal.</p>
-    <button onclick="document.getElementById('prereqModal').classList.add('hidden')">Close</button>
-  </div>
-</div>
-<script>
-function openPrereqModal(){
-  document.getElementById('prereqModal').classList.remove('hidden');
-}
-</script>
-
 </body>
-
-
 </html>
