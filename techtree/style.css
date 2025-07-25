@@ -1,0 +1,76 @@
+
+body {
+  font-family: "IM Fell English", serif;
+  background: #f5f0e6 url('https://i.ibb.co/dGttxL7/ww1-map-bg.jpg') repeat;
+  color: #3b2f2f;
+  padding: 20px;
+}
+
+h1, h2, h3 {
+  font-family: "Cinzel Decorative", serif;
+  color: #2c1e0f;
+  border-bottom: 2px solid #6b4c33;
+  padding-bottom: 5px;
+}
+
+button {
+  background: #8b6b4c;
+  color: #fff;
+  border: 1px solid #5a422c;
+  padding: 5px 10px;
+  margin-top: 5px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #a9825c;
+}
+
+.login {
+  text-align: center;
+  margin-top: 50px;
+}
+
+.hidden {
+  display: none;
+}
+
+.tree-container {
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+.year-column {
+  display: inline-block;
+  vertical-align: top;
+  margin: 0 20px;
+}
+
+.tech-node {
+  background: rgba(255,255,245,0.9);
+  border: 2px solid #7b5a3a;
+  border-radius: 6px;
+  padding: 8px;
+  margin: 10px;
+  width: 180px;
+  text-align: center;
+  box-shadow: 2px 2px 6px rgba(0,0,0,0.2);
+  position: relative;
+}
+
+.tech-node img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid #c4b89a;
+}
+
+.tech-node.locked {
+  opacity: 0.5;
+  filter: grayscale(80%);
+}
+
+.prereq {
+  font-size: 12px;
+  color: #7a5e4b;
+  margin-top: 5px;
+}

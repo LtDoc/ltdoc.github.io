@@ -1,0 +1,123 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>WW1 Tech Tree Admin</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>Admin Panel</h1>
+
+  <section>
+    <h2>Add Research Item</h2>
+    <form id="addResearchForm">
+      <label>Tree:
+        <select id="treeSelect">
+          <option value="Navy">Navy</option>
+          <option value="Army">Army</option>
+          <option value="Engineering">Engineering</option>
+          <option value="Society">Society</option>
+        </select>
+      </label><br>
+      <label>Branch: <input type="text" id="branchInput" placeholder="e.g. Battleships"></label><br>
+      <label>Name: <input type="text" id="nameInput" placeholder="e.g. Edward-class Battleship"></label><br>
+      <label>Year:
+        <select id="yearInput"></select>
+      </label><br>
+      <label>Cost: <input type="number" id="costInput"></label><br>
+      <label>Image URL: <input type="text" id="imageInput"></label><br>
+      <label>Prerequisites (comma-separated): <input type="text" id="prereqInput"></label><br>
+      <button type="submit">Add Research</button>
+    </form>
+  </section>
+
+  <hr>
+
+  <section>
+    <h2>Add / Edit Nation</h2>
+    <form id="addNationForm">
+      <label>Nation Name: <input type="text" id="nationNameInput" placeholder="e.g. France"></label><br>
+      <label>RP per Week: <input type="number" id="rpWeekInput"></label><br>
+      <label>Banked RP: <input type="number" id="bankedInput"></label><br>
+      <label>Password: <input type="text" id="nationPassInput" placeholder="Nation password"></label><br>
+      <button type="submit">Save Nation</button>
+    </form>
+  </section>
+
+  <script type="module">
+    import { db } from './firebase.js';
+    import { ref, set, get } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+
+    const addResearchForm = document.getElementById('addResearchForm');
+    const addNationForm = document.getElementById('addNationForm');
+
+    const yearSelect = document.getElementById('yearInput');
+    for (let y = 1850; y <= 1925; y++) {
+      const opt = document.createElement('option');
+      opt.value = y;
+      opt.textContent = y;
+      yearSelect.appendChild(opt);
+    }
+
+    addResearchForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const tree = document.getElementById('treeSelect').value;
+      const branch = document.getElementById('branchInput').value.trim();
+      const name = document.getElementById('nameInput').value.trim();
+      const year = parseInt(document.getElementById('yearInput').value);
+      const cost = parseInt(document.getElementById('costInput').value);
+      const image = document.getElementById('imageInput').value.trim();
+      const prereqText = document.getElementById('prereqInput').value.trim();
+      const prereqArray = prereqText ? prereqText.split(',').map(p => p.trim()) : [];
+
+      if (!branch || !name) {
+        alert('Branch and Name required!');
+        return;
+      }
+
+      const researchRef = ref(db, `research_tree/${tree}/${branch}/${name}`);
+      await set(researchRef, {
+        year: year,
+        cost: cost,
+        image: image,
+        prerequisites: prereqArray
+      });
+
+      alert(`${name} added to ${tree} > ${branch}`);
+      addResearchForm.reset();
+    });
+
+    addNationForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = document.getElementById('nationNameInput').value.trim();
+      const rpWeek = parseInt(document.getElementById('rpWeekInput').value);
+      const banked = parseInt(document.getElementById('bankedInput').value);
+      const pass = document.getElementById('nationPassInput').value.trim();
+
+      if (!name) {
+        alert('Nation name required!');
+        return;
+      }
+
+      const now = Math.floor(Date.now()/1000);
+      const nationRef = ref(db, `nations/${name}`);
+      const snapshot = await get(nationRef);
+      let unlocked = {};
+      if (snapshot.exists()) {
+        unlocked = snapshot.val().unlocked || {};
+      }
+
+      await set(nationRef, {
+        rp_per_week: rpWeek,
+        banked_rp: banked,
+        last_update: now,
+        password: pass || 'default',
+        unlocked: unlocked
+      });
+
+      alert(`${name} saved/updated!`);
+      addNationForm.reset();
+    });
+  </script>
+</body>
+</html>

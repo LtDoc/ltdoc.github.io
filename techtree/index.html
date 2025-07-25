@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>WW1 Tech Tree</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="login">
+    <h1>Nation Login</h1>
+    <label>Nation:</label>
+    <select id="nationSelect"></select><br><br>
+    <label>Password:</label>
+    <input type="password" id="nationPassword" placeholder="Enter password"><br><br>
+    <button onclick="tryNationLogin()">Enter</button>
+  </div>
+
+  <div class="nation-view hidden">
+    <h1 id="nationName"></h1>
+    <div id="rpStatus"></div>
+    <div id="treeWrapper"></div>
+  </div>
+
+  <script type="module">
+    import { db } from './firebase.js';
+    import { ref, get, update } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+
+    const nationSelect = document.getElementById('nationSelect');
+    const nationPasswordInput = document.getElementById('nationPassword');
+    const nationNameEl = document.getElementById('nationName');
+    const rpStatusEl = document.getElementById('rpStatus');
+    const treeWrapper = document.getElementById('treeWrapper');
+
+    async function loadNationsList() {
+      const snapshot = await get(ref(db, 'nations'));
+      const nations = snapshot.val() || {};
+      Object.keys(nations).forEach(name => {
+        let opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        nationSelect.appendChild(opt);
+      });
+    }
+
+    async function tryNationLogin() {
+      const selectedNation = nationSelect.value;
+      const enteredPass = nationPasswordInput.value;
+      const nationSnap = await get(ref(db, `nations/${selectedNation}`));
+      if (!nationSnap.exists()) {
+        alert('Nation not found!');
+        return;
+      }
+      const nationData = nationSnap.val();
+      if (enteredPass !== nationData.password) {
+        alert('Incorrect password!');
+        return;
+      }
+      loadNation(selectedNation, nationData);
+    }
+
+    async function loadNation(nationName, nationData) {
+      const now = Math.floor(Date.now()/1000);
+      const weeksPassed = Math.floor((now - nationData.last_update) / (7*24*3600));
+      if (weeksPassed > 0) {
+        const gained = weeksPassed * nationData.rp_per_week;
+        nationData.banked_rp += gained;
+        nationData.last_update = now;
+        await update(ref(db, `nations/${nationName}`), {
+          banked_rp: nationData.banked_rp,
+          last_update: now
+        });
+      }
+
+      nationNameEl.textContent = `${nationName}`;
+      rpStatusEl.textContent = `Banked RP: ${nationData.banked_rp} (+${nationData.rp_per_week}/week)`;
+
+      const treeSnap = await get(ref(db, 'research_tree'));
+      const treeData = treeSnap.val() || {};
+
+      treeWrapper.innerHTML = '';
+      for (let tree in treeData) {
+        let treeDiv = document.createElement('div');
+        treeDiv.innerHTML = `<h2>${tree}</h2>`;
+
+        for (let branch in treeData[tree]) {
+          let branchDiv = document.createElement('div');
+          branchDiv.innerHTML = `<h3>${branch}</h3>`;
+
+          // Group items by year
+          let yearGroups = {};
+          for (let item in treeData[tree][branch]) {
+            let tech = treeData[tree][branch][item];
+            if (!yearGroups[tech.year]) yearGroups[tech.year] = [];
+            yearGroups[tech.year].push({ name: item, ...tech });
+          }
+
+          let branchContainer = document.createElement('div');
+          branchContainer.classList.add('tree-container');
+
+          for (let year = 1850; year <= 1925; year++) {
+            if (!yearGroups[year]) continue;
+            let yearCol = document.createElement('div');
+            yearCol.classList.add('year-column');
+            yearCol.innerHTML = `<h4>${year}</h4>`;
+            yearGroups[year].forEach(tech => {
+              const unlocked = nationData.unlocked?.[tech.name] || false;
+              const prereqs = tech.prerequisites || [];
+              const prereqsMet = prereqs.every(req => nationData.unlocked?.[req]);
+              let node = document.createElement('div');
+              node.classList.add('tech-node');
+              if (!unlocked && !prereqsMet) node.classList.add('locked');
+
+              node.innerHTML = `
+                <img src="${tech.image}" alt="${tech.name}">
+                <div><strong>${tech.name}</strong></div>
+                <div>Cost: ${tech.cost} RP</div>
+                ${prereqs.length > 0 ? `<div class="prereq">Requires: ${prereqs.join(', ')}</div>` : ''}
+                ${unlocked ? '<div><strong>Unlocked</strong></div>' : 
+                  (prereqsMet ? `<button onclick="unlockTech('${nationName}','${tech.name}',${tech.cost})">Unlock</button>` :
+                  '<div>Locked</div>')}
+              `;
+              yearCol.appendChild(node);
+            });
+            branchContainer.appendChild(yearCol);
+          }
+
+          branchDiv.appendChild(branchContainer);
+          treeDiv.appendChild(branchDiv);
+        }
+
+        treeWrapper.appendChild(treeDiv);
+      }
+
+      document.querySelector('.login').classList.add('hidden');
+      document.querySelector('.nation-view').classList.remove('hidden');
+    }
+
+    window.unlockTech = async function(nation, techName, cost) {
+      const nationRef = ref(db, `nations/${nation}`);
+      const snap = await get(nationRef);
+      const nationData = snap.val();
+      if (nationData.banked_rp < cost) {
+        alert('Not enough RP!');
+        return;
+      }
+      await update(nationRef, {
+        banked_rp: nationData.banked_rp - cost,
+        [`unlocked/${techName}`]: true
+      });
+      alert(`${techName} unlocked!`);
+      loadNation(nation, nationData);
+    }
+
+    loadNationsList();
+    window.tryNationLogin = tryNationLogin;
+  </script>
+</body>
+</html>
