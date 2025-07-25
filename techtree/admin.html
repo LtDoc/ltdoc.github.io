@@ -1,17 +1,44 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>WW1 Tech Tree Admin</title>
   <link rel="stylesheet" href="style.css">
+  <style>
+    /* Ensure modal is initially hidden and flex when shown */
+    #prereqModal {
+      display: none;
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.5);
+      align-items: center;
+      justify-content: center;
+    }
+    #prereqModal.visible {
+      display: flex;
+    }
+    #prereqModal .modal-content {
+      background: #fff;
+      padding: 20px;
+      border: 2px solid #333;
+      text-align: center;
+      width: 300px;
+    }
+    .modal-close {
+      margin-top: 10px;
+      padding: 4px 8px;
+      cursor: pointer;
+    }
+  </style>
 </head>
 <body>
   <!-- SINGLE modal definition -->
-  <div id="prereqModal" class="hidden" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:none;align-items:center;justify-content:center;">
-    <div class="modal-content" style="background:#fff;padding:20px;border:2px solid #333;width:300px;text-align:center;">
+  <div id="prereqModal">
+    <div class="modal-content">
       <h3>Prerequisite Modal</h3>
       <p>Placeholder modal content</p>
-      <button class="modal-close" onclick="document.getElementById('prereqModal').classList.add('hidden');document.getElementById('prereqModal').style.display='none';">Close</button>
+      <button class="modal-close">Close</button>
     </div>
   </div>
 
@@ -85,7 +112,7 @@
     import { ref, get, set, remove } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
 
     document.addEventListener('DOMContentLoaded', () => {
-      // Element references
+      // Element refs
       const treeSelect = document.getElementById('treeSelect');
       const branchSelect = document.getElementById('branchSelect');
       const yearSelect = document.getElementById('yearInput');
@@ -97,43 +124,43 @@
       const saveNationBtn = document.getElementById('saveNationBtn');
       const prereqModal = document.getElementById('prereqModal');
       const addPrereqBtn = document.getElementById('addPrereqBtn');
+      const closeBtns = document.querySelectorAll('.modal-close');
 
-      // Populate Year dropdown
-      function populateYearDropdown(select) {
-        select.innerHTML = '';
+      // Populate years
+      (function populateYears() {
         for (let y = 1850; y <= 1925; y++) {
-          const opt = document.createElement('option');
+          let opt = document.createElement('option');
           opt.value = y; opt.textContent = y;
-          select.appendChild(opt);
+          yearSelect.appendChild(opt);
         }
-      }
-      populateYearDropdown(yearSelect);
+      })();
 
-      // Load Branches
-      async function loadBranches(tree, targetSelect) {
-        targetSelect.innerHTML = '';
+      // Load branches into a select
+      async function loadBranches(tree, selectEl) {
+        selectEl.innerHTML = '';
         const snap = await get(ref(db, `branches/${tree}`));
         if (snap.exists()) {
           snap.val().forEach(b => {
-            const opt = document.createElement('option');
+            let opt = document.createElement('option');
             opt.value = b; opt.textContent = b;
-            targetSelect.appendChild(opt);
+            selectEl.appendChild(opt);
           });
         }
       }
-      // Initial load & listeners
+
+      // Init branch selects
       loadBranches(treeSelect.value, branchSelect);
       loadBranches(manageTreeSelect.value, manageBranchSelect);
       treeSelect.addEventListener('change', () => loadBranches(treeSelect.value, branchSelect));
       manageTreeSelect.addEventListener('change', () => loadBranches(manageTreeSelect.value, manageBranchSelect));
 
-      // Save Research Item
+      // Save research
       saveResearchBtn.addEventListener('click', async () => {
         const tree = treeSelect.value;
         const branch = branchSelect.value;
         const name = document.getElementById('nameInput').value.trim();
-        const year = parseInt(yearSelect.value);
-        const cost = parseInt(document.getElementById('costInput').value);
+        const year = +yearSelect.value;
+        const cost = +document.getElementById('costInput').value;
         const image = document.getElementById('imageInput').value.trim();
         const desc = document.getElementById('descInput').value.trim();
         const stats = document.getElementById('statsInput').value.trim();
@@ -146,7 +173,7 @@
         alert(`${name} saved to ${tree} > ${branch}`);
       });
 
-      // Load Manage Items
+      // Load and manage items
       loadItemsBtn.addEventListener('click', async () => {
         const tree = manageTreeSelect.value;
         const branch = manageBranchSelect.value;
@@ -162,7 +189,7 @@
         });
       });
 
-      // Edit/Delete Delegation
+      // Edit/Delete delegation
       itemsList.addEventListener('click', async e => {
         const btn = e.target;
         if (btn.classList.contains('editBtn')) {
@@ -179,8 +206,9 @@
           document.getElementById('imageInput').value = tech.image;
           document.getElementById('descInput').value = tech.description || '';
           document.getElementById('statsInput').value = tech.stats || '';
-          alert('Loaded into form (saving will overwrite).');
-        } else if (btn.classList.contains('delBtn')) {
+          alert('Loaded into form. Saving will overwrite.');
+        }
+        if (btn.classList.contains('delBtn')) {
           const { tree, branch, name } = btn.dataset;
           if (confirm(`Delete ${name}?`)) {
             await remove(ref(db, `research_tree/${tree}/${branch}/${name}`));
@@ -190,11 +218,11 @@
         }
       });
 
-      // Save Nation
+      // Save nation
       saveNationBtn.addEventListener('click', async () => {
         const nation = document.getElementById('nationNameInput').value.trim();
-        const rpWeek = parseInt(document.getElementById('rpWeekInput').value);
-        const banked = parseInt(document.getElementById('bankedInput').value);
+        const rpWeek = +document.getElementById('rpWeekInput').value;
+        const banked = +document.getElementById('bankedInput').value;
         const pass = document.getElementById('nationPassInput').value.trim();
         if (!nation) return alert('Nation name required!');
         const now = Math.floor(Date.now()/1000);
@@ -205,16 +233,18 @@
         alert(`${nation} saved/updated!`);
       });
 
-      // Modal open / close
-      addPrereqBtn.addEventListener('click', () => {
-        prereqModal.style.display = 'flex';
-        prereqModal.classList.remove('hidden');
+      // Modal open
+      addPrereqBtn?.addEventListener('click', () => {
+        prereqModal.classList.add('visible');
       });
-      // Close via outside click
+      // Modal close via button
+      closeBtns.forEach(btn =>
+        btn.addEventListener('click', () => prereqModal.classList.remove('visible'))
+      );
+      // Modal close via outside click
       prereqModal.addEventListener('click', e => {
         if (e.target === prereqModal) {
-          prereqModal.style.display = 'none';
-          prereqModal.classList.add('hidden');
+          prereqModal.classList.remove('visible');
         }
       });
     });
