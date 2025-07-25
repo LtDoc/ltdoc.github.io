@@ -111,7 +111,7 @@
       const tree = document.getElementById('branchTreeSelect').value;
       const branchName = document.getElementById('branchNameInput').value.trim();
       if (!branchName) {
-        alert('Branch name required!');
+        showModal('Branch name required!');
         return;
       }
       const branchRef = ref(db, `branches/${tree}`);
@@ -124,7 +124,7 @@
         branches.push(branchName);
       }
       await set(branchRef, branches);
-      alert(`Branch ${branchName} added to ${tree}`);
+      showModal(`Branch ${branchName} added to ${tree}`);
       document.getElementById('branchNameInput').value = '';
       if (tree === treeSelect.value) loadBranches(treeSelect.value);
     });
@@ -170,7 +170,7 @@
         prerequisites: prereqs
       });
 
-      alert(`${name} added to ${tree} > ${branch} with prerequisites: ${prereqs.join(', ')}`);
+      showModal(`${name} added to ${tree} > ${branch} with prerequisites: ${prereqs.join(', ')}`);
       addResearchForm.reset();
       loadBranches(treeSelect.value);
     });
@@ -183,7 +183,7 @@
       const banked = parseInt(document.getElementById('bankedInput').value);
       const pass = document.getElementById('nationPassInput').value.trim();
       if (!name) {
-        alert('Nation name required!');
+        showModal('Nation name required!');
         return;
       }
       const now = Math.floor(Date.now()/1000);
@@ -200,7 +200,7 @@
         password: pass || 'default',
         unlocked: unlocked
       });
-      alert(`${name} saved/updated!`);
+      showModal(`${name} saved/updated!`);
       addNationForm.reset();
     });
   </script>
@@ -272,6 +272,21 @@
       const snap = await get(ref(db, `research_tree/${tree}/${branch}/${name}`));
       if (!snap.exists()) return;
       const tech = snap.val();
+      // Set tree & reload branches
+      document.getElementById('treeSelect').value = tree;
+      await loadBranches(tree);
+      document.getElementById('branchSelect').value = branch;
+      document.getElementById('nameInput').value = name;
+      document.getElementById('yearInput').value = tech.year;
+      document.getElementById('costInput').value = tech.cost;
+      document.getElementById('imageInput').value = tech.image;
+      document.getElementById('descInput').value = tech.description || '';
+      document.getElementById('statsInput').value = tech.stats || '';
+      showModal('Loaded into Add Research form. Saving will overwrite existing data.');
+    
+      const snap = await get(ref(db, `research_tree/${tree}/${branch}/${name}`));
+      if (!snap.exists()) return;
+      const tech = snap.val();
       document.getElementById('treeSelect').value = tree;
       await loadBranches(tree);
       document.getElementById('branchSelect').value = branch;
@@ -285,12 +300,43 @@
     }
 
     window.deleteItem = async function(tree, branch, name) {
-      if (!confirm(`Delete ${name}?`)) return;
-      await remove(ref(db, `research_tree/${tree}/${branch}/${name}`));
+      showModal(`Delete ${name}?`, [ { text: 'Cancel' }, { text: 'Delete', action: () => actuallyDeleteItem(tree, branch, name) } ]); return;
+      async function actuallyDeleteItem(tree, branch, name){ await remove(ref(db, `research_tree/${tree}/${branch}/${name}`)); showModal(`${name} deleted.`); loadItemsBtn.click(); }
       alert(`${name} deleted.`);
       loadItemsBtn.click();
     }
   </script>
+
+<div id="modal" class="modal hidden">
+  <div class="modal-content">
+    <p id="modalMessage"></p>
+    <div class="modal-actions" id="modalActions"></div>
+  </div>
+</div>
+
+<script>
+function showModal(message, buttons = [{ text: "OK" }]) {
+  const modal = document.getElementById('modal');
+  const modalMsg = document.getElementById('modalMessage');
+  const modalActions = document.getElementById('modalActions');
+  modalMsg.textContent = message;
+  modalActions.innerHTML = '';
+  buttons.forEach(btn => {
+    const b = document.createElement('button');
+    b.textContent = btn.text;
+    b.onclick = () => {
+      hideModal();
+      if (btn.action) btn.action();
+    };
+    modalActions.appendChild(b);
+  });
+  modal.classList.remove('hidden');
+}
+function hideModal() {
+  document.getElementById('modal').classList.add('hidden');
+}
+</script>
 </body>
+
 
 </html>

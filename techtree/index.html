@@ -118,7 +118,7 @@
                 <img src="${tech.image}" alt="${tech.name}">
                 <div class="tech-title">${tech.name}</div>
                 <div>Cost: ${tech.cost} RP</div>
-                <div class="tech-desc">${tech.description || ''}</div>
+                <div class="tech-desc" title="${tech.description || ''}">${tech.description || ''}</div>
                 <div class="tech-stats">${tech.stats || ''}</div>
                 ${prereqs.length > 0 ? `<div class="prereq">Req: ${prereqs.join(', ')}</div>` : ''}
                 ${unlocked ? '<div><strong>Unlocked</strong></div>' : 
