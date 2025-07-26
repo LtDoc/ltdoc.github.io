@@ -225,9 +225,17 @@
       };
 
       // Modal open/close
-      addPrereqBtn.onclick=async()=>{ allItems=[]; const s=await get(ref(db,'research_tree')); if(s.exists())Object.entries(s.val()).forEach(([tr,brs])=>Object.entries(brs).forEach(([b,ts])=>Object.keys(ts).forEach(n=>allItems.push(n)))); render(allItems); prereqModal.classList.add('visible');};
-      closeBtns.forEach(cb=>cb.onclick=()=>prereqModal.classList.remove('visible'));
-      prereqModal.onclick=e=>{ if(e.target===prereqModal)prereqModal.classList.remove('visible'); };
+      addPrereqBtn.onclick=async()=>{
+        allItems=[];
+        const s=await get(ref(db,'research_tree'));
+        if(s.exists())Object.entries(s.val()).forEach(([tr,brs])=>Object.entries(brs).forEach(([b,ts])=>Object.keys(ts).forEach(n=>allItems.push(n))));
+        render(allItems);
+        // Show modal
+        prereqModal.style.display = 'flex';
+        prereqModal.classList.add('visible');
+      };
+      closeBtns.forEach(cb=>cb.onclick=()=>{ prereqModal.classList.remove('visible'); prereqModal.style.display = 'none'; });
+      prereqModal.onclick=e=>{ if(e.target===prereqModal){ prereqModal.classList.remove('visible'); prereqModal.style.display = 'none'; } };
 
       // Prereq modal logic
       let allItems=[];
