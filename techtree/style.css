@@ -18,10 +18,8 @@ button:hover { background:#a9825c; }
   font-size: 0.8rem;
   color: #7a5e4b;
   margin: 8px 0;
-  display: -webkit-box;
-  -webkit-line-clamp: 1;      /* limit to 1 line */
-  -webkit-box-orient: vertical;
   overflow: hidden;
+  white-space: nowrap;
   text-overflow: ellipsis;
-  white-space: normal;
+  cursor: help;
 }

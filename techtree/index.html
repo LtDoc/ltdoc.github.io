@@ -146,7 +146,7 @@
                 <div class="tech-cost">RP: ${tech.cost} | $${tech.moneyCost || 100}</div>
                 <div class="tech-desc" title="${tech.description || ''}">${tech.description || ''}</div>
                 <div class="tech-stats">${tech.stats || ''}</div>
-                ${prereqs.length ? `<div class="prereq">Req: ${prereqs.join(', ')}</div>` : ''}
+                ${prereqs.length ? `<div class="prereq" title="Requirements: ${prereqs.join(', ')}">Req: ${prereqs.join(', ')}</div>` : ''}
                 ${unlocked
                   ? '<div><strong>Unlocked</strong></div>'
                   : ready
