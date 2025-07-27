@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet-measure@3.1.0/dist/leaflet-measure.css"/>
   <!-- Cluster CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
@@ -174,6 +175,7 @@
 
   <!-- Libraries -->
   <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/leaflet-measure@3.1.0/dist/leaflet-measure.min.js"></script>
   <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.6.1/firebase-database.js"></script>
@@ -201,6 +203,17 @@
     const imageBounds = [[0,0],[3996,5729]];
     L.imageOverlay('assets/high_res_image.png', imageBounds).addTo(map);
     map.fitBounds(imageBounds);
+
+    // add the measure tool:
+    const measureControl = new L.Control.Measure({
+      position: 'topright',        // or wherever you like
+      primaryLengthUnit: 'pixels', // report length in pixels
+      secondaryLengthUnit: null,   // disable secondary units
+      primaryAreaUnit: null,       // disable area measuring
+      activeColor: '#ABE67E',
+      completedColor: '#C8F2BE'
+    });
+    measureControl.addTo(map);
 
     // clustering settings: gentler and disabled at max zoom
     const clusterGroup = L.markerClusterGroup({
