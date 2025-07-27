@@ -329,24 +329,6 @@
   let hasEditPermissions = false;
   const markers = {};
 
-  // Data normalization helper
-  function correctMarkerData(raw) {
-    const d = { ...raw };
-    // ensure id
-    d.id = raw.id;
-    // migrate legacy markerIcon to iconUrl
-    if (raw.markerIcon && !raw.iconUrl) d.iconUrl = raw.markerIcon;
-    // default iconSize
-    if (!d.iconSize) d.iconSize = [32, 32];
-    else if (typeof d.iconSize === 'string') {
-      d.iconSize = d.iconSize.split(',').map(n => Number(n));
-    }
-    // parse coordinates
-    d.lat = Number(d.lat);
-    d.lng = Number(d.lng);
-    return d;
-  }
-
   // Helper: render popup HTML
   function renderPopup(d) {
     const schema = markerSchemas[d.type] || markerSchemas.default;
@@ -374,7 +356,7 @@
     Object.values(snapshot.val() || {}).forEach(raw => {
       const d = correctMarkerData(raw);
       markers[d.id] = d;
-      const icon = getIcon(d.iconUrl, d.iconSize);
+      const icon = getIcon(d.iconUrl, d.iconSize || [32,32]);
       const m = L.marker([d.lat, d.lng], { icon, data: d });
       m.bindPopup(renderPopup(d) + getAdminOptions(d));
       if (d.adminOnly && !hasEditPermissions) return;
@@ -384,7 +366,7 @@
     updateSidebar();
   });
 
-  // Sidebar update
+  // Sidebar update (with DocumentFragment)
   function updateSidebar() {
     const search = refs.searchInput.value.toLowerCase();
     const frag = document.createDocumentFragment();
@@ -430,6 +412,7 @@
       if (!el || el.type==='file') return;
       d[fid] = el.type==='checkbox'? el.checked : el.value;
     });
+    // TODO: handle file uploads for icon and tooltip images
     database.ref('markers/'+id).set(d);
   }
 
@@ -441,10 +424,12 @@
     refs.editType.value = d.type;
     const schema = markerSchemas[d.type] || markerSchemas.default;
     schema.formFields.forEach(fid => {
+      const el = document.getElementById(fid);
       const editEl = document.getElementById('edit'+ capitalize(fid));
-      if (!editEl) return;
-      if (editEl.type==='checkbox') editEl.checked = d[fid];
-      else editEl.value = d[fid] || '';
+      if (editEl) {
+        if (editEl.type==='checkbox') editEl.checked = d[fid];
+        else editEl.value = d[fid] || '';
+      }
     });
     document.getElementById('editTownFields').classList.toggle('hidden', !schema.formFields.includes('townSize'));
     document.getElementById('editArmyFields').classList.toggle('hidden', !schema.formFields.some(f=>f.startsWith('army')));
@@ -469,6 +454,7 @@
   window.duplicateMarker = function(id) {
     const orig = markers[id];
     const copy = { ...orig, id: database.ref().child('markers').push().key, name: orig.name + ' Copy' };
+    delete copy.lat; delete copy.lng;
     database.ref('markers/'+copy.id).set(copy);
   };
   window.removeMarker = function(id) { database.ref('markers/'+id).remove(); };
@@ -488,7 +474,6 @@
   // Initialize form state
   toggleFields(); toggleTooltip();
 })();
-
   </script>
 </body>
 </html>
