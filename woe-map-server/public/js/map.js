@@ -127,7 +127,63 @@
     $('#btnModeUndo').hidden = selecting;
     $('#btnModeClear').hidden = selecting;
   }
-  function hideModeHud() { $('#modeHud').classList.remove('show'); }
+  function hideModeHud() {
+    if (state.placing) { updatePlaceHud(); return; }   // quick-add placement keeps its own HUD text
+    $('#modeHud').classList.remove('show');
+  }
+
+  // ---- Quick add: click a unit type, then click the map to drop numbered units ------------
+  const counterCache = new Map();
+  async function counterImg(typeName, color) {
+    const key = `${typeName}|${color}`;
+    if (!counterCache.has(key)) counterCache.set(key, renderer.counterImage(typeName, color));
+    return counterCache.get(key);
+  }
+  function quickNation() { return $('#qaNation')?.value ?? ''; }
+  function quickColor() { return factionByName(quickNation())?.color || state.member?.color || '#3498db'; }
+  /** The name the server will most likely give the next unit of this type for the chosen faction. */
+  function nextQuickName(t) {
+    const nation = quickNation();
+    const names = [...state.markers.values()].filter(m => m.type === 'unit' && String(m.data?.nation || '').toLowerCase() === nation.toLowerCase()).map(m => m.name);
+    return window.Naming ? Naming.nextName(names, t.unit, nation) : t.unit;
+  }
+  function armPlacing(typeId) {
+    if (state.placing?.typeId === typeId) { disarmPlacing(); return; }
+    const t = window.UnitTypes.LIST.find(x => x.id === typeId);
+    if (!t) return;
+    state.placing = { typeId, type: t };
+    $$('#qaList .qa').forEach(b => b.classList.toggle('active', b.dataset.qa === typeId));
+    renderer.app.canvas.style.cursor = 'copy';
+    updatePlaceHud();
+  }
+  function disarmPlacing() {
+    if (!state.placing) return;
+    state.placing = null;
+    $$('#qaList .qa').forEach(b => b.classList.remove('active'));
+    renderer.app.canvas.style.cursor = renderer.mode ? 'crosshair' : '';
+    if (!renderer.mode) $('#modeHud').classList.remove('show');
+  }
+  function updatePlaceHud() {
+    if (!state.placing || renderer.mode) return;
+    const t = state.placing.type;
+    $('#modeHud').classList.add('show');
+    $('#btnModeUndo').hidden = true; $('#btnModeClear').hidden = true; $('#btnModeDone').hidden = true;
+    $('#modeText').textContent = `Placing ${quickNation() || 'unaligned'} ${t.unit}: click the map (next: ${nextQuickName(t)}). Esc to stop.`;
+  }
+  renderer.addEventListener('mapclick', async e => {
+    if (!state.placing || state.role !== 'gm') return;
+    const t = state.placing.type, nation = quickNation();
+    const d = window.UnitTypes.defaults(t, state.lobby?.settings?.unitStats) || {};
+    try {
+      const r = await api.post(`${base}/markers`, {
+        type: 'unit', autoName: true, color: quickColor(), x: round1(e.detail.x), y: round1(e.detail.y),
+        data: { nation, unitType: t.name, ...d, strength: 100 },
+      });
+      upsertMarker(r.marker);
+      toast(`Placed ${r.marker.name}`);
+      updatePlaceHud();
+    } catch (err) { toast(err.message); }
+  });
 
   // ---- Loading ------------------------------------------------------------------------
   async function loadLobby() {
@@ -221,13 +277,26 @@
 
   /** Update the faction and owner dropdowns in the Add/Edit forms in place, keeping the current choice. */
   function refreshFormLists() {
+    const qa = document.getElementById('qaNation');
+    if (qa) {
+      // Quick-add faction picker: factions arrive after the form is first drawn; keep the choice if it still exists.
+      const cur = qa.value;
+      qa.innerHTML = nationOptions().replace('<option value="__custom">Custom…</option>', '');
+      qa.querySelector('option[value=""]').textContent = '— unaligned —';
+      const names = [...qa.options].map(o => o.value);
+      qa.value = names.includes(cur) && cur ? cur : (names.includes(state.member?.nation || '') && state.member?.nation ? state.member.nation : (state.factions[0]?.name || ''));
+      if (qa.value !== cur) qa.dispatchEvent(new Event('change'));
+    }
     for (const p of ['add', 'edit']) {
       for (const id of ['Nation', 'TownNation']) {
         const sel = document.getElementById(p + id + 'Sel');
         if (!sel) continue;
         const cur = sel.value;
+        const custom = document.getElementById(p + id)?.value || '';
         sel.innerHTML = nationOptions();
-        sel.value = [...sel.options].some(o => o.value === cur) ? cur : (cur === '__custom' ? '__custom' : '');
+        // A nation typed as "custom" before the factions arrived may now be a real faction: re-resolve it.
+        if (cur === '__custom' && custom) setNation(p, id, custom);
+        else sel.value = [...sel.options].some(o => o.value === cur) ? cur : '';
       }
       const owner = document.getElementById(p + 'Owner');
       if (owner) {
@@ -862,13 +931,14 @@
       <label>Type<select id="${p}Type" ${isGm ? '' : 'disabled'}>
         <option value="unit">Unit / army</option><option value="town">Town</option><option value="poi">Point of interest</option><option value="player">Player</option>${isGm ? '<option value="scenery">Scenery / terrain</option>' : ''}
       </select></label>
-      <label>Name<input id="${p}Name" maxlength="60" autocomplete="off"></label>
-      <div class="grid2">
+      <label>Name<input id="${p}Name" maxlength="60" autocomplete="off" placeholder="${p === 'add' ? 'Units: blank = numbered automatically' : ''}"></label>
+      <div class="grid2 coloricon">
         <label>Colour<input id="${p}Color" type="color" value="${esc(state.member?.color || '#3498db')}"></label>
-        <label>Icon <span class="hint">(sprite, URL or file)</span><input id="${p}IconUrl" placeholder="https://… or pick a sprite" autocomplete="off"></label>
+        <div class="field">Icon
+          <div class="iconrow"><span id="${p}IconPreview"></span><button type="button" class="small" data-pick="${p}">Sprite…</button><label class="filebtn">Upload<input id="${p}IconFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden></label><button type="button" class="small secondary" data-pickclear="${p}" title="Clear the icon (back to the drawn symbol)">×</button></div>
+        </div>
       </div>
-      <div class="iconpreview"><span id="${p}IconPreview"></span><button type="button" class="small" data-pick="${p}">Pick sprite…</button><button type="button" class="small secondary" data-pickclear="${p}">Clear</button></div>
-      <label>Icon file <span class="hint">(optional, replaces the above)</span><input id="${p}IconFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label>
+      <input id="${p}IconUrl" placeholder="…or paste an image URL" autocomplete="off">
       <div data-for="scenery">
         <div class="grid2">
           <label>Scale <span class="hint">(map px per sprite px)</span><input id="${p}Scale" type="number" step="any" min="0.05" max="50" value="1"></label>
@@ -881,21 +951,24 @@
         <div class="grid2"><label>Faction<select id="${p}NationSel">${nationOptions()}</select></label><label>Unit type <a href="#" data-key title="Show all unit symbols">key</a><select id="${p}UnitTypeSel">${unitTypeOptions()}</select></label></div>
         <label id="${p}NationCustomWrap" hidden>Custom nation<input id="${p}Nation" list="nationList" maxlength="40"></label>
         <label id="${p}UnitTypeCustomWrap" hidden>Custom unit type<input id="${p}UnitType" maxlength="40" placeholder="e.g. Cossack sotnia"></label>
-        <div class="grid2"><label>Attack <a href="#" data-defaults title="Fill attack, defend, AP, range and movement from the campaign's defaults for this unit type">defaults</a><input id="${p}Attack" type="number" step="any"></label><label>Defend<input id="${p}Defend" type="number" step="any"></label></div>
-        <div class="grid2"><label>Action points<input id="${p}Ap" type="number" step="any"></label><label>Range<input id="${p}Range" type="number" step="any"></label></div>
-        <div class="grid2"><label>Movement<input id="${p}Movement" type="number" step="any"></label><label>Strength %<input id="${p}Strength" type="number" min="0" max="100" value="100"></label></div>
-        <label>Abilities <span class="hint">(one per line)</span><textarea id="${p}Abilities" rows="2"></textarea></label>
+        <details class="sub" ${p === 'edit' ? 'open' : ''}><summary>Stats <span class="hint">from the campaign table · <a href="#" data-defaults title="Refill attack, defend, AP, range and movement from the campaign's table for this unit type">reset</a></span></summary>
+          <div class="grid3"><label>Attack<input id="${p}Attack" type="number" step="any"></label><label>Defend<input id="${p}Defend" type="number" step="any"></label><label>AP<input id="${p}Ap" type="number" step="any"></label></div>
+          <div class="grid3"><label>Range<input id="${p}Range" type="number" step="any"></label><label>Move<input id="${p}Movement" type="number" step="any"></label><label>Strength %<input id="${p}Strength" type="number" min="0" max="100" value="100"></label></div>
+          <label>Abilities <span class="hint">(one per line)</span><textarea id="${p}Abilities" rows="2"></textarea></label>
+        </details>
       </div>
       <div data-for="town"><div class="grid2">
         <label>Size<select id="${p}Size"><option value="capital">Capital</option><option value="city">City</option><option value="village">Village</option></select></label>
         <label>Faction<select id="${p}TownNationSel">${nationOptions()}</select></label>
       </div><label id="${p}TownNationCustomWrap" hidden>Custom nation<input id="${p}TownNation" list="nationList" maxlength="40"></label></div>
       <div data-for="poi"><label>Category<input id="${p}Category" maxlength="40" placeholder="Ruins, Mine, Fortress…"></label></div>
-      <label>Notes<textarea id="${p}Notes" rows="3"></textarea></label>
-      <label class="inline"><input type="checkbox" id="${p}Locked"> Locked <span class="hint">(clicks and drags pass through; unlock from its popup)</span></label>
-      ${isGm ? `<label>Owner <span class="hint">(player allowed to move it)</span><select id="${p}Owner"><option value="">— none —</option>${ownerOpts}</select></label>
-      <label>Visible to nations <span class="hint">(comma separated, blank = everyone; owner always sees it)</span><input id="${p}VisibleTo" list="nationList" autocomplete="off" placeholder="Everyone"></label>
-      <label class="inline"><input type="checkbox" id="${p}AdminOnly"> GM only (hidden from players)</label>` : ''}`;
+      <label>Notes<textarea id="${p}Notes" rows="2"></textarea></label>
+      <details class="sub" ${p === 'edit' ? 'open' : ''}><summary>Visibility &amp; ownership</summary>
+        <label class="inline"><input type="checkbox" id="${p}Locked"> Locked <span class="hint">(clicks and drags pass through; unlock from its popup)</span></label>
+        ${isGm ? `<label>Owner <span class="hint">(player allowed to move it)</span><select id="${p}Owner"><option value="">— none —</option>${ownerOpts}</select></label>
+        <label>Visible to nations <span class="hint">(comma separated, blank = everyone; owner always sees it)</span><input id="${p}VisibleTo" list="nationList" autocomplete="off" placeholder="Everyone"></label>
+        <label class="inline"><input type="checkbox" id="${p}AdminOnly"> GM only (hidden from players)</label>` : ''}
+      </details>`;
   }
 
   function toggleTypeFields(form, type, setLockDefault) {
@@ -937,8 +1010,8 @@
     };
     const link = sel.closest('label')?.querySelector('[data-key]');
     if (link) link.onclick = e => { e.preventDefault(); openSymbolKey(document.getElementById(p + 'Color')?.value); };
-    const def = document.getElementById(p + 'Attack')?.closest('label')?.querySelector('[data-defaults]');
-    if (def) def.onclick = e => { e.preventDefault(); if (!applyTypeDefaults(p)) toast('No catalogue defaults for a custom unit type'); };
+    const def = document.querySelector(`#${p}Form [data-defaults]`);
+    if (def) def.onclick = e => { e.preventDefault(); e.stopPropagation(); if (!applyTypeDefaults(p)) toast('No catalogue defaults for a custom unit type'); };
   }
 
   /** Render every catalogue counter in the chosen colour and show them in a modal. */
@@ -1013,7 +1086,7 @@
     if (type === 'poi') Object.assign(data, { category: v('Category') });
     if (type === 'scenery') Object.assign(data, { scale: v('Scale') || 1, rotation: v('Rotation') || 0, flip: !!document.getElementById(p + 'Flip')?.checked });
     const name = v('Name').trim() || (type === 'scenery' ? sceneryName(v('IconUrl')) : '');
-    const out = { type, name, color: v('Color'), iconUrl: v('IconUrl'), data };
+    const out = { type, name, color: v('Color'), iconUrl: v('IconUrl'), data, autoName: type === 'unit' && !name };
     const owner = document.getElementById(p + 'Owner');
     if (owner) out.ownerId = owner.value ? Number(owner.value) : null;
     const ao = document.getElementById(p + 'AdminOnly');
@@ -1052,18 +1125,22 @@
     const el = document.getElementById(p + 'IconPreview');
     const val = document.getElementById(p + 'IconUrl')?.value || '';
     if (!el) return;
-    if (Atlas.isRef(val)) el.innerHTML = Atlas.html(val, 40);
+    const file = document.getElementById(p + 'IconFile')?.files?.[0];
+    if (file) el.innerHTML = `<span class="hint" title="${esc(file.name)}">📎 ${esc(file.name.length > 18 ? file.name.slice(0, 16) + '…' : file.name)}</span>`;
+    else if (Atlas.isRef(val)) el.innerHTML = Atlas.html(val, 40);
     else if (val) el.innerHTML = `<img src="${esc(val)}" alt="" style="max-width:40px;max-height:40px;border-radius:4px">`;
-    else el.innerHTML = '<span class="hint">Drawn symbol</span>';
+    else el.innerHTML = '<span class="hint" title="No icon: the marker uses its drawn symbol">symbol</span>';
   }
 
-  /** Wire the sprite picker buttons and live preview for a form prefix. */
+  /** Wire the sprite picker buttons, upload button and live preview for a form prefix. */
   function bindIconPicker(p) {
     const input = document.getElementById(p + 'IconUrl');
     if (!input) return;
     input.oninput = () => updateIconPreview(p);
+    const file = document.getElementById(p + 'IconFile');
+    if (file) file.onchange = () => updateIconPreview(p);
     document.querySelector(`[data-pick="${p}"]`).onclick = () => openSpritePicker(p);
-    document.querySelector(`[data-pickclear="${p}"]`).onclick = () => { input.value = ''; updateIconPreview(p); };
+    document.querySelector(`[data-pickclear="${p}"]`).onclick = () => { input.value = ''; if (file) file.value = ''; updateIconPreview(p); };
     updateIconPreview(p);
   }
 
@@ -1114,7 +1191,23 @@
   function renderAddForm() {
     const form = $('#addForm');
     const gm = state.role === 'gm';
-    form.innerHTML = `${gm ? '' : '<p class="hint">Players can place their own player marker. Ask the GM to place units and towns.</p>'}
+    const prevFilter = $('#qaFilter')?.value || '';
+    const prevNation = $('#qaNation')?.value;
+    form.innerHTML = gm ? `
+      <div class="grid2">
+        <label>Faction<select id="qaNation">${nationOptions()}</select></label>
+        <label>Find<input id="qaFilter" type="search" placeholder="e.g. cavalry" autocomplete="off"></label>
+      </div>
+      <p class="hint">Click a unit type, then click the map to place it. Units are numbered per faction (1st, 2nd… or 1e, 1., 1ª to suit the faction) and take their stats from the campaign table. Rename or edit any unit from its popup.</p>
+      <div id="qaList" class="qalist"></div>
+      <div class="row" style="margin-top:10px;flex-wrap:wrap;gap:4px"><span class="hint">Also:</span>
+        <button type="button" class="small secondary" data-quick="town">Town</button><button type="button" class="small secondary" data-quick="poi">Point of interest</button><button type="button" class="small secondary" data-quick="scenery">Scenery</button><button type="button" class="small secondary" data-quick="player">Player</button>
+      </div>
+      <details class="sub" id="customMarker"><summary>Custom marker</summary>
+        ${formHtml('add', gm)}
+        <button type="submit" style="width:100%">Place at map centre</button>
+      </details>`
+    : `<p class="hint">Players can place their own player marker. Ask the GM to place units and towns.</p>
       ${formHtml('add', gm)}
       <button type="submit" style="width:100%">Place at map centre</button>
       <p class="hint">Drag markers on the map to move them. Everyone connected sees changes live.</p>`;
@@ -1127,6 +1220,44 @@
     bindNationPicker('add', 'Nation'); bindNationPicker('add', 'TownNation');
     setNation('add', 'Nation', state.member?.nation || '');
     applyTypeDefaults('add');
+    if (gm) {
+      const nationSel = $('#qaNation');
+      nationSel.querySelector('option[value="__custom"]')?.remove();
+      nationSel.querySelector('option[value=""]').textContent = '— unaligned —';
+      if (prevNation !== undefined && [...nationSel.options].some(o => o.value === prevNation)) nationSel.value = prevNation;
+      else if (state.factions.length && !state.member?.nation) nationSel.value = state.factions[0].name;
+      else nationSel.value = state.member?.nation || '';
+      $('#qaFilter').value = prevFilter;
+      let gen = 0;
+      const renderQuick = async () => {
+        const U = window.UnitTypes, ov = state.lobby?.settings?.unitStats;
+        const q = $('#qaFilter').value.trim().toLowerCase();
+        let html = '';
+        for (const cat of U.categories) {
+          const types = U.LIST.filter(t => t.cat === cat && (!q || t.name.toLowerCase().includes(q) || t.unit.toLowerCase().includes(q) || cat.toLowerCase().includes(q)));
+          if (!types.length) continue;
+          html += `<div class="section">${esc(cat)}</div>` + types.map(t =>
+            `<button type="button" class="qa${state.placing?.typeId === t.id ? ' active' : ''}" data-qa="${t.id}" title="${esc(t.name)} · ${esc(U.statLabel(t, ov))}"><img alt="" data-counter="${esc(t.name)}"><span>${esc(t.unit)}</span></button>`).join('');
+        }
+        $('#qaList').innerHTML = html || '<p class="hint">No unit types match.</p>';
+        $$('#qaList .qa').forEach(b => b.onclick = () => armPlacing(b.dataset.qa));
+        const g = ++gen, color = quickColor();
+        for (const img of $$('#qaList img[data-counter]')) {
+          const url = await counterImg(img.dataset.counter, color);
+          if (g !== gen) return;
+          img.src = url;
+        }
+      };
+      $('#qaFilter').oninput = renderQuick;
+      nationSel.onchange = () => { renderQuick(); updatePlaceHud(); setNation('add', 'Nation', nationSel.value); };
+      renderQuick();
+      $$('#addForm [data-quick]').forEach(b => b.onclick = () => {
+        disarmPlacing();
+        const det = $('#customMarker'); det.open = true;
+        typeSel.value = b.dataset.quick; toggleTypeFields(form, typeSel.value, true);
+        $('#addName').focus();
+      });
+    }
     form.onsubmit = async e => {
       e.preventDefault();
       const f = readForm('add');
@@ -1463,7 +1594,7 @@
   $('#btnModeUndo').onclick = () => renderer.modeUndo();
   $('#btnModeClear').onclick = () => renderer.modeClear();
   $('#btnModeDone').onclick = () => { if (!renderer.finishDraw()) toast('Add more points first'); };
-  $('#btnModeCancel').onclick = () => renderer.cancelMode();
+  $('#btnModeCancel').onclick = () => { if (renderer.mode) renderer.cancelMode(); else disarmPlacing(); };
   $('#searchInput').oninput = renderMarkerLists;
   if (window.innerWidth < 800) $('#app').classList.add('nosidebar');
 
@@ -1472,6 +1603,7 @@
     if (e.key === 'Escape') {
       if ($$('.modal.open').length) { closeModals(); return; }
       if (renderer.mode) { renderer.cancelMode(); return; }
+      if (state.placing) { disarmPlacing(); return; }
       renderer.select(null);
       return;
     }

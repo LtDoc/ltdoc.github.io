@@ -127,6 +127,21 @@ combat reports, so a restricted item never reaches a browser that may not show i
 
 ### Marker types
 
+- **Quick add (GM)**: the Add tab opens on a faction picker and a grid of every unit type drawn as a counter in
+  that faction's colour. Click a type, then click the map wherever you want the unit; keep clicking to drop
+  more, press Esc (or Cancel on the HUD, or click the type again) to stop. Each unit is named by its type's
+  formation and numbered per faction and formation: "1st Infantry Regiment", "2nd Infantry Regiment",
+  "1st Assault Regiment", "1st Cavalry Regiment", "1st Field Artillery Battery", "1st Fighter Squadron"…
+  The ordinal style comes from keywords in the faction name (`public/js/naming.js`): French, Belgian and
+  Dutch factions count 1e, 2e, 3e; German, Austrian, Hungarian, Scandinavian, Polish, Czech, Serbian and
+  Turkish ones 1., 2., 3.; Italian, Spanish and Portuguese 1ª, 2ª; Russian and Bulgarian 1-я; Greek 1η;
+  Romanian 1-a; Japanese and Chinese 第1; everything else 1st, 2nd, 3rd. The server assigns the number from
+  the units that exist, skipping past the highest one already used, so renaming or deleting units never
+  produces duplicates. Stats come from the campaign's stat table and the colour from the faction. Rename or
+  edit any unit later from its popup. Blank names in the custom form get the same treatment.
+- **Custom marker**: below the grid, a collapsed form for towns, points of interest, scenery, players and
+  units that need a specific icon, name or stats. Stats and visibility/ownership sit in collapsible sections;
+  the icon row offers a sprite picker, an upload button and an image URL.
 - **Unit / army**: drawn as a NATO-style counter in the nation colour with a symbol for the unit type and a
   strength bar. Fields: nation, unit type, attack, defend, action points, range, movement, strength %, abilities, notes.
   The unit type picker offers a WW1-era catalogue of 53 types in six groups (infantry, mounted & mobile,
@@ -312,6 +327,7 @@ public/
   js/earth.js     vector Earth built from the Natural Earth bundle, plus the equirectangular projection helpers
   js/atlas.js     sprite atlas loader: "sprite:<sheet>:<n>" references → PixiJS textures and CSS previews
   js/units.js     WW1 unit catalogue, default stats and the drawn NATO-style counter symbols
+  js/naming.js    ordinal styles by faction keyword and the next-free-number rule (shared with the server)
   js/stats-editor.js  GM table of per-campaign unit stat overrides (+/- steppers), shared by both pages
   sprites/        pixel-art sheets and atlas.json (generated)
   js/map.js       app logic: REST + WebSocket sync, sidebar, forms, popups, history, combat, notifications

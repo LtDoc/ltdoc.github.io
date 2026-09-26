@@ -180,6 +180,26 @@ const UnitTypes = (() => {
     { id: 'transport', name: 'Transports / convoy', cat: 'Naval', symbol: 'transport', stats: [0, 1, 1, 0, 5] },
     { id: 'seaplanecarrier', name: 'Seaplane carrier', cat: 'Naval', symbol: 'transport', mod: 'AV', stats: [2, 2, 1, 4, 5] },
   ];
+  // Formation name each type gives to quick-added units: "1st Infantry Regiment", "2nd Assault Regiment"…
+  const FORMATIONS = {
+    infantry: 'Infantry Regiment', stormtroopers: 'Assault Regiment', mountain: 'Mountain Regiment', marines: 'Marine Regiment',
+    conscripts: 'Conscript Regiment', militia: 'Militia Regiment', colonial: 'Colonial Regiment', bicycle: 'Cyclist Battalion',
+    machinegun: 'Machine-gun Company',
+    cavalry: 'Cavalry Regiment', dragoons: 'Dragoon Regiment', lancers: 'Lancer Regiment', hussars: 'Hussar Regiment',
+    camelry: 'Camel Corps', reconnaissance: 'Reconnaissance Squadron', armouredcar: 'Armoured Car Squadron', tank: 'Tank Battalion',
+    armouredtrain: 'Armoured Train',
+    fieldartillery: 'Field Artillery Battery', horseartillery: 'Horse Artillery Battery', heavyartillery: 'Heavy Artillery Battery',
+    siegeartillery: 'Siege Battery', railwaygun: 'Railway Gun', mortar: 'Trench Mortar Battery', antiaircraft: 'Anti-aircraft Battery',
+    coastal: 'Coastal Battery',
+    hq: 'Headquarters', engineers: 'Engineer Battalion', sappers: 'Sapper Company', pioneers: 'Pioneer Battalion', signals: 'Signals Company',
+    supply: 'Supply Column', medical: 'Field Hospital', gas: 'Gas Company', railway: 'Railway Company', labour: 'Labour Battalion',
+    fighter: 'Fighter Squadron', bomber: 'Bomber Squadron', reconair: 'Reconnaissance Flight', seaplane: 'Seaplane Flight',
+    balloon: 'Balloon Company', airship: 'Airship',
+    dreadnought: 'Battleship', predreadnought: 'Pre-dreadnought', battlecruiser: 'Battlecruiser', armouredcruiser: 'Armoured Cruiser',
+    lightcruiser: 'Light Cruiser', destroyer: 'Destroyer Flotilla', torpedoboat: 'Torpedo Boat Flotilla', submarine: 'Submarine Flotilla',
+    minelayer: 'Minelayer', gunboat: 'Gunboat', transport: 'Transport Convoy', seaplanecarrier: 'Seaplane Carrier',
+  };
+  for (const t of LIST) t.unit = FORMATIONS[t.id] || t.name;
   const byId = new Map(LIST.map(t => [t.id, t]));
   const byName = new Map(LIST.map(t => [t.name.toLowerCase(), t]));
   const STAT_KEYS = ['attack', 'defend', 'ap', 'range', 'movement'];
@@ -255,4 +275,5 @@ const UnitTypes = (() => {
   return { LIST, categories, resolve, draw, symbols: sym, defaults, statsFor, statLabel, STAT_KEYS, STAT_LABELS };
 })();
 
-window.UnitTypes = UnitTypes;
+if (typeof window !== 'undefined') window.UnitTypes = UnitTypes;
+if (typeof module !== 'undefined') module.exports = UnitTypes;   // the server reuses the catalogue for auto-naming

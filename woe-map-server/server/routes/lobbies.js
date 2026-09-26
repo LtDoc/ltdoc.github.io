@@ -11,6 +11,8 @@ const access = require('../lobbyAccess');
 const hub = require('../ws');
 const hist = require('../history');
 const { imageSize } = require('../imageSize');
+const UnitTypes = require('../../public/js/units');   // shared catalogue: formation names and default stats
+const Naming = require('../../public/js/naming');     // shared ordinal rules for sequential unit names
 
 const router = express.Router();
 router.use(requireAuth);
@@ -698,7 +700,22 @@ router.post('/:id/markers', (req, res) => {
   const type = MARKER_TYPES.includes(b.type) ? b.type : null;
   if (!type) return res.status(400).json({ error: 'Bad marker type' });
   if (!isGm && type !== 'player') return res.status(403).json({ error: 'Players can only add their own player marker' });
-  const name = clean(b.name, 60) || (type === 'scenery' ? 'Scenery' : '');
+  let name = clean(b.name, 60) || (type === 'scenery' ? 'Scenery' : '');
+  if (!name && type === 'unit' && b.autoName) {
+    // Quick add: "<ordinal> <formation>", numbered per faction and formation, ordinal style from the faction name.
+    const d = (b.data && typeof b.data === 'object') ? b.data : {};
+    const ut = UnitTypes.resolve(d.unitType);
+    const formation = ut ? ut.unit : (clean(d.unitType, 40) || 'Unit');
+    const nation = clean(d.nation, 60).toLowerCase();
+    const names = q.markers.all(req.lobby.id)
+      .filter(m => m.type === 'unit' && clean(access.safeJson(m.data).nation, 60).toLowerCase() === nation)
+      .map(m => m.name);
+    name = Naming.nextName(names, formation, nation);
+    // Fill any stats the client left out from the campaign's stat table.
+    const defaults = ut ? UnitTypes.defaults(ut, access.safeJson(req.lobby.settings).unitStats) : null;
+    if (defaults) for (const k of UnitTypes.STAT_KEYS) if (d[k] === undefined || d[k] === '') d[k] = defaults[k];
+    b.data = d;
+  }
   if (!name) return res.status(400).json({ error: 'Marker needs a name' });
   const x = num(b.x), y = num(b.y);
   if (!inBounds(req, x, y)) return res.status(400).json({ error: 'Position is off the map' });

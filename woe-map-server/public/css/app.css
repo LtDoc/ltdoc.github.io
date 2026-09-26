@@ -92,8 +92,22 @@ p { margin: 8px 0; }
 .spritegrid .cell { width: 78px; height: 78px; display: flex; align-items: center; justify-content: center; border: 2px solid transparent; border-radius: 5px; cursor: pointer; background: rgba(0,0,0,.28); }
 .spritegrid .cell:hover { border-color: #5dade2; }
 .spritegrid .cell.selected { border-color: #f1c40f; }
-.iconpreview { display: flex; align-items: center; gap: 8px; min-height: 40px; margin: 4px 0 8px; }
-.iconpreview .sprite { background-color: rgba(0,0,0,.25); border-radius: 4px; }
+.coloricon { grid-template-columns: 84px 1fr; }
+#addForm .coloricon { grid-template-columns: 1fr; }   /* the sidebar is too narrow for two columns */
+.field { display: block; color: #bdc3c7; font-size: 12px; margin-top: 6px; }
+.iconrow { display: flex; align-items: center; gap: 5px; min-height: 40px; margin: 4px 0 6px; flex-wrap: wrap; }
+.iconrow .sprite { background-color: rgba(0,0,0,.25); border-radius: 4px; }
+label.filebtn { display: inline-block; margin: 0; padding: 4px 8px; font-size: 12px; border-radius: 6px; cursor: pointer; background: var(--panel2); color: var(--text); }
+label.filebtn:hover { filter: brightness(1.15); }
+.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 8px; }
+details.sub { margin: 6px 0; }
+details.sub > summary { cursor: pointer; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 6px 0; user-select: none; list-style-position: inside; }
+details.sub > summary .hint { text-transform: none; letter-spacing: 0; }
+.qalist { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 6px; }
+.qalist .section { grid-column: 1 / -1; margin: 10px 0 2px; }
+.qa { display: flex; align-items: center; gap: 6px; padding: 3px 6px; background: var(--panel2); text-align: left; font-size: 12px; line-height: 1.15; border: 1px solid transparent; min-height: 36px; }
+.qa img { width: 40px; height: 27px; flex: none; }
+.qa.active { border-color: #f1c40f; background: rgba(241,196,15,.18); }
 #popup .sprite { display: block; margin: 0 auto 6px; }
 .flag { display: inline-block; height: 14px; width: auto; max-width: 28px; vertical-align: middle; border: 1px solid rgba(0,0,0,.6); border-radius: 2px; background: #000; object-fit: cover; }
 .flag.big { height: 22px; max-width: 44px; }
