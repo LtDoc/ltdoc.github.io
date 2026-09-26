@@ -139,6 +139,23 @@ function circle(lobby, x, y, km, n = 28) {
   return [[ring]];
 }
 
+/** Is a map point on land (Earth map)? Image maps are all land. */
+function isLand(lobby, x, y) {
+  if (!geo.isEarth(lobby)) return true;
+  for (const l of landFor(lobby)) {
+    const b = l.bbox;
+    if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) continue;
+    if (pointInMulti(x, y, [l.poly])) return true;
+  }
+  return false;
+}
+/** Coastal test: any point on a circle of `km` around (x, y) is sea. */
+function isCoastal(lobby, x, y, km = 30) {
+  if (!geo.isEarth(lobby)) return true;
+  const ring = circle(lobby, x, y, km, 24)[0][0];
+  return ring.some(p => !isLand(lobby, p[0], p[1]));
+}
+
 /** Clip a multipolygon to land on the Earth map (image maps have no sea). */
 function landClip(lobby, multi) {
   if (!geo.isEarth(lobby)) return multi;
@@ -343,4 +360,4 @@ function capture(lobby, g, unit, factions, markers, relation) {
 }
 
 module.exports = { NEUTRAL, all, write, clear, carve, circle, landClip, ownerAt, seedFromYear, assignArea, brush, ownershipChanges, capture, isLandUnit, earthYears, clean,
-  trenchOwner, trenchOwnershipChanges, trenchCover, distanceToPath };
+  trenchOwner, trenchOwnershipChanges, trenchCover, distanceToPath, isLand, isCoastal, landFor, loadGz };

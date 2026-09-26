@@ -15,7 +15,7 @@ const GameUI = (() => {
   function init(c) {
     ctx = c;
     const { $ } = ctx;
-    $('#nationFaction').onchange = renderNation;
+    $('#nationFaction').onchange = () => { renderNation(); loadProduction(); };
     $('#btnGameToggle').onclick = toggleGame;
     $('#btnEndTurn').onclick = endTurn;
     $('#btnUndoTurn').onclick = undoTurn;
@@ -30,6 +30,20 @@ const GameUI = (() => {
       ctx.armBrush(Number(sel.value) || 0, Number($('#terrBrushKm').value) || 60, sel.options[sel.selectedIndex]?.textContent || 'neutral');
     };
     $('#btnTerrClear').onclick = clearTerritories;
+    $('#btnCosts').onclick = () => CostEditor.open(ctx.state.lobby, { settings: g().settings, onSaved: game => { ctx.state.game = game; refresh(); loadProduction(); } });
+    $('#btnSeedCities').onclick = seedCities;
+    $('#btnGenResources').onclick = generateResources;
+    $('#buildFilter').oninput = renderBuildList;
+    document.addEventListener('click', e => {
+      const b = e.target.closest('[data-build]');
+      if (b) { queueBuild(b.dataset.build, Number(b.dataset.site)); return; }
+      const c = e.target.closest('[data-cancelbuild]');
+      if (c) { cancelBuild(Number(c.dataset.cancelbuild)); return; }
+      const o = e.target.closest('[data-openbuild]');
+      if (o) { openBuildPicker(Number(o.dataset.openbuild)); return; }
+      const f = e.target.closest('[data-buildfactory]');
+      if (f) { ctx.armFactory(); }
+    });
     // Diplomacy buttons live inside re-rendered panels: delegate.
     document.addEventListener('click', e => {
       const b = e.target.closest('[data-diplo]');
@@ -48,6 +62,7 @@ const GameUI = (() => {
     ctx.state.game = d.game; ctx.state.gameFactions = d.factions; ctx.state.myFactionId = d.myFactionId; ctx.state.canUndo = d.canUndo;
     ctx.state.relations = d.relations || []; ctx.state.diplomacy = d.diplomacy || []; ctx.state.hasTerritories = !!d.hasTerritories;
     refresh();
+    loadProduction();
   }
   function onRelations(msg) {
     ctx.state.relations = msg.relations || []; ctx.state.diplomacy = msg.diplomacy || [];
@@ -150,6 +165,109 @@ const GameUI = (() => {
     if (i >= 0) list[i] = entry; else list.push(entry);
     ctx.state.gameFactions = list;
     renderNation(); renderGameTab();
+    const e = myEntry();
+    if (e && e.faction.id === msg.faction.id) loadProduction();
+  }
+
+  // ---- Production (Nation tab) --------------------------------------------------------------
+  let prod = null;   // last production view for the faction shown on the Nation tab
+  async function loadProduction() {
+    const e = g() && g().enabled ? myEntry() : null;
+    if (!e || !e.visible) { prod = null; renderNation(); return; }
+    try {
+      prod = await api.get(`${ctx.base}/game/production?factionId=${e.faction.id}`);
+      if (prod.factionId !== e.faction.id) prod = null;
+    } catch { prod = null; }
+    renderNation();
+  }
+  function productionHtml(e) {
+    if (!prod || prod.factionId !== e.faction.id) return `<div class="section">Production</div><p class="hint">Loading…</p>`;
+    const actor = ctx.isGm() || ctx.state.myFactionId === e.faction.id;
+    const sites = prod.sites.map(s => {
+      const q = s.queue.map(item => {
+        const t = UnitTypes.LIST.find(x => x.id === item.typeId);
+        return `<div class="diplo"><span class="grow">${esc(t ? t.unit : item.typeId)} <span class="hint">${item.turnsLeft} turn${item.turnsLeft === 1 ? '' : 's'} left</span></span>${actor ? `<button class="small secondary" data-cancelbuild="${item.id}" title="Cancel and refund">×</button>` : ''}</div>`;
+      }).join('');
+      const free = s.capacity - s.queue.length;
+      return `<div class="site"><div class="diplo"><span class="grow"><b>${esc(s.name)}</b> <span class="hint">${s.kind}${s.kind === 'factory' ? ` level ${s.industry}` : ''} · ${s.queue.length}/${s.capacity} building${s.coastal ? ' · port' : ''}</span></span>${actor && free > 0 ? `<button class="small" data-openbuild="${s.id}">Build…</button>` : ''}</div>${q}</div>`;
+    }).join('');
+    const factories = prod.factoryBuilds.map(item => `<div class="diplo"><span class="grow">Factory near ${esc(item.siteName || '')} <span class="hint">${item.turnsLeft} turn${item.turnsLeft === 1 ? '' : 's'} left</span></span>${actor ? `<button class="small secondary" data-cancelbuild="${item.id}" title="Cancel and refund">×</button>` : ''}</div>`).join('');
+    const fc = prod.costs.factory;
+    return `<div class="section">Production</div>
+      ${sites.length ? sites : '<p class="hint">No cities or factories. Production needs a city, a capital or a factory in your colours.</p>'}
+      ${factories}
+      ${actor ? `<p><button class="small secondary" data-buildfactory="1" title="${esc(GameData.costLabel(fc))}">Build a factory…</button> <span class="hint">within ${g().settings.factoryRangeKm} ${ctx.state.lobby?.scaleLabel || 'km'} of your city or town</span></p>` : ''}`;
+  }
+  let buildSiteId = null;
+  function openBuildPicker(siteId) {
+    const { $ } = ctx;
+    if (!prod) return;
+    const site = prod.sites.find(s => s.id === siteId);
+    if (!site) return;
+    buildSiteId = siteId;
+    $('#buildSite').textContent = site.name;
+    $('#buildHint').textContent = `${site.kind}${site.kind === 'factory' ? ` level ${site.industry}` : ''} · ${site.capacity - site.queue.length} slot${site.capacity - site.queue.length === 1 ? '' : 's'} free${site.coastal ? ' · coastal (ships allowed)' : ' · inland (no ships)'}${site.industry < 2 ? ' · no aircraft below industry 2' : ''}`;
+    $('#buildFilter').value = '';
+    renderBuildList();
+    $('#buildModal').classList.add('open');
+  }
+  function renderBuildList() {
+    const { $ } = ctx;
+    if (!prod) return;
+    const site = prod.sites.find(s => s.id === buildSiteId);
+    const q = $('#buildFilter').value.trim().toLowerCase();
+    const st = prod.state;
+    let html = '';
+    for (const cat of UnitTypes.categories) {
+      const types = UnitTypes.LIST.filter(t => t.cat === cat && (!q || t.unit.toLowerCase().includes(q) || t.name.toLowerCase().includes(q) || cat.toLowerCase().includes(q)));
+      if (!types.length) continue;
+      html += `<div class="section">${esc(cat)}</div>`;
+      for (const t of types) {
+        const cost = prod.costs[t.id];
+        const short = [];
+        for (const k of GameData.RESOURCE_KEYS) if ((st.resources[k] || 0) < cost[k]) short.push(GameData.byKey[k].name.toLowerCase());
+        if (st.money < cost.money) short.push('money');
+        if (st.manpower < cost.manpower) short.push('manpower');
+        let blocked = short.length ? `short of ${short.join(', ')}` : '';
+        if (!blocked && t.cat === 'Naval' && site && !site.coastal) blocked = 'needs a coastal city';
+        if (!blocked && t.cat === 'Air' && site && site.industry < 2) blocked = 'needs industry 2';
+        html += `<div class="diplo"><span class="grow"><b>${esc(t.unit)}</b><br><span class="hint">${esc(GameData.costLabel(cost))}</span>${blocked ? `<br><span class="hint" style="color:#ff9f80">${esc(blocked)}</span>` : ''}</span><button class="small" data-build="${t.id}" data-site="${buildSiteId}" ${blocked ? 'disabled' : ''}>Build</button></div>`;
+      }
+    }
+    $('#buildList').innerHTML = html || '<p class="hint">No unit types match.</p>';
+  }
+  async function queueBuild(typeId, siteId) {
+    const e = myEntry();
+    try {
+      prod = await api.post(`${ctx.base}/game/production`, { typeId, siteId, factionId: e ? e.faction.id : undefined });
+      toast('Queued'); renderNation(); renderBuildList();
+    } catch (err) { toast(err.message); }
+  }
+  async function cancelBuild(id) {
+    const e = myEntry();
+    try { prod = await api.del(`${ctx.base}/game/production/${id}?factionId=${e ? e.faction.id : ''}`); renderNation(); toast('Cancelled and refunded'); }
+    catch (err) { toast(err.message); }
+  }
+  /** map.js calls this with the map point the player clicked while placing a factory. */
+  async function buildFactoryAt(x, y) {
+    const e = myEntry();
+    try {
+      prod = await api.post(`${ctx.base}/game/production`, { typeId: 'factory', x, y, factionId: e ? e.faction.id : undefined });
+      renderNation(); toast(`Factory started (${prod.costs.factory.turns} turns)`); return true;
+    } catch (err) { toast(err.message); return false; }
+  }
+
+  // ---- Earth datasets (GM) ----------------------------------------------------------------------
+  async function seedCities() {
+    if (!confirm('Add the major cities of 1914 as towns? Cities already on the map (by name) are skipped.')) return;
+    try { const d = await api.post(`${ctx.base}/game/cities/seed`, {}); toast(`${d.created} cities added${d.skipped ? `, ${d.skipped} already there` : ''}`, 4000); await ctx.loadMarkers(); }
+    catch (err) { toast(err.message); }
+  }
+  async function generateResources() {
+    const fill = Number(ctx.$('#genFill').value) || 0;
+    if (!confirm(`Place the historical resource regions${fill ? ` plus ${fill} random small deposits` : ''}? Regions already on the map (by name) are skipped.`)) return;
+    try { const d = await api.post(`${ctx.base}/game/resources/generate`, { dataset: true, fill }); toast(`${d.created} regions${d.filled ? ` and ${d.filled} deposits` : ''} placed`, 4000); await ctx.loadMarkers(); }
+    catch (err) { toast(err.message); }
   }
 
   /** Everything that depends on the game row: rules for the renderer, tab visibility, HUD, both panels. */
@@ -224,6 +342,7 @@ const GameUI = (() => {
       ${inc.notes && inc.notes.length ? `<details class="sub"><summary>Where it comes from</summary><ul class="hintlist">${inc.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul></details>` : ''}
       <div class="section">Forces <span class="hint">(${units.length})</span></div>
       ${Object.keys(cats).length ? `<table class="treasury"><tbody>${Object.entries(cats).map(([c, v]) => `<tr><td>${esc(c)}</td><td class="num">${v.n}</td><td class="hint">${v.moved ? `${v.moved} moved` : ''}${v.spent ? `${v.moved ? ', ' : ''}${v.spent} attacked` : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="hint">No units on the map.</p>'}
+      ${productionHtml(e)}
       ${diplomacyHtml(e)}
       ${lastTurn ? `<div class="section">Last turn</div><p class="hint">${esc(lastTurn.message)}</p>` : ''}`;
   }
@@ -273,6 +392,9 @@ const GameUI = (() => {
     set('#ruleBaseMoney', s.baseMoney); set('#ruleBaseRp', s.baseRp); set('#ruleBaseManpower', s.baseManpower);
     set('#rulePublic', s.publicTreasury);
     set('#ruleTrenchRange', s.trenchRangeKm); set('#ruleTrenchDug', s.trenchBonusDug); set('#ruleTrenchReinforced', s.trenchBonusReinforced);
+    set('#ruleCapCapital', s.cityCapacity.capital); set('#ruleCapCity', s.cityCapacity.city); set('#ruleCapVillage', s.cityCapacity.village);
+    set('#ruleFactoryRange', s.factoryRangeKm); set('#ruleCoastal', s.coastalKm);
+    $('#earthSeedRow').hidden = state.lobby?.mapKind !== 'earth';
     for (const size of ['capital', 'city', 'village']) for (const k of ['money', 'rp', 'manpower']) set(`#rule_${size}_${k}`, s.cityIncome[size][k]);
     set('#ruleFactoryMoney', s.factoryIncome.money); set('#ruleFactoryRp', s.factoryIncome.rp);
     set('#ruleStartRes', s.startStock.resources); set('#ruleStartMoney', s.startStock.money); set('#ruleStartMp', s.startStock.manpower);
@@ -324,6 +446,8 @@ const GameUI = (() => {
       upkeepGrain: v('#ruleUpkeepGrain'), upkeepOil: v('#ruleUpkeepOil'),
       baseMoney: v('#ruleBaseMoney'), baseRp: v('#ruleBaseRp'), baseManpower: v('#ruleBaseManpower'), publicTreasury: $('#rulePublic').checked,
       trenchRangeKm: v('#ruleTrenchRange'), trenchBonusDug: v('#ruleTrenchDug'), trenchBonusReinforced: v('#ruleTrenchReinforced'),
+      cityCapacity: { capital: v('#ruleCapCapital'), city: v('#ruleCapCity'), village: v('#ruleCapVillage') },
+      factoryRangeKm: v('#ruleFactoryRange'), coastalKm: v('#ruleCoastal'),
       cityIncome: {}, factoryIncome: { money: v('#ruleFactoryMoney'), rp: v('#ruleFactoryRp') },
       startStock: { resources: v('#ruleStartRes'), money: v('#ruleStartMoney'), manpower: v('#ruleStartMp') },
     };
@@ -405,7 +529,7 @@ const GameUI = (() => {
     finally { btn.disabled = false; }
   }
 
-  return { init, load, refresh, onGame, onFaction, onRelations, onTerritories, renderNation };
+  return { init, load, refresh, onGame, onFaction, onRelations, onTerritories, renderNation, loadProduction, buildFactoryAt };
 })();
 
 // Small helper so the modifiers table starts with every resource present.

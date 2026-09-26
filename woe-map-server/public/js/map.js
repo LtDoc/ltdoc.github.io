@@ -230,11 +230,20 @@
       $('#modeText').textContent = `Territory brush: each click ${b.factionId ? 'gives ' + b.name : 'makes neutral'} a ${b.km} km circle. Esc to stop.`;
       return;
     }
+    if (state.placing.factory) {
+      $('#modeText').textContent = `New factory: click the map within ${state.game?.settings?.factoryRangeKm ?? 50} ${state.lobby?.scaleLabel || 'km'} of one of your cities or towns. Esc to cancel.`;
+      return;
+    }
     const t = state.placing.type;
     $('#modeText').textContent = `Placing ${quickNation() || 'unaligned'} ${t.unit}: click the map (next: ${nextQuickName(t)}). Esc to stop.`;
   }
   renderer.addEventListener('mapclick', async e => {
-    if (!state.placing || state.role !== 'gm') return;
+    if (!state.placing) return;
+    if (state.placing.factory) {
+      if (await GameUI.buildFactoryAt(round1(e.detail.x), round1(e.detail.y))) disarmPlacing();
+      return;
+    }
+    if (state.role !== 'gm') return;
     if (state.placing.brush) {
       const b = state.placing.brush;
       try {
@@ -322,6 +331,14 @@
       renderer.setFactionInfo(state.factions);
       renderer.setTerritories(d.territories, true);
     } catch (err) { console.warn('territories', err); }
+  }
+
+  /** Player factory: click the map near one of your cities or towns to start building. */
+  function armFactory() {
+    disarmPlacing();
+    state.placing = { factory: true };
+    renderer.app.canvas.style.cursor = 'copy';
+    updatePlaceHud();
   }
 
   /** GM territory brush: click the map to paint (or erase, factionId 0) a circle of the given radius. */
@@ -1110,7 +1127,7 @@
       <div data-for="town"><div class="grid2">
         <label>Size<select id="${p}Size"><option value="capital">Capital</option><option value="city">City</option><option value="village">Village</option></select></label>
         <label>Faction<select id="${p}TownNationSel">${nationOptions()}</select></label>
-      </div><label id="${p}TownNationCustomWrap" hidden>Custom nation<input id="${p}TownNation" list="nationList" maxlength="40"></label></div>
+      </div><div class="grid2"><label>Industry <span class="hint">(game mode: 0–10)</span><input id="${p}Industry2" type="number" min="0" max="10" step="1" placeholder="by size"></label></div><label id="${p}TownNationCustomWrap" hidden>Custom nation<input id="${p}TownNation" list="nationList" maxlength="40"></label></div>
       <div data-for="poi"><label>Category<input id="${p}Category" maxlength="40" placeholder="Ruins, Mine, Fortress…"></label></div>
       <div data-for="resource"><div class="grid2">
         <label>Resource<select id="${p}Kind">${(window.GameData ? GameData.RESOURCES : []).map(r => `<option value="${r.key}">${esc(r.name)}</option>`).join('')}</select></label>
@@ -1241,7 +1258,7 @@
       movement: v('Movement'), strength: v('Strength') === '' ? 100 : v('Strength'),
       abilities: v('Abilities').split('\n').map(s => s.trim()).filter(Boolean),
     });
-    if (type === 'town') Object.assign(data, { size: v('Size'), nation: readNation(p, 'TownNation') });
+    if (type === 'town') Object.assign(data, { size: v('Size'), nation: readNation(p, 'TownNation'), industry: v('Industry2') });
     if (type === 'poi') Object.assign(data, { category: v('Category') });
     if (type === 'resource') Object.assign(data, { kind: v('Kind'), yield: v('Yield') === '' ? 1 : v('Yield'), nation: readNation(p, 'ResNation') });
     if (type === 'factory') Object.assign(data, { industry: v('Industry') || 1, nation: readNation(p, 'FacNation') });
@@ -1271,6 +1288,7 @@
     set('Size', d.size || 'village'); setNation(p, 'TownNation', m.type === 'town' ? d.nation : ''); set('Category', d.category); set('Notes', d.notes);
     set('Kind', d.kind || 'grain'); set('Yield', d.yield ?? 3); setNation(p, 'ResNation', m.type === 'resource' ? d.nation : '');
     set('Industry', d.industry ?? 1); setNation(p, 'FacNation', m.type === 'factory' ? d.nation : '');
+    set('Industry2', m.type === 'town' ? (d.industry ?? '') : '');
     set('Owner', m.ownerId ?? ''); set('VisibleTo', (m.visibleTo || []).join(', '));
     set('Scale', d.scale ?? 1); set('Rotation', d.rotation ?? 0);
     const fl = document.getElementById(p + 'Flip'); if (fl) fl.checked = !!d.flip;
@@ -1842,7 +1860,7 @@
   try {
     await loadLobby();
     await loadFactions();
-    GameUI.init({ state, renderer, base, $, $$, flagImg, loadMarkers, loadTerritories, armBrush, isGm: () => state.role === 'gm' });
+    GameUI.init({ state, renderer, base, $, $$, flagImg, loadMarkers, loadTerritories, armBrush, armFactory, isGm: () => state.role === 'gm' });
     await GameUI.load().catch(err => console.warn('game state', err));
     await loadTerritories();
     await loadMarkers();

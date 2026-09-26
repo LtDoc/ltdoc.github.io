@@ -272,7 +272,7 @@ function afterMove(req, unit) {
 }
 
 // Game layer (turns, treasuries, territories, diplomacy): routes/game.js, sharing this router's lobby middleware.
-router.use('/:id/game', require('./game')({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById }));
+router.use('/:id/game', require('./game')({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById, createMarker }));
 
 router.get('/:id', (req, res) => {
   const online = new Set(hub.presence(req.lobby.id).map(u => u.id));
@@ -730,7 +730,9 @@ function sanitizeData(type, data) {
     out.industry = clamp(Math.round(num(d.industry, 1)), 1, 5);
   } else if (type === 'town') {
     out.size = ['capital', 'city', 'village'].includes(d.size) ? d.size : 'village';
-    out.nation = clean(d.nation, 40);
+    out.nation = clean(d.nation, 60);
+    if (d.industry !== undefined && d.industry !== '') out.industry = clamp(Math.round(num(d.industry, 0)), 0, 10);   // game mode: production and income weight
+    if (d.major) out.major = true;
   } else if (type === 'poi') {
     out.category = clean(d.category, 40);
   } else if (type === 'scenery') {
@@ -755,12 +757,16 @@ function loadMarker(req, res) {
   return m;
 }
 
-router.post('/:id/markers', (req, res) => {
-  const b = req.body || {};
-  const isGm = req.lobbyRole === 'gm';
+/**
+ * Create a marker for the acting user (shared by the POST route and production). Throws { status, message }.
+ *  skips the role check (finished builds belong to the faction, not the GM).
+ */
+function createMarker(req, b, system = false) {
+  const fail = (status, message) => { const e = new Error(message); e.status = status; throw e; };
+  const isGm = req.lobbyRole === 'gm' || system;
   const type = MARKER_TYPES.includes(b.type) ? b.type : null;
-  if (!type) return res.status(400).json({ error: 'Bad marker type' });
-  if (!isGm && type !== 'player') return res.status(403).json({ error: 'Players can only add their own player marker' });
+  if (!type) fail(400, 'Bad marker type');
+  if (!isGm && type !== 'player') fail(403, 'Players can only add their own player marker');
   let name = clean(b.name, 60) || (type === 'scenery' ? 'Scenery' : '');
   if (!name && type === 'unit' && b.autoName) {
     // Quick add: "<ordinal> <formation>", numbered per faction and formation, ordinal style from the faction name.
@@ -777,9 +783,9 @@ router.post('/:id/markers', (req, res) => {
     if (defaults) for (const k of UnitTypes.STAT_KEYS) if (d[k] === undefined || d[k] === '') d[k] = defaults[k];
     b.data = d;
   }
-  if (!name) return res.status(400).json({ error: 'Marker needs a name' });
+  if (!name) fail(400, 'Marker needs a name');
   const x = num(b.x), y = num(b.y);
-  if (!inBounds(req, x, y)) return res.status(400).json({ error: 'Position is off the map' });
+  if (!inBounds(req, x, y)) fail(400, 'Position is off the map');
   const color = COLOR_RE.test(b.color || '') ? b.color : (req.member?.color || '#3498db');
   const adminOnly = isGm && b.adminOnly ? 1 : 0;
   const visibleTo = isGm ? parseVisibleTo(b.visibleTo) : null;
@@ -792,8 +798,13 @@ router.post('/:id/markers', (req, res) => {
     JSON.stringify(sanitizeData(type, b.data)), t, t, locked).lastInsertRowid;
   const marker = access.serializeMarker(q.marker.get(id, req.lobby.id));
   commitChange(req, 'marker', 'create', null, marker);
-  if (!adminOnly && !visibleTo && type !== 'scenery') logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} placed ${name}`);
-  res.status(201).json({ marker });
+  if (!adminOnly && !visibleTo && type !== 'scenery' && !system) logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} placed ${name}`);
+  return marker;
+}
+
+router.post('/:id/markers', (req, res) => {
+  try { res.status(201).json({ marker: createMarker(req, req.body || {}) }); }
+  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); throw e; }
 });
 
 router.patch('/:id/markers/:mid', (req, res) => {

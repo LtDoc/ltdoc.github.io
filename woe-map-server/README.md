@@ -337,6 +337,37 @@ design, including the phases still to come (territory that follows armies, produ
 - **Rules** (Game tab): distance per movement point, waive limits, base money/RP/manpower, city and factory
   income rates, upkeep, starting stockpiles and public treasuries.
 
+### Production, cities and resources (game mode)
+
+- **Costs.** Every unit type has a cost in resources, money and manpower and a build time in turns
+  (`GameData.DEFAULT_COSTS`): an Infantry Regiment is 10 grain, 5 cotton, 20 money and 3 manpower in one
+  turn; a Tank Battalion 15 iron, 10 coal, 5 oil, 5 rubber, 80 money and 2 manpower in two; a Battleship
+  40 iron, 30 coal, 10 copper and 200 money in six. The GM's **Unit costs…** table (Game tab) changes any of
+  it per campaign with +/- steppers; only differences are stored.
+- **Sites.** A faction builds at the cities and capitals in its colours (capacity: capital 3, city 2
+  parallel builds; villages build nothing) and at its factories (capacity = industry level). Ships need a
+  **coastal** city (sea within 30 km on the Earth map); aircraft need a site of industry 2 or more. Cost is
+  paid when a build is queued and refunded if it is cancelled. **End turn** advances every build; finished
+  units appear beside their site with the usual numbered name and the faction's stats, owned by the
+  faction's player. The Nation tab lists every site with its queue, a **Build…** picker that shows each
+  type's cost and why it cannot be built if it cannot, and a cancel button per item.
+- **Factories.** A player may **build a factory** within 50 km of one of their cities or towns (never a
+  village) on their own or neutral ground: press the button on the Nation tab, click the map, and two turns
+  later a level-1 factory stands there (15 iron, 10 timber, 80 money, 2 manpower). The GM can place or
+  upgrade factories directly.
+- **Major cities (Earth).** **Add major cities** places about 270 towns of the 1914 world with the names of
+  the time (St Petersburg, Constantinople, Christiania, Lemberg, Peking, Bombay…), the capitals of the
+  1914 powers marked as capitals, and an industry level 1–5 that feeds income and production. Coordinates
+  come from Natural Earth (`scripts/prepare-cities.js` rebuilds `public/earth/cities.json`); the list,
+  names, capitals and industry are authored. Cities take the faction whose territory they sit in and are
+  skipped if a town of that name already exists.
+- **Resources (Earth).** **Generate resources** places about 200 authored historical regions from
+  `public/earth/resources.json` (Ruhr, Donets and Welsh coal; Lorraine, Kiruna, Mesabi and Bell Island iron;
+  Baku, Ploiești, Texas and Persian oil; Chilean nitrates; Malayan and Congo rubber; Ukrainian, prairie and
+  pampas grain; steppe and Argentine horses; and so on) with yields of 1–9 per turn, plus an optional **fill**
+  of small random deposits on land so remote factions have something to work with. Everything is an ordinary
+  resource marker afterwards.
+
 ### Territory and war (game mode)
 
 - **Territories** are one polygon set per faction plus neutral land, drawn as tinted fills with outlines and

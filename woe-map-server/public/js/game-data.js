@@ -54,10 +54,93 @@ const GameData = (() => {
     factoryIncome: { money: 2, rp: 0, manpower: 0 },   // per factory, times its industry level
     startStock: { resources: 20, money: 100, manpower: 20, rp: 0 },   // stockpiles when game mode starts
     publicTreasury: false,    // players may see every faction's treasury
+    factoryRangeKm: 50,       // players may build a factory this close to one of their cities or towns
+    coastalKm: 30,            // a city this close to the sea can build ships (Earth map)
+    cityCapacity: { capital: 3, city: 2, village: 0 },   // parallel builds per town size (factories use their level)
     trenchRangeKm: 20,        // units this close to a friendly dug trench get cover
     trenchBonusDug: 2,        // added to defend when attacked
     trenchBonusReinforced: 4,
   };
+
+  // ---- Production costs ----------------------------------------------------------------------
+  // Per unit type: resources, money, manpower and build time in turns. Campaigns override per type via
+  // settings.unitCosts = { typeId: { grain: n, ..., money: n, manpower: n, turns: n } } (only the keys given).
+  const COST_KEYS = [...RESOURCE_KEYS, 'money', 'manpower', 'turns'];
+  const c = (o) => o;
+  const DEFAULT_COSTS = {
+    infantry: c({ grain: 10, cotton: 5, money: 20, manpower: 3, turns: 1 }),
+    stormtroopers: c({ grain: 10, cotton: 6, nitrates: 3, money: 35, manpower: 3, turns: 2 }),
+    mountain: c({ grain: 10, cotton: 6, money: 25, manpower: 3, turns: 1 }),
+    marines: c({ grain: 10, cotton: 6, money: 30, manpower: 3, turns: 2 }),
+    conscripts: c({ grain: 6, cotton: 3, money: 10, manpower: 4, turns: 1 }),
+    militia: c({ grain: 6, cotton: 3, money: 8, manpower: 2, turns: 1 }),
+    colonial: c({ grain: 8, cotton: 4, money: 15, manpower: 2, turns: 1 }),
+    bicycle: c({ grain: 8, cotton: 4, iron: 3, money: 25, manpower: 2, turns: 1 }),
+    machinegun: c({ iron: 5, copper: 3, nitrates: 2, money: 30, manpower: 1, turns: 1 }),
+    cavalry: c({ grain: 10, horses: 8, cotton: 4, money: 30, manpower: 2, turns: 1 }),
+    dragoons: c({ grain: 10, horses: 8, cotton: 4, money: 30, manpower: 2, turns: 1 }),
+    lancers: c({ grain: 10, horses: 8, cotton: 4, iron: 2, money: 32, manpower: 2, turns: 1 }),
+    hussars: c({ grain: 10, horses: 9, cotton: 5, money: 32, manpower: 2, turns: 1 }),
+    camelry: c({ grain: 8, cotton: 4, money: 25, manpower: 2, turns: 1 }),
+    reconnaissance: c({ grain: 5, horses: 4, money: 20, manpower: 1, turns: 1 }),
+    armouredcar: c({ iron: 8, oil: 3, rubber: 3, money: 50, manpower: 1, turns: 2 }),
+    tank: c({ iron: 15, coal: 10, oil: 5, rubber: 5, money: 80, manpower: 2, turns: 2 }),
+    armouredtrain: c({ iron: 20, coal: 10, money: 90, manpower: 2, turns: 3 }),
+    fieldartillery: c({ iron: 8, copper: 4, nitrates: 4, horses: 4, money: 40, manpower: 1, turns: 1 }),
+    horseartillery: c({ iron: 8, copper: 4, nitrates: 4, horses: 8, money: 45, manpower: 1, turns: 1 }),
+    heavyartillery: c({ iron: 15, copper: 6, nitrates: 6, horses: 4, money: 60, manpower: 1, turns: 2 }),
+    siegeartillery: c({ iron: 25, copper: 8, nitrates: 8, money: 90, manpower: 1, turns: 3 }),
+    railwaygun: c({ iron: 40, coal: 10, nitrates: 10, money: 150, manpower: 1, turns: 4 }),
+    mortar: c({ iron: 5, nitrates: 4, money: 25, manpower: 1, turns: 1 }),
+    antiaircraft: c({ iron: 8, copper: 5, nitrates: 3, money: 45, manpower: 1, turns: 2 }),
+    coastal: c({ iron: 25, copper: 5, nitrates: 5, money: 80, manpower: 1, turns: 3 }),
+    hq: c({ money: 40, manpower: 1, turns: 1 }),
+    engineers: c({ timber: 8, iron: 4, money: 30, manpower: 2, turns: 1 }),
+    sappers: c({ timber: 6, iron: 4, nitrates: 2, money: 30, manpower: 2, turns: 1 }),
+    pioneers: c({ timber: 8, iron: 3, money: 25, manpower: 2, turns: 1 }),
+    signals: c({ copper: 6, money: 30, manpower: 1, turns: 1 }),
+    supply: c({ horses: 6, timber: 4, grain: 5, money: 20, manpower: 1, turns: 1 }),
+    medical: c({ cotton: 6, money: 30, manpower: 1, turns: 1 }),
+    gas: c({ nitrates: 8, copper: 2, money: 45, manpower: 1, turns: 2 }),
+    railway: c({ iron: 8, timber: 6, money: 35, manpower: 2, turns: 1 }),
+    labour: c({ grain: 6, money: 10, manpower: 3, turns: 1 }),
+    fighter: c({ timber: 6, cotton: 4, rubber: 2, oil: 3, money: 60, manpower: 1, turns: 2 }),
+    bomber: c({ timber: 10, cotton: 6, rubber: 3, oil: 5, money: 90, manpower: 1, turns: 3 }),
+    reconair: c({ timber: 6, cotton: 4, rubber: 2, oil: 3, money: 50, manpower: 1, turns: 2 }),
+    seaplane: c({ timber: 6, cotton: 4, rubber: 2, oil: 3, money: 60, manpower: 1, turns: 2 }),
+    balloon: c({ cotton: 8, money: 25, manpower: 1, turns: 1 }),
+    airship: c({ cotton: 15, rubber: 4, oil: 4, money: 120, manpower: 1, turns: 4 }),
+    dreadnought: c({ iron: 40, coal: 30, copper: 10, money: 200, manpower: 3, turns: 6 }),
+    predreadnought: c({ iron: 30, coal: 20, copper: 6, money: 120, manpower: 3, turns: 4 }),
+    battlecruiser: c({ iron: 35, coal: 30, copper: 8, money: 180, manpower: 3, turns: 5 }),
+    armouredcruiser: c({ iron: 25, coal: 15, copper: 5, money: 110, manpower: 2, turns: 4 }),
+    lightcruiser: c({ iron: 15, coal: 10, copper: 4, money: 70, manpower: 2, turns: 3 }),
+    destroyer: c({ iron: 10, coal: 8, copper: 2, money: 50, manpower: 1, turns: 2 }),
+    torpedoboat: c({ iron: 6, coal: 4, money: 30, manpower: 1, turns: 1 }),
+    submarine: c({ iron: 12, copper: 4, oil: 4, money: 70, manpower: 1, turns: 3 }),
+    minelayer: c({ iron: 8, coal: 6, nitrates: 4, money: 45, manpower: 1, turns: 2 }),
+    gunboat: c({ iron: 8, coal: 5, money: 40, manpower: 1, turns: 2 }),
+    transport: c({ timber: 15, coal: 8, money: 50, manpower: 1, turns: 2 }),
+    seaplanecarrier: c({ iron: 20, coal: 12, money: 120, manpower: 2, turns: 4 }),
+    factory: c({ iron: 15, timber: 10, money: 80, manpower: 2, turns: 2 }),   // a new production site
+  };
+  /** Full cost row for a type (every key present) after applying campaign overrides. */
+  function costFor(typeId, overrides) {
+    const base = DEFAULT_COSTS[typeId] || { money: 30, manpower: 1, turns: 1 };
+    const o = (overrides && overrides[typeId]) || {};
+    const out = {};
+    for (const k of COST_KEYS) out[k] = Number.isFinite(Number(o[k])) ? Number(o[k]) : (base[k] || 0);
+    out.turns = Math.max(1, Math.round(out.turns || 1));
+    return out;
+  }
+  /** Short "10 grain, 5 cotton, 20 money, 3 manpower · 1 turn" text. */
+  function costLabel(cost) {
+    const parts = [];
+    for (const k of RESOURCE_KEYS) if (cost[k]) parts.push(`${cost[k]} ${byKey[k].name.toLowerCase()}`);
+    if (cost.money) parts.push(`${cost.money} money`);
+    if (cost.manpower) parts.push(`${cost.manpower} manpower`);
+    return `${parts.join(', ') || 'free'} · ${cost.turns} turn${cost.turns === 1 ? '' : 's'}`;
+  }
 
   /** Unit categories that burn oil under upkeep, plus specific land vehicle types. */
   const OIL_CATEGORIES = new Set(['Air', 'Naval']);
@@ -93,7 +176,8 @@ const GameData = (() => {
     return out;
   }
 
-  return { RESOURCES, RESOURCE_KEYS, byKey, iconUrl, POOLS, FACTORY_ICON, TURN_STEPS, DEFAULT_SETTINGS, OIL_CATEGORIES, OIL_TYPES, stepDate, fmtDate, mergeSettings };
+  return { RESOURCES, RESOURCE_KEYS, byKey, iconUrl, POOLS, FACTORY_ICON, TURN_STEPS, DEFAULT_SETTINGS, OIL_CATEGORIES, OIL_TYPES, stepDate, fmtDate, mergeSettings,
+    COST_KEYS, DEFAULT_COSTS, costFor, costLabel };
 })();
 
 if (typeof window !== 'undefined') window.GameData = GameData;

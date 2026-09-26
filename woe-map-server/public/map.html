@@ -75,6 +75,11 @@
             <button type="submit" class="small secondary">Set</button>
           </form>
           <div id="relationList" class="hint"></div>
+          <div class="section">Production</div>
+          <p class="row" style="flex-wrap:wrap;gap:4px"><button type="button" id="btnCosts" class="small secondary">Unit costs…</button>
+            <span id="earthSeedRow" class="row" style="gap:4px;flex-wrap:wrap"><button type="button" id="btnSeedCities" class="small secondary" title="Add the major cities of 1914 as towns (capitals and cities), owned by the faction whose territory they sit in">Add major cities</button>
+            <button type="button" id="btnGenResources" class="small secondary" title="Place the historical resource regions as nodes, owned by the territory they sit in">Generate resources</button>
+            <label class="inline" style="margin:0" title="Also scatter this many small random deposits on land">+ fill <input id="genFill" type="number" min="0" max="400" value="0" style="width:56px;margin:0;padding:3px 6px"></label></span></p>
           <div class="section">Territory</div>
           <div id="territoryTools">
             <div class="row" style="flex-wrap:wrap;gap:4px" id="territoryEarthRow">
@@ -114,6 +119,9 @@
               <div class="section">Upkeep</div>
               <label class="inline"><input type="checkbox" id="ruleUpkeep"> Units cost upkeep each turn</label>
               <div class="grid2"><label>Grain per unit<input id="ruleUpkeepGrain" type="number" step="any" min="0"></label><label>Oil per vehicle / aircraft / ship<input id="ruleUpkeepOil" type="number" step="any" min="0"></label></div>
+              <div class="section">Production</div>
+              <div class="grid3"><label>Capital builds<input id="ruleCapCapital" type="number" min="0" max="20" step="1"></label><label>City builds<input id="ruleCapCity" type="number" min="0" max="20" step="1"></label><label>Village builds<input id="ruleCapVillage" type="number" min="0" max="20" step="1"></label></div>
+              <div class="grid2"><label>Factory range from a city/town<input id="ruleFactoryRange" type="number" step="any" min="1"></label><label>Coastal city: sea within<input id="ruleCoastal" type="number" step="any" min="1"></label></div>
               <div class="section">Trenches</div>
               <div class="grid3"><label>Cover range<input id="ruleTrenchRange" type="number" step="any" min="0"></label><label>Dug: +defend<input id="ruleTrenchDug" type="number" step="any" min="0"></label><label>Reinforced: +defend<input id="ruleTrenchReinforced" type="number" step="any" min="0"></label></div>
               <div class="section">Starting stockpiles <span class="hint">(new factions)</span></div>
@@ -214,6 +222,16 @@
         </div>
         <div class="row"><button type="submit">Save</button><button type="button" class="danger" id="btnShapeDelete" hidden>Delete</button></div>
       </form>
+    </div>
+  </div>
+
+  <div id="buildModal" class="modal">
+    <div class="card">
+      <button class="close" data-close>×</button>
+      <h2>Build at <span id="buildSite"></span></h2>
+      <p class="hint" id="buildHint"></p>
+      <input id="buildFilter" type="search" placeholder="Filter unit types…" autocomplete="off">
+      <div id="buildList" class="buildlist"></div>
     </div>
   </div>
 
@@ -382,6 +400,7 @@
   <script src="/js/naming.js"></script>
   <script src="/js/game-data.js"></script>
   <script src="/js/game-ui.js"></script>
+  <script src="/js/cost-editor.js"></script>
   <script src="/js/stats-editor.js"></script>
   <script src="/js/earth.js"></script>
   <script src="/js/trench.js"></script>

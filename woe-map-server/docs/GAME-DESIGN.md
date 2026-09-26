@@ -1,6 +1,6 @@
 # WoE Strategy Map: game layer design
 
-Status: **agreed 26 Sep 2026; phases 1 (turns and economy) and 2 (territory and war) built 26 Sep 2026, phases 3–5 to come.** The ⚠ marks show where a decision was needed; section 12 records the answers.
+Status: **agreed 26 Sep 2026; phases 1 (turns and economy), 2 (territory and war) and 3 (production and cities) built 26 Sep 2026; phases 4–5 to come.** The ⚠ marks show where a decision was needed; section 12 records the answers.
 
 ## 1. Goal and principles
 
@@ -365,7 +365,7 @@ Each phase ships on its own and is useful without the next.
    forces) and Game tab (turn control, faction table with inline editing).
 2. **Territory and war** (done): territories table, 1914 seeding, assign/brush tools, relations, the capture rule on
    move, city capture, territory rendering, undo last turn.
-3. **Production and cities**: cost table and editor, production queues, spawning, major-city dataset and
+3. **Production and cities** (done): cost table and editor, production queues, spawning, major-city dataset and
    seeding, Earth resource dataset and generation with fill.
 4. **Research**: default tree data, tech table and editor, research queue and progress, effects engine,
    production gating, tech tree modal, GM unlock/lock.

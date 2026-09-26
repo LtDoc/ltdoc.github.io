@@ -159,8 +159,13 @@ function diplomacy(lobbyId) { return q.diplomacy.all(lobbyId).map(serializeDiplo
  * End the current turn. Returns { game, summaries: [{faction, text, data}], shortages }.
  * The caller logs events and broadcasts; this function only changes the database (in one transaction).
  */
-function endTurn(lobby) {
+/**
+ * hooks.spawn(faction, state, item) is called for every finished build inside the transaction and should
+ * create the marker (or throw to skip it); it returns the marker for the summary.
+ */
+function endTurn(lobby, hooks = {}) {
   const g = get(lobby.id);
+  const production = require('./production');
   if (!g.enabled) throw new Error('Game mode is off');
   const markers = q.markers.all(lobby.id).map(access.serializeMarker);
   const fs = factionStates(lobby.id, g.settings);
@@ -188,8 +193,17 @@ function endTurn(lobby) {
       if (inc.money) parts.push(`${inc.money >= 0 ? '+' : ''}${round(inc.money)} money`);
       if (inc.rp) parts.push(`+${round(inc.rp)} RP`);
       if (inc.manpower) parts.push(`+${round(inc.manpower)} manpower`);
+      // Production: builds advance; finished ones become markers via the hook.
+      const built = [];
+      for (const item of production.advance(state)) {
+        try { const m = hooks.spawn ? hooks.spawn(faction, state, item) : null; if (m) built.push(m.name); }
+        catch (e) { parts.push(`build failed: ${e.message}`); }
+      }
+      if (built.length) parts.push(`completed ${built.join(', ')}`);
+      const queued = (state.production || []).length;
+      if (queued) parts.push(`${queued} build${queued === 1 ? '' : 's'} in progress`);
       writeState(state);
-      summaries.push({ faction, text: parts.length ? parts.join(', ') : 'no income', data: { income: inc } });
+      summaries.push({ faction, text: parts.length ? parts.join(', ') : 'no income', data: { income: inc, built } });
     }
     // Shortages bite: up to three of the faction's strongest units lose 10 % strength per short resource.
     for (const hit of strengthHits) {

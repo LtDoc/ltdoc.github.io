@@ -11,7 +11,11 @@ const GameData = require('../../public/js/game-data');
 
 const territory = require('../territory');
 
-module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById }) {
+const production = require('../production');
+const UnitTypes = require('../../public/js/units');
+const geo = require('../geo');
+
+module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById, createMarker }) {
   const router = express.Router({ mergeParams: true });
 
   function requireGm(req, res, next) {
@@ -115,6 +119,137 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     hub.broadcast(req.lobby.id, { type: 'territory', territories: [], replace: true });
     logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} cleared all territories`);
     res.json({ ok: true });
+  });
+
+  // ---- Production ------------------------------------------------------------------------------
+  function factionFor(req, fid) {
+    if (req.lobbyRole === 'gm' && fid) return game.q.faction.get(Number(fid), req.lobby.id) || null;
+    return myFaction(req);
+  }
+  function productionView(req, g, faction) {
+    const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
+    const state = game.serializeState(game.q.state.get(faction.id) || game.ensureState(req.lobby.id, faction.id, g.settings));
+    const sites = production.sites(req.lobby, g, access.serializeFaction(faction), markers).map(s => ({
+      ...s, coastal: geo.isEarth(req.lobby) ? territory.isCoastal(req.lobby, s.x, s.y, num(g.settings.coastalKm, 30)) : true,
+      queue: (state.production || []).filter(q => q.siteId === s.id && q.typeId !== 'factory'),
+    }));
+    const factories = (state.production || []).filter(q => q.typeId === 'factory');
+    const costs = Object.fromEntries([...UnitTypes.LIST.map(t => t.id), 'factory'].map(id => [id, GameData.costFor(id, g.settings.unitCosts)]));
+    return { factionId: faction.id, sites, factoryBuilds: factories, costs, state };
+  }
+
+  router.get('/production', (req, res) => {
+    const g = game.get(req.lobby.id);
+    if (!g.enabled) return res.status(400).json({ error: 'Game mode is off' });
+    const f = factionFor(req, req.query.factionId);
+    if (!f) return res.status(400).json({ error: 'You need a faction' });
+    res.json(productionView(req, g, f));
+  });
+
+  /** Queue a build: { typeId, siteId } for units, { typeId: 'factory', x, y } for a new factory. */
+  router.post('/production', (req, res) => {
+    const g = game.get(req.lobby.id);
+    if (!g.enabled) return res.status(400).json({ error: 'Game mode is off' });
+    const f = factionFor(req, req.body?.factionId);
+    if (!f) return res.status(400).json({ error: 'You need a faction to build' });
+    const faction = access.serializeFaction(f);
+    const state = game.serializeState(game.q.state.get(f.id) || game.ensureState(req.lobby.id, f.id, g.settings));
+    const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
+    let item;
+    try { item = production.queue(req.lobby, g, faction, state, markers, { typeId: String(req.body?.typeId || ''), siteId: req.body?.siteId, x: req.body?.x, y: req.body?.y }); }
+    catch (e) { return res.status(400).json({ error: e.message }); }
+    game.writeState(state);
+    const what = item.typeId === 'factory' ? 'a factory' : (UnitTypes.LIST.find(t => t.id === item.typeId)?.unit || item.typeId);
+    logEvent(req.lobby.id, req.user.id, 'system', `${faction.name} begins building ${what} at ${item.siteName} (${item.turns} turn${item.turns === 1 ? '' : 's'})`, { faction: faction.name },
+      ws => ws.lobbyRole === 'gm' || g.settings.publicTreasury || String(ws.nation || '').toLowerCase() === faction.name.toLowerCase());
+    broadcastFaction(req, g, f);
+    res.status(201).json({ item, ...productionView(req, g, f) });
+  });
+
+  router.delete('/production/:qid', (req, res) => {
+    const g = game.get(req.lobby.id);
+    const f = factionFor(req, req.query.factionId);
+    if (!f) return res.status(400).json({ error: 'You need a faction' });
+    const state = game.serializeState(game.q.state.get(f.id) || game.ensureState(req.lobby.id, f.id, g.settings));
+    try { production.cancel(state, req.params.qid); } catch (e) { return res.status(404).json({ error: e.message }); }
+    game.writeState(state);
+    broadcastFaction(req, g, f);
+    res.json(productionView(req, g, f));
+  });
+
+  // ---- Earth datasets: major cities and resource deposits ------------------------------------
+  router.post('/cities/seed', requireGm, (req, res) => {
+    if (!geo.isEarth(req.lobby)) return res.status(400).json({ error: 'Major cities come with the Earth map' });
+    let cities;
+    try { cities = JSON.parse(require('node:fs').readFileSync(require('node:path').join(require('../config').root, 'public', 'earth', 'cities.json'), 'utf8')).cities; }
+    catch { return res.status(500).json({ error: 'cities.json is missing: run scripts/prepare-cities.js' }); }
+    const W = req.lobby.map_width, H = req.lobby.map_height;
+    const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
+    const existing = new Set(markers.filter(m => m.type === 'town').map(m => m.name.toLowerCase()));
+    const terrs = territory.all(req.lobby.id);
+    const factions = game.q.factions.all(req.lobby.id).map(access.serializeFaction);
+    const byId = new Map(factions.map(f => [f.id, f]));
+    let created = 0;
+    for (const c of cities) {
+      if (existing.has(c.n.toLowerCase())) continue;
+      const [x, y] = geo.project(c.lon, c.lat, W, H);
+      const owner = terrs.length ? territory.ownerAt(terrs, x, y) : null;
+      const faction = owner && owner !== territory.NEUTRAL ? byId.get(owner) : null;
+      const size = c.cap ? 'capital' : 'city';
+      createMarker(req, { type: 'town', name: c.n, x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, color: faction ? faction.color : '#95a5a6', locked: true,
+        data: { size, nation: faction ? faction.name : '', industry: c.ind + (c.cap ? 1 : 0), major: true } }, true);
+      created++;
+    }
+    logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} added ${created} major cities of 1914`);
+    res.json({ created, skipped: cities.length - created });
+  });
+
+  /** Place resource nodes from the historical dataset and optionally scatter smaller "fill" nodes on land. */
+  router.post('/resources/generate', requireGm, (req, res) => {
+    if (!geo.isEarth(req.lobby)) return res.status(400).json({ error: 'Resource generation uses the Earth map; place nodes by hand on image maps' });
+    let rows;
+    try { rows = JSON.parse(require('node:fs').readFileSync(require('node:path').join(require('../config').root, 'public', 'earth', 'resources.json'), 'utf8')).resources; }
+    catch { return res.status(500).json({ error: 'resources.json is missing' }); }
+    const W = req.lobby.map_width, H = req.lobby.map_height;
+    const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
+    const existing = new Set(markers.filter(m => m.type === 'resource').map(m => m.name.toLowerCase()));
+    const terrs = territory.all(req.lobby.id);
+    const factions = game.q.factions.all(req.lobby.id).map(access.serializeFaction);
+    const byId = new Map(factions.map(f => [f.id, f]));
+    const place = (name, kind, x, y, yieldN) => {
+      const owner = terrs.length ? territory.ownerAt(terrs, x, y) : null;
+      const faction = owner && owner !== territory.NEUTRAL ? byId.get(owner) : null;
+      createMarker(req, { type: 'resource', name, x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, color: faction ? faction.color : '#95a5a6', locked: true,
+        data: { kind, yield: yieldN, nation: faction ? faction.name : '' } }, true);
+    };
+    let created = 0;
+    if (req.body?.dataset !== false) {
+      for (const r of rows) {
+        if (existing.has(r.n.toLowerCase()) || !GameData.byKey[r.k]) continue;
+        const [x, y] = geo.project(r.lon, r.lat, W, H);
+        place(r.n, r.k, x, y, clamp(num(r.y, 2), 1, 20));
+        created++;
+      }
+    }
+    // Fill: random small nodes on land (rejection sampling in the map's land bbox), seeded so reruns differ.
+    const fill = clamp(Math.round(num(req.body?.fill, 0)), 0, 400);
+    let filled = 0;
+    if (fill > 0) {
+      const keys = GameData.RESOURCE_KEYS;
+      let seed = (Date.now() % 100000) + 1;
+      const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+      let tries = 0;
+      while (filled < fill && tries < fill * 40) {
+        tries++;
+        const x = rnd() * W, y = (0.08 + rnd() * 0.78) * H;   // skip the polar rows
+        if (!territory.isLand(req.lobby, x, y)) continue;
+        const kind = keys[Math.floor(rnd() * keys.length)];
+        place(`${GameData.byKey[kind].name} deposit`, kind, x, y, 1 + Math.floor(rnd() * 2));
+        filled++;
+      }
+    }
+    logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} generated ${created} historical resource regions${filled ? ` and ${filled} smaller deposits` : ''}`);
+    res.json({ created, filled });
   });
 
   // ---- Relations and diplomacy ---------------------------------------------------------------
@@ -227,6 +362,26 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       numIn('researchLead', 0, 50); numIn('baseMoney', -1000, 100000); numIn('baseRp', -1000, 100000); numIn('baseManpower', -1000, 100000);
       numIn('upkeepGrain', 0, 100); numIn('upkeepOil', 0, 100);
       numIn('trenchRangeKm', 0, 1000); numIn('trenchBonusDug', 0, 50); numIn('trenchBonusReinforced', 0, 50);
+      numIn('factoryRangeKm', 1, 5000); numIn('coastalKm', 1, 500);
+      if (s.cityCapacity && typeof s.cityCapacity === 'object') {
+        out.cityCapacity = {};
+        for (const k of ['capital', 'city', 'village']) if (s.cityCapacity[k] !== undefined) out.cityCapacity[k] = clamp(Math.round(num(s.cityCapacity[k])), 0, 20);
+      }
+      // Unit cost overrides: { typeId: { grain.., money, manpower, turns } }; null clears a type, replaceUnitCosts replaces all.
+      if (s.unitCosts !== undefined) {
+        const cur = s.replaceUnitCosts ? {} : { ...(g.settings.unitCosts || {}) };
+        if (s.unitCosts && typeof s.unitCosts === 'object') {
+          for (const [id, row] of Object.entries(s.unitCosts).slice(0, 200)) {
+            if (!/^[a-z0-9_-]{1,40}$/.test(id)) continue;
+            if (row === null) { delete cur[id]; continue; }
+            if (!row || typeof row !== 'object') continue;
+            const o = {};
+            for (const k of GameData.COST_KEYS) if (row[k] !== undefined) o[k] = clamp(num(row[k]), 0, k === 'turns' ? 50 : 100000);
+            if (Object.keys(o).length) cur[id] = o;
+          }
+        }
+        out.unitCosts = cur;
+      }
       for (const k of ['waiveMovement', 'occupyNeutrals', 'upkeep', 'publicTreasury']) if (s[k] !== undefined) out[k] = !!s[k];
       for (const grp of ['cityIncome', 'factoryIncome', 'startStock']) {
         if (s[grp] && typeof s[grp] === 'object') {
@@ -250,7 +405,24 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     // Ownership follows territory: settle nodes, factories and towns before income is counted.
     const settled = applyOwnership(req);
     let result;
-    try { result = game.endTurn(req.lobby); } catch (e) { return res.status(400).json({ error: e.message }); }
+    const membersByNation = new Map(access.getMembers(req.lobby.id).map(m => [String(m.nation || '').toLowerCase(), m.user_id]));
+    const spawnIndex = new Map();
+    const spawn = (faction, state, item) => {
+      const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
+      const site = markers.find(m => m.id === item.siteId);
+      const owner = membersByNation.get(faction.name.toLowerCase()) || null;
+      if (item.typeId === 'factory') {
+        return createMarker(req, { type: 'factory', name: `${item.siteName || faction.name} Works`, x: item.x, y: item.y, color: faction.color, ownerId: owner, data: { nation: faction.name, industry: 1 } }, true);
+      }
+      const t = UnitTypes.LIST.find(u => u.id === item.typeId);
+      if (!t) throw new Error('unknown type');
+      const n = (spawnIndex.get(item.siteId) || 0); spawnIndex.set(item.siteId, n + 1);
+      const p = site ? production.spawnPoint(req.lobby, site, n) : { x: item.x || 0, y: item.y || 0 };
+      const d = UnitTypes.defaults(t, g0.settings.unitStats) || {};
+      return createMarker(req, { type: 'unit', autoName: true, x: p.x, y: p.y, color: faction.color, ownerId: owner, data: { nation: faction.name, unitType: t.name, ...d, strength: 100 } }, true);
+    };
+    const g0 = before;
+    try { result = game.endTurn(req.lobby, { spawn }); } catch (e) { return res.status(400).json({ error: e.message }); }
     const g = result.game;
     if (settled.length) logEvent(req.lobby.id, null, 'system', `${settled.length} place${settled.length === 1 ? '' : 's'} changed hands with the front line`);
     logEvent(req.lobby.id, req.user.id, 'system', `Turn ${before.turn} ended. Turn ${g.turn} begins: ${GameData.fmtDate(g.date)}. Movement and action points are reset.`);
