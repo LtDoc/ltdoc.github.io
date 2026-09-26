@@ -311,7 +311,8 @@ public/
   js/map-renderer.js  PixiJS WebGL renderer (camera, procedural sprites, shapes + vertex editing, animations, measure/draw modes)
   js/earth.js     vector Earth built from the Natural Earth bundle, plus the equirectangular projection helpers
   js/atlas.js     sprite atlas loader: "sprite:<sheet>:<n>" references → PixiJS textures and CSS previews
-  js/units.js     WW1 unit catalogue and the drawn NATO-style counter symbols
+  js/units.js     WW1 unit catalogue, default stats and the drawn NATO-style counter symbols
+  js/stats-editor.js  GM table of per-campaign unit stat overrides (+/- steppers), shared by both pages
   sprites/        pixel-art sheets and atlas.json (generated)
   js/map.js       app logic: REST + WebSocket sync, sidebar, forms, popups, history, combat, notifications
   earth/          land, lakes, rivers, borders (gzipped JSON, public domain)
@@ -319,6 +320,16 @@ scripts/
   create-admin.js, import-firebase.js, backup.js, cleanup-uploads.js, prepare-earth.js, extract-sprites.js,
   install-service.ps1, uninstall-service.ps1
 ```
+
+### Rendering and CPU use
+
+The renderer draws on demand rather than every display refresh. PixiJS's own ticker is stopped; a small loop
+in `map-renderer.js` redraws only after something changed (`invalidate()` is called by every camera move,
+marker or drawing update, hover, drag, selection and texture load) or while an animation is running. A map
+nobody is touching costs no frames at all. Idle animations (aircraft floating, ships rolling, the selection
+pulse, burning wrecks, explosions) are capped at `idleFps` (24) and stop drawing as soon as they finish, while
+panning, dragging and vertex editing run at the full refresh rate. Before this change a 144 Hz monitor was
+redrawing the whole scene 145 times a second and kept a CPU core busy for a static map.
 
 ## Known limitations
 

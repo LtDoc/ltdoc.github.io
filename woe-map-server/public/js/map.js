@@ -21,6 +21,7 @@
 
   // ---- Renderer -------------------------------------------------------------------
   const renderer = new MapRenderer($('#stage'));
+  window.__woe = { renderer, state };   // for debugging from the console
   await renderer.init();
   window.woe = { renderer, state }; // handy for debugging from the console
   $('#rendererLabel').textContent = renderer.rendererType.toUpperCase();

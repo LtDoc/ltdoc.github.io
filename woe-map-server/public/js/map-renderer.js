@@ -43,6 +43,10 @@ class MapRenderer extends EventTarget {
     this._pan = null;
     this._drag = null;
     this._textures = new Map();
+    this._dirty = true;              // something changed since the last draw
+    this._animating = false;         // the last tick left an animation running
+    this._lastRender = 0;
+    this.idleFps = 24;               // frame cap for idle animations (bobbing aircraft, selection pulse, fires)
   }
 
   async init() {
@@ -76,9 +80,15 @@ class MapRenderer extends EventTarget {
     app.stage.eventMode = 'static';
     app.stage.hitArea = app.screen;
     this._bindInput();
-    app.ticker.add(t => this._tick(t.deltaMS));
+    // Render on demand. PixiJS would otherwise redraw every display refresh (145 fps on a 144 Hz monitor),
+    // keeping a CPU core and the GPU busy for a map nobody is touching. We stop its ticker and run our own
+    // loop that only draws after invalidate() or while an animation is running, throttled to idleFps when
+    // the user is not interacting.
+    app.ticker.stop();
+    this._startLoop();
     app.renderer.on('resize', () => {
       app.stage.hitArea = app.screen;
+      this.invalidate();
       // If the last fit happened while the pane was collapsed (e.g. hidden tab), redo it now.
       if (this._fitWasDegenerate && app.screen.width > 100 && app.screen.height > 100) this.fit();
     });
@@ -103,6 +113,7 @@ class MapRenderer extends EventTarget {
       this.burningFrames = frames;
       this.burningFrameSize = fw;
       for (const v of this.views.values()) v.refreshFire();
+      this.invalidate();
     } catch (e) {
       console.warn('Burning sprite sheet not available', e);
     }
@@ -128,6 +139,7 @@ class MapRenderer extends EventTarget {
 
   /** Play an explosion at a world position with a given on-screen size in px. */
   explode(x, y, screenSize = 72, delayMs = 0) {
+    this.invalidate();
     if (!this.explosionFrames) return false;
     const sp = new PIXI.AnimatedSprite(this.explosionFrames);
     sp.anchor.set(0.5);
@@ -141,7 +153,7 @@ class MapRenderer extends EventTarget {
     sp.visible = delayMs === 0;
     sp.scale.set(screenSize / this.explosionFrameSize / this.scale);
     this.boomLayer.addChild(sp);
-    if (delayMs > 0) setTimeout(() => { if (!sp.destroyed) { sp.visible = true; sp.play(); } }, delayMs);
+    if (delayMs > 0) setTimeout(() => { if (!sp.destroyed) { sp.visible = true; sp.play(); this.invalidate(); } }, delayMs);
     else sp.play();
     return true;
   }
@@ -238,8 +250,8 @@ class MapRenderer extends EventTarget {
     return v ? this.worldToScreen(v.x, v.y) : null;
   }
 
-  setTokenScale(s) { this.tokenScale = Math.max(0.5, Math.min(3, Number(s) || 1)); }
-  setTokenMode(m) { this.tokenMode = m === 'screen' ? 'screen' : 'map'; }
+  setTokenScale(s) { this.tokenScale = Math.max(0.5, Math.min(3, Number(s) || 1)); this.invalidate(); }
+  setTokenMode(m) { this.tokenMode = m === 'screen' ? 'screen' : 'map'; this.invalidate(); }
 
   shapeScreenPos(id) {
     const v = this.shapeViews.get(id);
@@ -249,13 +261,14 @@ class MapRenderer extends EventTarget {
   }
 
   _onZoom() {
+    this.invalidate();
     this._drawGrid();
     this._redrawMode();
     this._redrawShapes();
     this._positionHandles();
     if (this.earth) {
       clearTimeout(this._earthTimer);
-      this._earthTimer = setTimeout(() => { if (this.earth) this.earth.redraw(this.scale); }, 120);
+      this._earthTimer = setTimeout(() => { if (this.earth) { this.earth.redraw(this.scale); this.invalidate(); } }, 120);
     }
     this.dispatchEvent(new CustomEvent('zoom', { detail: { scale: this.scale } }));
   }
@@ -264,6 +277,7 @@ class MapRenderer extends EventTarget {
   setGrid(on) { this.grid.visible = on; this._drawGrid(); }
 
   _drawGrid() {
+    this.invalidate();
     const g = this.gridLayer;
     g.clear();
     if (!this.grid.visible) return;
@@ -278,6 +292,7 @@ class MapRenderer extends EventTarget {
   _layerFor(marker) { return marker.type === 'scenery' ? this.sceneryLayer : this.markerLayer; }
 
   upsert(marker) {
+    this.invalidate();
     let v = this.views.get(marker.id);
     if (v && v.dying) { v.root.parent?.removeChild(v.root); v.root.destroy({ children: true }); v = null; }
     if (!v) {
@@ -293,6 +308,7 @@ class MapRenderer extends EventTarget {
   }
 
   remove(id) {
+    this.invalidate();
     const v = this.views.get(id);
     if (v) {
       v.dying = true;
@@ -301,17 +317,20 @@ class MapRenderer extends EventTarget {
   }
 
   clearMarkers() {
+    this.invalidate();
     for (const v of this.views.values()) { v.root.parent?.removeChild(v.root); v.root.destroy({ children: true }); }
     this.views.clear();
   }
 
   /** Remote live-drag preview: tween towards the position without persisting. */
   ghostMove(id, x, y) {
+    this.invalidate();
     const v = this.views.get(id);
     if (v && !v.dragging) { v.tx = x; v.ty = y; }
   }
 
   select(id) {
+    this.invalidate();
     if (this.selectedId === id && this.selectedShapeId === null && this.selected.size <= 1) return;
     this.selectedId = id;
     this.selected = id != null ? new Set([id]) : new Set();
@@ -322,6 +341,7 @@ class MapRenderer extends EventTarget {
 
   /** Select several markers at once; `primary` (or the first) gets the popup. */
   selectMany(ids, primary) {
+    this.invalidate();
     this.selected = new Set(ids);
     this.selectedId = this.selected.size ? (primary != null && this.selected.has(primary) ? primary : ids[0]) : null;
     if (this.selectedShapeId !== null) { this.selectedShapeId = null; this._redrawShapes(); }
@@ -330,12 +350,14 @@ class MapRenderer extends EventTarget {
   }
 
   toggleSelect(id) {
+    this.invalidate();
     const s = new Set(this.selected);
     if (s.has(id)) s.delete(id); else s.add(id);
     this.selectMany([...s], s.has(id) ? id : this.selectedId);
   }
 
   selectShape(id) {
+    this.invalidate();
     if (this.selectedShapeId === id && this.selectedId === null) return;
     this.selectedId = null;
     this.selected = new Set();
@@ -351,6 +373,7 @@ class MapRenderer extends EventTarget {
 
   /** Movement trail: fading arrow from (x1,y1) to (x2,y2). */
   trail(x1, y1, x2, y2, color) {
+    this.invalidate();
     if (Math.hypot(x2 - x1, y2 - y1) < 2) return;
     const w = 3 / this.scale;
     const g = new PIXI.Graphics();
@@ -368,6 +391,7 @@ class MapRenderer extends EventTarget {
 
   /** Brief expanding ring, e.g. when a marker is placed remotely. */
   pulse(x, y, color) {
+    this.invalidate();
     const g = new PIXI.Graphics();
     g.circle(0, 0, 10).stroke({ width: 3, color, alpha: 0.9 });
     g.position.set(x, y);
@@ -380,6 +404,7 @@ class MapRenderer extends EventTarget {
    * `destroyed` when the unit's strength hit zero (bigger, and a second blast).
    */
   hit(id, strong = true, destroyed = false) {
+    this.invalidate();
     const v = this.views.get(id);
     if (!v) return;
     v.shakeUntil = performance.now() + (destroyed ? 900 : strong ? 650 : 350);
@@ -409,6 +434,7 @@ class MapRenderer extends EventTarget {
 
   // ---- Shapes ----------------------------------------------------------------------
   upsertShape(shape) {
+    this.invalidate();
     let v = this.shapeViews.get(shape.id);
     if (!v) {
       const g = new PIXI.Graphics();
@@ -427,6 +453,7 @@ class MapRenderer extends EventTarget {
   }
 
   removeShape(id) {
+    this.invalidate();
     const v = this.shapeViews.get(id);
     if (!v) return;
     this.shapesLayer.removeChild(v.g, v.label);
@@ -438,6 +465,7 @@ class MapRenderer extends EventTarget {
   _redrawShapes() { for (const v of this.shapeViews.values()) this._drawShapeView(v); }
 
   _drawShapeView(v) {
+    this.invalidate();
     const s = v.shape, g = v.g, sc = this.scale;
     const color = parseInt(String(s.color || '#f1c40f').slice(1), 16) || 0xf1c40f;
     const selected = this.selectedShapeId === s.id;
@@ -493,6 +521,7 @@ class MapRenderer extends EventTarget {
 
   // ---- Vertex handles for the selected, editable shape --------------------------------
   _drawHandles() {
+    this.invalidate();
     for (const h of this._handles.items) h.destroy();
     this._handles.items = [];
     this._handles.shapeId = null;
@@ -512,6 +541,7 @@ class MapRenderer extends EventTarget {
   }
 
   _positionHandles() {
+    this.invalidate();
     const v = this._handles.shapeId != null ? this.shapeViews.get(this._handles.shapeId) : null;
     if (!v) return;
     const inv = 1 / this.scale;
@@ -556,12 +586,14 @@ class MapRenderer extends EventTarget {
   setSelectMode(on) { this._setMode(on ? 'select' : null); }
 
   _marqueeStart(e) {
+    this.invalidate();
     const p = this.screenToWorld(e.global.x, e.global.y);
     this._marquee = { x0: p.x, y0: p.y, x1: p.x, y1: p.y, additive: e.shiftKey };
     if (!this._marqueeG) { this._marqueeG = new PIXI.Graphics(); this.overlayLayer.addChild(this._marqueeG); }
   }
 
   _marqueeMove(e) {
+    this.invalidate();
     const p = this.screenToWorld(e.global.x, e.global.y);
     const m = this._marquee;
     m.x1 = p.x; m.y1 = p.y;
@@ -570,6 +602,7 @@ class MapRenderer extends EventTarget {
   }
 
   _marqueeEnd() {
+    this.invalidate();
     const m = this._marquee; this._marquee = null;
     if (this._marqueeG) this._marqueeG.clear();
     if (!m) return false;
@@ -596,6 +629,7 @@ class MapRenderer extends EventTarget {
   }
 
   _setMode(mode) {
+    this.invalidate();
     this.mode = mode;
     this.measure.points = []; this.measure.hover = null;
     this.draw.points = []; this.draw.hover = null; this.draw.lastClick = null; this.draw.shapeId = null;
@@ -622,6 +656,7 @@ class MapRenderer extends EventTarget {
   }
 
   _modeClick(e) {
+    this.invalidate();
     const p = this.screenToWorld(e.global.x, e.global.y);
     if (this.mode === 'measure') {
       this.measure.points.push({ x: p.x, y: p.y });
@@ -640,6 +675,7 @@ class MapRenderer extends EventTarget {
   }
 
   _modeHover(x, y) {
+    this.invalidate();
     const m = this.mode === 'draw' ? this.draw : this.measure;
     if (!m.points.length) return;
     m.hover = { x, y };
@@ -665,6 +701,7 @@ class MapRenderer extends EventTarget {
   }
 
   _redrawMode() {
+    this.invalidate();
     let g = this.measure.g;
     if (!g) { g = this.measure.g = new PIXI.Graphics(); this.overlayLayer.addChild(g); }
     g.clear();
@@ -731,6 +768,7 @@ class MapRenderer extends EventTarget {
         if (Math.hypot(dx, dy) > 3) this._pan.moved = true;
         this.world.x = this._pan.wx + dx;
         this.world.y = this._pan.wy + dy;
+        this.invalidate();
         return;
       }
       if (this._drag) {
@@ -821,15 +859,37 @@ class MapRenderer extends EventTarget {
     }
   }
 
+  // ---- Frame loop -------------------------------------------------------------------
+  /** Mark the scene as changed so the next animation frame draws it. Cheap; call freely. */
+  invalidate() { this._dirty = true; }
+
+  _startLoop() {
+    const loop = now => {
+      this._raf = requestAnimationFrame(loop);
+      if (!this._dirty && !this._animating) return;                     // idle: draw nothing at all
+      const interacting = !!(this._pan || this._drag || this._vdrag || this._marquee);
+      if (!this._dirty && !interacting && now - this._lastRender < 1000 / this.idleFps - 1) return;
+      const dt = this._lastRender ? Math.min(100, now - this._lastRender) : 16;
+      this._dirty = false;
+      this._lastRender = now;
+      this._tick(dt);
+      this.app.render();
+    };
+    this._raf = requestAnimationFrame(loop);
+  }
+
   // ---- Per-frame animation --------------------------------------------------------
+  /** Advance animations by dt ms. Sets this._animating when another frame is needed. */
   _tick(dt) {
     const s = this.scale, inv = 1 / s;
     const nowMs = performance.now();
     const t = nowMs / 1000;
     const k = 1 - Math.pow(0.001, dt / 700); // movement easing
+    let anim = this.fxLayer.children.length > 0 || this.boomLayer.children.length > 0;
 
-    for (const v of [...this.views.values()]) {
+    for (const v of this.views.values()) {
       if (v.dying) {
+        anim = true;
         v.root.alpha = Math.max(0, v.root.alpha - dt / 220);
         v.root.scale.set(v.root.scale.x * (1 + dt / 400));
         if (v.root.alpha <= 0) {
@@ -837,25 +897,27 @@ class MapRenderer extends EventTarget {
         }
         continue;
       }
-      if (!v.dragging) {
+      if (!v.dragging && (v.x !== v.tx || v.y !== v.ty)) {
         v.x += (v.tx - v.x) * k; v.y += (v.ty - v.y) * k;
         if (Math.abs(v.tx - v.x) < 0.02) v.x = v.tx;
         if (Math.abs(v.ty - v.y) < 0.02) v.y = v.ty;
+        anim = true;
       }
       v.root.position.set(v.x, v.y);
       const sel = this.selected.has(v.id);
       v.root.zIndex = v.y + (v.dragging ? 1e6 : 0) + (sel ? 5e5 : 0);
 
       // spawn pop
-      if (v.spawn < 1) v.spawn = Math.min(1, v.spawn + dt / 380);
+      if (v.spawn < 1) { v.spawn = Math.min(1, v.spawn + dt / 380); anim = true; }
       const pop = v.spawn < 1 ? 1 + 0.9 * (1 - easeOutCubic(v.spawn)) : 1;
+      if (v.fire) anim = true;
 
       if (v.marker.type === 'scenery') {
         // Scenery lives in map space: it scales with zoom, can rotate, and does not bob.
         const d = v.marker.data || {};
         const ws = Number(d.scale) || 1;
         const hoverS = (v.hover || v.dragging) ? 1.04 : 1;
-        v.curS += (pop * hoverS - v.curS) * Math.min(1, dt / 70);
+        if (ease(v, pop * hoverS, dt)) anim = true;
         v.root.scale.set(ws * v.curS * (d.flip ? -1 : 1), ws * v.curS);
         v.root.rotation = (Number(d.rotation) || 0) * Math.PI / 180;
         v.root.alpha = Math.min(1, v.spawn * 2.5);
@@ -864,20 +926,20 @@ class MapRenderer extends EventTarget {
         v.label.scale.set(1 / (ws * this.scale * v.curS) * (d.flip ? -1 : 1), 1 / (ws * this.scale * v.curS));
         v.ring.visible = sel || v.hover;
         if (v.ring.visible) v.ring.alpha = sel ? 0.65 + 0.35 * Math.sin(t * 5) : 0.45;
+        if (sel) anim = true;
         continue;
       }
 
       // Aircraft float, ships ride a swell; ground units and everything else sit still. Shake when hit.
       let bob = 0, sx = 0, rot = 0;
-      if (v.unitCat === 'Air') bob = Math.sin(t * 1.6 + v.phase) * 2.6;
-      else if (v.unitCat === 'Naval') { bob = Math.sin(t * 1.3 + v.phase) * 1.2; rot = Math.sin(t * 1.1 + v.phase) * 0.035; }
-      if (v.shakeUntil && nowMs < v.shakeUntil) sx = Math.sin(nowMs / 18) * v.shakeAmp;
+      if (v.unitCat === 'Air') { bob = Math.sin(t * 1.6 + v.phase) * 2.6; anim = true; }
+      else if (v.unitCat === 'Naval') { bob = Math.sin(t * 1.3 + v.phase) * 1.2; rot = Math.sin(t * 1.1 + v.phase) * 0.035; anim = true; }
+      if (v.shakeUntil && nowMs < v.shakeUntil) { sx = Math.sin(nowMs / 18) * v.shakeAmp; anim = true; }
       v.body.position.set(sx, bob);
       v.body.rotation = rot;
 
       const hoverS = (v.hover || v.dragging) ? 1.18 : 1;
-      const target = pop * hoverS;
-      v.curS += (target - v.curS) * Math.min(1, dt / 70);
+      if (ease(v, pop * hoverS, dt)) anim = true;
       // Token scale (world units per token pixel). 'map' mode: tokens are map objects about 60 map px wide,
       // so they shrink as you zoom out, clamped so they never vanish or become giants.
       let rs;
@@ -898,6 +960,7 @@ class MapRenderer extends EventTarget {
 
       v.ring.visible = sel || v.hover;
       if (v.ring.visible) v.ring.alpha = sel ? 0.65 + 0.35 * Math.sin(t * 5) : 0.45;
+      if (sel) anim = true;
     }
 
     for (const layer of [this.fxLayer, this.boomLayer]) {
@@ -910,6 +973,7 @@ class MapRenderer extends EventTarget {
       }
     }
 
+    this._animating = anim;
     this.dispatchEvent(new CustomEvent('frame'));
   }
 
@@ -935,6 +999,13 @@ class MapRenderer extends EventTarget {
     }
     return tex;
   }
+}
+
+/** Ease a view's scale towards target; returns true while still moving (snaps when close). */
+function ease(v, target, dt) {
+  if (Math.abs(target - v.curS) < 0.003) { v.curS = target; return false; }
+  v.curS += (target - v.curS) * Math.min(1, dt / 70);
+  return true;
 }
 
 function easeOutCubic(x) { return 1 - Math.pow(1 - x, 3); }
@@ -1010,16 +1081,17 @@ class MarkerView {
     this.w = 30; this.h = 30; this._gen = 0;
 
     this.root.on('pointerdown', e => this.r._startMarkerPointer(this, e));
-    this.root.on('pointerover', () => { this.hover = true; });
-    this.root.on('pointerout', () => { this.hover = false; });
+    this.root.on('pointerover', () => { this.hover = true; this.r.invalidate(); });
+    this.root.on('pointerout', () => { this.hover = false; this.r.invalidate(); });
     this.update(marker);
   }
 
-  setImmediate(x, y) { this.x = x; this.y = y; this.tx = x; this.ty = y; }
+  setImmediate(x, y) { this.x = x; this.y = y; this.tx = x; this.ty = y; this.r.invalidate(); }
 
   update(marker) {
     const prev = this.marker;
     this.marker = marker;
+    this.r.invalidate();
     this.colorNum = parseInt(String(marker.color || '#3498db').slice(1), 16) || 0x3498db;
     if (!this.dragging) { this.tx = marker.x; this.ty = marker.y; }
     this.label.text = marker.name;
@@ -1055,6 +1127,7 @@ class MarkerView {
     this._layout();
     this.refreshFire();
     this._buildFlag(gen);
+    this.r.invalidate();
   }
 
   /** Scenery: the raw sprite (or a placeholder box) at native pixel size; the tick scales it with the map. */
@@ -1110,10 +1183,12 @@ class MarkerView {
     cont.eventMode = 'none';
     this.flag = cont;
     this.root.addChild(cont);
+    this.r.invalidate();
   }
 
   /** A unit at zero strength burns (looping sprite) until it is removed or its strength is restored. */
   refreshFire() {
+    this.r.invalidate();
     const m = this.marker;
     const wrecked = m.type === 'unit' && Number(m.data?.strength ?? 100) <= 0;
     if (!wrecked || !this.r.burningFrames) {
