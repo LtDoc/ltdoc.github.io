@@ -124,6 +124,19 @@ p { margin: 8px 0; }
 .modal.open { display: flex; }
 .modal .card { width: 100%; max-width: 460px; max-height: 92vh; overflow: auto; position: relative; }
 .modal .close { position: absolute; top: 8px; right: 10px; background: transparent; font-size: 20px; padding: 2px 8px; }
+.modal .card.wide { max-width: 820px; }
+.statswrap { overflow: auto; max-height: 62vh; margin-top: 8px; border: 1px solid #3d566e; border-radius: 6px; }
+.stats { width: 100%; border-collapse: collapse; font-size: 13px; }
+.stats th, .stats td { padding: 3px 4px; text-align: center; border-bottom: 1px solid #3d566e; white-space: nowrap; }
+.stats th { position: sticky; top: 0; background: #1f2d3a; font-size: 12px; color: #bdc3c7; z-index: 1; }
+.stats th.name, .stats td.name { text-align: left; }
+.stats tr.cat td { background: rgba(255,255,255,.05); font-weight: 600; text-align: left; padding: 8px 6px 4px; }
+.stats tr.changed td.name { color: #f9c74f; }
+.stats .pm { display: inline-flex; align-items: center; gap: 2px; }
+.stats .pm button { padding: 0 7px; font-size: 14px; line-height: 22px; min-width: 22px; }
+.stats .pm input { width: 46px; padding: 2px 4px; margin: 0; text-align: center; font-size: 13px; -moz-appearance: textfield; }
+.stats .pm input::-webkit-outer-spin-button, .stats .pm input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.stats .pm.chg input { border-color: #f39c12; color: #f9c74f; }
 .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #1a2530; border: 1px solid #46617a;
   padding: 10px 14px; border-radius: 6px; z-index: 30; opacity: 0; transition: opacity .2s; pointer-events: none; }
 .toast.show { opacity: 1; }

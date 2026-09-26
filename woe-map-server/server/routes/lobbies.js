@@ -252,6 +252,22 @@ router.patch('/:id', requireGm, (req, res) => {
         winnerLoss: clamp(num(c.winnerLoss, 5), 0, 100),
       };
     }
+    // Per-campaign unit stat overrides: { typeId: [attack, defend, ap, range, movement] }. A null entry
+    // removes that type's override (back to the catalogue); an empty object clears them all.
+    if (b.settings.unitStats !== undefined) {
+      const src = b.settings.unitStats;
+      if (src === null) delete settings.unitStats;
+      else if (typeof src === 'object') {
+        const out = b.settings.replaceUnitStats ? {} : { ...(settings.unitStats || {}) };
+        for (const [key, val] of Object.entries(src).slice(0, 200)) {
+          if (!/^[a-z0-9_-]{1,40}$/.test(key)) continue;
+          if (val === null) { delete out[key]; continue; }
+          if (!Array.isArray(val) || val.length !== 5) continue;
+          out[key] = val.map(v => clamp(Math.round(num(v, 0) * 10) / 10, -99, 999));
+        }
+        if (Object.keys(out).length) settings.unitStats = out; else delete settings.unitStats;
+      }
+    }
   }
   q.updateLobby.run(name, scaleLabel, upp, JSON.stringify(settings), req.lobby.id);
   const lobby = access.getLobby(req.lobby.id);

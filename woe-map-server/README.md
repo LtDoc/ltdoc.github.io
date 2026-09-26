@@ -137,6 +137,24 @@ combat reports, so a restricted item never reaches a browser that may not show i
   transports. Variants carry a small corner tag (ST, MTN, BC, …). A "key" link beside the picker renders the whole
   catalogue in the chosen colour. Free-text types still work: known words map onto a symbol, anything else shows
   a short abbreviation. The catalogue lives in `public/js/units.js` and is easy to extend.
+- **Default unit stats**: picking a type fills attack, defend, action points, range and movement from the
+  campaign's stat table, so placing a unit is usually a name and a click. After a unit is placed the form
+  keeps the faction, type and stats, ready for the next one. A "defaults" link beside Attack refills the
+  numbers if you have changed them; custom free-text types are left alone. Attack and defend are d20
+  modifiers: 0–1 very weak, 2–3 weak, 4–5 mid, 6–7 strong, 8–9 very strong, 10 extreme. The catalogue
+  baseline follows the brief that infantry are mid/mid (4/4), cavalry very strong attack but very weak
+  defence (8/1), marines mid attack and very strong defence (4/8), stormtroopers extreme attack and very
+  weak defence (10/1) and conscripts very weak attack with mid defence (1/4), extrapolated across the rest:
+  machine-gun companies defend at 9, heavy and siege guns hit at 8–10 with range 4, tanks are 8/7 but move
+  1, dreadnoughts 10/9, transports 0/1, and so on (the full table is the `stats` column in `units.js`).
+- **Per-campaign stat table**: a GM can change any of those numbers for one campaign with the **Unit stats**
+  button beside the campaign on the campaigns page, or the "Unit stats table…" button in campaign settings
+  on the map. Every type gets a row with **+ / −** steppers (Shift-click steps by 5) and a typeable field;
+  changed cells are highlighted with the catalogue value in their tooltip, each row has a reset arrow, and
+  "Reset all" returns to the catalogue. Only the differences are stored (in the campaign settings as
+  `unitStats`), so catalogue improvements still flow through to untouched types. Changing the table never
+  edits units already on the map; it only changes what new units start with. Stats also appear in the type
+  dropdown and the symbol key.
 - **Town**: capital (star), city, village. **POI**: diamond. **Player**: circle with initial.
 - Any marker can use an uploaded image or external URL as its icon instead. Prefer uploads: an external
   image host must send CORS headers for WebGL to use it, and when it does not the marker silently falls back

@@ -234,6 +234,7 @@
           <label>Winner's loss %<input id="setWinnerLoss" type="number" min="0" max="100" value="5"></label>
         </div>
         <p class="hint">Each side rolls the die and adds attack or defend. The loser loses base + margin × extra; the winner loses the winner's loss. Ties cost both half the base.</p>
+        <p><button type="button" class="secondary small" id="btnUnitStats">Unit stats table…</button> <span class="hint">Default attack / defend / AP / range / movement per unit type, with +/- steppers.</span></p>
         <button type="submit">Save</button>
       </form>
       <div class="section">Map</div>
@@ -278,6 +279,7 @@
   <script src="/js/api.js"></script>
   <script src="/js/atlas.js"></script>
   <script src="/js/units.js"></script>
+  <script src="/js/stats-editor.js"></script>
   <script src="/js/earth.js"></script>
   <script src="/js/map-renderer.js"></script>
   <script src="/js/map.js"></script>

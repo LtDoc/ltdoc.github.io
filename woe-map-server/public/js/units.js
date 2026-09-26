@@ -114,73 +114,102 @@ const UnitTypes = (() => {
   };
 
   // ---- Catalogue -----------------------------------------------------------------------------
+  // `stats` are the default [attack, defend, action points, range, movement] filled into the form when a
+  // type is picked. Attack and defend are d20 modifiers (combat rolls d20 + attack vs d20 + defend):
+  //   0-1 very weak · 2-3 weak · 4-5 mid · 6-7 strong · 8-9 very strong · 10 extreme.
+  // Range and movement are in map tiles/hexes per turn on a loose relative scale (infantry moves 2).
   const LIST = [
     // Infantry
-    { id: 'infantry', name: 'Infantry', cat: 'Infantry', symbol: 'infantry' },
-    { id: 'stormtroopers', name: 'Stormtroopers / assault infantry', cat: 'Infantry', symbol: 'infantry', mod: 'ST' },
-    { id: 'mountain', name: 'Mountain infantry', cat: 'Infantry', symbol: 'infantry', mod: 'MTN' },
-    { id: 'marines', name: 'Marines / naval infantry', cat: 'Infantry', symbol: 'infantry', mod: 'MAR' },
-    { id: 'militia', name: 'Militia / territorials', cat: 'Infantry', symbol: 'infantry', mod: 'MIL' },
-    { id: 'colonial', name: 'Colonial troops', cat: 'Infantry', symbol: 'infantry', mod: 'COL' },
-    { id: 'bicycle', name: 'Bicycle infantry', cat: 'Infantry', symbol: 'infantry', mod: 'BI' },
-    { id: 'machinegun', name: 'Machine-gun company', cat: 'Infantry', symbol: 'machineGun' },
+    { id: 'infantry', name: 'Infantry', cat: 'Infantry', symbol: 'infantry', stats: [4, 4, 1, 1, 2] },
+    { id: 'stormtroopers', name: 'Stormtroopers / assault infantry', cat: 'Infantry', symbol: 'infantry', mod: 'ST', stats: [10, 1, 1, 1, 2] },
+    { id: 'mountain', name: 'Mountain infantry', cat: 'Infantry', symbol: 'infantry', mod: 'MTN', stats: [5, 6, 1, 1, 2] },
+    { id: 'marines', name: 'Marines / naval infantry', cat: 'Infantry', symbol: 'infantry', mod: 'MAR', stats: [4, 8, 1, 1, 2] },
+    { id: 'conscripts', name: 'Conscripts / levies', cat: 'Infantry', symbol: 'infantry', mod: 'CON', stats: [1, 4, 1, 1, 2] },
+    { id: 'militia', name: 'Militia / territorials', cat: 'Infantry', symbol: 'infantry', mod: 'MIL', stats: [2, 3, 1, 1, 2] },
+    { id: 'colonial', name: 'Colonial troops', cat: 'Infantry', symbol: 'infantry', mod: 'COL', stats: [3, 3, 1, 1, 3] },
+    { id: 'bicycle', name: 'Bicycle infantry', cat: 'Infantry', symbol: 'infantry', mod: 'BI', stats: [3, 2, 1, 1, 4] },
+    { id: 'machinegun', name: 'Machine-gun company', cat: 'Infantry', symbol: 'machineGun', stats: [2, 9, 1, 2, 1] },
     // Mounted & mobile
-    { id: 'cavalry', name: 'Cavalry', cat: 'Mounted & mobile', symbol: 'cavalry' },
-    { id: 'dragoons', name: 'Dragoons', cat: 'Mounted & mobile', symbol: 'cavalry', mod: 'DR' },
-    { id: 'lancers', name: 'Lancers / uhlans', cat: 'Mounted & mobile', symbol: 'cavalry', mod: 'LN' },
-    { id: 'hussars', name: 'Hussars', cat: 'Mounted & mobile', symbol: 'cavalry', mod: 'HU' },
-    { id: 'camelry', name: 'Camel corps', cat: 'Mounted & mobile', symbol: 'cavalry', mod: 'CAM' },
-    { id: 'reconnaissance', name: 'Reconnaissance', cat: 'Mounted & mobile', symbol: 'cavalry', mod: 'R' },
-    { id: 'armouredcar', name: 'Armoured cars', cat: 'Mounted & mobile', symbol: 'armouredCar' },
-    { id: 'tank', name: 'Tanks', cat: 'Mounted & mobile', symbol: 'armour' },
-    { id: 'armouredtrain', name: 'Armoured train', cat: 'Mounted & mobile', symbol: 'armour', mod: 'RR' },
+    { id: 'cavalry', name: 'Cavalry', cat: 'Mounted & mobile', symbol: 'cavalry', stats: [8, 1, 2, 1, 5] },
+    { id: 'dragoons', name: 'Dragoons', cat: 'Mounted & mobile', symbol: 'cavalry', mod: 'DR', stats: [6, 3, 2, 1, 5] },
+    { id: 'lancers', name: 'Lancers / uhlans', cat: 'Mounted & mobile', symbol: 'cavalry', mod: 'LN', stats: [9, 1, 2, 1, 5] },
+    { id: 'hussars', name: 'Hussars', cat: 'Mounted & mobile', symbol: 'cavalry', mod: 'HU', stats: [7, 1, 2, 1, 6] },
+    { id: 'camelry', name: 'Camel corps', cat: 'Mounted & mobile', symbol: 'cavalry', mod: 'CAM', stats: [6, 2, 2, 1, 5] },
+    { id: 'reconnaissance', name: 'Reconnaissance', cat: 'Mounted & mobile', symbol: 'cavalry', mod: 'R', stats: [2, 1, 2, 1, 6] },
+    { id: 'armouredcar', name: 'Armoured cars', cat: 'Mounted & mobile', symbol: 'armouredCar', stats: [5, 4, 2, 2, 6] },
+    { id: 'tank', name: 'Tanks', cat: 'Mounted & mobile', symbol: 'armour', stats: [8, 7, 1, 1, 1] },
+    { id: 'armouredtrain', name: 'Armoured train', cat: 'Mounted & mobile', symbol: 'armour', mod: 'RR', stats: [7, 6, 1, 3, 6] },
     // Artillery
-    { id: 'fieldartillery', name: 'Field artillery', cat: 'Artillery', symbol: 'artillery' },
-    { id: 'horseartillery', name: 'Horse artillery', cat: 'Artillery', symbol: 'artillery', mod: 'H' },
-    { id: 'heavyartillery', name: 'Heavy artillery', cat: 'Artillery', symbol: 'heavyArtillery' },
-    { id: 'siegeartillery', name: 'Siege artillery', cat: 'Artillery', symbol: 'heavyArtillery', mod: 'SG' },
-    { id: 'railwaygun', name: 'Railway gun', cat: 'Artillery', symbol: 'railwayGun' },
-    { id: 'mortar', name: 'Trench mortars', cat: 'Artillery', symbol: 'mortar' },
-    { id: 'antiaircraft', name: 'Anti-aircraft', cat: 'Artillery', symbol: 'antiAir' },
-    { id: 'coastal', name: 'Coastal battery', cat: 'Artillery', symbol: 'heavyArtillery', mod: 'CST' },
+    { id: 'fieldartillery', name: 'Field artillery', cat: 'Artillery', symbol: 'artillery', stats: [6, 2, 1, 3, 2] },
+    { id: 'horseartillery', name: 'Horse artillery', cat: 'Artillery', symbol: 'artillery', mod: 'H', stats: [5, 2, 2, 2, 4] },
+    { id: 'heavyartillery', name: 'Heavy artillery', cat: 'Artillery', symbol: 'heavyArtillery', stats: [8, 1, 1, 4, 1] },
+    { id: 'siegeartillery', name: 'Siege artillery', cat: 'Artillery', symbol: 'heavyArtillery', mod: 'SG', stats: [10, 1, 1, 4, 1] },
+    { id: 'railwaygun', name: 'Railway gun', cat: 'Artillery', symbol: 'railwayGun', stats: [10, 0, 1, 6, 4] },
+    { id: 'mortar', name: 'Trench mortars', cat: 'Artillery', symbol: 'mortar', stats: [5, 3, 1, 2, 2] },
+    { id: 'antiaircraft', name: 'Anti-aircraft', cat: 'Artillery', symbol: 'antiAir', stats: [3, 4, 1, 3, 2] },
+    { id: 'coastal', name: 'Coastal battery', cat: 'Artillery', symbol: 'heavyArtillery', mod: 'CST', stats: [9, 6, 1, 5, 0] },
     // Support
-    { id: 'hq', name: 'Headquarters', cat: 'Support', symbol: 'hq' },
-    { id: 'engineers', name: 'Engineers', cat: 'Support', symbol: 'engineers' },
-    { id: 'sappers', name: 'Sappers / tunnellers', cat: 'Support', symbol: 'engineers', mod: 'SP' },
-    { id: 'pioneers', name: 'Pioneers', cat: 'Support', symbol: 'engineers', mod: 'PI' },
-    { id: 'signals', name: 'Signals', cat: 'Support', symbol: 'signals' },
-    { id: 'supply', name: 'Supply / logistics', cat: 'Support', symbol: 'supply' },
-    { id: 'medical', name: 'Medical / field hospital', cat: 'Support', symbol: 'medical' },
-    { id: 'gas', name: 'Gas / chemical troops', cat: 'Support', symbol: 'gas' },
-    { id: 'railway', name: 'Railway troops', cat: 'Support', symbol: 'supply', mod: 'RR' },
-    { id: 'labour', name: 'Labour battalion', cat: 'Support', symbol: 'supply', mod: 'LAB' },
+    { id: 'hq', name: 'Headquarters', cat: 'Support', symbol: 'hq', stats: [1, 3, 1, 1, 2] },
+    { id: 'engineers', name: 'Engineers', cat: 'Support', symbol: 'engineers', stats: [3, 5, 1, 1, 2] },
+    { id: 'sappers', name: 'Sappers / tunnellers', cat: 'Support', symbol: 'engineers', mod: 'SP', stats: [4, 4, 1, 1, 2] },
+    { id: 'pioneers', name: 'Pioneers', cat: 'Support', symbol: 'engineers', mod: 'PI', stats: [3, 5, 1, 1, 2] },
+    { id: 'signals', name: 'Signals', cat: 'Support', symbol: 'signals', stats: [0, 2, 1, 1, 2] },
+    { id: 'supply', name: 'Supply / logistics', cat: 'Support', symbol: 'supply', stats: [0, 1, 1, 1, 3] },
+    { id: 'medical', name: 'Medical / field hospital', cat: 'Support', symbol: 'medical', stats: [0, 1, 1, 1, 2] },
+    { id: 'gas', name: 'Gas / chemical troops', cat: 'Support', symbol: 'gas', stats: [6, 2, 1, 2, 2] },
+    { id: 'railway', name: 'Railway troops', cat: 'Support', symbol: 'supply', mod: 'RR', stats: [0, 2, 1, 1, 3] },
+    { id: 'labour', name: 'Labour battalion', cat: 'Support', symbol: 'supply', mod: 'LAB', stats: [0, 2, 1, 1, 2] },
     // Air
-    { id: 'fighter', name: 'Fighter squadron', cat: 'Air', symbol: 'air' },
-    { id: 'bomber', name: 'Bomber squadron', cat: 'Air', symbol: 'air', mod: 'B' },
-    { id: 'reconair', name: 'Reconnaissance aircraft', cat: 'Air', symbol: 'air', mod: 'R' },
-    { id: 'seaplane', name: 'Seaplanes', cat: 'Air', symbol: 'seaplane' },
-    { id: 'balloon', name: 'Observation balloon', cat: 'Air', symbol: 'balloon' },
-    { id: 'airship', name: 'Airship / Zeppelin', cat: 'Air', symbol: 'airship' },
+    { id: 'fighter', name: 'Fighter squadron', cat: 'Air', symbol: 'air', stats: [5, 5, 2, 4, 8] },
+    { id: 'bomber', name: 'Bomber squadron', cat: 'Air', symbol: 'air', mod: 'B', stats: [7, 2, 2, 6, 7] },
+    { id: 'reconair', name: 'Reconnaissance aircraft', cat: 'Air', symbol: 'air', mod: 'R', stats: [1, 2, 2, 5, 8] },
+    { id: 'seaplane', name: 'Seaplanes', cat: 'Air', symbol: 'seaplane', stats: [3, 2, 2, 4, 7] },
+    { id: 'balloon', name: 'Observation balloon', cat: 'Air', symbol: 'balloon', stats: [0, 1, 1, 3, 1] },
+    { id: 'airship', name: 'Airship / Zeppelin', cat: 'Air', symbol: 'airship', stats: [6, 1, 1, 8, 6] },
     // Naval
-    { id: 'dreadnought', name: 'Dreadnought / battleship', cat: 'Naval', symbol: 'battleship' },
-    { id: 'predreadnought', name: 'Pre-dreadnought', cat: 'Naval', symbol: 'battleship', mod: 'PD' },
-    { id: 'battlecruiser', name: 'Battlecruiser', cat: 'Naval', symbol: 'battleship', mod: 'BC' },
-    { id: 'armouredcruiser', name: 'Armoured cruiser', cat: 'Naval', symbol: 'cruiser', mod: 'AC' },
-    { id: 'lightcruiser', name: 'Light cruiser', cat: 'Naval', symbol: 'cruiser' },
-    { id: 'destroyer', name: 'Destroyers', cat: 'Naval', symbol: 'destroyer' },
-    { id: 'torpedoboat', name: 'Torpedo boats', cat: 'Naval', symbol: 'torpedoBoat' },
-    { id: 'submarine', name: 'Submarine / U-boat', cat: 'Naval', symbol: 'submarine' },
-    { id: 'minelayer', name: 'Minelayer / minesweeper', cat: 'Naval', symbol: 'minelayer' },
-    { id: 'gunboat', name: 'Gunboat / river monitor', cat: 'Naval', symbol: 'gunboat' },
-    { id: 'transport', name: 'Transports / convoy', cat: 'Naval', symbol: 'transport' },
-    { id: 'seaplanecarrier', name: 'Seaplane carrier', cat: 'Naval', symbol: 'transport', mod: 'AV' },
+    { id: 'dreadnought', name: 'Dreadnought / battleship', cat: 'Naval', symbol: 'battleship', stats: [10, 9, 1, 5, 5] },
+    { id: 'predreadnought', name: 'Pre-dreadnought', cat: 'Naval', symbol: 'battleship', mod: 'PD', stats: [7, 6, 1, 4, 4] },
+    { id: 'battlecruiser', name: 'Battlecruiser', cat: 'Naval', symbol: 'battleship', mod: 'BC', stats: [9, 5, 1, 5, 7] },
+    { id: 'armouredcruiser', name: 'Armoured cruiser', cat: 'Naval', symbol: 'cruiser', mod: 'AC', stats: [6, 5, 1, 4, 5] },
+    { id: 'lightcruiser', name: 'Light cruiser', cat: 'Naval', symbol: 'cruiser', stats: [5, 3, 1, 3, 7] },
+    { id: 'destroyer', name: 'Destroyers', cat: 'Naval', symbol: 'destroyer', stats: [4, 2, 2, 2, 8] },
+    { id: 'torpedoboat', name: 'Torpedo boats', cat: 'Naval', symbol: 'torpedoBoat', stats: [6, 1, 2, 1, 8] },
+    { id: 'submarine', name: 'Submarine / U-boat', cat: 'Naval', symbol: 'submarine', stats: [8, 1, 1, 2, 5] },
+    { id: 'minelayer', name: 'Minelayer / minesweeper', cat: 'Naval', symbol: 'minelayer', stats: [2, 2, 1, 1, 5] },
+    { id: 'gunboat', name: 'Gunboat / river monitor', cat: 'Naval', symbol: 'gunboat', stats: [4, 3, 1, 2, 4] },
+    { id: 'transport', name: 'Transports / convoy', cat: 'Naval', symbol: 'transport', stats: [0, 1, 1, 0, 5] },
+    { id: 'seaplanecarrier', name: 'Seaplane carrier', cat: 'Naval', symbol: 'transport', mod: 'AV', stats: [2, 2, 1, 4, 5] },
   ];
   const byId = new Map(LIST.map(t => [t.id, t]));
   const byName = new Map(LIST.map(t => [t.name.toLowerCase(), t]));
+  const STAT_KEYS = ['attack', 'defend', 'ap', 'range', 'movement'];
+
+  /**
+   * Stats array for a type after applying a campaign's overrides ({ typeId: [a, d, ap, r, m] }).
+   * Missing or malformed override entries fall back to the catalogue value for that slot.
+   */
+  function statsFor(t, overrides) {
+    if (!t || !t.stats) return null;
+    const o = overrides && overrides[t.id];
+    return t.stats.map((v, i) => (Array.isArray(o) && Number.isFinite(Number(o[i])) ? Number(o[i]) : v));
+  }
+  /** Default stats for a type (by object, id, name or free text) as {attack, defend, ap, range, movement}; null when nothing matches. */
+  function defaults(typeOrName, overrides) {
+    const t = typeOrName && typeof typeOrName === 'object' ? typeOrName : resolve(typeOrName);
+    const s = statsFor(t, overrides);
+    return s ? Object.fromEntries(STAT_KEYS.map((k, i) => [k, s[i]])) : null;
+  }
+  /** Short "A4 D4 R1 M2" summary for lists and the key. */
+  function statLabel(t, overrides) {
+    const s = statsFor(t, overrides);
+    return s ? `A${s[0]} D${s[1]} R${s[3]} M${s[4]}` : '';
+  }
+  const STAT_LABELS = [['attack', 'Atk'], ['defend', 'Def'], ['ap', 'AP'], ['range', 'Rng'], ['movement', 'Mov']];
 
   // Keyword fallback for free-text unit types (old data, imports, custom names).
   const KEYWORDS = [
     [/storm|assault|shock/, 'stormtroopers'], [/mountain|alpin|alpine/, 'mountain'], [/marine/, 'marines'],
+    [/conscript|levy|levies|draftee|recruit|green/, 'conscripts'],
     [/militia|territorial|landwehr|landsturm|reserve/, 'militia'], [/colonial|askari|sepoy|zouave|senegal/, 'colonial'],
     [/bicycle|cyclist/, 'bicycle'], [/machine|mg\b|maxim|vickers/, 'machinegun'],
     [/dragoon/, 'dragoons'], [/lancer|uhlan/, 'lancers'], [/hussar/, 'hussars'], [/camel/, 'camelry'],
@@ -223,7 +252,7 @@ const UnitTypes = (() => {
   }
 
   const categories = [...new Set(LIST.map(t => t.cat))];
-  return { LIST, categories, resolve, draw, symbols: sym };
+  return { LIST, categories, resolve, draw, symbols: sym, defaults, statsFor, statLabel, STAT_KEYS, STAT_LABELS };
 })();
 
 window.UnitTypes = UnitTypes;

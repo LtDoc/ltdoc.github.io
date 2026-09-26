@@ -880,7 +880,7 @@
         <div class="grid2"><label>Faction<select id="${p}NationSel">${nationOptions()}</select></label><label>Unit type <a href="#" data-key title="Show all unit symbols">key</a><select id="${p}UnitTypeSel">${unitTypeOptions()}</select></label></div>
         <label id="${p}NationCustomWrap" hidden>Custom nation<input id="${p}Nation" list="nationList" maxlength="40"></label>
         <label id="${p}UnitTypeCustomWrap" hidden>Custom unit type<input id="${p}UnitType" maxlength="40" placeholder="e.g. Cossack sotnia"></label>
-        <div class="grid2"><label>Attack<input id="${p}Attack" type="number" step="any"></label><label>Defend<input id="${p}Defend" type="number" step="any"></label></div>
+        <div class="grid2"><label>Attack <a href="#" data-defaults title="Fill attack, defend, AP, range and movement from the campaign's defaults for this unit type">defaults</a><input id="${p}Attack" type="number" step="any"></label><label>Defend<input id="${p}Defend" type="number" step="any"></label></div>
         <div class="grid2"><label>Action points<input id="${p}Ap" type="number" step="any"></label><label>Range<input id="${p}Range" type="number" step="any"></label></div>
         <div class="grid2"><label>Movement<input id="${p}Movement" type="number" step="any"></label><label>Strength %<input id="${p}Strength" type="number" min="0" max="100" value="100"></label></div>
         <label>Abilities <span class="hint">(one per line)</span><textarea id="${p}Abilities" rows="2"></textarea></label>
@@ -908,18 +908,36 @@
   function unitTypeOptions() {
     const U = window.UnitTypes;
     if (!U) return '<option value="__custom">Custom…</option>';
+    const ov = state.lobby?.settings?.unitStats;
     return U.categories.map(cat =>
-      `<optgroup label="${esc(cat)}">${U.LIST.filter(t => t.cat === cat).map(t => `<option value="${esc(t.name)}">${esc(t.name)}</option>`).join('')}</optgroup>`
+      `<optgroup label="${esc(cat)}">${U.LIST.filter(t => t.cat === cat).map(t => `<option value="${esc(t.name)}">${esc(t.name)} — ${U.statLabel(t, ov)}</option>`).join('')}</optgroup>`
     ).join('') + '<option value="__custom">Custom…</option>';
   }
 
-  /** Wire the unit-type picker: choosing "Custom…" reveals a free-text field. */
+  /** Fill attack/defend/AP/range/movement from the campaign's defaults for the selected type (custom types are left alone). */
+  function applyTypeDefaults(p) {
+    const U = window.UnitTypes;
+    if (!U) return false;
+    const d = U.defaults(readUnitType(p), state.lobby?.settings?.unitStats);
+    if (!d) return false;
+    const set = (id, val) => { const el = document.getElementById(p + id); if (el) el.value = val; };
+    set('Attack', d.attack); set('Defend', d.defend); set('Ap', d.ap); set('Range', d.range); set('Movement', d.movement);
+    return true;
+  }
+
+  /** Wire the unit-type picker: choosing "Custom…" reveals a free-text field; picking a type fills its default stats. */
   function bindUnitTypePicker(p) {
     const sel = document.getElementById(p + 'UnitTypeSel'), wrap = document.getElementById(p + 'UnitTypeCustomWrap');
     if (!sel) return;
-    sel.onchange = () => { wrap.hidden = sel.value !== '__custom'; if (!wrap.hidden) document.getElementById(p + 'UnitType').focus(); };
+    sel.onchange = () => {
+      wrap.hidden = sel.value !== '__custom';
+      if (!wrap.hidden) document.getElementById(p + 'UnitType').focus();
+      else applyTypeDefaults(p);
+    };
     const link = sel.closest('label')?.querySelector('[data-key]');
     if (link) link.onclick = e => { e.preventDefault(); openSymbolKey(document.getElementById(p + 'Color')?.value); };
+    const def = document.getElementById(p + 'Attack')?.closest('label')?.querySelector('[data-defaults]');
+    if (def) def.onclick = e => { e.preventDefault(); if (!applyTypeDefaults(p)) toast('No catalogue defaults for a custom unit type'); };
   }
 
   /** Render every catalogue counter in the chosen colour and show them in a modal. */
@@ -931,12 +949,13 @@
     grid.innerHTML = '<p class="muted">Rendering…</p>';
     $('#keyModal').classList.add('open');
     const col = /^#[0-9a-f]{6}$/i.test(color || '') ? color : (state.member?.color || '#3498db');
+    const ov = state.lobby?.settings?.unitStats;
     let html = '';
     for (const cat of U.categories) {
       html += `<div class="section" style="grid-column:1/-1">${esc(cat)}</div>`;
       for (const t of U.LIST.filter(x => x.cat === cat)) {
         const url = await renderer.counterImage(t.name, col);
-        html += `<div class="k"><img src="${url}" alt=""><span>${esc(t.name)}</span></div>`;
+        html += `<div class="k"><img src="${url}" alt=""><span>${esc(t.name)}<br><span class="hint">${esc(U.statLabel(t, ov))}</span></span></div>`;
       }
     }
     grid.innerHTML = html;
@@ -1106,6 +1125,7 @@
     bindIconPicker('add');
     bindNationPicker('add', 'Nation'); bindNationPicker('add', 'TownNation');
     setNation('add', 'Nation', state.member?.nation || '');
+    applyTypeDefaults('add');
     form.onsubmit = async e => {
       e.preventDefault();
       const f = readForm('add');
@@ -1120,7 +1140,14 @@
         if (!gm) typeSel.value = 'player';
         typeSel.value = f.type; // keep placing the same kind of thing
         toggleTypeFields(form, typeSel.value, true);
-        if (f.type === 'unit') setNation('add', 'Nation', f.data.nation);
+        if (f.type === 'unit') {
+          // Keep faction, unit type and the stats just used so a line of identical units is a name and a click each.
+          setNation('add', 'Nation', f.data.nation);
+          setUnitType('add', f.data.unitType);
+          for (const k of ['Attack', 'Defend', 'Ap', 'Range', 'Movement']) {
+            const el = document.getElementById('add' + k); if (el) el.value = f.data[k.toLowerCase()] ?? '';
+          }
+        }
         if (f.type === 'town') setNation('add', 'TownNation', f.data.nation);
         updateIconPreview('add');
         toast(`Placed ${marker.name}`);
@@ -1317,6 +1344,9 @@
   }
   $('#btnSettings').onclick = openSettings;
   $('#btnEmptyUpload').onclick = openSettings;
+  $('#btnUnitStats').onclick = () => StatsEditor.open(state.lobby, {
+    onSaved: l => { state.lobby = { ...l, joinCode: l.joinCode ?? state.lobby.joinCode, yourRole: state.role }; applyLobby(); },
+  });
   $('#settingsForm').onsubmit = async e => {
     e.preventDefault();
     try {
