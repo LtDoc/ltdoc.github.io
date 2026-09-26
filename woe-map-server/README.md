@@ -228,6 +228,26 @@ Editing a drawing you own (or any, as GM) is direct manipulation on the map, bui
 
 Each release saves and records one "reshaped" history entry, so an overzealous edit is one revert away.
 
+### Trenches
+
+The ⌇ toolbar button (or **T**) digs a trench: click points like a line, or press and drag to draw freehand.
+When you finish, the pointer samples are simplified (Ramer–Douglas–Peucker), smoothed (one Chaikin pass) and,
+unless you untick it, long straights get **traverses** so the line reads as a fire trench. A trench is a
+drawing of kind `trench`: its **centreline** is the object the game uses (occupancy, editing, history, the
+Extend button, vertex dragging from the popup all work on it); the look is derived from it and never the other
+way round. Fields: width in map pixels (default 10), build **state** and which side is the **rear**.
+
+Rendering (`public/js/trench.js`) is a triangulated ribbon, not a line: each centreline point becomes a
+left/right vertex pair at ±half-width (slightly varied along the path) on a mitred normal, sharp corners are
+capped so they do not spike, and the ends are rounded in the shader. One shared GLSL program draws three
+ribbons per trench: a soft drop shadow, the dirt ribbon and, offset to the rear, a narrower broken **spoil**
+ribbon. The dirt look is a seamless value-noise texture tiled along the trench and across it, darkened to a
+wet floor down the middle and lightened at the lips, with noise nibbling the edges. **Planned** trenches draw
+as a pale dashed engineer line; **dug** ones get the full ribbon; **reinforced** ones have darker, timbered
+lips and sandbag props along the rear lip. Zoomed far out, texture detail and spoil fade to a dark stroke with
+a light rim. Where a trench's end meets another trench a sandbag node marks the junction. Meshes are rebuilt
+only when the centreline, width or facing change.
+
 ### The Earth as a map
 
 Campaign settings offer **Use Earth map** as an alternative to uploading an image. It draws the planet from

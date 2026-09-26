@@ -84,10 +84,10 @@ const q = {
   shapes: db.prepare('SELECT * FROM shapes WHERE lobby_id = ? ORDER BY id'),
   shape: db.prepare('SELECT * FROM shapes WHERE id = ? AND lobby_id = ?'),
   insertShape: db.prepare(`
-    INSERT INTO shapes (id, lobby_id, kind, label, points, color, width, admin_only, visible_to, created_by, created_at, updated_at, locked)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    INSERT INTO shapes (id, lobby_id, kind, label, points, color, width, admin_only, visible_to, created_by, created_at, updated_at, locked, data)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
   updateShape: db.prepare(`
-    UPDATE shapes SET kind = ?, label = ?, points = ?, color = ?, width = ?, admin_only = ?, visible_to = ?, updated_at = ?, locked = ? WHERE id = ?`),
+    UPDATE shapes SET kind = ?, label = ?, points = ?, color = ?, width = ?, admin_only = ?, visible_to = ?, updated_at = ?, locked = ?, data = ? WHERE id = ?`),
   deleteShape: db.prepare('DELETE FROM shapes WHERE id = ?'),
 
   events: db.prepare(`
@@ -521,7 +521,7 @@ router.post('/:id/shapes/import-borders', requireGm, (req, res) => {
       const label = n === 0 ? c.n : `${c.n} (${n + 1})`;
       if (existing.has(label.toLowerCase())) { n++; continue; }
       const points = pts.map(p => [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10]);
-      const id = q.insertShape.run(null, req.lobby.id, 'area', label.slice(0, 60), JSON.stringify(points), color, 2, 0, null, req.user.id, t0, t0, 1).lastInsertRowid;
+      const id = q.insertShape.run(null, req.lobby.id, 'area', label.slice(0, 60), JSON.stringify(points), color, 2, 0, null, req.user.id, t0, t0, 1, null).lastInsertRowid;
       const shape = access.serializeShape(q.shape.get(id, req.lobby.id));
       commitChange(req, 'shape', 'create', null, shape);
       created.push(shape.id);
@@ -931,6 +931,17 @@ function canEditShape(req, s) {
   return req.lobbyRole === 'gm' || (s.createdBy === req.user.id && !s.adminOnly);
 }
 
+/** Per-kind extras. Trench: facing (which side is the rear), build state, zigzag flag. */
+function shapeData(kind, raw, before) {
+  if (kind !== 'trench') return null;
+  const d = (raw && typeof raw === 'object') ? raw : {}, prev = before || {};
+  return {
+    facing: ['left', 'right'].includes(d.facing) ? d.facing : (prev.facing || 'left'),
+    state: ['plan', 'dug', 'reinforced'].includes(d.state) ? d.state : (prev.state || 'dug'),
+    zigzag: d.zigzag !== undefined ? !!d.zigzag : (prev.zigzag !== undefined ? !!prev.zigzag : true),
+  };
+}
+
 function parsePoints(req, kind, raw) {
   if (!Array.isArray(raw) || raw.length > 500) return null;
   const pts = [];
@@ -953,17 +964,18 @@ function loadShape(req, res) {
 router.post('/:id/shapes', (req, res) => {
   const b = req.body || {};
   const isGm = req.lobbyRole === 'gm';
-  const kind = ['line', 'area'].includes(b.kind) ? b.kind : null;
-  if (!kind) return res.status(400).json({ error: 'Drawing must be a line or an area' });
+  const kind = ['line', 'area', 'trench'].includes(b.kind) ? b.kind : null;
+  if (!kind) return res.status(400).json({ error: 'Drawing must be a line, an area or a trench' });
   const points = parsePoints(req, kind, b.points);
   if (!points) return res.status(400).json({ error: 'Bad points (need 2+ for a line, 3+ for an area, all on the map)' });
   const label = clean(b.label, 60);
   const color = COLOR_RE.test(b.color || '') ? b.color : (req.member?.color || '#f1c40f');
-  const width = clamp(num(b.width, 3), 1, 20);
+  const width = kind === 'trench' ? clamp(num(b.width, 10), 2, 80) : clamp(num(b.width, 3), 1, 20);
   const adminOnly = isGm && b.adminOnly ? 1 : 0;
   const visibleTo = isGm ? parseVisibleTo(b.visibleTo) : null;
+  const data = shapeData(kind, b.data, null);
   const t = now();
-  const id = q.insertShape.run(null, req.lobby.id, kind, label, JSON.stringify(points), color, width, adminOnly, visibleTo, req.user.id, t, t, b.locked ? 1 : 0).lastInsertRowid;
+  const id = q.insertShape.run(null, req.lobby.id, kind, label, JSON.stringify(points), color, width, adminOnly, visibleTo, req.user.id, t, t, b.locked ? 1 : 0, data ? JSON.stringify(data) : null).lastInsertRowid;
   const shape = access.serializeShape(q.shape.get(id, req.lobby.id));
   commitChange(req, 'shape', 'create', null, shape);
   res.status(201).json({ shape });
@@ -982,11 +994,12 @@ router.patch('/:id/shapes/:sid', (req, res) => {
   }
   const label = b.label !== undefined ? clean(b.label, 60) : before.label;
   const color = b.color !== undefined && COLOR_RE.test(b.color) ? b.color : before.color;
-  const width = b.width !== undefined ? clamp(num(b.width, 3), 1, 20) : before.width;
+  const width = b.width !== undefined ? (before.kind === 'trench' ? clamp(num(b.width, 10), 2, 80) : clamp(num(b.width, 3), 1, 20)) : before.width;
   const adminOnly = isGm && b.adminOnly !== undefined ? (b.adminOnly ? 1 : 0) : (before.adminOnly ? 1 : 0);
   const visibleTo = isGm && b.visibleTo !== undefined ? parseVisibleTo(b.visibleTo) : (before.visibleTo ? JSON.stringify(before.visibleTo) : null);
   const locked = b.locked !== undefined ? (b.locked ? 1 : 0) : (before.locked ? 1 : 0);
-  q.updateShape.run(before.kind, label, JSON.stringify(points), color, width, adminOnly, visibleTo, now(), locked, before.id);
+  const data = b.data !== undefined ? shapeData(before.kind, b.data, before.data) : (before.data && Object.keys(before.data).length ? before.data : null);
+  q.updateShape.run(before.kind, label, JSON.stringify(points), color, width, adminOnly, visibleTo, now(), locked, data ? JSON.stringify(data) : null, before.id);
   const after = access.serializeShape(q.shape.get(before.id, req.lobby.id));
   commitChange(req, 'shape', 'update', before, after);
   res.json({ shape: after });

@@ -117,20 +117,35 @@
     const d = e.detail;
     $('#btnDrawLine').classList.toggle('active', !!d && d.kind === 'line');
     $('#btnDrawArea').classList.toggle('active', !!d && d.kind === 'area');
+    $('#btnDrawTrench').classList.toggle('active', !!d && d.kind === 'trench');
     if (!d) { if (renderer.mode !== 'measure') hideModeHud(); return; }
     showModeHud(false);
     const need = d.kind === 'area' ? 3 : 2;
+    const what = d.kind === 'area' ? 'an area' : d.kind === 'trench' ? 'a trench' : 'a line';
     $('#modeText').textContent = d.points < need
-      ? `Drawing ${d.kind === 'area' ? 'an area' : 'a line'}: click ${need - d.points} more point${need - d.points === 1 ? '' : 's'}`
-      : `${d.points} points · double-click, Enter or Done to finish`;
+      ? `Drawing ${what}: ${d.kind === 'trench' ? 'click points or drag freehand' : `click ${need - d.points} more point${need - d.points === 1 ? '' : 's'}`}`
+      : `${d.points} points · double-click, Enter or Done to finish${d.kind === 'trench' ? ' (the line is smoothed and traversed when you do)' : ''}`;
   });
   renderer.addEventListener('drawend', async e => {
     if (e.detail.shapeId) {
       // Continuing an existing line: just save the new points.
       try {
-        const d = await api.patch(`${base}/shapes/${e.detail.shapeId}`, { points: e.detail.points });
+        const prev = state.shapes.get(e.detail.shapeId);
+        let points = e.detail.points;
+        if (prev && prev.kind === 'trench') {
+          // Only the newly drawn tail is processed; the existing centreline stays as it was.
+          const n = prev.points.length;
+          const tail = Trench.processPath([prev.points[n - 1], ...points.slice(n)], { tol: 2 / renderer.scale, width: prev.width || 10, zig: prev.data?.zigzag !== false });
+          points = [...prev.points, ...tail.slice(1)];
+        }
+        const d = await api.patch(`${base}/shapes/${e.detail.shapeId}`, { points });
         upsertShape(d.shape); renderer.selectShape(d.shape.id);
       } catch (err) { toast(err.message); }
+      return;
+    }
+    if (e.detail.kind === 'trench') {
+      // Keep the raw samples so the modal can re-process them with or without traverses.
+      openShapeModal(null, { kind: 'trench', raw: e.detail.points, points: Trench.processPath(e.detail.points, { tol: 2 / renderer.scale, width: 10, zig: true }) });
       return;
     }
     openShapeModal(null, e.detail);
@@ -860,7 +875,7 @@
       html += `<div class="section">Drawings <span class="hint">(${shapes.length})</span>${lockLinks('shape', shapes)}${state.role === 'gm' && shapes.length > 1 ? ` · <a href="#" data-delall="1" title="Delete every drawing you can see (e.g. imported borders you no longer need)">delete all</a>` : ''}</div><ul class="list">${shapes.map(s => `
         <li class="clickable ${s.id === state.selectedShapeId ? 'selected' : ''}" data-shape="${s.id}">
           <span class="dot" style="background:${esc(s.color)}"></span>
-          <span class="grow">${esc(s.label || (s.kind === 'area' ? 'Unnamed area' : 'Unnamed line'))} <span class="hint">${s.kind} · ${s.points.length} pts</span></span>
+          <span class="grow">${esc(s.label || (s.kind === 'area' ? 'Unnamed area' : s.kind === 'trench' ? 'Unnamed trench' : 'Unnamed line'))} <span class="hint">${s.kind} · ${s.points.length} pts</span></span>
           ${visBadge(s)}
         </li>`).join('')}</ul>`;
     }
@@ -971,10 +986,11 @@
 
   function shapePopupHtml(s) {
     const creator = s.createdBy && state.members.find(x => x.userId === s.createdBy);
-    let body = stat('Kind', s.kind === 'area' ? 'Area' : 'Line') + stat('Points', s.points.length);
+    let body = stat('Kind', s.kind === 'area' ? 'Area' : s.kind === 'trench' ? 'Trench' : 'Line') + stat('Points', s.points.length);
+    if (s.kind === 'trench') body += stat('State', { plan: 'planned', dug: 'dug', reinforced: 'reinforced' }[s.data?.state] || 'dug') + stat('Width', `${s.width} px`);
     if (creator) body += stat('Drawn by', creator.displayName);
     if (s.visibleTo && s.visibleTo.length) body += stat('Visible to', s.visibleTo.join(', '));
-    if (s.kind === 'line') {
+    if (s.kind !== 'area') {
       body += stat('Length', `${fmtNum(pathUnits(s.points))} ${state.lobby?.scaleLabel || ''}`);
     } else {
       body += stat('Perimeter', `${fmtNum(pathUnits([...s.points, s.points[0]]))} ${state.lobby?.scaleLabel || ''}`);
@@ -982,13 +998,13 @@
     let actions = '';
     if (canEditShape(s)) actions += `<button class="small" data-act="edit">Edit</button>`;
     if (canEditShape(s)) actions += `<button class="small secondary" data-act="lock">${s.locked ? '🔓 Unlock' : '🔒 Lock'}</button>`;
-    if (canEditShape(s) && !s.locked && s.kind === 'line') actions += `<button class="small secondary" data-act="continue" title="Keep adding points at the end">Continue</button>`;
+    if (canEditShape(s) && !s.locked && s.kind !== 'area') actions += `<button class="small secondary" data-act="continue" title="Keep adding points at the end">${s.kind === 'trench' ? 'Extend' : 'Continue'}</button>`;
     if (canEditShape(s)) actions += `<button class="small secondary" data-act="move" title="Drag the whole drawing to a new place">Move</button>`;
     actions += `<button class="small secondary" data-act="history">History</button>`;
     if (canEditShape(s)) actions += `<button class="small danger" data-act="del">Delete</button>`;
     const hint = canEditShape(s) && !s.locked ? `<p class="hint" style="margin:6px 0 0">Drag a point to move it · grab the line to add a point · right-click (or Alt-click) a point to remove it · Move button or Shift-drag to move everything</p>`
       : (s.locked ? '<p class="hint" style="margin:6px 0 0">Locked: clicks on the map pass through it. Unlock to edit.</p>' : '');
-    return `<h3><span class="dot" style="background:${esc(s.color)}"></span>${esc(s.label || (s.kind === 'area' ? 'Unnamed area' : 'Unnamed line'))} <span class="badge">Drawing</span>${visBadge(s)}</h3>${body}${hint}<div class="actions">${actions}</div>`;
+    return `<h3><span class="dot" style="background:${esc(s.color)}"></span>${esc(s.label || (s.kind === 'area' ? 'Unnamed area' : s.kind === 'trench' ? 'Unnamed trench' : 'Unnamed line'))} <span class="badge">Drawing</span>${visBadge(s)}</h3>${body}${hint}<div class="actions">${actions}</div>`;
   }
 
   async function popupAction(act, m) {
@@ -1013,7 +1029,7 @@
     try {
       if (act === 'edit') openShapeModal(s);
       else if (act === 'lock') { const d = await api.patch(`${base}/shapes/${s.id}`, { locked: !s.locked }); upsertShape(d.shape); }
-      else if (act === 'continue') { renderer.startDraw('line', s.points, s.id); toast('Click to add points at the end; double-click, Enter or Done to finish'); }
+      else if (act === 'continue') { renderer.startDraw(s.kind === 'trench' ? 'trench' : 'line', s.points, s.id); toast('Click to add points at the end; double-click, Enter or Done to finish'); }
       else if (act === 'move') { renderer.armMove(s.id); toast('Now drag the drawing to move it'); }
       else if (act === 'history') showHistoryFor('shape', s.id);
       else if (act === 'del') {
@@ -1462,10 +1478,21 @@
   function openShapeModal(shape, pending) {
     state.editingShapeId = shape ? shape.id : null;
     state.pendingShape = pending || null;
-    $('#shapeModalTitle').textContent = shape ? 'Edit drawing' : `New ${pending.kind === 'area' ? 'area' : 'line'}`;
+    const kind = shape ? shape.kind : pending.kind;
+    const trench = kind === 'trench';
+    $('#shapeModalTitle').textContent = shape ? (trench ? 'Edit trench' : 'Edit drawing') : `New ${kind === 'area' ? 'area' : trench ? 'trench' : 'line'}`;
     $('#shapeLabel').value = shape ? shape.label : '';
     $('#shapeColor').value = shape ? shape.color : (state.member?.color || '#f1c40f');
-    $('#shapeWidth').value = shape ? shape.width : 3;
+    $('#shapeWidth').value = shape ? shape.width : (trench ? 10 : 3);
+    $('#shapeColorWrap').hidden = trench;
+    $('#shapeWidthLabel').textContent = trench ? 'Trench width (map px)' : 'Line width';
+    $('#trenchFields').hidden = !trench;
+    $('#trenchZigWrap').hidden = !trench || !!shape;                 // traverses are applied when the trench is first dug
+    if (trench) {
+      $('#trenchState').value = shape ? (shape.data?.state || 'dug') : 'dug';
+      $('#trenchFacing').value = shape ? (shape.data?.facing || 'left') : 'left';
+      $('#trenchZigzag').checked = shape ? shape.data?.zigzag !== false : true;
+    }
     $('#shapeVisibleTo').value = shape && shape.visibleTo ? shape.visibleTo.join(', ') : '';
     $('#shapeAdminOnly').checked = !!(shape && shape.adminOnly);
     $('#btnShapeDelete').hidden = !shape;
@@ -1478,12 +1505,20 @@
       label: $('#shapeLabel').value, color: $('#shapeColor').value, width: Number($('#shapeWidth').value) || 3,
       visibleTo: $('#shapeVisibleTo').value, adminOnly: $('#shapeAdminOnly').checked,
     };
+    const editing = state.editingShapeId ? state.shapes.get(state.editingShapeId) : null;
+    if ((editing && editing.kind === 'trench') || state.pendingShape?.kind === 'trench') {
+      body.data = { state: $('#trenchState').value, facing: $('#trenchFacing').value, zigzag: $('#trenchZigzag').checked };
+    }
     try {
       if (state.editingShapeId) {
         const d = await api.patch(`${base}/shapes/${state.editingShapeId}`, body);
         upsertShape(d.shape);
       } else if (state.pendingShape) {
-        const d = await api.post(`${base}/shapes`, { ...body, kind: state.pendingShape.kind, points: state.pendingShape.points });
+        let points = state.pendingShape.points;
+        if (state.pendingShape.kind === 'trench' && state.pendingShape.raw) {
+          points = Trench.processPath(state.pendingShape.raw, { tol: 2 / renderer.scale, width: body.width, zig: body.data.zigzag });
+        }
+        const d = await api.post(`${base}/shapes`, { ...body, kind: state.pendingShape.kind, points });
         upsertShape(d.shape);
         renderer.selectShape(d.shape.id);
       }
@@ -1728,6 +1763,7 @@
   $('#btnSelect').onclick = () => renderer.setSelectMode(renderer.mode !== 'select');
   $('#btnDrawLine').onclick = () => (renderer.mode === 'draw' && renderer.draw.kind === 'line') ? renderer.cancelMode() : renderer.startDraw('line');
   $('#btnDrawArea').onclick = () => (renderer.mode === 'draw' && renderer.draw.kind === 'area') ? renderer.cancelMode() : renderer.startDraw('area');
+  $('#btnDrawTrench').onclick = () => (renderer.mode === 'draw' && renderer.draw.kind === 'trench') ? renderer.cancelMode() : renderer.startDraw('trench');
   $('#btnModeUndo').onclick = () => renderer.modeUndo();
   $('#btnModeClear').onclick = () => renderer.modeClear();
   $('#btnModeDone').onclick = () => { if (!renderer.finishDraw()) toast('Add more points first'); };
@@ -1752,6 +1788,7 @@
     if (e.key === 'f' || e.key === 'F') renderer.fit();
     if (e.key === 'l' || e.key === 'L') $('#btnDrawLine').click();
     if (e.key === 'a' || e.key === 'A') $('#btnDrawArea').click();
+    if (e.key === 't' || e.key === 'T') $('#btnDrawTrench').click();
     if ((e.key === 'z' || e.key === 'Z') && renderer.mode) renderer.modeUndo();
     if (e.key === 'Delete') {
       if ((state.selectedIds || []).length > 1) {

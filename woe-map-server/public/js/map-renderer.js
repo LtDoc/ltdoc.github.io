@@ -71,6 +71,7 @@ class MapRenderer extends EventTarget {
     this.factionInfo = new Map();                // factionId -> { color, name }
     this.sceneryLayer = new PIXI.Container();   // buildings, trenches, craters: scale with the map
     this.sceneryLayer.sortableChildren = true;
+    this.trenchLayer = new PIXI.Container();    // dug earthworks (ribbon meshes), under drawings and tokens
     this.shapesLayer = new PIXI.Container();
     this.fxLayer = new PIXI.Container();
     this.markerLayer = new PIXI.Container();
@@ -78,7 +79,7 @@ class MapRenderer extends EventTarget {
     this.boomLayer = new PIXI.Container();     // explosions, above the markers
     this.overlayLayer = new PIXI.Container();
     this.handleLayer = new PIXI.Container();
-    this.world.addChild(this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.shapesLayer, this.fxLayer, this.markerLayer, this.boomLayer, this.overlayLayer, this.handleLayer);
+    this.world.addChild(this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.trenchLayer, this.shapesLayer, this.fxLayer, this.markerLayer, this.boomLayer, this.overlayLayer, this.handleLayer);
     app.stage.addChild(this.world);
 
     app.stage.eventMode = 'static';
@@ -460,14 +461,30 @@ class MapRenderer extends EventTarget {
       this.shapesLayer.addChild(g, label);
       this.shapeViews.set(shape.id, v);
     }
+    if (shape.kind === 'trench' && !v.trench && window.Trench) v.trench = new Trench.View(this.trenchLayer);
     v.shape = shape;
     this._drawShapeView(v);
+    if (shape.kind === 'trench') this._refreshTrenchNodes();
     if (this.selectedShapeId === shape.id && !this._vdrag) this._drawHandles();
+  }
+
+  /** Where a trench's end meets another trench, drop a sandbag node so the ribbons read as joined. */
+  _refreshTrenchNodes() {
+    const trenches = [...this.shapeViews.values()].filter(v => v.trench && v.shape.points.length >= 2);
+    for (const v of trenches) v.trench.clearNodes();
+    for (const v of trenches) {
+      const hw = Math.max(2, Number(v.shape.width) || 10) / 2;
+      for (const end of [v.shape.points[0], v.shape.points[v.shape.points.length - 1]]) {
+        const near = trenches.some(o => o !== v && Trench.distToPath(end[0], end[1], o.shape.points) <= hw * 2.2);
+        if (near) v.trench.addNode(end[0], end[1]);
+      }
+    }
   }
 
   removeShape(id) {
     this.invalidate();
     const v = this.shapeViews.get(id);
+    if (v && v.trench) { v.trench.destroy(); v.trench = null; setTimeout(() => this._refreshTrenchNodes(), 0); }
     if (!v) return;
     this.shapesLayer.removeChild(v.g, v.label);
     v.g.destroy(); v.label.destroy();
@@ -488,6 +505,20 @@ class MapRenderer extends EventTarget {
     const pts = s.points || [];
     if (pts.length < 2) return;
     const path = () => { g.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]); };
+    if (s.kind === 'trench' && v.trench) {
+      // The earthwork is a mesh in the trench layer; the graphics only carry the hit path and the selection ring.
+      v.trench.update(s, sc);
+      const tw = Math.max(2, Number(s.width) || 10);
+      if (selected) { path(); g.stroke({ width: tw + 6 / sc, color: 0xffffff, alpha: 0.45 }); }
+      if (s.adminOnly || (s.visibleTo && s.visibleTo.length)) { path(); g.stroke({ width: 1.5 / sc, color: s.adminOnly ? 0xe67e22 : 0x5dade2, alpha: 0.9 }); }
+      path(); g.stroke({ width: Math.max(tw, 14 / sc), color: 0xffffff, alpha: 0.001 });
+      v.label.text = s.label || '';
+      v.label.visible = !!s.label;
+      const a = shapeAnchor(s);
+      v.label.position.set(a[0], a[1]);
+      v.label.scale.set(1 / sc);
+      return;
+    }
     if (s.kind === 'area') {
       g.poly(pts.flat()).fill({ color, alpha: selected ? 0.32 : 0.18 });
       if (selected) g.poly(pts.flat()).stroke({ width: w + 6 / sc, color: 0xffffff, alpha: 0.5 });
@@ -721,7 +752,7 @@ class MapRenderer extends EventTarget {
     if (!this.mode) return;
     const s = this.scale;
     const m = this.mode === 'draw' ? this.draw : this.measure;
-    const color = this.mode === 'draw' ? 0xf1c40f : 0xabe67e;
+    const color = this.mode === 'draw' ? (this.draw.kind === 'trench' ? 0xc9b37f : 0xf1c40f) : 0xabe67e;
     const pts = [...m.points];
     if (m.hover && pts.length) pts.push(m.hover);
     if (pts.length >= 2) {
@@ -827,7 +858,12 @@ class MapRenderer extends EventTarget {
     st.on('pointerdown', e => {
       if (e.target !== st) return;
       if (e.button === 0 && (this.mode === 'select' || (!this.mode && e.shiftKey))) { this._marqueeStart(e); return; }
-      if (this.mode && e.button === 0) { this._modeClick(e); return; }
+      if (this.mode && e.button === 0) {
+        this._modeClick(e);
+        // Trenches can be drawn freehand: keep sampling while the button is held.
+        if (this.mode === 'draw' && this.draw.kind === 'trench') this.draw.freehand = true;
+        return;
+      }
       this._pan = { sx: e.global.x, sy: e.global.y, wx: this.world.x, wy: this.world.y, moved: false, button: e.button };
     });
 
@@ -882,11 +918,21 @@ class MapRenderer extends EventTarget {
       }
       if (this.mode) {
         const p = this.screenToWorld(e.global.x, e.global.y);
+        if (this.mode === 'draw' && this.draw.freehand) {
+          const last = this.draw.points[this.draw.points.length - 1];
+          if (!last || Math.hypot(p.x - last.x, p.y - last.y) >= 6 / this.scale) {
+            this.draw.points.push({ x: p.x, y: p.y });
+            this.draw.lastClick = null;               // a long drag is not a double-click
+            this._redrawMode(); this._emitMode();
+          }
+          return;
+        }
         this._modeHover(p.x, p.y);
       }
     });
 
     const up = e => {
+      if (this.draw.freehand) this.draw.freehand = false;
       if (this._marquee) {
         if (!this._marqueeEnd() && this.mode !== 'select' && !e.shiftKey) this.select(null);
         return;

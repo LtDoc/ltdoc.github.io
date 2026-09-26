@@ -120,6 +120,7 @@ function serializeShape(row) {
     points: safeJson(row.points || '[]'),
     color: row.color,
     width: row.width,
+    data: safeJson(row.data || "{}"),
     adminOnly: !!row.admin_only,
     visibleTo: parseVisibleTo(row.visible_to),
     locked: !!row.locked,

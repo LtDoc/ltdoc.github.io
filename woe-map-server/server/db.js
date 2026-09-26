@@ -203,6 +203,7 @@ function addColumnIfMissing(table, column, decl) {
 addColumnIfMissing('markers', 'visible_to', 'TEXT');
 addColumnIfMissing('markers', 'locked', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('shapes', 'locked', 'INTEGER NOT NULL DEFAULT 0');
+addColumnIfMissing('shapes', 'data', 'TEXT');   // per-kind extras (trench: facing, state, zigzag)
 addColumnIfMissing('events', 'data', 'TEXT');
 
 function now() { return Date.now(); }
