@@ -269,6 +269,44 @@ GMs can revert any entry, players their own. Reverting a move puts it back, reve
 fields, "Remove" undoes a placement and "Restore" brings a deleted item back with the same id. A revert is itself
 a history entry, so it can be reverted too.
 
+### Game mode (turns and economy)
+
+Off by default: a campaign is the plain map tracker described above. A GM switches it on from the **Game**
+tab (pick a start date; the 1914 scenario uses 28 July 1914) and the campaign gains turns, treasuries,
+movement limits and action points. Switching it off pauses all of that and keeps the treasuries. The full
+design, including the phases still to come (territory that follows armies, production, research), is in
+`docs/GAME-DESIGN.md`.
+
+- **Turns.** Weekly by default (fortnight, month and season are options). The HUD shows the turn, the game
+  date and any deadline text the GM sets. Everyone acts during the turn; the GM presses **End turn**, which
+  pays income, resets every unit's movement and action points, advances the date and posts a private turn
+  summary to each faction (and the GM). **Undo last turn** restores treasuries and the calendar from a
+  snapshot taken before the resolution (the last five are kept); units stay where they are.
+- **Treasuries.** Each faction has stockpiles of the ten map resources (grain, coal, iron, oil, copper,
+  rubber, nitrates, timber, cotton, horses) plus money, manpower and research points. New factions start
+  with the campaign's starting stockpiles. The GM's **Edit treasuries…** table sets every number with +/-
+  steppers (Shift for 10) and, on its second tab, per-turn modifiers added to a faction's income.
+- **Income per turn** = base allowance + resource nodes the faction owns + towns in its colours (capital,
+  city and village rates) + factories (rate × industry level) + the GM's modifiers − upkeep when enabled.
+  The **Nation** tab shows each faction its stockpiles with the change it will receive, where the change
+  comes from, its forces by category with how many have moved or attacked, and its last turn summary. The
+  GM can view any faction from the same tab; players see only their own unless the GM makes treasuries public.
+- **Resource nodes** are markers (Add tab: pick the resource and yield, choose the faction, click the map)
+  drawn with the bundled painted icons in `public/icons/` inside a ring in the owner's colour; the ring
+  colour and the owner follow the faction. **Factories** are markers with an industry level 1–5. Both are
+  locked by default like towns. Ownership by territory arrives in phase 2; until then the GM sets it.
+- **Movement.** A unit may move `movement × distance per movement point` per turn (50 km by default on the
+  Earth map, map units elsewhere). While a player drags a unit a green ring shows how far it may still go;
+  a drop beyond it is clamped to the ring and the player is told. A formation moves as one and is limited
+  by its slowest unit. Units that have moved carry an amber dot (red when their allowance is spent). The GM
+  is never limited, and a rule switch waives the limits for everyone.
+- **Action points.** Attacking costs one AP; a unit with none left cannot attack until the next turn.
+  Players cannot edit their units' stats, type or faction while game mode is on.
+- **Upkeep** is built in but off: when enabled every unit costs grain per turn and vehicles, aircraft and
+  ships cost oil; a faction that runs out has its three strongest units lose 10 % strength.
+- **Rules** (Game tab): distance per movement point, waive limits, base money/RP/manpower, city and factory
+  income rates, upkeep, starting stockpiles and public treasuries.
+
 ### Dice and combat
 
 Type `/roll 2d6+3 optional note` (or `/r d20`) in the chat, or use the 🎲 button. Rolls happen on the server with
@@ -328,6 +366,12 @@ public/
   js/atlas.js     sprite atlas loader: "sprite:<sheet>:<n>" references → PixiJS textures and CSS previews
   js/units.js     WW1 unit catalogue, default stats and the drawn NATO-style counter symbols
   js/naming.js    ordinal styles by faction keyword and the next-free-number rule (shared with the server)
+  js/game-data.js the ten resources, default rules and calendar helpers (shared with the server)
+  js/game-ui.js   turn HUD, Nation tab, GM Game tab and the treasury editor
+  icons/          painted resource and goods icons used by nodes, factories and the treasury
+server/game.js    game rows, faction treasuries, income, End turn / undo, movement and action-point rules
+server/routes/game.js  /api/lobbies/:id/game routes
+server/geo.js     server-side projection and great-circle distance (mirrors earth.js)
   js/stats-editor.js  GM table of per-campaign unit stat overrides (+/- steppers), shared by both pages
   sprites/        pixel-art sheets and atlas.json (generated)
   js/map.js       app logic: REST + WebSocket sync, sidebar, forms, popups, history, combat, notifications

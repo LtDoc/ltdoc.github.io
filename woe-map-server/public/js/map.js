@@ -9,7 +9,7 @@
   const $$ = s => [...document.querySelectorAll(s)];
   const base = `/api/lobbies/${lobbyId}`;
 
-  const TYPE_LABEL = { unit: 'Unit', town: 'Town', poi: 'POI', player: 'Player', scenery: 'Scenery' };
+  const TYPE_LABEL = { unit: 'Unit', town: 'Town', poi: 'POI', player: 'Player', scenery: 'Scenery', resource: 'Resource', factory: 'Factory' };
   const Atlas = window.SpriteAtlas;
   await Atlas.load();
   const state = {
@@ -17,7 +17,9 @@
     markers: new Map(), shapes: new Map(), events: [], history: [], presence: [],
     selectedId: null, selectedShapeId: null,
     ws: null, wsBackoff: 1000, mapKey: null, pendingShape: null, editingShapeId: null,
+    game: null, gameFactions: [], myFactionId: null, canUndo: false, placing: null,
   };
+  const gameOn = () => !!state.game?.enabled;
 
   // ---- Renderer -------------------------------------------------------------------
   const renderer = new MapRenderer($('#stage'));
@@ -58,6 +60,17 @@
     } else if (!e.detail.mode) hideModeHud();
   });
   renderer.addEventListener('drag', e => wsSend({ type: 'drag', ...e.detail }));
+  // Game mode: show how far the dragged unit (or the slowest of a group) may still move this turn.
+  renderer.addEventListener('dragstart', e => {
+    if (!gameOn() || state.role === 'gm' || state.game.settings.waiveMovement) return;
+    const units = e.detail.ids.map(id => state.markers.get(id)).filter(m => m && m.type === 'unit');
+    if (!units.length) return;
+    const km = state.game.settings.kmPerMove;
+    const remaining = Math.min(...units.map(m => Math.max(0, (Number(m.data?.movement) || 0) * km - (Number(m.data?.movedKm) || 0))));
+    const lead = state.markers.get(e.detail.id);
+    const perPx = distanceUnits(lead.x, lead.y, lead.x + 1, lead.y) || 1;   // local map units per pixel
+    renderer.showRange(lead.x, lead.y, remaining / perPx, remaining <= 0.01);
+  });
   renderer.addEventListener('dragend', async e => {
     const { id, x, y, moves } = e.detail;
     try {
@@ -68,7 +81,9 @@
       } else {
         const d = await api.patch(`${base}/markers/${id}`, { x: round1(x), y: round1(y) });
         upsertMarker(d.marker);
+        if (d.note) toast(d.note);
       }
+      if (gameOn()) GameUI.renderNation();
     } catch (err) {
       toast(err.message);
       const m = state.markers.get(id);
@@ -160,18 +175,37 @@
     if (!state.placing) return;
     state.placing = null;
     $$('#qaList .qa').forEach(b => b.classList.remove('active'));
+    $('#qaResPlace')?.classList.remove('active');
     renderer.app.canvas.style.cursor = renderer.mode ? 'crosshair' : '';
     if (!renderer.mode) $('#modeHud').classList.remove('show');
   }
   function updatePlaceHud() {
     if (!state.placing || renderer.mode) return;
-    const t = state.placing.type;
     $('#modeHud').classList.add('show');
     $('#btnModeUndo').hidden = true; $('#btnModeClear').hidden = true; $('#btnModeDone').hidden = true;
+    if (state.placing.resource) {
+      const r = window.GameData?.byKey[state.placing.resource];
+      $('#modeText').textContent = `Placing ${r ? r.name.toLowerCase() : 'resource'} nodes (+${state.placing.yield}/turn) for ${quickNation() || 'no one'}: click the map. Esc to stop.`;
+      return;
+    }
+    const t = state.placing.type;
     $('#modeText').textContent = `Placing ${quickNation() || 'unaligned'} ${t.unit}: click the map (next: ${nextQuickName(t)}). Esc to stop.`;
   }
   renderer.addEventListener('mapclick', async e => {
     if (!state.placing || state.role !== 'gm') return;
+    if (state.placing.resource) {
+      const r = window.GameData?.byKey[state.placing.resource];
+      const nation = quickNation();
+      try {
+        const res = await api.post(`${base}/markers`, {
+          type: 'resource', name: r ? r.name : state.placing.resource, color: quickColor(), x: round1(e.detail.x), y: round1(e.detail.y),
+          data: { kind: state.placing.resource, yield: state.placing.yield, nation },
+        });
+        upsertMarker(res.marker); toast(`Placed ${res.marker.name} (+${state.placing.yield}/turn${nation ? ' for ' + nation : ''})`);
+        if (gameOn()) GameUI.load().catch(() => {});
+      } catch (err) { toast(err.message); }
+      return;
+    }
     const t = state.placing.type, nation = quickNation();
     const d = window.UnitTypes.defaults(t, state.lobby?.settings?.unitStats) || {};
     try {
@@ -288,7 +322,7 @@
       if (qa.value !== cur) qa.dispatchEvent(new Event('change'));
     }
     for (const p of ['add', 'edit']) {
-      for (const id of ['Nation', 'TownNation']) {
+      for (const id of ['Nation', 'TownNation', 'ResNation', 'FacNation']) {
         const sel = document.getElementById(p + id + 'Sel');
         if (!sel) continue;
         const cur = sel.value;
@@ -336,13 +370,26 @@
     if (isNew && !quiet) renderer.pulse(m.x, m.y, colorNum(m.color));
     renderMarkerLists();
     if (state.selectedId === m.id) renderPopup();
+    gameMarkerChanged(m.type);
   }
 
   function removeMarker(id) {
+    const type = state.markers.get(id)?.type;
     state.markers.delete(id);
     renderer.remove(id);
     renderMarkerLists();
     if (state.selectedId === id) { state.selectedId = null; renderPopup(); }
+    gameMarkerChanged(type);
+  }
+
+  /** Game mode: income depends on nodes, towns and factories; the Forces list on units. Refresh after a short pause. */
+  let gameRefreshTimer = null;
+  function gameMarkerChanged(type) {
+    if (!gameOn() || !type) return;
+    if (['resource', 'factory', 'town'].includes(type)) {
+      clearTimeout(gameRefreshTimer);
+      gameRefreshTimer = setTimeout(() => GameUI.load().catch(() => {}), 400);
+    } else if (type === 'unit') GameUI.renderNation();
   }
 
   function upsertShape(s) {
@@ -426,14 +473,17 @@
           break;
         }
         case 'members': await loadMembers(); break;
-        case 'factions': await loadFactions(); await loadMembers(); await loadMarkers(); break;
+        case 'factions': await loadFactions(); await loadMembers(); await loadMarkers(); if (gameOn()) GameUI.load().catch(() => {}); break;
+        case 'game': GameUI.onGame(msg.game); break;
+        case 'faction': GameUI.onFaction(msg); break;
+        case 'reload': if (msg.what === 'markers') await loadMarkers(); break;
         case 'lobby': {
           state.lobby = { ...msg.lobby, joinCode: msg.lobby.joinCode ?? state.lobby?.joinCode, yourRole: state.role };
           applyLobby(); await applyMap();
           if ($('#settingsModal').classList.contains('open')) openSettings();
           break;
         }
-        case 'role': state.role = msg.role; await loadLobby(); await loadMarkers(); await loadShapes(); await loadHistory(); toast(`You are now a ${msg.role === 'gm' ? 'game master' : 'player'}${msg.nation ? ` of ${msg.nation}` : ''}`); break;
+        case 'role': state.role = msg.role; await loadLobby(); await loadMarkers(); await loadShapes(); await loadHistory(); GameUI.load().catch(() => {}); toast(`You are now a ${msg.role === 'gm' ? 'game master' : 'player'}${msg.nation ? ` of ${msg.nation}` : ''}`); break;
         case 'kicked': alert('You are no longer part of this campaign.'); location.replace('/lobbies.html'); break;
         case 'error': toast(msg.error); break;
         default: break;
@@ -757,6 +807,8 @@
     for (const [n, list] of [...byNation.entries()].sort((a, b) => a[0].localeCompare(b[0]))) groups.push([`Units · ${n}`, list, flagImg(n)]);
     const towns = all.filter(m => m.type === 'town' || m.type === 'poi'), scenery = all.filter(m => m.type === 'scenery');
     groups.push(['Towns & points of interest', towns, lockLinks('marker', towns)]);
+    const nodes = all.filter(m => m.type === 'resource' || m.type === 'factory');
+    if (nodes.length) groups.push(['Resources & factories', nodes, lockLinks('marker', nodes)]);
     groups.push(['Players', all.filter(m => m.type === 'player')]);
     groups.push(['Scenery', scenery, lockLinks('marker', scenery)]);
     let html = groups.filter(([, list]) => list.length).map(([title, list, extra]) => `
@@ -764,7 +816,7 @@
       <ul class="list">${list.sort((a, b) => a.name.localeCompare(b.name)).map(m => `
         <li class="clickable ${m.id === state.selectedId ? 'selected' : ''}" data-marker="${m.id}">
           <span class="dot" style="background:${esc(m.color)}"></span>
-          <span class="grow">${esc(m.name)}${m.type === 'unit' && m.data?.unitType ? ` <span class="hint">${esc(m.data.unitType)}</span>` : ''}${m.type === 'town' ? ` <span class="hint">${esc(m.data?.size || '')}</span>` : ''}</span>
+          <span class="grow">${esc(m.name)}${m.type === 'unit' && m.data?.unitType ? ` <span class="hint">${esc(m.data.unitType)}</span>` : ''}${m.type === 'town' ? ` <span class="hint">${esc(m.data?.size || '')}</span>` : ''}${m.type === 'resource' ? ` <span class="hint">${esc(window.GameData?.byKey[m.data?.kind]?.name || m.data?.kind || '')} +${esc(m.data?.yield ?? '')}${m.data?.nation ? ' · ' + esc(m.data.nation) : ''}</span>` : ''}${m.type === 'factory' ? ` <span class="hint">level ${esc(m.data?.industry ?? 1)}${m.data?.nation ? ' · ' + esc(m.data.nation) : ''}</span>` : ''}</span>
           ${visBadge(m)}
         </li>`).join('')}</ul>`).join('');
     const shapes = [...state.shapes.values()].filter(s => match(s.label) || (!q));
@@ -843,9 +895,18 @@
       body += nationStat(d.nation) + stat('Unit type', d.unitType) + stat('Attack', d.attack) + stat('Defend', d.defend)
         + stat('Action points', d.ap) + stat('Range', d.range) + stat('Movement', d.movement)
         + stat('Strength', d.strength !== undefined ? `${d.strength}%${d.strength <= 0 ? ' (destroyed)' : ''}` : '');
+      if (gameOn()) {
+        const km = state.game.settings.kmPerMove, allow = (Number(d.movement) || 0) * km, used = Number(d.movedKm) || 0;
+        body += stat('This turn', `${fmtNum(Math.max(0, allow - used))} of ${fmtNum(allow)} ${state.lobby?.scaleLabel || 'km'} left · ${Math.max(0, (Number(d.ap) || 0) - (Number(d.apUsed) || 0))}/${Number(d.ap) || 0} AP`);
+      }
       if (d.abilities?.length) body += `<div class="stat"><span class="muted">Abilities</span></div><ul style="margin:2px 0 4px 16px;padding:0;font-size:12px">${d.abilities.map(a => `<li>${esc(a)}</li>`).join('')}</ul>`;
     } else if (m.type === 'town') {
       body += stat('Size', d.size) + nationStat(d.nation);
+    } else if (m.type === 'resource') {
+      const r = window.GameData?.byKey[d.kind];
+      body += stat('Resource', r ? r.name : d.kind) + stat('Yield per turn', d.yield) + nationStat(d.nation);
+    } else if (m.type === 'factory') {
+      body += stat('Industry level', d.industry) + nationStat(d.nation);
     } else if (m.type === 'poi') {
       body += stat('Category', d.category);
     }
@@ -929,7 +990,7 @@
     const ownerOpts = state.members.map(m => `<option value="${m.userId}">${esc(m.displayName)}</option>`).join('');
     return `
       <label>Type<select id="${p}Type" ${isGm ? '' : 'disabled'}>
-        <option value="unit">Unit / army</option><option value="town">Town</option><option value="poi">Point of interest</option><option value="player">Player</option>${isGm ? '<option value="scenery">Scenery / terrain</option>' : ''}
+        <option value="unit">Unit / army</option><option value="town">Town</option><option value="poi">Point of interest</option><option value="player">Player</option>${isGm ? '<option value="scenery">Scenery / terrain</option><option value="resource">Resource node</option><option value="factory">Factory</option>' : ''}
       </select></label>
       <label>Name<input id="${p}Name" maxlength="60" autocomplete="off" placeholder="${p === 'add' ? 'Units: blank = numbered automatically' : ''}"></label>
       <div class="grid2 coloricon">
@@ -962,6 +1023,15 @@
         <label>Faction<select id="${p}TownNationSel">${nationOptions()}</select></label>
       </div><label id="${p}TownNationCustomWrap" hidden>Custom nation<input id="${p}TownNation" list="nationList" maxlength="40"></label></div>
       <div data-for="poi"><label>Category<input id="${p}Category" maxlength="40" placeholder="Ruins, Mine, Fortress…"></label></div>
+      <div data-for="resource"><div class="grid2">
+        <label>Resource<select id="${p}Kind">${(window.GameData ? GameData.RESOURCES : []).map(r => `<option value="${r.key}">${esc(r.name)}</option>`).join('')}</select></label>
+        <label>Yield per turn<input id="${p}Yield" type="number" min="0" max="50" step="any" value="3"></label>
+      </div><div class="grid2"><label>Owner faction<select id="${p}ResNationSel">${nationOptions()}</select></label></div>
+      <label id="${p}ResNationCustomWrap" hidden>Custom nation<input id="${p}ResNation" list="nationList" maxlength="60"></label></div>
+      <div data-for="factory"><div class="grid2">
+        <label>Owner faction<select id="${p}FacNationSel">${nationOptions()}</select></label>
+        <label>Industry level<input id="${p}Industry" type="number" min="1" max="5" step="1" value="1"></label>
+      </div><label id="${p}FacNationCustomWrap" hidden>Custom nation<input id="${p}FacNation" list="nationList" maxlength="60"></label></div>
       <label>Notes<textarea id="${p}Notes" rows="2"></textarea></label>
       <details class="sub" ${p === 'edit' ? 'open' : ''}><summary>Visibility &amp; ownership</summary>
         <label class="inline"><input type="checkbox" id="${p}Locked"> Locked <span class="hint">(clicks and drags pass through; unlock from its popup)</span></label>
@@ -1084,6 +1154,8 @@
     });
     if (type === 'town') Object.assign(data, { size: v('Size'), nation: readNation(p, 'TownNation') });
     if (type === 'poi') Object.assign(data, { category: v('Category') });
+    if (type === 'resource') Object.assign(data, { kind: v('Kind'), yield: v('Yield') === '' ? 1 : v('Yield'), nation: readNation(p, 'ResNation') });
+    if (type === 'factory') Object.assign(data, { industry: v('Industry') || 1, nation: readNation(p, 'FacNation') });
     if (type === 'scenery') Object.assign(data, { scale: v('Scale') || 1, rotation: v('Rotation') || 0, flip: !!document.getElementById(p + 'Flip')?.checked });
     const name = v('Name').trim() || (type === 'scenery' ? sceneryName(v('IconUrl')) : '');
     const out = { type, name, color: v('Color'), iconUrl: v('IconUrl'), data, autoName: type === 'unit' && !name };
@@ -1108,6 +1180,8 @@
     set('Range', d.range); set('Movement', d.movement); set('Strength', d.strength ?? 100);
     set('Abilities', (d.abilities || []).join('\n'));
     set('Size', d.size || 'village'); setNation(p, 'TownNation', m.type === 'town' ? d.nation : ''); set('Category', d.category); set('Notes', d.notes);
+    set('Kind', d.kind || 'grain'); set('Yield', d.yield ?? 3); setNation(p, 'ResNation', m.type === 'resource' ? d.nation : '');
+    set('Industry', d.industry ?? 1); setNation(p, 'FacNation', m.type === 'factory' ? d.nation : '');
     set('Owner', m.ownerId ?? ''); set('VisibleTo', (m.visibleTo || []).join(', '));
     set('Scale', d.scale ?? 1); set('Rotation', d.rotation ?? 0);
     const fl = document.getElementById(p + 'Flip'); if (fl) fl.checked = !!d.flip;
@@ -1203,6 +1277,13 @@
       <div class="row" style="margin-top:10px;flex-wrap:wrap;gap:4px"><span class="hint">Also:</span>
         <button type="button" class="small secondary" data-quick="town">Town</button><button type="button" class="small secondary" data-quick="poi">Point of interest</button><button type="button" class="small secondary" data-quick="scenery">Scenery</button><button type="button" class="small secondary" data-quick="player">Player</button>
       </div>
+      <div class="row" style="margin-top:6px;flex-wrap:wrap;gap:4px" title="Resource nodes feed the faction that owns them each turn">
+        <img id="qaResIcon" class="resicon" src="/icons/wheat.png" alt="" style="width:22px;height:22px;margin:0">
+        <select id="qaResKind" style="width:auto;margin:0;padding:3px 6px">${(window.GameData ? GameData.RESOURCES : []).map(r => `<option value="${r.key}">${esc(r.name)}</option>`).join('')}</select>
+        <input id="qaResYield" type="number" min="0" max="50" step="any" value="3" style="width:56px;margin:0;padding:3px 6px" title="Yield per turn">
+        <button type="button" class="small secondary" id="qaResPlace" title="Then click the map to place nodes for the selected faction">Place…</button>
+        <button type="button" class="small secondary" data-quick="factory">Factory</button>
+      </div>
       <details class="sub" id="customMarker"><summary>Custom marker</summary>
         ${formHtml('add', gm)}
         <button type="submit" style="width:100%">Place at map centre</button>
@@ -1217,7 +1298,7 @@
     typeSel.onchange = () => toggleTypeFields(form, typeSel.value, true);
     bindUnitTypePicker('add');
     bindIconPicker('add');
-    bindNationPicker('add', 'Nation'); bindNationPicker('add', 'TownNation');
+    bindNationPicker('add', 'Nation'); bindNationPicker('add', 'TownNation'); bindNationPicker('add', 'ResNation'); bindNationPicker('add', 'FacNation');
     setNation('add', 'Nation', state.member?.nation || '');
     applyTypeDefaults('add');
     if (gm) {
@@ -1251,6 +1332,16 @@
       $('#qaFilter').oninput = renderQuick;
       nationSel.onchange = () => { renderQuick(); updatePlaceHud(); setNation('add', 'Nation', nationSel.value); };
       renderQuick();
+      $('#qaResKind').onchange = () => { const u = window.GameData?.iconUrl($('#qaResKind').value); $('#qaResIcon').src = u || ''; if (state.placing?.resource) { state.placing.resource = $('#qaResKind').value; updatePlaceHud(); } };
+      $('#qaResYield').onchange = () => { if (state.placing?.resource) { state.placing.yield = Number($('#qaResYield').value) || 0; updatePlaceHud(); } };
+      $('#qaResPlace').onclick = () => {
+        if (state.placing?.resource) { disarmPlacing(); return; }
+        disarmPlacing();
+        state.placing = { resource: $('#qaResKind').value, yield: Number($('#qaResYield').value) || 0 };
+        $('#qaResPlace').classList.add('active');
+        renderer.app.canvas.style.cursor = 'copy';
+        updatePlaceHud();
+      };
       $$('#addForm [data-quick]').forEach(b => b.onclick = () => {
         disarmPlacing();
         const det = $('#customMarker'); det.open = true;
@@ -1299,7 +1390,7 @@
       <div class="row"><button type="submit">Save</button><button type="button" class="danger" id="btnEditDelete">Delete</button></div>`;
     bindUnitTypePicker('edit');
     bindIconPicker('edit');
-    bindNationPicker('edit', 'Nation'); bindNationPicker('edit', 'TownNation');
+    bindNationPicker('edit', 'Nation'); bindNationPicker('edit', 'TownNation'); bindNationPicker('edit', 'ResNation'); bindNationPicker('edit', 'FacNation');
     fillForm('edit', m);
     toggleTypeFields(form, m.type);
     $('#editType').onchange = () => toggleTypeFields(form, $('#editType').value);
@@ -1392,6 +1483,7 @@
       if (e.kind === 'chat') return `<div class="ev"><span class="who">${esc(e.displayName)}</span><span class="when">${fmtTime(e.createdAt)}</span><br>${esc(e.message)}</div>`;
       if (e.kind === 'roll') return `<div class="ev roll"><span class="who">${esc(e.displayName)}</span> ${esc(e.message)}<span class="when">${fmtTime(e.createdAt)}</span></div>`;
       if (e.kind === 'combat') return `<div class="ev combat">${esc(e.message)}<span class="when">${fmtTime(e.createdAt)}</span></div>`;
+      if (e.kind === 'turn') return `<div class="ev turn">📅 ${esc(e.message)}<span class="when">${fmtTime(e.createdAt)}</span></div>`;
       return `<div class="ev system">${esc(e.message)}<span class="when">${fmtTime(e.createdAt)}</span></div>`;
     }).join('') || '<p class="muted">Nothing has happened yet.</p>';
     if (scroll === undefined || atBottom || scroll) el.scrollTop = el.scrollHeight;
@@ -1636,6 +1728,8 @@
   try {
     await loadLobby();
     await loadFactions();
+    GameUI.init({ state, renderer, base, $, $$, flagImg, loadMarkers, isGm: () => state.role === 'gm' });
+    await GameUI.load().catch(err => console.warn('game state', err));
     await loadMarkers();
     await loadShapes();
     await loadEvents();

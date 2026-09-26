@@ -27,11 +27,70 @@
 
     <aside id="sidebar">
       <div class="tabs">
-        <button data-tab="markers" class="active">Markers</button>
+        <button data-tab="markers" class="active" title="Markers and drawings">Map</button>
         <button data-tab="add">Add</button>
-        <button data-tab="members">Members</button>
+        <button data-tab="nation" hidden title="Your faction: treasury, income and forces">Nation</button>
+        <button data-tab="game" hidden title="Game master: turns, factions and rules">Game</button>
+        <button data-tab="members" title="Factions and members">People</button>
         <button data-tab="log">Log</button>
         <button data-tab="history">History</button>
+      </div>
+      <div class="panel" data-panel="nation">
+        <select id="nationFaction" hidden title="View any faction (GM)"></select>
+        <div id="nationPanel"></div>
+      </div>
+      <div class="panel" data-panel="game">
+        <div class="section">Game mode</div>
+        <p class="hint" id="gameOffHint">Turns, treasuries, movement limits and action points. Off, the campaign is a plain map tracker.</p>
+        <div id="gameStartWrap" class="grid2">
+          <label>Start date<input id="gameStartDate" type="date" value="1914-07-28"></label>
+          <label class="inline" style="margin-top:22px"><input type="checkbox" id="gameResetTurn" checked> Reset to turn 1</label>
+        </div>
+        <p><button id="btnGameToggle" class="small">Switch game mode on</button></p>
+        <div id="gameOnBlock" hidden>
+          <div class="section">Turn</div>
+          <p><b id="turnInfo"></b></p>
+          <p class="row"><button id="btnEndTurn" class="danger">End turn</button><button id="btnUndoTurn" class="small secondary" title="Restore treasuries and the calendar from before the last end of turn">Undo last turn</button></p>
+          <form id="turnForm">
+            <div class="grid2">
+              <label>Turn length<select id="turnStep"><option value="week">1 week</option><option value="fortnight">2 weeks</option><option value="month">1 month</option><option value="season">1 season</option></select></label>
+              <label>Deadline <span class="hint">(shown to players)</span><input id="turnDeadline" maxlength="80" placeholder="ends Sunday 8pm"></label>
+            </div>
+            <div class="grid2">
+              <label>Game date<input id="turnDate" type="date"></label>
+              <label>Turn number<input id="turnNumber" type="number" min="1" step="1"></label>
+            </div>
+            <button type="submit" class="small">Save</button>
+          </form>
+          <div class="section">Factions</div>
+          <div id="factionTable"></div>
+          <p><button id="btnEditTreasuries" class="small secondary">Edit treasuries…</button></p>
+          <details class="sub"><summary>Rules</summary>
+            <form id="rulesForm">
+              <div class="grid2">
+                <label>Distance per movement point <span class="hint">(km / map units per turn)</span><input id="ruleKmPerMove" type="number" step="any" min="1"></label>
+                <label class="inline" style="margin-top:22px"><input type="checkbox" id="ruleWaive"> Waive movement limits</label>
+              </div>
+              <div class="grid3">
+                <label>Base money / turn<input id="ruleBaseMoney" type="number" step="any"></label>
+                <label>Base RP / turn<input id="ruleBaseRp" type="number" step="any"></label>
+                <label>Base manpower<input id="ruleBaseManpower" type="number" step="any"></label>
+              </div>
+              <div class="section">City income per turn (money · RP · manpower)</div>
+              <div class="grid3"><label>Capital<input id="rule_capital_money" type="number" step="any"></label><label>&nbsp;<input id="rule_capital_rp" type="number" step="any"></label><label>&nbsp;<input id="rule_capital_manpower" type="number" step="any"></label></div>
+              <div class="grid3"><label>City<input id="rule_city_money" type="number" step="any"></label><label>&nbsp;<input id="rule_city_rp" type="number" step="any"></label><label>&nbsp;<input id="rule_city_manpower" type="number" step="any"></label></div>
+              <div class="grid3"><label>Village<input id="rule_village_money" type="number" step="any"></label><label>&nbsp;<input id="rule_village_rp" type="number" step="any"></label><label>&nbsp;<input id="rule_village_manpower" type="number" step="any"></label></div>
+              <div class="grid2"><label>Factory money / level<input id="ruleFactoryMoney" type="number" step="any"></label><label>Factory RP / level<input id="ruleFactoryRp" type="number" step="any"></label></div>
+              <div class="section">Upkeep</div>
+              <label class="inline"><input type="checkbox" id="ruleUpkeep"> Units cost upkeep each turn</label>
+              <div class="grid2"><label>Grain per unit<input id="ruleUpkeepGrain" type="number" step="any" min="0"></label><label>Oil per vehicle / aircraft / ship<input id="ruleUpkeepOil" type="number" step="any" min="0"></label></div>
+              <div class="section">Starting stockpiles <span class="hint">(new factions)</span></div>
+              <div class="grid3"><label>Each resource<input id="ruleStartRes" type="number" step="any"></label><label>Money<input id="ruleStartMoney" type="number" step="any"></label><label>Manpower<input id="ruleStartMp" type="number" step="any"></label></div>
+              <label class="inline"><input type="checkbox" id="rulePublic"> Treasuries are public (players see every faction)</label>
+              <button type="submit" class="small">Save rules</button>
+            </form>
+          </details>
+        </div>
       </div>
       <div class="panel active" data-panel="markers">
         <input id="searchInput" placeholder="Search markers and drawings…" autocomplete="off">
@@ -68,6 +127,7 @@
         <button id="btnZoomIn" class="small" title="Zoom in">+</button>
         <button id="btnZoomOut" class="small" title="Zoom out">−</button>
         <span id="zoomLabel" class="badge">100%</span>
+        <span id="turnLabel" class="badge turn" hidden></span>
         <span id="rendererLabel" class="badge" title="Renderer"></span>
       </div>
       <div id="modeHud">
@@ -280,6 +340,8 @@
   <script src="/js/atlas.js"></script>
   <script src="/js/units.js"></script>
   <script src="/js/naming.js"></script>
+  <script src="/js/game-data.js"></script>
+  <script src="/js/game-ui.js"></script>
   <script src="/js/stats-editor.js"></script>
   <script src="/js/earth.js"></script>
   <script src="/js/map-renderer.js"></script>

@@ -20,6 +20,7 @@ class MapRenderer extends EventTarget {
     super();
     this.container = container;
     this.views = new Map();          // marker id -> MarkerView
+    this.gameRules = null;           // { enabled, kmPerMove } when the campaign runs in game mode
     this.shapeViews = new Map();     // shape id -> { shape, g, label }
     this.selectedId = null;          // primary selected marker (popup)
     this.selected = new Set();       // all selected marker ids (group moves)
@@ -251,6 +252,11 @@ class MapRenderer extends EventTarget {
   }
 
   setTokenScale(s) { this.tokenScale = Math.max(0.5, Math.min(3, Number(s) || 1)); this.invalidate(); }
+  setGameRules(rules) {
+    this.gameRules = rules && rules.enabled ? rules : null;
+    for (const v of this.views.values()) v._refreshMovedDot();
+    this.invalidate();
+  }
   setTokenMode(m) { this.tokenMode = m === 'screen' ? 'screen' : 'map'; this.invalidate(); }
 
   shapeScreenPos(id) {
@@ -724,6 +730,20 @@ class MapRenderer extends EventTarget {
     }
   }
 
+  // ---- Movement range ring (game mode) ----------------------------------------------
+  /** Draw the remaining-movement circle (world units) around a unit being dragged. */
+  showRange(x, y, radius, exhausted) {
+    if (!this._rangeG) { this._rangeG = new PIXI.Graphics(); this._rangeG.eventMode = 'none'; this.overlayLayer.addChild(this._rangeG); }
+    const g = this._rangeG, s = this.scale;
+    g.clear();
+    const color = exhausted ? 0xe74c3c : 0x2ecc71;
+    if (radius > 0) g.circle(x, y, radius).fill({ color, alpha: 0.08 }).stroke({ width: 2 / s, color, alpha: 0.9 });
+    else g.circle(x, y, 10 / s).stroke({ width: 2 / s, color, alpha: 0.9 });
+    g.visible = true;
+    this.invalidate();
+  }
+  hideRange() { if (this._rangeG) { this._rangeG.visible = false; this.invalidate(); } }
+
   // ---- Input ------------------------------------------------------------------------
   _bindInput() {
     const st = this.app.stage;
@@ -819,6 +839,7 @@ class MapRenderer extends EventTarget {
       }
       if (this._drag) {
         const d = this._drag; this._drag = null;
+        this.hideRange();
         d.view.dragging = false;
         if (d.group) for (const g of d.group) g.view.dragging = false;
         if (d.moved) {
@@ -854,6 +875,7 @@ class MapRenderer extends EventTarget {
         for (const g of this._drag.group) g.view.dragging = true;
       }
       view.dragging = true;
+      this.dispatchEvent(new CustomEvent('dragstart', { detail: { id: view.id, ids: this._drag.group ? this._drag.group.map(g => g.view.id) : [view.id] } }));
     } else {
       this.select(view.id);
     }
@@ -1100,6 +1122,7 @@ class MarkerView {
     const visualKey = [marker.type, marker.color, marker.iconUrl, marker.data?.unitType, marker.data?.size,
       marker.data?.strength, marker.adminOnly, JSON.stringify(marker.visibleTo), marker.name[0], marker.flagUrl].join('|');
     if (visualKey !== this._visualKey) { this._visualKey = visualKey; this._buildBody(); }
+    this._refreshMovedDot();
     if (prev && (prev.x !== marker.x || prev.y !== marker.y) && !this.dragging) {
       const d = Math.hypot(marker.x - this.x, marker.y - this.y);
       if (d > 6) this.r.trail(this.x, this.y, marker.x, marker.y, this.colorNum);
@@ -1117,10 +1140,17 @@ class MarkerView {
         else tex = await PIXI.Assets.load({ src: m.iconUrl, loadParser: 'loadTextures' });
       } catch { tex = null; }
     }
+    // Resource nodes and factories use the bundled painted icons unless the GM picked something else.
+    if (!tex && (m.type === 'resource' || m.type === 'factory') && window.GameData) {
+      const url = m.type === 'resource' ? window.GameData.iconUrl(m.data?.kind) : '/icons/' + window.GameData.FACTORY_ICON;
+      if (url) { try { tex = await PIXI.Assets.load({ src: url, loadParser: 'loadTextures' }); } catch { tex = null; } }
+      isSprite = false;
+    }
     if (gen !== this._gen || this.root.destroyed) return;
     for (const c of this.body.removeChildren()) c.destroy({ children: true });
     let built;
     if (m.type === 'scenery') built = this._sceneryBody(tex, m);
+    else if ((m.type === 'resource' || m.type === 'factory') && tex) built = this._nodeBody(tex, m);
     else if (tex && isSprite) built = this._spriteBody(tex, m);
     else built = tex ? this._iconBody(tex, m) : this._procBody(m);
     this.body.addChild(built);
@@ -1142,6 +1172,28 @@ class MarkerView {
       c.addChild(g);
       this.w = this.h = 48;
     }
+    return c;
+  }
+
+  /** Resource node or factory: the painted icon on a dark disc with a ring in the owner's colour; factories show their level. */
+  _nodeBody(tex, m) {
+    const c = new PIXI.Container();
+    const R = 15, inner = 22;
+    const g = new PIXI.Graphics();
+    g.circle(0, 0, R).fill({ color: 0x14202b, alpha: 0.88 }).stroke({ width: 2.5, color: this.colorNum });
+    c.addChild(g);
+    const sp = new PIXI.Sprite(tex); sp.anchor.set(0.5);
+    const k = inner / Math.max(tex.width, tex.height);
+    sp.scale.set(k);
+    c.addChild(sp);
+    if (m.type === 'factory') {
+      const lvl = Math.max(1, Math.min(5, Number(m.data?.industry) || 1));
+      const badge = new PIXI.Graphics().circle(R - 3, R - 4, 6).fill(this.colorNum).stroke({ width: 1.2, color: 0xffffff });
+      const t = new PIXI.Text({ text: String(lvl), style: { fontFamily: 'Segoe UI, Arial', fontSize: 8, fontWeight: '800', fill: 0xffffff }, resolution: 3 });
+      t.anchor.set(0.5); t.position.set(R - 3, R - 4);
+      c.addChild(badge, t);
+    }
+    this.w = this.h = R * 2 + 2;
     return c;
   }
 
@@ -1186,6 +1238,18 @@ class MarkerView {
     this.r.invalidate();
   }
 
+  /** Game mode: a small dot on units that have moved this turn (amber) or used all their movement (red). */
+  _refreshMovedDot() {
+    const rules = this.r.gameRules, m = this.marker;
+    const moved = rules && rules.enabled && m.type === 'unit' ? Number(m.data?.movedKm) || 0 : 0;
+    if (!moved) { if (this.movedDot) { this.movedDot.visible = false; } return; }
+    if (!this.movedDot) { this.movedDot = new PIXI.Graphics(); this.movedDot.eventMode = 'none'; this.root.addChild(this.movedDot); }
+    const allowance = (Number(m.data?.movement) || 0) * (rules.kmPerMove || 1);
+    const spent = moved >= allowance - 0.01;
+    this.movedDot.clear().circle(this.w / 2 - 1, -this.h / 2 + 3, 4).fill(spent ? 0xe74c3c : 0xf1c40f).stroke({ width: 1.2, color: 0x1e2b1a });
+    this.movedDot.visible = true;
+  }
+
   /** A unit at zero strength burns (looping sprite) until it is removed or its strength is restored. */
   refreshFire() {
     this.r.invalidate();
@@ -1212,6 +1276,7 @@ class MarkerView {
   _layout() {
     const { w, h } = this;
     this.label.y = h / 2 + 3;
+    this._refreshMovedDot();
     if (this.marker.type === 'scenery') {
       this.shadow.clear();
       this.ring.clear().rect(-w / 2 - 3, -h / 2 - 3, w + 6, h + 6).stroke({ width: 2, color: 0xf1c40f });
@@ -1320,6 +1385,46 @@ class MarkerView {
         g.poly([0, -R, R, 0, 0, R, -R, 0]).fill(color).stroke({ width: 2.5, color: 0xffffff });
         const t = new PIXI.Text({ text: '?', style: { fontFamily: 'Segoe UI, Arial', fontSize: 13, fontWeight: '800', fill: 0xffffff }, resolution: 3 });
         t.anchor.set(0.5); t.position.set(0, 0);
+        c.addChild(g, t);
+        return c;
+      });
+      const sp = new PIXI.Sprite(tex); sp.anchor.set(0.5);
+      return sp;
+    }
+    if (m.type === 'resource') {
+      // Hexagon in the resource's colour, outlined in the owner's colour, with the resource glyph.
+      const R = 13;
+      this.w = this.h = R * 2 + 2;
+      const res = window.GameData ? window.GameData.byKey[d.kind] : null;
+      const fill = res ? parseInt(res.color.slice(1), 16) : 0x888888;
+      const lum = ((fill >> 16) & 255) * 0.299 + ((fill >> 8) & 255) * 0.587 + (fill & 255) * 0.114;
+      const tex = this.r._texture(`res|${d.kind}|${color}`, () => {
+        const c = new PIXI.Container();
+        const g = new PIXI.Graphics();
+        const pts = [];
+        for (let i = 0; i < 6; i++) { const a = Math.PI / 6 + i * Math.PI / 3; pts.push(Math.cos(a) * R, Math.sin(a) * R); }
+        g.poly(pts).fill(fill).stroke({ width: 2.5, color });
+        const t = new PIXI.Text({ text: res ? res.glyph : '?', style: { fontFamily: 'Segoe UI, Arial', fontSize: 10, fontWeight: '800', fill: lum > 150 ? 0x1e2b1a : 0xffffff }, resolution: 3 });
+        t.anchor.set(0.5); t.position.set(0, 0);
+        c.addChild(g, t);
+        return c;
+      });
+      const sp = new PIXI.Sprite(tex); sp.anchor.set(0.5);
+      return sp;
+    }
+    if (m.type === 'factory') {
+      // Sawtooth-roofed works with a chimney; the number is the industry level.
+      const W = 28, H = 20;
+      this.w = W + 2; this.h = H + 8;
+      const lvl = Math.max(1, Math.min(5, Number(d.industry) || 1));
+      const tex = this.r._texture(`factory|${color}|${lvl}`, () => {
+        const c = new PIXI.Container();
+        const g = new PIXI.Graphics();
+        g.poly([-W / 2, H / 2, -W / 2, -2, -W / 2 + 7, -8, -W / 2 + 7, -2, -W / 2 + 14, -8, -W / 2 + 14, -2, W / 2 - 7, -8, W / 2 - 7, -2, W / 2, -2, W / 2, H / 2])
+          .fill(color).stroke({ width: 2, color: 0xffffff });
+        g.rect(W / 2 - 9, -H / 2 - 4, 4, 10).fill(0xffffff);   // chimney
+        const t = new PIXI.Text({ text: String(lvl), style: { fontFamily: 'Segoe UI, Arial', fontSize: 9, fontWeight: '800', fill: 0xffffff }, resolution: 3 });
+        t.anchor.set(0.5); t.position.set(-2, 3);
         c.addChild(g, t);
         return c;
       });

@@ -83,6 +83,7 @@ p { margin: 8px 0; }
 #topbar .tabs button, #sidebar .tabs button { padding: 6px 4px; font-size: 12px; }
 .log .ev.roll { color: #f1c40f; }
 .log .ev.combat { color: #ff9f80; }
+.log .ev.turn { color: #f9c74f; }
 .log .ev.history { display: flex; align-items: flex-start; gap: 6px; }
 .log .ev.history .grow { flex: 1; }
 .log .ev.history.reverted { opacity: .55; text-decoration: line-through; }
@@ -103,6 +104,20 @@ label.filebtn:hover { filter: brightness(1.15); }
 details.sub { margin: 6px 0; }
 details.sub > summary { cursor: pointer; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 6px 0; user-select: none; list-style-position: inside; }
 details.sub > summary .hint { text-transform: none; letter-spacing: 0; }
+/* Game layer */
+#turnLabel.turn { background: rgba(241,196,15,.18); color: #f9c74f; border: 1px solid rgba(241,196,15,.5); }
+.nationhead { display: flex; align-items: center; gap: 6px; margin: 4px 0 8px; font-size: 15px; flex-wrap: wrap; }
+.pools { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+.pools div { background: var(--panel2); border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; }
+.pools b { font-size: 16px; }
+.delta { font-size: 11px; } .delta.up, .num.up { color: #2ecc71; } .delta.down, .num.down { color: #e74c3c; }
+.treasury { width: 100%; border-collapse: collapse; font-size: 13px; }
+.treasury td, .treasury th { padding: 3px 4px; border-bottom: 1px solid #3d566e; text-align: left; }
+.treasury th { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+.treasury .num { text-align: right; font-variant-numeric: tabular-nums; }
+.resicon { width: 18px; height: 18px; vertical-align: -4px; margin-right: 6px; image-rendering: auto; }
+.reskey { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; border: 1px solid rgba(255,255,255,.25); }
+.hintlist { margin: 4px 0 0 16px; padding: 0; font-size: 12px; color: var(--muted); }
 .qalist { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 6px; }
 .qalist .section { grid-column: 1 / -1; margin: 10px 0 2px; }
 .qa { display: flex; align-items: center; gap: 6px; padding: 3px 6px; background: var(--panel2); text-align: left; font-size: 12px; line-height: 1.15; border: 1px solid transparent; min-height: 36px; }

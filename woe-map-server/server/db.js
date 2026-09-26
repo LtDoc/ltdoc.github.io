@@ -125,6 +125,42 @@ CREATE TABLE IF NOT EXISTS events (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_lobby ON events(lobby_id, id);
+
+-- ---- Game layer (docs/GAME-DESIGN.md) -------------------------------------------------
+CREATE TABLE IF NOT EXISTS game (
+  lobby_id   INTEGER PRIMARY KEY REFERENCES lobbies(id) ON DELETE CASCADE,
+  enabled    INTEGER NOT NULL DEFAULT 0,
+  turn       INTEGER NOT NULL DEFAULT 1,
+  date       TEXT NOT NULL DEFAULT '1914-07-28',   -- ISO game date
+  turn_step  TEXT NOT NULL DEFAULT 'week',         -- week | fortnight | month | season
+  deadline   TEXT NOT NULL DEFAULT '',             -- free text shown on the HUD ("ends Sunday")
+  settings   TEXT NOT NULL DEFAULT '{}',           -- rule overrides, see GameData.DEFAULT_SETTINGS
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS faction_state (
+  faction_id INTEGER PRIMARY KEY REFERENCES factions(id) ON DELETE CASCADE,
+  lobby_id   INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  resources  TEXT NOT NULL DEFAULT '{}',           -- { grain: n, coal: n, ... }
+  money      REAL NOT NULL DEFAULT 0,
+  manpower   REAL NOT NULL DEFAULT 0,
+  rp         REAL NOT NULL DEFAULT 0,
+  techs      TEXT NOT NULL DEFAULT '[]',           -- unlocked tech keys (phase 4)
+  research   TEXT NOT NULL DEFAULT '{}',           -- active project + queue (phase 4)
+  production TEXT NOT NULL DEFAULT '[]',           -- build queue (phase 3)
+  mods       TEXT NOT NULL DEFAULT '{}',           -- GM per-turn modifiers { money, rp, manpower, resources: {..} }
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_faction_state_lobby ON faction_state(lobby_id);
+
+CREATE TABLE IF NOT EXISTS turn_snapshots (
+  id         INTEGER PRIMARY KEY,
+  lobby_id   INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  turn       INTEGER NOT NULL,                     -- the turn that was ended
+  data       TEXT NOT NULL,                        -- JSON: faction states (and later territories) before resolution
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_turn_snapshots_lobby ON turn_snapshots(lobby_id, turn);
 `);
 
 // ---- Lightweight migrations for databases created by earlier versions -------------

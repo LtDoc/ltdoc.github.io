@@ -1,6 +1,6 @@
 # WoE Strategy Map: game layer design
 
-Status: **draft for review, nothing built yet.** Decisions marked ⚠ need your call before that phase starts.
+Status: **agreed 26 Sep 2026; phase 1 (turns and economy core) built 26 Sep 2026, phases 2–5 to come.** The ⚠ marks show where a decision was needed; section 12 records the answers.
 
 ## 1. Goal and principles
 
@@ -360,7 +360,7 @@ the GM by default, with a campaign switch to make treasuries public.
 
 Each phase ships on its own and is useful without the next.
 
-1. **Turns and economy core** (largest): game tables, enable/disable, turn and date, End turn with income
+1. **Turns and economy core** (done): game tables, enable/disable, turn and date, End turn with income
    and reset, faction_state, resource nodes placed by hand, movement and AP enforcement, Nation tab (treasury,
    forces) and Game tab (turn control, faction table with inline editing).
 2. **Territory and war**: territories table, 1914 seeding, assign/brush tools, relations, the capture rule on
@@ -374,13 +374,20 @@ Each phase ships on its own and is useful without the next.
 
 Rough size: phases 1 and 2 are each about the size of the Earth-map work; 3 and 4 a little smaller; 5 small.
 
-## 12. Decisions needed before phase 1
+## 12. Decisions (agreed 26 Sep 2026)
 
-1. Turn length default (month proposed) and start date for the 1914 scenario (28 July 1914 proposed).
-2. Border changes immediately on move (proposed) or only at end of turn.
-3. Diplomacy: declarations immediate and proposals player-accepted (proposed), or everything GM-approved.
-4. Upkeep off by default (proposed).
-5. The resource list in 6.1: swap any of the ten? (Candidates left out: steel as a map resource, tin, gold.)
-6. Production only at cities (proposed) or also at any town/POI the GM flags as a factory.
-7. Tech tree: start from the authored default (proposed) or import your old Firebase tree first.
-8. Capture radii: 60 km per unit, 150 km per city (proposed).
+1. **Turn length: 1 week.** The campaign runs over a few real months with RP happening in Discord alongside;
+   weekly turns keep the map moving at that pace. Start date for the 1914 scenario: 28 July 1914.
+2. **Borders change on move**, immediately when a land unit's move is committed.
+3. **Diplomacy is queued for the GM.** A player queues a declaration of war, a peace offer or an alliance
+   proposal; the GM is notified and approves or blocks it. Approved declarations take effect at once;
+   approved proposals then go to the other player to accept.
+4. **Upkeep is built but off by default.** The setting exists from phase 1 so it can be switched on once the
+   economy is tuned.
+5. **Resources stay as listed**, and the Earth dataset must give **Newfoundland iron** (the Bell Island mines
+   were a major producer).
+6. **Production at cities, plus factories.** Cities (towns of size city or capital) produce units. Players
+   can also build a **factory** within 50 km of a city or town, never a village; a factory is a production
+   site with its own industry level. Villages produce nothing.
+7. **Tech tree: the authored default**, editable in the browser.
+8. **Capture radii approved**: 60 km per unit, 150 km per city.

@@ -8,6 +8,7 @@ const config = require('../config');
 const { db, now } = require('../db');
 const { requireAuth } = require('../auth');
 const access = require('../lobbyAccess');
+const geo = require('../geo');
 const hub = require('../ws');
 const hist = require('../history');
 const { imageSize } = require('../imageSize');
@@ -96,7 +97,9 @@ const q = {
   event: db.prepare('SELECT e.*, u.display_name FROM events e LEFT JOIN users u ON u.id = e.user_id WHERE e.id = ?'),
 };
 
-const MARKER_TYPES = ['unit', 'town', 'poi', 'player', 'scenery'];
+const MARKER_TYPES = ['unit', 'town', 'poi', 'player', 'scenery', 'resource', 'factory'];
+const game = require('../game');
+const GameData = require('../../public/js/game-data');
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const PALETTE = ['#3498db', '#e74c3c', '#2ecc71', '#9b59b6', '#f1c40f', '#1abc9c', '#e67e22', '#ecf0f1', '#95a5a6', '#d35400'];
 
@@ -220,6 +223,9 @@ function requireGm(req, res, next) {
   if (req.lobbyRole !== 'gm') return res.status(403).json({ error: 'Game master only' });
   next();
 }
+
+// Game layer (turns, treasuries, rules): routes/game.js, sharing this router's lobby middleware.
+router.use('/:id/game', require('./game')({ logEvent, clean, num, clamp }));
 
 router.get('/:id', (req, res) => {
   const online = new Set(hub.presence(req.lobby.id).map(u => u.id));
@@ -666,7 +672,15 @@ function sanitizeData(type, data) {
       attack: num(d.attack), defend: num(d.defend), ap: num(d.ap), range: num(d.range), movement: num(d.movement),
       abilities: Array.isArray(d.abilities) ? d.abilities.map(a => clean(a, 80)).filter(Boolean).slice(0, 6) : [],
       strength: clamp(num(d.strength, 100), 0, 100),
+      movedKm: Math.max(0, num(d.movedKm)), apUsed: Math.max(0, num(d.apUsed)),   // game mode: used this turn
     });
+  } else if (type === 'resource') {
+    out.kind = GameData.byKey[d.kind] ? d.kind : 'grain';
+    out.yield = clamp(num(d.yield, 1), 0, 50);
+    out.nation = clean(d.nation, 60);
+  } else if (type === 'factory') {
+    out.nation = clean(d.nation, 60);
+    out.industry = clamp(Math.round(num(d.industry, 1)), 1, 5);
   } else if (type === 'town') {
     out.size = ['capital', 'city', 'village'].includes(d.size) ? d.size : 'village';
     out.nation = clean(d.nation, 40);
@@ -725,7 +739,7 @@ router.post('/:id/markers', (req, res) => {
   const ownerId = isGm ? (b.ownerId ? num(b.ownerId, null) : null) : req.user.id;
   const iconUrl = clean(b.iconUrl, 500) || null;
   // Towns, POIs and scenery start locked (they rarely move); units and players start unlocked.
-  const locked = b.locked !== undefined ? (b.locked ? 1 : 0) : (['town', 'poi', 'scenery'].includes(type) ? 1 : 0);
+  const locked = b.locked !== undefined ? (b.locked ? 1 : 0) : (['town', 'poi', 'scenery', 'resource', 'factory'].includes(type) ? 1 : 0);
   const t = now();
   const id = q.insertMarker.run(null, req.lobby.id, type, name, x, y, null, iconUrl, color, adminOnly, visibleTo, ownerId,
     JSON.stringify(sanitizeData(type, b.data)), t, t, locked).lastInsertRowid;
@@ -744,11 +758,24 @@ router.patch('/:id/markers/:mid', (req, res) => {
   const type = isGm && MARKER_TYPES.includes(b.type) ? b.type : before.type;
   const name = (b.name !== undefined ? clean(b.name, 60) : before.name) || (type === 'scenery' ? 'Scenery' : '');
   if (!name) return res.status(400).json({ error: 'Marker needs a name' });
-  const x = b.x !== undefined ? num(b.x, before.x) : before.x;
-  const y = b.y !== undefined ? num(b.y, before.y) : before.y;
+  let x = b.x !== undefined ? num(b.x, before.x) : before.x;
+  let y = b.y !== undefined ? num(b.y, before.y) : before.y;
   if (!inBounds(req, x, y)) return res.status(400).json({ error: 'Position is off the map' });
   if (before.locked && (x !== before.x || y !== before.y) && b.locked !== false) {
     return res.status(409).json({ error: `${before.name} is locked; unlock it first` });
+  }
+  // Game mode: players move within their allowance and cannot rewrite their units' stats.
+  const g = game.get(req.lobby.id);
+  let clampNote = null;
+  if (b.data && typeof b.data === 'object' && g.enabled && !isGm && before.type === 'unit') {
+    for (const k of game.PROTECTED_UNIT_FIELDS) delete b.data[k];
+  }
+  if (x !== before.x || y !== before.y) {
+    const mv = game.checkMove(req.lobby, g, isGm, before, x, y);
+    if (mv.error) return res.status(409).json({ error: mv.error });
+    x = mv.x; y = mv.y;
+    if (mv.movedKm !== undefined) b.data = { ...(b.data || {}), movedKm: mv.movedKm };
+    if (mv.clamped) clampNote = `${before.name} could only move ${Math.round(mv.remaining)} of ${mv.dist} this turn`;
   }
   let iconFile = before.iconFile;
   let iconUrl = iconFile ? null : before.iconUrl;
@@ -766,14 +793,16 @@ router.patch('/:id/markers/:mid', (req, res) => {
   q.updateMarker.run(type, name, x, y, iconFile, iconUrl, color, adminOnly, visibleTo, ownerId, JSON.stringify(data), now(), locked, before.id);
   const after = access.serializeMarker(q.marker.get(before.id, req.lobby.id));
   commitChange(req, 'marker', 'update', before, after);
-  res.json({ marker: after });
+  res.json({ marker: after, note: clampNote });
 });
 
 /** Move several markers at once (group drag). Each move is validated and recorded individually. */
 router.post('/:id/markers/move', (req, res) => {
   const moves = Array.isArray(req.body?.moves) ? req.body.moves.slice(0, 200) : [];
   const v = viewerOf(req);
-  const out = [], errors = [];
+  const g = game.get(req.lobby.id);
+  const isGm = req.lobbyRole === 'gm';
+  const out = [], errors = [], plan = [];
   for (const mv of moves) {
     const row = q.marker.get(Number(mv.id), req.lobby.id);
     const before = row && access.serializeMarker(row);
@@ -782,9 +811,25 @@ router.post('/:id/markers/move', (req, res) => {
     const x = num(mv.x, before.x), y = num(mv.y, before.y);
     if (!inBounds(req, x, y)) { errors.push(`${before.name}: off the map`); continue; }
     if (x === before.x && y === before.y) { out.push(before); continue; }
-    q.moveMarker.run(x, y, now(), before.id);
-    const after = access.serializeMarker(q.marker.get(before.id, req.lobby.id));
-    commitChange(req, 'marker', 'update', before, after);
+    const chk = game.checkMove(req.lobby, g, isGm, before, x, y);
+    if (chk.error) { errors.push(chk.error); continue; }
+    plan.push({ before, x, y, chk });
+  }
+  // A formation moves as one: if any unit would be clamped, scale every move by the slowest unit's fraction.
+  let t = 1;
+  for (const p of plan) if (p.chk.clamped) t = Math.min(t, p.chk.remaining / p.chk.dist);
+  if (t < 1) errors.push(`Formation moved ${Math.round(t * 100)}% of the way: the slowest unit ran out of movement`);
+  for (const p of plan) {
+    const x = t < 1 ? Math.round((p.before.x + (p.x - p.before.x) * t) * 10) / 10 : p.x;
+    const y = t < 1 ? Math.round((p.before.y + (p.y - p.before.y) * t) * 10) / 10 : p.y;
+    if (p.chk.movedKm !== undefined) {
+      const used = num(p.before.data.movedKm), dist = geo.distance(req.lobby, p.before.x, p.before.y, x, y);
+      const data = { ...p.before.data, movedKm: Math.round((used + dist) * 10) / 10 };
+      q.updateMarker.run(p.before.type, p.before.name, x, y, p.before.iconFile, p.before.iconFile ? null : p.before.iconUrl, p.before.color,
+        p.before.adminOnly ? 1 : 0, p.before.visibleTo ? JSON.stringify(p.before.visibleTo) : null, p.before.ownerId, JSON.stringify(data), now(), p.before.locked ? 1 : 0, p.before.id);
+    } else q.moveMarker.run(x, y, now(), p.before.id);
+    const after = access.serializeMarker(q.marker.get(p.before.id, req.lobby.id));
+    commitChange(req, 'marker', 'update', p.before, after);
     out.push(after);
   }
   res.json({ markers: out, errors });
@@ -990,8 +1035,12 @@ router.get('/:id/events', (req, res) => {
   const since = num(req.query.since, 0);
   const limit = clamp(num(req.query.limit, 100), 1, 200);
   const gm = req.lobbyRole === 'gm';
+  const g = game.get(req.lobby.id);
+  const myNation = String(req.member?.nation || '').toLowerCase();
   const events = q.events.all(req.lobby.id, since, limit).reverse().map(serializeEvent)
-    .filter(e => gm || !(e.data && e.data.hidden));
+    .filter(e => gm || !(e.data && e.data.hidden))
+    // Turn summaries are private to the faction unless treasuries are public.
+    .filter(e => gm || e.kind !== 'turn' || g.settings.publicTreasury || String(e.data?.faction || '').toLowerCase() === myNation);
   res.json({ events });
 });
 
@@ -1025,6 +1074,10 @@ router.post('/:id/combat', (req, res) => {
   if (a.type !== 'unit' || d.type !== 'unit') return res.status(400).json({ error: 'Only units can fight' });
   if (!canEditMarker(req, a)) return res.status(403).json({ error: 'You can only attack with units you control' });
   if ((a.data.strength ?? 100) <= 0) return res.status(400).json({ error: `${a.name} has no strength left` });
+  const g = game.get(req.lobby.id);
+  const apError = game.checkAttack(g, req.lobbyRole === 'gm', a);
+  if (apError) return res.status(409).json({ error: apError });
+  if (g.enabled) a.data = { ...a.data, apUsed: num(a.data.apUsed) + 1 };   // spent even if the attack is repelled
 
   const cfg = access.serializeLobby(req.lobby, 'player').settings.combat;
   const atk = num(a.data.attack), def = num(d.data.defend);
@@ -1042,7 +1095,7 @@ router.post('/:id/combat', (req, res) => {
     const from = clamp(num(m.data.strength, 100), 0, 100);
     const to = clamp(from - loss, 0, 100);
     losses[m.id] = { name: m.name, from, to, loss: from - to };
-    if (to === from) return m;
+    if (to === from && !(m === a && g.enabled)) return m;   // the attacker is always rewritten in game mode (AP spent)
     const data = { ...m.data, strength: to };
     q.updateMarker.run(m.type, m.name, m.x, m.y, m.iconFile, m.iconFile ? null : m.iconUrl, m.color, m.adminOnly ? 1 : 0,
       m.visibleTo ? JSON.stringify(m.visibleTo) : null, m.ownerId, JSON.stringify(data), now(), m.locked ? 1 : 0, m.id);
