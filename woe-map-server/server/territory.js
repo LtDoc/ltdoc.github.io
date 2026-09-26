@@ -240,6 +240,62 @@ function ownershipChanges(terrs, factions, markers) {
   return out;
 }
 
+/** A trench belongs to the faction whose territory most of its centreline lies in ('' when unowned). */
+function trenchOwner(terrs, factions, shape) {
+  const byId = new Map(factions.map(f => [f.id, f]));
+  const votes = new Map();
+  for (const p of shape.points || []) {
+    const o = ownerAt(terrs, p[0], p[1]);
+    if (o === null) continue;
+    votes.set(o, (votes.get(o) || 0) + 1);
+  }
+  let best = null, n = 0;
+  for (const [o, c] of votes) if (c > n) { n = c; best = o; }
+  if (best === null || best === NEUTRAL) return '';
+  return byId.get(best)?.name || '';
+}
+/** Trenches whose owner should change with the territory under them. */
+function trenchOwnershipChanges(terrs, factions, shapes) {
+  const out = [];
+  if (!terrs.length) return out;
+  for (const s of shapes) {
+    if (s.kind !== 'trench') continue;
+    const nation = trenchOwner(terrs, factions, s);
+    if (String(s.data?.nation || '').toLowerCase() !== nation.toLowerCase()) out.push({ shape: s, nation });
+  }
+  return out;
+}
+
+/** Distance in campaign units from a point to a polyline (closest point found in pixel space, then measured geodesically). */
+function distanceToPath(lobby, x, y, pts) {
+  let best = Infinity, bx = x, by = y;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [ax, ay] = pts[i], [cx, cy] = pts[i + 1], dx = cx - ax, dy = cy - ay, l2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2));
+    const px = ax + dx * t, py = ay + dy * t, d = (x - px) ** 2 + (y - py) ** 2;
+    if (d < best) { best = d; bx = px; by = py; }
+  }
+  return best === Infinity ? Infinity : geo.distance(lobby, x, y, bx, by);
+}
+/**
+ * Cover for a unit: the best dug or reinforced trench of its own nation (or an unowned one) within
+ * settings.trenchRangeKm. Returns { bonus, trench } or null.
+ */
+function trenchCover(lobby, settings, unit, shapes) {
+  const range = Number(settings.trenchRangeKm ?? 20), dug = Number(settings.trenchBonusDug ?? 2), reinforced = Number(settings.trenchBonusReinforced ?? 4);
+  const nation = String(unit.data?.nation || '').toLowerCase();
+  let best = null;
+  for (const s of shapes) {
+    if (s.kind !== 'trench' || !s.data || s.data.state === 'plan' || (s.points || []).length < 2) continue;
+    const owner = String(s.data.nation || '').toLowerCase();
+    if (owner && owner !== nation) continue;
+    if (distanceToPath(lobby, unit.x, unit.y, s.points) > range) continue;
+    const bonus = s.data.state === 'reinforced' ? reinforced : dug;
+    if (!best || bonus > best.bonus) best = { bonus, trench: s };
+  }
+  return best;
+}
+
 const LAND_CATEGORIES = new Set(['Infantry', 'Mounted & mobile', 'Artillery', 'Support']);
 function isLandUnit(m) {
   if (m.type !== 'unit') return false;
@@ -286,4 +342,5 @@ function capture(lobby, g, unit, factions, markers, relation) {
   return { held: false, changed, flips, cities: cities.map(c => c.name), owner, mine };
 }
 
-module.exports = { NEUTRAL, all, write, clear, carve, circle, landClip, ownerAt, seedFromYear, assignArea, brush, ownershipChanges, capture, isLandUnit, earthYears, clean };
+module.exports = { NEUTRAL, all, write, clear, carve, circle, landClip, ownerAt, seedFromYear, assignArea, brush, ownershipChanges, capture, isLandUnit, earthYears, clean,
+  trenchOwner, trenchOwnershipChanges, trenchCover, distanceToPath };

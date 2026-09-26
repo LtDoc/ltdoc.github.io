@@ -14,6 +14,7 @@
  */
 const Trench = (() => {
   const r1 = n => Math.round(n * 10) / 10;
+  const MIN_SCREEN_PX = 10;   // a trench stays at least this wide on screen, however far you zoom out
 
   // ---- Path processing ----------------------------------------------------------------------
   function rdp(pts, tol) {
@@ -90,9 +91,15 @@ const Trench = (() => {
    * sharp corners bevel instead of spiking). Both ends get a cap pair (aCap = 1) that the shader rounds.
    * Attributes: aPosition (x,y), aUV (u = distance along the path in map units, v = 0..1 across), aCap.
    */
-  function buildRibbon(pts, hw, { capLen = hw, wobble = 0.14, side = 0, offset = 0 } = {}) {
+  /**
+   * The ribbon is built in "half-width units": aPosition is the centreline point and aOffset the vector
+   * (in half-widths) to the vertex. The vertex shader multiplies by uHalfWidth, so the width can follow the
+   * zoom (a minimum on-screen width) without rebuilding the geometry. `side`/`offset` shift a whole ribbon
+   * sideways (spoil), `widthFactor` narrows it.
+   */
+  function buildRibbon(pts, { capLen = 1, wobble = 0.14, side = 0, offset = 0, widthFactor = 1 } = {}) {
     const n = pts.length;
-    const positions = [], uvs = [], caps = [], indices = [];
+    const positions = [], offsets = [], uvs = [], caps = [], indices = [];
     const tangents = [];
     for (let i = 0; i < n; i++) {
       const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
@@ -103,10 +110,10 @@ const Trench = (() => {
       tangents.push([tx / l, ty / l]);
     }
     let u = 0;
-    const push = (x, y, v, cap) => { positions.push(x, y); uvs.push(u, v); caps.push(cap); };
+    const push = (px, py, ox, oy, v, cap) => { positions.push(px, py); offsets.push(ox, oy); uvs.push(u, v); caps.push(cap); };
     for (let i = 0; i < n; i++) {
       const [px, py] = pts[i], [tx, ty] = tangents[i];
-      let nx = -ty, ny = tx;
+      const nx = -ty, ny = tx;
       // Mitre factor against the incoming segment's normal, capped at 2 (bevel-ish on hairpins).
       let m = 1;
       if (i > 0) {
@@ -115,19 +122,19 @@ const Trench = (() => {
         m = 1 / Math.max(0.5, nx * snx + ny * sny);
       }
       if (i > 0) u += Math.hypot(px - pts[i - 1][0], py - pts[i - 1][1]);
-      const w = hw * (1 + wobble * Math.sin(i * 1.93 + 0.4) * 0.6 + wobble * Math.sin(u * 0.21) * 0.4) * m;
-      const cx = px + nx * side * offset, cy = py + ny * side * offset;   // offset ribbons (spoil) ride beside the line
-      if (i === 0) { const c = capLen; push(cx - tx * c + nx * w, cy - ty * c + ny * w, 0, 1); push(cx - tx * c - nx * w, cy - ty * c - ny * w, 1, 1); }
-      push(cx + nx * w, cy + ny * w, 0, 0);
-      push(cx - nx * w, cy - ny * w, 1, 0);
-      if (i === n - 1) { const c = capLen; push(cx + tx * c + nx * w, cy + ty * c + ny * w, 0, 1); push(cx + tx * c - nx * w, cy + ty * c - ny * w, 1, 1); }
+      const w = widthFactor * (1 + wobble * Math.sin(i * 1.93 + 0.4) * 0.6 + wobble * Math.sin(i * 0.61) * 0.4) * m;
+      const sx = nx * side * offset, sy = ny * side * offset;             // sideways shift (spoil) in half-widths
+      if (i === 0) push(px, py, sx - tx * capLen + nx * w, sy - ty * capLen + ny * w, 0, 1), push(px, py, sx - tx * capLen - nx * w, sy - ty * capLen - ny * w, 1, 1);
+      push(px, py, sx + nx * w, sy + ny * w, 0, 0);
+      push(px, py, sx - nx * w, sy - ny * w, 1, 0);
+      if (i === n - 1) push(px, py, sx + tx * capLen + nx * w, sy + ty * capLen + ny * w, 0, 1), push(px, py, sx + tx * capLen - nx * w, sy + ty * capLen - ny * w, 1, 1);
     }
     const pairs = positions.length / 4;
     for (let i = 0; i < pairs - 1; i++) {
       const a = i * 2, b = a + 1, c = a + 2, d = a + 3;
       indices.push(a, b, c, b, d, c);
     }
-    return { positions: new Float32Array(positions), uvs: new Float32Array(uvs), caps: new Float32Array(caps), indices: new Uint32Array(indices), length: u };
+    return { positions: new Float32Array(positions), offsets: new Float32Array(offsets), uvs: new Float32Array(uvs), caps: new Float32Array(caps), indices: new Uint32Array(indices), length: u };
   }
 
   // ---- Dirt texture and shader ------------------------------------------------------------------
@@ -170,6 +177,7 @@ const Trench = (() => {
 
   const VERT = `
     in vec2 aPosition;
+    in vec2 aOffset;
     in vec2 aUV;
     in float aCap;
     out vec2 vUV;
@@ -177,14 +185,16 @@ const Trench = (() => {
     uniform mat3 uProjectionMatrix;
     uniform mat3 uWorldTransformMatrix;
     uniform mat3 uTransformMatrix;
+    uniform highp float uHalfWidth;
     void main() {
       mat3 mvp = uProjectionMatrix * uWorldTransformMatrix * uTransformMatrix;
-      gl_Position = vec4((mvp * vec3(aPosition, 1.0)).xy, 0.0, 1.0);
+      vec2 p = aPosition + aOffset * uHalfWidth;
+      gl_Position = vec4((mvp * vec3(p, 1.0)).xy, 0.0, 1.0);
       vUV = aUV;
       vCap = aCap;
     }`;
   const FRAG = `
-    precision mediump float;
+    precision highp float;
     in vec2 vUV;
     in float vCap;
     out vec4 finalColor;
@@ -193,12 +203,12 @@ const Trench = (() => {
     uniform float uState;   // 1 dug, 2 reinforced
     uniform float uZoom;    // screen px per map unit
     uniform float uAlpha;
-    uniform vec2 uTile;     // texture repeats per map unit along, and across the ribbon
+    uniform highp float uHalfWidth;   // map units; the dirt grain tiles relative to it so it keeps its aspect at any width
     uniform float uSeed;
     void main() {
       float across = abs(vUV.y - 0.5) * 2.0;                 // 0 centre .. 1 edge
       if (length(vec2(vCap, across)) > 1.0) discard;          // rounded caps
-      vec2 tuv = vec2(vUV.x * uTile.x + uSeed, vUV.y * uTile.y);
+      vec2 tuv = vec2(vUV.x / (uHalfWidth * 4.4) + uSeed, vUV.y * 0.9);
       float n1 = texture(uTexture, tuv).r;
       float n2 = texture(uTexture, tuv * 3.7 + vec2(0.31, 0.77)).r;
       float detail = smoothstep(0.12, 0.55, uZoom);            // texture fades out when zoomed far out
@@ -223,7 +233,7 @@ const Trench = (() => {
       col *= mix(1.0, 0.68 + 0.64 * n1, detail);
       col += vec3(0.02, 0.03, 0.045) * (1.0 - smoothstep(0.0, 0.3, across)) * n2;   // wet sheen in the bottom
       if (uState > 1.5 && across > 0.6) {                      // reinforced: timber revetment along the lips
-        float d = fract(vUV.x * uTile.x * 0.9);
+        float d = fract(vUV.x / (uHalfWidth * 4.9));
         if (d < 0.42) col = mix(col, vec3(0.56, 0.45, 0.27), 0.6 * detail);
       }
       float rim = smoothstep(0.72, 1.0, across);                // zoomed out: dark stroke with a light rim
@@ -243,13 +253,19 @@ const Trench = (() => {
         uTexture: tex.source, uSampler: tex.source.style,
         trenchUniforms: {
           uMode: { value: mode, type: 'f32' }, uState: { value: 1, type: 'f32' }, uZoom: { value: 1, type: 'f32' },
-          uAlpha: { value: 1, type: 'f32' }, uTile: { value: [0.02, 1.0], type: 'vec2<f32>' }, uSeed: { value: seed, type: 'f32' },
+          uAlpha: { value: 1, type: 'f32' }, uHalfWidth: { value: 1, type: 'f32' }, uSeed: { value: seed, type: 'f32' },
         },
       },
     });
   }
   function makeMesh(rib, mode, seed) {
-    const geometry = new PIXI.Geometry({ attributes: { aPosition: rib.positions, aUV: rib.uvs, aCap: rib.caps }, indexBuffer: rib.indices });
+    const geometry = new PIXI.Geometry({
+      attributes: {
+        aPosition: { buffer: rib.positions, format: 'float32x2' }, aOffset: { buffer: rib.offsets, format: 'float32x2' },
+        aUV: { buffer: rib.uvs, format: 'float32x2' }, aCap: { buffer: rib.caps, format: 'float32' },
+      },
+      indexBuffer: rib.indices,
+    });
     const mesh = new PIXI.Mesh({ geometry, shader: makeShader(mode, seed) });
     mesh.eventMode = 'none';
     return mesh;
@@ -267,48 +283,58 @@ const Trench = (() => {
       this.key = null; this.scale = 1; this.seed = Math.random() * 10;
       layer.addChild(this.container);
     }
-    /** Rebuild only when the centreline, width or facing changed; restyle otherwise. */
-    update(shape, scale) {
+    /**
+     * Rebuild the meshes only when the centreline or facing changed; width and zoom are uniforms.
+     * `pxWidth` is the trench's real width in map pixels; on screen it never drops below MIN_SCREEN_PX.
+     */
+    update(shape, scale, pxWidth) {
       const d = shape.data || {};
-      const width = Math.max(2, Number(shape.width) || 10), hw = width / 2;
       const facing = d.facing === 'right' ? 1 : -1;
       const state = d.state === 'plan' ? 0 : d.state === 'reinforced' ? 2 : 1;
-      const key = `${JSON.stringify(shape.points)}|${width}|${facing}`;
+      const key = `${JSON.stringify(shape.points)}|${facing}`;
+      this.pxWidth = Math.max(0.01, Number(pxWidth) || 1);
       if (key !== this.key) {
         this.key = key;
         this._dispose();
         if (shape.points.length >= 2) {
-          const rib = buildRibbon(shape.points, hw);
+          const rib = buildRibbon(shape.points, { capLen: 1 });
           this.shadow = makeMesh(rib, 1, this.seed);
           this.mesh = makeMesh(rib, 0, this.seed);
           // Spoil rides on the rear side, narrower, a little further out.
-          const spoilRib = buildRibbon(shape.points, hw * 0.6, { capLen: hw * 0.4, wobble: 0.3, side: facing, offset: hw * 1.55 });
+          const spoilRib = buildRibbon(shape.points, { capLen: 0.4, wobble: 0.3, side: facing, offset: 1.55, widthFactor: 0.6 });
           this.spoil = makeMesh(spoilRib, 2, this.seed + 3);
           this.container.addChildAt(this.spoil, 0);
           this.container.addChildAt(this.mesh, 0);
           this.container.addChildAt(this.shadow, 0);
-          for (const m of [this.shadow, this.mesh, this.spoil]) m.shader.resources.trenchUniforms.uniforms.uTile = [1 / (width * 2.2), 0.9];
           this.length = rib.length;
         }
-        this._drawPlan(shape.points, hw);
-        this._placeProps(shape.points, hw, facing);
+        this._planPts = shape.points;
+        this._propsKey = null;
       }
-      this.state = state; this.hw = hw; this.facing = facing;
+      this.state = state; this.facing = facing;
       const dug = state > 0;
       for (const m of [this.shadow, this.mesh, this.spoil]) if (m) { m.visible = dug; m.shader.resources.trenchUniforms.uniforms.uState = Math.max(1, state); }
       this.plan.visible = !dug;
       this.props.visible = state === 2;
       this.setZoom(scale);
     }
+    /** Effective half-width in map units at this zoom: the real width, but never thinner than MIN_SCREEN_PX on screen. */
+    halfWidth(scale) { return Math.max(this.pxWidth / 2, MIN_SCREEN_PX / 2 / (scale || 1)); }
     setZoom(scale) {
       this.scale = scale;
-      const hwPx = (this.hw || 5) * scale;
-      for (const m of [this.shadow, this.mesh, this.spoil]) if (m) m.shader.resources.trenchUniforms.uniforms.uZoom = hwPx / 6;
+      const hw = this.halfWidth(scale), hwPx = hw * scale;
+      this.hw = hw;
+      for (const m of [this.shadow, this.mesh, this.spoil]) if (m) {
+        const u = m.shader.resources.trenchUniforms.uniforms;
+        u.uHalfWidth = hw; u.uZoom = hwPx / 6;
+      }
       if (this.shadow) this.shadow.position.set(1.5 / scale, 2.5 / scale);
       if (this.spoil) this.spoil.visible = this.state > 0 && hwPx > 4;     // skip spoil when zoomed far out
-      this.plan.scale.set(1);
-      if (!this.plan.visible) return;
-      this._drawPlan(this._planPts, this.hw);
+      // Props and the plan line are drawn in map units, so they follow the effective width too.
+      const propsKey = `${this.key}|${Math.round(hw * 100)}`;
+      if (this._propsKey !== propsKey && this._planPts) { this._propsKey = propsKey; this._placeProps(this._planPts, hw, this.facing); }
+      if (this.plan.visible) this._drawPlan(this._planPts, hw);
+      for (const c of this.container.children) if (c.isNode) c.scale.set(hw / 10);   // junction nodes follow the width too
     }
     _drawPlan(pts, hw) {
       this._planPts = pts;
@@ -338,7 +364,7 @@ const Trench = (() => {
         while (t < len) {
           const sp = new PIXI.Sprite(tex); sp.anchor.set(0.5, 0.7);
           sp.position.set(ax + tx * t + nx * facing * hw * 0.95, ay + ty * t + ny * facing * hw * 0.95);
-          sp.rotation = Math.atan2(ty, tx); sp.scale.set(hw / 9); sp.eventMode = 'none';
+          sp.rotation = Math.atan2(ty, tx); sp.scale.set(hw / 13); sp.eventMode = 'none';
           this.props.addChild(sp);
           t += every;
         }
@@ -347,7 +373,7 @@ const Trench = (() => {
     }
     /** Junction node: a sandbag heap where this trench's end meets another trench. */
     addNode(x, y) {
-      const sp = new PIXI.Sprite(prop()); sp.anchor.set(0.5); sp.position.set(x, y); sp.scale.set((this.hw || 5) / 7); sp.eventMode = 'none';
+      const sp = new PIXI.Sprite(prop()); sp.anchor.set(0.5); sp.position.set(x, y); sp.scale.set(this.halfWidth(this.scale) / 10); sp.eventMode = 'none';
       sp.isNode = true;
       this.container.addChild(sp);
     }
@@ -370,7 +396,7 @@ const Trench = (() => {
     return best;
   }
 
-  return { processPath, buildRibbon, View, distToPath, rdp, chaikin, zigzag };
+  return { processPath, buildRibbon, View, distToPath, rdp, chaikin, zigzag, sources: { VERT, FRAG } };
 })();
 
 window.Trench = Trench;

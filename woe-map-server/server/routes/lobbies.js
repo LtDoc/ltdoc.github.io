@@ -234,7 +234,19 @@ function setMarkerNation(req, before, nation) {
   commitChange(req, 'marker', 'update', before, after);
   return after;
 }
-function shapeById(req, id) { const row = q.shape.get(id, req.lobby.id); return row ? access.serializeShape(row) : null; }
+function shapeById(req, id, all) {
+  if (all) return q.shapes.all(req.lobby.id).map(access.serializeShape);
+  const row = q.shape.get(id, req.lobby.id); return row ? access.serializeShape(row) : null;
+}
+/** Change a drawing's owning nation (trenches follow territory), recording history and broadcasting. */
+function setShapeNation(req, before, nation) {
+  const data = { ...(before.data || {}), nation };
+  q.updateShape.run(before.kind, before.label, JSON.stringify(before.points), before.color, before.width, before.adminOnly ? 1 : 0,
+    before.visibleTo ? JSON.stringify(before.visibleTo) : null, now(), before.locked ? 1 : 0, JSON.stringify(data), before.id);
+  const after = access.serializeShape(q.shape.get(before.id, req.lobby.id));
+  commitChange(req, 'shape', 'update', before, after);
+  return after;
+}
 
 /**
  * After a committed move: if game mode is on and the unit is a land unit standing on enemy or neutral
@@ -260,7 +272,7 @@ function afterMove(req, unit) {
 }
 
 // Game layer (turns, treasuries, territories, diplomacy): routes/game.js, sharing this router's lobby middleware.
-router.use('/:id/game', require('./game')({ logEvent, clean, num, clamp, setMarkerNation, shapeById }));
+router.use('/:id/game', require('./game')({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById }));
 
 router.get('/:id', (req, res) => {
   const online = new Set(hub.presence(req.lobby.id).map(u => u.id));
@@ -942,6 +954,14 @@ function shapeData(kind, raw, before) {
   };
 }
 
+/** Which faction owns the ground under a trench (from territories); '' when there are none. */
+function trenchNation(req, points) {
+  const territory = require('../territory');
+  const terrs = territory.all(req.lobby.id);
+  if (!terrs.length) return '';
+  return territory.trenchOwner(terrs, q.factions.all(req.lobby.id).map(access.serializeFaction), { points });
+}
+
 function parsePoints(req, kind, raw) {
   if (!Array.isArray(raw) || raw.length > 500) return null;
   const pts = [];
@@ -970,10 +990,11 @@ router.post('/:id/shapes', (req, res) => {
   if (!points) return res.status(400).json({ error: 'Bad points (need 2+ for a line, 3+ for an area, all on the map)' });
   const label = clean(b.label, 60);
   const color = COLOR_RE.test(b.color || '') ? b.color : (req.member?.color || '#f1c40f');
-  const width = kind === 'trench' ? clamp(num(b.width, 10), 2, 80) : clamp(num(b.width, 3), 1, 20);
+  const width = kind === 'trench' ? clamp(num(b.width, 0.5), 0.05, 50) : clamp(num(b.width, 3), 1, 20);
   const adminOnly = isGm && b.adminOnly ? 1 : 0;
   const visibleTo = isGm ? parseVisibleTo(b.visibleTo) : null;
   const data = shapeData(kind, b.data, null);
+  if (data && kind === 'trench') data.nation = trenchNation(req, points);
   const t = now();
   const id = q.insertShape.run(null, req.lobby.id, kind, label, JSON.stringify(points), color, width, adminOnly, visibleTo, req.user.id, t, t, b.locked ? 1 : 0, data ? JSON.stringify(data) : null).lastInsertRowid;
   const shape = access.serializeShape(q.shape.get(id, req.lobby.id));
@@ -994,11 +1015,12 @@ router.patch('/:id/shapes/:sid', (req, res) => {
   }
   const label = b.label !== undefined ? clean(b.label, 60) : before.label;
   const color = b.color !== undefined && COLOR_RE.test(b.color) ? b.color : before.color;
-  const width = b.width !== undefined ? (before.kind === 'trench' ? clamp(num(b.width, 10), 2, 80) : clamp(num(b.width, 3), 1, 20)) : before.width;
+  const width = b.width !== undefined ? (before.kind === 'trench' ? clamp(num(b.width, 0.5), 0.05, 50) : clamp(num(b.width, 3), 1, 20)) : before.width;
   const adminOnly = isGm && b.adminOnly !== undefined ? (b.adminOnly ? 1 : 0) : (before.adminOnly ? 1 : 0);
   const visibleTo = isGm && b.visibleTo !== undefined ? parseVisibleTo(b.visibleTo) : (before.visibleTo ? JSON.stringify(before.visibleTo) : null);
   const locked = b.locked !== undefined ? (b.locked ? 1 : 0) : (before.locked ? 1 : 0);
-  const data = b.data !== undefined ? shapeData(before.kind, b.data, before.data) : (before.data && Object.keys(before.data).length ? before.data : null);
+  const data = b.data !== undefined ? shapeData(before.kind, b.data, before.data) : (before.data && Object.keys(before.data).length ? { ...before.data } : null);
+  if (data && before.kind === 'trench') data.nation = trenchNation(req, points);
   q.updateShape.run(before.kind, label, JSON.stringify(points), color, width, adminOnly, visibleTo, now(), locked, data ? JSON.stringify(data) : null, before.id);
   const after = access.serializeShape(q.shape.get(before.id, req.lobby.id));
   commitChange(req, 'shape', 'update', before, after);
@@ -1130,7 +1152,8 @@ router.post('/:id/combat', (req, res) => {
   if (g.enabled) a.data = { ...a.data, apUsed: num(a.data.apUsed) + 1 };   // spent even if the attack is repelled
 
   const cfg = access.serializeLobby(req.lobby, 'player').settings.combat;
-  const atk = num(a.data.attack), def = num(d.data.defend);
+  const cover = require('../territory').trenchCover(req.lobby, g.settings, d, q.shapes.all(req.lobby.id).map(access.serializeShape));
+  const atk = num(a.data.attack), def = num(d.data.defend) + (cover ? cover.bonus : 0);
   const aRoll = crypto.randomInt(1, cfg.die + 1), dRoll = crypto.randomInt(1, cfg.die + 1);
   const aTotal = aRoll + atk, dTotal = dRoll + def;
   const margin = aTotal - dTotal;
@@ -1156,7 +1179,7 @@ router.post('/:id/combat', (req, res) => {
   apply(a, aLoss); apply(d, dLoss);
 
   const fmt = (m, l) => `${m.name} ${l.loss ? `loses ${l.loss}% (${l.from}→${l.to}${l.to === 0 ? ', destroyed' : ''})` : 'is unharmed'}`;
-  const text = `⚔ ${a.name} attacked ${d.name}: ${aRoll}+${atk}=${aTotal} vs ${dRoll}+${def}=${dTotal} → ` +
+  const text = `⚔ ${a.name} attacked ${d.name}: ${aRoll}+${atk}=${aTotal} vs ${dRoll}+${def}${cover ? ` (incl. +${cover.bonus} trench cover)` : ''}=${dTotal} → ` +
     (outcome === 'tie' ? 'stalemate. ' : outcome === 'attacker' ? 'attack succeeds. ' : 'attack repelled. ') +
     `${fmt(d, losses[d.id])}; ${fmt(a, losses[a.id])}`;
   const hidden = !!(a.adminOnly || d.adminOnly || a.visibleTo || d.visibleTo);

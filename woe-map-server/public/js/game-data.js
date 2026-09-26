@@ -54,6 +54,9 @@ const GameData = (() => {
     factoryIncome: { money: 2, rp: 0, manpower: 0 },   // per factory, times its industry level
     startStock: { resources: 20, money: 100, manpower: 20, rp: 0 },   // stockpiles when game mode starts
     publicTreasury: false,    // players may see every faction's treasury
+    trenchRangeKm: 20,        // units this close to a friendly dug trench get cover
+    trenchBonusDug: 2,        // added to defend when attacked
+    trenchBonusReinforced: 4,
   };
 
   /** Unit categories that burn oil under upkeep, plus specific land vehicle types. */

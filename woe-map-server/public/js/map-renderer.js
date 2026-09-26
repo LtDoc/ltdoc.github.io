@@ -21,6 +21,7 @@ class MapRenderer extends EventTarget {
     this.container = container;
     this.views = new Map();          // marker id -> MarkerView
     this.gameRules = null;           // { enabled, kmPerMove } when the campaign runs in game mode
+    this.unitsToPx = (x, y, units) => units;   // campaign units → map px at a point; map.js supplies the Earth version
     this.shapeViews = new Map();     // shape id -> { shape, g, label }
     this.selectedId = null;          // primary selected marker (popup)
     this.selected = new Set();       // all selected marker ids (group moves)
@@ -473,7 +474,7 @@ class MapRenderer extends EventTarget {
     const trenches = [...this.shapeViews.values()].filter(v => v.trench && v.shape.points.length >= 2);
     for (const v of trenches) v.trench.clearNodes();
     for (const v of trenches) {
-      const hw = Math.max(2, Number(v.shape.width) || 10) / 2;
+      const hw = v.trench.halfWidth(this.scale);
       for (const end of [v.shape.points[0], v.shape.points[v.shape.points.length - 1]]) {
         const near = trenches.some(o => o !== v && Trench.distToPath(end[0], end[1], o.shape.points) <= hw * 2.2);
         if (near) v.trench.addNode(end[0], end[1]);
@@ -507,8 +508,10 @@ class MapRenderer extends EventTarget {
     const path = () => { g.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]); };
     if (s.kind === 'trench' && v.trench) {
       // The earthwork is a mesh in the trench layer; the graphics only carry the hit path and the selection ring.
-      v.trench.update(s, sc);
-      const tw = Math.max(2, Number(s.width) || 10);
+      // Width is stored in campaign units (km on the Earth map); convert at the trench's own latitude.
+      const a0 = shapeAnchor(s);
+      v.trench.update(s, sc, this.unitsToPx(a0[0], a0[1], Number(s.width) || 1));
+      const tw = v.trench.halfWidth(sc) * 2;
       if (selected) { path(); g.stroke({ width: tw + 6 / sc, color: 0xffffff, alpha: 0.45 }); }
       if (s.adminOnly || (s.visibleTo && s.visibleTo.length)) { path(); g.stroke({ width: 1.5 / sc, color: s.adminOnly ? 0xe67e22 : 0x5dade2, alpha: 0.9 }); }
       path(); g.stroke({ width: Math.max(tw, 14 / sc), color: 0xffffff, alpha: 0.001 });

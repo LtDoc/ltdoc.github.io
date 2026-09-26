@@ -11,7 +11,7 @@ const GameData = require('../../public/js/game-data');
 
 const territory = require('../territory');
 
-module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNation, shapeById }) {
+module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById }) {
   const router = express.Router({ mergeParams: true });
 
   function requireGm(req, res, next) {
@@ -69,8 +69,11 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
   function applyOwnership(req) {
     const factions = game.q.factions.all(req.lobby.id).map(access.serializeFaction);
     const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
-    const changes = territory.ownershipChanges(territory.all(req.lobby.id), factions, markers);
-    return changes.map(c => setMarkerNation(req, c.marker, c.nation));
+    const terrs = territory.all(req.lobby.id);
+    const changes = territory.ownershipChanges(terrs, factions, markers);
+    const out = changes.map(c => setMarkerNation(req, c.marker, c.nation));
+    for (const c of territory.trenchOwnershipChanges(terrs, factions, shapeById(req, null, true))) out.push(setShapeNation(req, c.shape, c.nation));
+    return out;
   }
 
   router.get('/territories', (req, res) => res.json({ territories: territory.all(req.lobby.id) }));
@@ -223,6 +226,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       numIn('kmPerMove', 1, 100000); numIn('captureRadiusKm', 1, 5000); numIn('cityRadiusKm', 1, 5000);
       numIn('researchLead', 0, 50); numIn('baseMoney', -1000, 100000); numIn('baseRp', -1000, 100000); numIn('baseManpower', -1000, 100000);
       numIn('upkeepGrain', 0, 100); numIn('upkeepOil', 0, 100);
+      numIn('trenchRangeKm', 0, 1000); numIn('trenchBonusDug', 0, 50); numIn('trenchBonusReinforced', 0, 50);
       for (const k of ['waiveMovement', 'occupyNeutrals', 'upkeep', 'publicTreasury']) if (s[k] !== undefined) out[k] = !!s[k];
       for (const grp of ['cityIncome', 'factoryIncome', 'startStock']) {
         if (s[grp] && typeof s[grp] === 'object') {

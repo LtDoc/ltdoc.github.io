@@ -235,7 +235,17 @@ When you finish, the pointer samples are simplified (Ramer–Douglas–Peucker),
 unless you untick it, long straights get **traverses** so the line reads as a fire trench. A trench is a
 drawing of kind `trench`: its **centreline** is the object the game uses (occupancy, editing, history, the
 Extend button, vertex dragging from the popup all work on it); the look is derived from it and never the other
-way round. Fields: width in map pixels (default 10), build **state** and which side is the **rear**.
+way round. Fields: width in the campaign's units (km on the Earth map; default 0.5), build **state** and
+which side is the **rear**. The real width is honoured when you zoom in close; zoomed out, a trench never
+drops below about 10 screen pixels so the line stays readable (that minimum is a vertex-shader uniform, so
+zooming never rebuilds a mesh).
+
+Trenches also play: a trench **belongs to the faction whose territory most of its centreline lies in**
+(recomputed whenever borders move, with the ownership of towns and nodes), and a unit attacked while within
+the **cover range** (20 km) of a dug or reinforced trench of its own faction (or of an unowned trench) adds the
+trench's **cover bonus** to its defend roll: +2 dug, +4 reinforced, planned trenches give nothing. The combat
+log shows the bonus, the unit's popup shows the cover it currently enjoys, and the range and bonuses are
+campaign rules on the Game tab. An enemy's trench never shelters you.
 
 Rendering (`public/js/trench.js`) is a triangulated ribbon, not a line: each centreline point becomes a
 left/right vertex pair at ±half-width (slightly varied along the path) on a mitred normal, sharp corners are

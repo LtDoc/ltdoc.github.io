@@ -29,6 +29,7 @@
   $('#rendererLabel').textContent = renderer.rendererType.toUpperCase();
   renderer.canDrag = m => canEdit(m) && !m.locked;
   renderer.canEditShape = s => canEditShape(s) && !s.locked;
+  renderer.unitsToPx = (x, y, units) => units / (distanceUnits(x, y, x + 1, y) || 1);   // km (or map units) → px, locally
 
   function canEdit(m) { return state.role === 'gm' || (m.ownerId === me.id && !m.adminOnly); }
   function canEditShape(s) { return state.role === 'gm' || (s.createdBy === me.id && !s.adminOnly); }
@@ -45,6 +46,24 @@
     let u = 0;
     for (let i = 1; i < pts.length; i++) u += distanceUnits(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]);
     return u;
+  }
+
+  /** The best trench cover a unit gets: a dug or reinforced trench of its own nation (or unowned) within the trench range. */
+  function trenchCoverFor(m) {
+    if (m.type !== 'unit' || !window.Trench) return null;
+    const g = state.game?.settings || {};
+    const range = g.trenchRangeKm ?? 20, dug = g.trenchBonusDug ?? 2, reinforced = g.trenchBonusReinforced ?? 4;
+    const perPx = distanceUnits(m.x, m.y, m.x + 1, m.y) || 1;
+    let best = null;
+    for (const s of state.shapes.values()) {
+      if (s.kind !== 'trench' || !s.data || s.data.state === 'plan') continue;
+      const owner = String(s.data.nation || '').toLowerCase();
+      if (owner && owner !== String(m.data?.nation || '').toLowerCase()) continue;
+      if (Trench.distToPath(m.x, m.y, s.points) * perPx > range) continue;
+      const bonus = s.data.state === 'reinforced' ? reinforced : dug;
+      if (!best || bonus > best.bonus) best = { bonus, trench: s };
+    }
+    return best;
   }
 
   renderer.addEventListener('select', e => {
@@ -135,7 +154,9 @@
         if (prev && prev.kind === 'trench') {
           // Only the newly drawn tail is processed; the existing centreline stays as it was.
           const n = prev.points.length;
-          const tail = Trench.processPath([prev.points[n - 1], ...points.slice(n)], { tol: 2 / renderer.scale, width: prev.width || 10, zig: prev.data?.zigzag !== false });
+          const p0 = prev.points[n - 1];
+          const wPx = Math.max(renderer.unitsToPx(p0[0], p0[1], prev.width || 0.5), 10 / renderer.scale);
+          const tail = Trench.processPath([p0, ...points.slice(n)], { tol: 2 / renderer.scale, width: wPx, zig: prev.data?.zigzag !== false });
           points = [...prev.points, ...tail.slice(1)];
         }
         const d = await api.patch(`${base}/shapes/${e.detail.shapeId}`, { points });
@@ -145,7 +166,7 @@
     }
     if (e.detail.kind === 'trench') {
       // Keep the raw samples so the modal can re-process them with or without traverses.
-      openShapeModal(null, { kind: 'trench', raw: e.detail.points, points: Trench.processPath(e.detail.points, { tol: 2 / renderer.scale, width: 10, zig: true }) });
+      openShapeModal(null, { kind: 'trench', raw: e.detail.points, points: Trench.processPath(e.detail.points, { tol: 2 / renderer.scale, width: 10 / renderer.scale, zig: true }) });
       return;
     }
     openShapeModal(null, e.detail);
@@ -875,7 +896,7 @@
       html += `<div class="section">Drawings <span class="hint">(${shapes.length})</span>${lockLinks('shape', shapes)}${state.role === 'gm' && shapes.length > 1 ? ` · <a href="#" data-delall="1" title="Delete every drawing you can see (e.g. imported borders you no longer need)">delete all</a>` : ''}</div><ul class="list">${shapes.map(s => `
         <li class="clickable ${s.id === state.selectedShapeId ? 'selected' : ''}" data-shape="${s.id}">
           <span class="dot" style="background:${esc(s.color)}"></span>
-          <span class="grow">${esc(s.label || (s.kind === 'area' ? 'Unnamed area' : s.kind === 'trench' ? 'Unnamed trench' : 'Unnamed line'))} <span class="hint">${s.kind} · ${s.points.length} pts</span></span>
+          <span class="grow">${esc(s.label || (s.kind === 'area' ? 'Unnamed area' : s.kind === 'trench' ? 'Unnamed trench' : 'Unnamed line'))} <span class="hint">${s.kind === 'trench' ? (s.data?.state || 'dug') + (s.data?.nation ? ' · ' + esc(s.data.nation) : '') : s.kind + ' · ' + s.points.length + ' pts'}</span></span>
           ${visBadge(s)}
         </li>`).join('')}</ul>`;
     }
@@ -959,6 +980,8 @@
         const km = state.game.settings.kmPerMove, allow = (Number(d.movement) || 0) * km, used = Number(d.movedKm) || 0;
         body += stat('This turn', `${fmtNum(Math.max(0, allow - used))} of ${fmtNum(allow)} ${state.lobby?.scaleLabel || 'km'} left · ${Math.max(0, (Number(d.ap) || 0) - (Number(d.apUsed) || 0))}/${Number(d.ap) || 0} AP`);
       }
+      const cover = trenchCoverFor(m);
+      if (cover) body += stat('Cover', `+${cover.bonus} defend (${esc(cover.trench.label || 'trench')})`);
       if (d.abilities?.length) body += `<div class="stat"><span class="muted">Abilities</span></div><ul style="margin:2px 0 4px 16px;padding:0;font-size:12px">${d.abilities.map(a => `<li>${esc(a)}</li>`).join('')}</ul>`;
     } else if (m.type === 'town') {
       body += stat('Size', d.size) + nationStat(d.nation);
@@ -987,7 +1010,12 @@
   function shapePopupHtml(s) {
     const creator = s.createdBy && state.members.find(x => x.userId === s.createdBy);
     let body = stat('Kind', s.kind === 'area' ? 'Area' : s.kind === 'trench' ? 'Trench' : 'Line') + stat('Points', s.points.length);
-    if (s.kind === 'trench') body += stat('State', { plan: 'planned', dug: 'dug', reinforced: 'reinforced' }[s.data?.state] || 'dug') + stat('Width', `${s.width} px`);
+    if (s.kind === 'trench') {
+      body += stat('State', { plan: 'planned', dug: 'dug', reinforced: 'reinforced' }[s.data?.state] || 'dug') + stat('Width', `${s.width} ${state.lobby?.scaleLabel || ''}`) + nationStat(s.data?.nation);
+      const g = state.game?.settings, st = s.data?.state || 'dug';
+      const bonus = st === 'plan' ? 0 : (st === 'reinforced' ? (g?.trenchBonusReinforced ?? 4) : (g?.trenchBonusDug ?? 2));
+      if (bonus) body += stat('Cover', `+${bonus} defend for ${esc(s.data?.nation || 'any')} units within ${g?.trenchRangeKm ?? 20} ${state.lobby?.scaleLabel || 'km'}`);
+    }
     if (creator) body += stat('Drawn by', creator.displayName);
     if (s.visibleTo && s.visibleTo.length) body += stat('Visible to', s.visibleTo.join(', '));
     if (s.kind !== 'area') {
@@ -1483,9 +1511,10 @@
     $('#shapeModalTitle').textContent = shape ? (trench ? 'Edit trench' : 'Edit drawing') : `New ${kind === 'area' ? 'area' : trench ? 'trench' : 'line'}`;
     $('#shapeLabel').value = shape ? shape.label : '';
     $('#shapeColor').value = shape ? shape.color : (state.member?.color || '#f1c40f');
-    $('#shapeWidth').value = shape ? shape.width : (trench ? 10 : 3);
+    $('#shapeWidth').value = shape ? shape.width : (trench ? 0.5 : 3);
+    $('#shapeWidth').step = trench ? 'any' : '1'; $('#shapeWidth').min = trench ? '0.05' : '1';
     $('#shapeColorWrap').hidden = trench;
-    $('#shapeWidthLabel').textContent = trench ? 'Trench width (map px)' : 'Line width';
+    $('#shapeWidthLabel').textContent = trench ? `Trench width (${state.lobby?.scaleLabel || 'map units'})` : 'Line width';
     $('#trenchFields').hidden = !trench;
     $('#trenchZigWrap').hidden = !trench || !!shape;                 // traverses are applied when the trench is first dug
     if (trench) {
@@ -1516,7 +1545,10 @@
       } else if (state.pendingShape) {
         let points = state.pendingShape.points;
         if (state.pendingShape.kind === 'trench' && state.pendingShape.raw) {
-          points = Trench.processPath(state.pendingShape.raw, { tol: 2 / renderer.scale, width: body.width, zig: body.data.zigzag });
+          // Traverse size follows the on-screen width so the bays read at the zoom the trench was drawn at.
+          const p0 = state.pendingShape.raw[0];
+          const wPx = Math.max(renderer.unitsToPx(p0[0], p0[1], body.width), 10 / renderer.scale);
+          points = Trench.processPath(state.pendingShape.raw, { tol: 2 / renderer.scale, width: wPx, zig: body.data.zigzag });
         }
         const d = await api.post(`${base}/shapes`, { ...body, kind: state.pendingShape.kind, points });
         upsertShape(d.shape);
