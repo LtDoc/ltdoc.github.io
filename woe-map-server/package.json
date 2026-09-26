@@ -1,0 +1,21 @@
+{
+  "name": "woe-strategy-map",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Self-hosted real-time strategy map for World of Elyndor (Windows Server friendly, no cloud services)",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "create-admin": "node scripts/create-admin.js",
+    "import-firebase": "node scripts/import-firebase.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "multer": "^2.0.0",
+    "pixi.js": "^8.0.0",
+    "ws": "^8.18.0"
+  }
+}

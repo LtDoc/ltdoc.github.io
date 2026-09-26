@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Campaigns · WoE Strategy Map</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <div class="page">
+    <header>
+      <h1>Campaigns</h1>
+      <span id="whoami" class="muted"></span>
+      <button id="btnAccount" class="secondary small">Account</button>
+      <button id="btnLogout" class="secondary small">Sign out</button>
+    </header>
+
+    <div class="cols">
+      <div class="card">
+        <h2 style="font-size:16px">Your campaigns</h2>
+        <ul id="lobbyList" class="list"></ul>
+        <p id="noLobbies" class="muted" hidden>You are not in any campaign yet. Create one or join with a code.</p>
+      </div>
+      <div>
+        <div class="card" style="margin-bottom:16px">
+          <h2 style="font-size:16px">Create a campaign</h2>
+          <form id="createForm">
+            <label>Name<input id="createName" maxlength="60" required placeholder="e.g. The Great War, 1914"></label>
+            <div class="error" id="createError"></div>
+            <button type="submit">Create</button>
+            <p class="hint">You become the game master. Upload a map image from the campaign settings once inside.</p>
+          </form>
+        </div>
+        <div class="card">
+          <h2 style="font-size:16px">Join with a code</h2>
+          <form id="joinForm">
+            <label>Join code<input id="joinCode" maxlength="12" required placeholder="ABCD23" style="text-transform:uppercase;letter-spacing:.15em"></label>
+            <div class="error" id="joinError"></div>
+            <button type="submit">Join</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div id="adminCard" class="card" style="margin-top:16px" hidden>
+      <h2 style="font-size:16px">Site admin · users</h2>
+      <ul id="userList" class="list"></ul>
+    </div>
+  </div>
+
+  <div id="accountModal" class="modal">
+    <div class="card">
+      <button class="close" data-close>×</button>
+      <h2>Account</h2>
+      <p id="accountInfo" class="muted"></p>
+      <form id="passwordForm">
+        <label>Current password<input id="pwCurrent" type="password" autocomplete="current-password" required></label>
+        <label>New password<input id="pwNext" type="password" autocomplete="new-password" required minlength="8"></label>
+        <div class="error" id="pwError"></div>
+        <button type="submit">Change password</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    (async () => {
+      const me = await requireUser();
+      const $ = s => document.querySelector(s);
+      $('#whoami').textContent = me.displayName + (me.role === 'admin' ? ' (site admin)' : '');
+      $('#accountInfo').textContent = `Signed in as ${me.username}`;
+
+      async function loadLobbies() {
+        const { lobbies } = await api.get('/api/lobbies');
+        const ul = $('#lobbyList');
+        ul.innerHTML = lobbies.map(l => `
+          <li class="clickable" data-id="${l.id}">
+            <span class="grow"><strong>${esc(l.name)}</strong><br><span class="hint">${l.memberCount} member${l.memberCount === 1 ? '' : 's'}${l.mapUrl ? '' : ' · no map yet'}</span></span>
+            <span class="badge ${l.yourRole === 'gm' ? 'gm' : ''}">${l.yourRole === 'gm' ? 'GM' : 'Player'}</span>
+            <button class="small">Open</button>
+          </li>`).join('');
+        $('#noLobbies').hidden = lobbies.length > 0;
+        ul.querySelectorAll('li').forEach(li => li.onclick = () => location.href = `/map/${li.dataset.id}`);
+      }
+
+      $('#createForm').onsubmit = async (e) => {
+        e.preventDefault(); $('#createError').textContent = '';
+        try {
+          const { lobby } = await api.post('/api/lobbies', { name: $('#createName').value });
+          location.href = `/map/${lobby.id}`;
+        } catch (err) { $('#createError').textContent = err.message; }
+      };
+      $('#joinForm').onsubmit = async (e) => {
+        e.preventDefault(); $('#joinError').textContent = '';
+        try {
+          const { lobby } = await api.post('/api/lobbies/join', { code: $('#joinCode').value });
+          location.href = `/map/${lobby.id}`;
+        } catch (err) { $('#joinError').textContent = err.message; }
+      };
+      $('#btnLogout').onclick = async () => { await api.post('/api/auth/logout'); location.replace('/'); };
+      $('#btnAccount').onclick = () => $('#accountModal').classList.add('open');
+      document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => b.closest('.modal').classList.remove('open'));
+      $('#passwordForm').onsubmit = async (e) => {
+        e.preventDefault(); $('#pwError').textContent = '';
+        try {
+          await api.post('/api/auth/password', { current: $('#pwCurrent').value, next: $('#pwNext').value });
+          toast('Password changed'); $('#accountModal').classList.remove('open'); e.target.reset();
+        } catch (err) { $('#pwError').textContent = err.message; }
+      };
+
+      async function loadUsers() {
+        if (me.role !== 'admin') return;
+        $('#adminCard').hidden = false;
+        const { users } = await api.get('/api/auth/users');
+        $('#userList').innerHTML = users.map(u => `
+          <li data-id="${u.id}">
+            <span class="grow"><strong>${esc(u.displayName)}</strong> <span class="hint">@${esc(u.username)}</span></span>
+            <span class="badge ${u.role === 'admin' ? 'admin' : ''}">${u.role}</span>
+            ${u.id === me.id ? '' : `<button class="small secondary" data-act="role">${u.role === 'admin' ? 'Make player' : 'Make admin'}</button>
+            <button class="small secondary" data-act="pw">Reset password</button>
+            <button class="small danger" data-act="del">Delete</button>`}
+          </li>`).join('');
+        $('#userList').querySelectorAll('button').forEach(b => b.onclick = async () => {
+          const li = b.closest('li'); const id = li.dataset.id; const u = users.find(x => String(x.id) === id);
+          try {
+            if (b.dataset.act === 'role') await api.patch(`/api/auth/users/${id}`, { role: u.role === 'admin' ? 'player' : 'admin' });
+            if (b.dataset.act === 'pw') { const pw = prompt(`New password for ${u.username} (8+ chars):`); if (!pw) return; await api.patch(`/api/auth/users/${id}`, { password: pw }); toast('Password reset'); }
+            if (b.dataset.act === 'del') { if (!confirm(`Delete user ${u.username}? This cannot be undone.`)) return; await api.del(`/api/auth/users/${id}`); }
+            loadUsers();
+          } catch (err) { toast(err.message); }
+        });
+      }
+
+      await loadLobbies();
+      await loadUsers();
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,1485 @@
+'use strict';
+/* global MapRenderer, api, requireUser, esc, toast, fmtTime, fmtNum */
+
+(async function main() {
+  const lobbyId = Number(location.pathname.match(/\/map\/(\d+)/)?.[1] || new URLSearchParams(location.search).get('lobby'));
+  if (!lobbyId) { location.replace('/lobbies.html'); return; }
+  const me = await requireUser();
+  const $ = s => document.querySelector(s);
+  const $$ = s => [...document.querySelectorAll(s)];
+  const base = `/api/lobbies/${lobbyId}`;
+
+  const TYPE_LABEL = { unit: 'Unit', town: 'Town', poi: 'POI', player: 'Player', scenery: 'Scenery' };
+  const Atlas = window.SpriteAtlas;
+  await Atlas.load();
+  const state = {
+    lobby: null, members: [], role: 'player', member: null, factions: [], bundledFlags: null,
+    markers: new Map(), shapes: new Map(), events: [], history: [], presence: [],
+    selectedId: null, selectedShapeId: null,
+    ws: null, wsBackoff: 1000, mapKey: null, pendingShape: null, editingShapeId: null,
+  };
+
+  // ---- Renderer -------------------------------------------------------------------
+  const renderer = new MapRenderer($('#stage'));
+  await renderer.init();
+  window.woe = { renderer, state }; // handy for debugging from the console
+  $('#rendererLabel').textContent = renderer.rendererType.toUpperCase();
+  renderer.canDrag = m => canEdit(m) && !m.locked;
+  renderer.canEditShape = s => canEditShape(s) && !s.locked;
+
+  function canEdit(m) { return state.role === 'gm' || (m.ownerId === me.id && !m.adminOnly); }
+  function canEditShape(s) { return state.role === 'gm' || (s.createdBy === me.id && !s.adminOnly); }
+  function round1(n) { return Math.round(n * 10) / 10; }
+  function colorNum(hex) { return parseInt(String(hex || '#3498db').slice(1), 16) || 0x3498db; }
+  function isEarth() { return state.lobby?.settings?.projection === 'equirect' && state.lobby?.mapKind === 'earth'; }
+
+  /** Distance between two map points in the campaign's units (great-circle km on the Earth map). */
+  function distanceUnits(x1, y1, x2, y2) {
+    if (isEarth()) return window.EarthMap.distanceKm(x1, y1, x2, y2, state.lobby.mapWidth, state.lobby.mapHeight);
+    return Math.hypot(x2 - x1, y2 - y1) * (state.lobby?.unitsPerPx || 1);
+  }
+  function pathUnits(pts) {
+    let u = 0;
+    for (let i = 1; i < pts.length; i++) u += distanceUnits(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]);
+    return u;
+  }
+
+  renderer.addEventListener('select', e => {
+    state.selectedId = e.detail.id; state.selectedIds = e.detail.ids || []; state.selectedShapeId = e.detail.shapeId;
+    renderPopup(); highlightList();
+    if (state.selectedIds.length > 1) toast(`${state.selectedIds.length} tokens selected: drag any of them to move the group`, 1800);
+  });
+  renderer.addEventListener('mode', e => {
+    $('#btnSelect').classList.toggle('active', e.detail.mode === 'select');
+    if (e.detail.mode === 'select') {
+      showModeHud(true);
+      $('#modeText').textContent = 'Select: drag a box around tokens (Shift adds to the selection); drag any selected token to move them all';
+    } else if (!e.detail.mode) hideModeHud();
+  });
+  renderer.addEventListener('drag', e => wsSend({ type: 'drag', ...e.detail }));
+  renderer.addEventListener('dragend', async e => {
+    const { id, x, y, moves } = e.detail;
+    try {
+      if (moves) {
+        const d = await api.post(`${base}/markers/move`, { moves: moves.map(m => ({ id: m.id, x: round1(m.x), y: round1(m.y) })) });
+        for (const m of d.markers) upsertMarker(m);
+        if (d.errors.length) { toast(d.errors.join('; ')); await loadMarkers(); }
+      } else {
+        const d = await api.patch(`${base}/markers/${id}`, { x: round1(x), y: round1(y) });
+        upsertMarker(d.marker);
+      }
+    } catch (err) {
+      toast(err.message);
+      const m = state.markers.get(id);
+      if (m) renderer.upsert(m);
+      if (moves) await loadMarkers();
+    }
+  });
+  renderer.addEventListener('zoom', e => { $('#zoomLabel').textContent = Math.round(e.detail.scale * 100) + '%'; });
+  renderer.addEventListener('frame', positionPopup);
+  renderer.addEventListener('measure', e => {
+    const d = e.detail;
+    $('#btnMeasure').classList.toggle('active', !!d);
+    if (!d) { if (renderer.mode !== 'draw') hideModeHud(); return; }
+    showModeHud(true);
+    if (d.points === 0) { $('#modeText').textContent = 'Measure: click points on the map'; return; }
+    const units = d.pts ? pathUnits(d.pts) : d.px * (state.lobby?.unitsPerPx || 1);
+    $('#modeText').textContent = `${fmtNum(units)} ${state.lobby?.scaleLabel || ''} · ${Math.round(d.px)} px · ${d.points} point${d.points === 1 ? '' : 's'}`;
+  });
+  renderer.addEventListener('shapeedit', async e => {
+    const { id, points } = e.detail;
+    try {
+      const d = await api.patch(`${base}/shapes/${id}`, { points });
+      upsertShape(d.shape);
+    } catch (err) {
+      toast(err.message);
+      await loadShapes();
+    }
+  });
+  renderer.addEventListener('drawprogress', e => {
+    const d = e.detail;
+    $('#btnDrawLine').classList.toggle('active', !!d && d.kind === 'line');
+    $('#btnDrawArea').classList.toggle('active', !!d && d.kind === 'area');
+    if (!d) { if (renderer.mode !== 'measure') hideModeHud(); return; }
+    showModeHud(false);
+    const need = d.kind === 'area' ? 3 : 2;
+    $('#modeText').textContent = d.points < need
+      ? `Drawing ${d.kind === 'area' ? 'an area' : 'a line'}: click ${need - d.points} more point${need - d.points === 1 ? '' : 's'}`
+      : `${d.points} points · double-click, Enter or Done to finish`;
+  });
+  renderer.addEventListener('drawend', async e => {
+    if (e.detail.shapeId) {
+      // Continuing an existing line: just save the new points.
+      try {
+        const d = await api.patch(`${base}/shapes/${e.detail.shapeId}`, { points: e.detail.points });
+        upsertShape(d.shape); renderer.selectShape(d.shape.id);
+      } catch (err) { toast(err.message); }
+      return;
+    }
+    openShapeModal(null, e.detail);
+  });
+
+  function showModeHud(measure) {
+    $('#modeHud').classList.add('show');
+    $('#btnModeDone').hidden = measure;
+    const selecting = renderer.mode === 'select';
+    $('#btnModeUndo').hidden = selecting;
+    $('#btnModeClear').hidden = selecting;
+  }
+  function hideModeHud() { $('#modeHud').classList.remove('show'); }
+
+  // ---- Loading ------------------------------------------------------------------------
+  async function loadLobby() {
+    const d = await api.get(base);
+    state.lobby = d.lobby; state.members = d.members; state.role = d.you.role; state.member = d.you.member;
+    applyLobby();
+    renderMembers();
+    await applyMap();
+  }
+
+  function applyLobby() {
+    const l = state.lobby;
+    document.title = `${l.name} · WoE Strategy Map`;
+    $('#lobbyName').textContent = l.name;
+    const gm = state.role === 'gm';
+    $('#btnSettings').hidden = !gm;
+    $('#btnEmptyUpload').hidden = !gm;
+    $('#emptyMapText').textContent = gm ? 'Upload a map image in the campaign settings to get started.' : 'The game master has not uploaded a map for this campaign yet.';
+    $('#joinCodeBlock').hidden = !gm;
+    if (gm) {
+      $('#joinCodeBlock').innerHTML = `<div class="section">Join code</div><p><span class="code">${esc(l.joinCode)}</span> <button class="small secondary" id="btnCopyCode">Copy</button></p><p class="hint">Players enter this on the campaigns page.</p>`;
+      $('#btnCopyCode').onclick = () => navigator.clipboard.writeText(l.joinCode).then(() => toast('Join code copied'));
+    }
+    $('#shapeGmFields').hidden = !gm;
+    renderer.setTokenScale(l.settings?.tokenScale || 1);
+    renderer.setTokenMode(l.settings?.tokenMode || 'map');
+    renderAddForm();
+    renderNationList();
+  }
+
+  async function applyMap() {
+    const l = state.lobby;
+    const key = `${l.mapKind}|${l.mapUrl}|${l.mapWidth}x${l.mapHeight}|${JSON.stringify(l.settings?.earth || null)}`;
+    if (key === state.mapKey) return;
+    state.mapKey = key;
+    $('#emptyMap').classList.toggle('show', l.mapKind === 'none');
+    if (l.mapKind === 'earth') {
+      toast('Building the Earth…', 1500);
+      try { await renderer.setEarth(l.settings.earth); }
+      catch (err) { toast(`Earth map failed: ${err.message}`); await renderer.setMap(null, l.mapWidth, l.mapHeight); }
+    } else {
+      await renderer.setMap(l.mapUrl, l.mapWidth, l.mapHeight);
+    }
+  }
+
+  async function loadMarkers() {
+    const d = await api.get(`${base}/markers`);
+    const seen = new Set();
+    for (const m of d.markers) { seen.add(m.id); upsertMarker(m, true); }
+    for (const id of [...state.markers.keys()]) if (!seen.has(id)) removeMarker(id);
+  }
+
+  async function loadShapes() {
+    const d = await api.get(`${base}/shapes`);
+    const seen = new Set();
+    for (const s of d.shapes) { seen.add(s.id); upsertShape(s); }
+    for (const id of [...state.shapes.keys()]) if (!seen.has(id)) removeShape(id);
+  }
+
+  async function loadEvents() {
+    const d = await api.get(`${base}/events?limit=100`);
+    state.events = d.events;
+    renderLog();
+  }
+
+  async function loadHistory() {
+    const d = await api.get(`${base}/history?limit=150`);
+    state.history = d.entries;
+    renderHistory();
+  }
+
+  async function loadMembers() {
+    const d = await api.get(base);
+    state.members = d.members; state.member = d.you.member;
+    if (d.you.role !== state.role) { state.role = d.you.role; state.lobby = d.lobby; applyLobby(); await loadMarkers(); await loadShapes(); }
+    renderMembers();
+    renderFactions();
+    refreshFormLists();
+    renderNationList();
+    reapplyFlags();
+  }
+
+  async function loadFactions() {
+    const d = await api.get(`${base}/factions`);
+    state.factions = d.factions;
+    renderFactions();
+    refreshFormLists();
+    renderNationList();
+    reapplyFlags();
+  }
+
+  /** Update the faction and owner dropdowns in the Add/Edit forms in place, keeping the current choice. */
+  function refreshFormLists() {
+    for (const p of ['add', 'edit']) {
+      for (const id of ['Nation', 'TownNation']) {
+        const sel = document.getElementById(p + id + 'Sel');
+        if (!sel) continue;
+        const cur = sel.value;
+        sel.innerHTML = nationOptions();
+        sel.value = [...sel.options].some(o => o.value === cur) ? cur : (cur === '__custom' ? '__custom' : '');
+      }
+      const owner = document.getElementById(p + 'Owner');
+      if (owner) {
+        const cur = owner.value;
+        owner.innerHTML = '<option value="">— none —</option>' + state.members.map(m => `<option value="${m.userId}">${esc(m.displayName)}</option>`).join('');
+        owner.value = [...owner.options].some(o => o.value === cur) ? cur : '';
+      }
+    }
+  }
+
+  function factionByName(name) {
+    const n = String(name || '').trim().toLowerCase();
+    return n ? state.factions.find(f => f.name.toLowerCase() === n) : null;
+  }
+
+  /** Which flag a marker shows: its own nation, or for player tokens the owner's faction. */
+  function flagFor(m) {
+    let nation = m.data?.nation;
+    if (m.type === 'player' && !nation && m.ownerId) nation = state.members.find(x => x.userId === m.ownerId)?.nation;
+    const f = factionByName(nation);
+    return f && f.flagUrl ? f.flagUrl : null;
+  }
+
+  function reapplyFlags() {
+    for (const m of state.markers.values()) {
+      const url = flagFor(m);
+      if (url !== m.flagUrl) { m.flagUrl = url; renderer.upsert(m); }
+    }
+    renderMarkerLists();
+  }
+
+  function upsertMarker(m, quiet) {
+    const isNew = !state.markers.has(m.id);
+    m.flagUrl = flagFor(m);
+    state.markers.set(m.id, m);
+    renderer.upsert(m);
+    if (isNew && !quiet) renderer.pulse(m.x, m.y, colorNum(m.color));
+    renderMarkerLists();
+    if (state.selectedId === m.id) renderPopup();
+  }
+
+  function removeMarker(id) {
+    state.markers.delete(id);
+    renderer.remove(id);
+    renderMarkerLists();
+    if (state.selectedId === id) { state.selectedId = null; renderPopup(); }
+  }
+
+  function upsertShape(s) {
+    state.shapes.set(s.id, s);
+    renderer.upsertShape(s);
+    renderMarkerLists();
+    if (state.selectedShapeId === s.id) renderPopup();
+  }
+
+  function removeShape(id) {
+    state.shapes.delete(id);
+    renderer.removeShape(id);
+    renderMarkerLists();
+    if (state.selectedShapeId === id) { state.selectedShapeId = null; renderPopup(); }
+  }
+
+  function nations() {
+    const set = new Set();
+    for (const f of state.factions) set.add(f.name);
+    for (const m of state.members) if (m.nation) set.add(m.nation);
+    for (const m of state.markers.values()) if (m.data?.nation) set.add(m.data.nation);
+    return [...set].sort();
+  }
+  function renderNationList() {
+    $('#nationList').innerHTML = nations().map(n => `<option value="${esc(n)}">`).join('');
+  }
+
+  // ---- WebSocket ----------------------------------------------------------------------
+  function wsSend(msg) { if (state.ws && state.ws.readyState === WebSocket.OPEN) state.ws.send(JSON.stringify(msg)); }
+
+  function connectWs() {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(`${proto}://${location.host}/ws`);
+    state.ws = ws;
+    let hadJoined = false;
+    ws.onopen = () => { ws.send(JSON.stringify({ type: 'join', lobbyId })); };
+    ws.onmessage = async ev => {
+      let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+      switch (msg.type) {
+        case 'joined':
+          state.wsBackoff = 1000;
+          state.presence = msg.users; renderPresence();
+          if (hadJoined || state.reconnected) { await loadMarkers(); await loadShapes(); await loadEvents(); await loadHistory(); }
+          hadJoined = true;
+          break;
+        case 'presence': state.presence = msg.users; renderPresence(); renderMembers(); break;
+        case 'marker':
+          if (msg.action === 'upsert') {
+            const prev = state.markers.get(msg.marker.id);
+            upsertMarker(msg.marker);
+            if (msg.actorId && msg.actorId !== me.id && prev && (prev.x !== msg.marker.x || prev.y !== msg.marker.y)) {
+              notify('Marker moved', `${msg.marker.name} was moved`);
+            }
+          } else if (msg.action === 'delete') removeMarker(msg.id);
+          break;
+        case 'shape':
+          if (msg.action === 'upsert') upsertShape(msg.shape);
+          else if (msg.action === 'delete') removeShape(msg.id);
+          break;
+        case 'history':
+          state.history.unshift(msg.entry);
+          if (msg.entry.reverts) { const t = state.history.find(h => h.id === msg.entry.reverts); if (t) t.revertedBy = msg.entry.id; }
+          if (state.history.length > 200) state.history.pop();
+          renderHistory();
+          break;
+        case 'drag': renderer.ghostMove(msg.id, msg.x, msg.y); break;
+        case 'event': {
+          const e = msg.event;
+          state.events.push(e); if (state.events.length > 200) state.events.shift(); renderLog(true);
+          if (e.kind === 'combat' && e.data) {
+            const { attackerId, defenderId, outcome, losses } = e.data;
+            const gone = id => !!(losses && losses[id] && losses[id].to === 0 && losses[id].from > 0);
+            renderer.hit(defenderId, outcome !== 'defender', gone(defenderId));
+            renderer.hit(attackerId, outcome === 'defender', gone(attackerId));
+          }
+          if (e.userId !== me.id) {
+            if (e.kind === 'chat') notify(e.displayName, e.message);
+            else if (e.kind === 'roll') notify(`${e.displayName} rolled`, e.message);
+            else if (e.kind === 'combat') notify('Combat', e.message);
+          }
+          break;
+        }
+        case 'members': await loadMembers(); break;
+        case 'factions': await loadFactions(); await loadMembers(); await loadMarkers(); break;
+        case 'lobby': {
+          state.lobby = { ...msg.lobby, joinCode: msg.lobby.joinCode ?? state.lobby?.joinCode, yourRole: state.role };
+          applyLobby(); await applyMap();
+          if ($('#settingsModal').classList.contains('open')) openSettings();
+          break;
+        }
+        case 'role': state.role = msg.role; await loadLobby(); await loadMarkers(); await loadShapes(); await loadHistory(); toast(`You are now a ${msg.role === 'gm' ? 'game master' : 'player'}${msg.nation ? ` of ${msg.nation}` : ''}`); break;
+        case 'kicked': alert('You are no longer part of this campaign.'); location.replace('/lobbies.html'); break;
+        case 'error': toast(msg.error); break;
+        default: break;
+      }
+    };
+    ws.onclose = () => {
+      state.reconnected = true;
+      setTimeout(connectWs, state.wsBackoff);
+      state.wsBackoff = Math.min(15000, state.wsBackoff * 2);
+    };
+    ws.onerror = () => { /* onclose follows */ };
+  }
+
+  // ---- Notifications ---------------------------------------------------------------------
+  const notifyPref = { enabled: false };
+  try { notifyPref.enabled = localStorage.getItem('woe.notify') === '1'; } catch { /* ignore */ }
+  let lastNotify = 0;
+  let audioCtx = null;
+  function beep() {
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = 'sine'; o.frequency.value = 880;
+      g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.15, audioCtx.currentTime + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.25);
+      o.connect(g).connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + 0.26);
+    } catch { /* no audio */ }
+  }
+  function notify(title, body) {
+    if (!notifyPref.enabled || !document.hidden) return;
+    const t = Date.now();
+    if (t - lastNotify < 3000) return;
+    lastNotify = t;
+    beep();
+    if ('Notification' in window && Notification.permission === 'granted') {
+      try { new Notification(`${state.lobby?.name || 'WoE'}: ${title}`, { body: String(body).slice(0, 140), silent: true }); } catch { /* ignore */ }
+    }
+  }
+  function renderNotifyButton() {
+    $('#btnNotify').textContent = notifyPref.enabled ? '🔔' : '🔕';
+    $('#btnNotify').classList.toggle('active', notifyPref.enabled);
+  }
+  $('#btnNotify').onclick = async () => {
+    notifyPref.enabled = !notifyPref.enabled;
+    if (notifyPref.enabled && 'Notification' in window && Notification.permission === 'default') {
+      try { await Notification.requestPermission(); } catch { /* ignore */ }
+    }
+    try { localStorage.setItem('woe.notify', notifyPref.enabled ? '1' : '0'); } catch { /* ignore */ }
+    renderNotifyButton();
+    if (notifyPref.enabled) { beep(); toast('You will hear a chime (and see a desktop notification if allowed) when things happen while this tab is in the background.'); }
+  };
+  renderNotifyButton();
+
+  // ---- Presence / members ---------------------------------------------------------------
+  function initials(name) { return String(name || '?').trim().split(/\s+/).map(p => p[0]).join('').slice(0, 2).toUpperCase(); }
+
+  function renderPresence() {
+    $('#presence').innerHTML = state.presence.map(u =>
+      `<div class="avatar ${u.role === 'gm' ? 'gm' : ''}" title="${esc(u.displayName)}${u.role === 'gm' ? ' (GM)' : ''}">${esc(initials(u.displayName))}</div>`).join('');
+  }
+
+  function flagImg(nation, big) {
+    const f = factionByName(nation);
+    return f && f.flagUrl ? `<img class="flag ${big ? 'big' : ''}" src="${esc(f.flagUrl)}" alt="" title="${esc(f.name)}">` : '';
+  }
+
+  function renderMembers() {
+    const online = new Set(state.presence.map(u => u.id));
+    const gm = state.role === 'gm';
+    $('#membersList').innerHTML = state.members.map(m => `
+      <li data-id="${m.userId}">
+        <span class="dot" style="background:${esc(m.color)}"></span>
+        <span class="grow"><strong>${esc(m.displayName)}</strong>${m.nation ? ` <span class="hint">· ${flagImg(m.nation)} ${esc(m.nation)}</span>` : ''}</span>
+        ${online.has(m.userId) ? '<span class="badge online">online</span>' : ''}
+        <span class="badge ${m.role === 'gm' ? 'gm' : ''}">${m.role === 'gm' ? 'GM' : 'Player'}</span>
+        ${gm ? `<button class="small secondary" data-act="edit" title="Edit member">✎</button>` : ''}
+        ${gm && m.userId !== state.lobby.ownerId ? `<button class="small danger" data-act="kick" title="Remove">✕</button>` : ''}
+      </li>`).join('');
+    $('#membersList').querySelectorAll('button').forEach(b => b.onclick = () => memberAction(b.dataset.act, Number(b.closest('li').dataset.id)));
+    $('#btnLeave').hidden = state.lobby && state.lobby.ownerId === me.id;
+  }
+
+  async function memberAction(act, userId) {
+    const m = state.members.find(x => x.userId === userId);
+    if (!m) return;
+    try {
+      if (act === 'kick') {
+        if (!confirm(`Remove ${m.displayName} from the campaign?`)) return;
+        await api.del(`${base}/members/${userId}`);
+        await loadMembers();
+      } else if (act === 'edit') {
+        openMemberModal(m);
+      }
+    } catch (err) { toast(err.message); }
+  }
+
+  function nationOptions(current) {
+    const known = state.factions.some(f => f.name.toLowerCase() === String(current || '').toLowerCase());
+    return `<option value="">— none —</option>` +
+      state.factions.map(f => `<option value="${esc(f.name)}">${esc(f.name)}</option>`).join('') +
+      `<option value="__custom">Custom…</option>`;
+  }
+
+  function openMemberModal(m) {
+    $('#memberModalTitle').textContent = `Edit ${m.displayName}`;
+    $('#memId').value = m.userId;
+    const sel = $('#memNation');
+    sel.innerHTML = nationOptions(m.nation);
+    const known = state.factions.find(f => f.name.toLowerCase() === String(m.nation || '').toLowerCase());
+    sel.value = known ? known.name : (m.nation ? '__custom' : '');
+    $('#memNationCustomWrap').hidden = sel.value !== '__custom';
+    $('#memNationCustom').value = known ? '' : (m.nation || '');
+    $('#memColor').value = m.color;
+    $('#memRole').value = m.role;
+    $('#memRole').disabled = m.userId === state.lobby.ownerId;
+    sel.onchange = () => {
+      $('#memNationCustomWrap').hidden = sel.value !== '__custom';
+      const f = factionByName(sel.value);
+      if (f) $('#memColor').value = f.color;
+    };
+    $('#memberModal').classList.add('open');
+  }
+  $('#memberForm').onsubmit = async e => {
+    e.preventDefault();
+    const sel = $('#memNation');
+    const nation = sel.value === '__custom' ? $('#memNationCustom').value : sel.value;
+    try {
+      await api.patch(`${base}/members/${$('#memId').value}`, { nation, color: $('#memColor').value, role: $('#memRole').value });
+      closeModals(); await loadMembers();
+    } catch (err) { toast(err.message); }
+  };
+
+  // ---- Factions --------------------------------------------------------------------------------
+  function renderFactions() {
+    const gm = state.role === 'gm';
+    $('#btnAddFaction').hidden = !gm;
+    $('#btnSeedFactions').hidden = !gm;
+    $('#factionsList').innerHTML = state.factions.map(f => `
+      <li data-id="${f.id}">
+        ${f.flagUrl ? `<img class="flag big" src="${esc(f.flagUrl)}" alt="">` : `<span class="dot" style="background:${esc(f.color)}"></span>`}
+        <span class="grow"><strong>${esc(f.name)}</strong> <span class="hint">· ${state.members.filter(m => m.nation.toLowerCase() === f.name.toLowerCase()).length} member(s)</span></span>
+        <span class="dot" style="background:${esc(f.color)}" title="Colour"></span>
+        ${gm ? `<button class="small secondary" data-act="edit" title="Edit faction">✎</button>` : ''}
+      </li>`).join('') || '<li class="muted">No factions yet.</li>';
+    $('#factionsList').querySelectorAll('button').forEach(b => b.onclick = () => openFactionModal(state.factions.find(f => f.id === Number(b.closest('li').dataset.id))));
+  }
+  $('#btnAddFaction').onclick = () => openFactionModal(null);
+
+  // ---- Seed factions from a historical year --------------------------------------------------
+  let seedPowers = [];
+  async function openSeedModal() {
+    const years = (await api.get('/api/lobbies/earth/years')).years;
+    if (!years.length) { toast('No historical borders are bundled on this server'); return; }
+    const sel = $('#seedYear');
+    sel.innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join('');
+    const cur = state.lobby?.settings?.earth?.borders;
+    sel.value = years.includes(Number(cur)) ? String(cur) : (years.includes(1914) ? '1914' : String(years[0]));
+    sel.onchange = loadSeedPreview;
+    $('#seedModal').classList.add('open');
+    await loadSeedPreview();
+  }
+  async function loadSeedPreview() {
+    const list = $('#seedList');
+    list.innerHTML = '<p class="muted">Loading…</p>';
+    try {
+      const d = await api.get(`${base}/factions/seed-preview?year=${$('#seedYear').value}`);
+      seedPowers = d.powers;
+      list.innerHTML = d.powers.map(p => `
+        <label class="ev" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" data-name="${esc(p.name)}" ${p.exists ? 'disabled' : 'checked'}>
+          ${p.flagAsset ? `<img class="flag big" src="/flags/${encodeURIComponent(p.flagAsset)}" alt="">` : '<span class="flag big" style="display:inline-block;width:44px;background:#1f2d3a;text-align:center;font-size:10px;line-height:22px;color:#95a5a6">no flag</span>'}
+          <span class="dot" style="background:${esc(p.color)}"></span>
+          <span class="grow">${esc(p.name)} <span class="hint">· ${p.territories} territor${p.territories === 1 ? 'y' : 'ies'}${p.exists ? ' · already exists' : ''}</span></span>
+        </label>`).join('');
+      list.querySelectorAll('input').forEach(i => i.onchange = updateSeedCount);
+      updateSeedCount();
+    } catch (err) { list.innerHTML = `<p class="error">${esc(err.message)}</p>`; }
+  }
+  function updateSeedCount() {
+    const n = $$('#seedList input:checked:not(:disabled)').length;
+    $('#seedCount').textContent = `${n} selected`;
+    $('#seedCreate').disabled = n === 0;
+  }
+  $('#seedAll').onclick = () => { $$('#seedList input:not(:disabled)').forEach(i => { i.checked = true; }); updateSeedCount(); };
+  $('#seedNone').onclick = () => { $$('#seedList input:not(:disabled)').forEach(i => { i.checked = false; }); updateSeedCount(); };
+  $('#seedCreate').onclick = async () => {
+    const names = $$('#seedList input:checked:not(:disabled)').map(i => i.dataset.name);
+    if (!names.length) return;
+    $('#seedCreate').disabled = true;
+    try {
+      const d = await api.post(`${base}/factions/seed`, { year: Number($('#seedYear').value), names });
+      closeModals();
+      await loadFactions(); await loadMembers(); await loadMarkers();
+      toast(`Created ${d.created.length} faction${d.created.length === 1 ? '' : 's'}`);
+    } catch (err) { toast(err.message); $('#seedCreate').disabled = false; }
+  };
+  $('#btnSeedFactions').onclick = openSeedModal;
+
+  // ---- Borders → editable drawings ---------------------------------------------------------------
+  async function importBorders(useView) {
+    const e = state.lobby?.settings?.earth;
+    const year = e && /^\d{3,4}$/.test(String(e.borders)) ? Number(e.borders) : null;
+    const y = year || Number(prompt('Which year\'s borders? (bundled: ' + ((await api.get('/api/lobbies/earth/years')).years.join(', ')) + ')', '1914'));
+    if (!y) return;
+    let bbox = null;
+    if (useView) {
+      const r = renderer;
+      const a = r.screenToWorld(0, 0), b = r.screenToWorld(r.app.screen.width, r.app.screen.height);
+      const [minLon, maxLat] = window.EarthMap.unproject(a.x, a.y, state.lobby.mapWidth, state.lobby.mapHeight);
+      const [maxLon, minLat] = window.EarthMap.unproject(b.x, b.y, state.lobby.mapWidth, state.lobby.mapHeight);
+      bbox = [minLon, minLat, maxLon, maxLat];
+    }
+    if (!confirm(`Import the ${y} borders ${useView ? 'in the current view' : 'of the whole world'} as locked area drawings?`)) return;
+    try {
+      const d = await api.post(`${base}/shapes/import-borders`, { year: y, bbox, hideLayer: $('#importHideLayer').checked });
+      await loadShapes(); await loadHistory();
+      toast(`Imported ${d.created} border drawings`);
+      closeModals();
+    } catch (err) { toast(err.message); }
+  }
+  $('#btnImportBordersView').onclick = () => importBorders(true);
+  $('#btnImportBordersAll').onclick = () => importBorders(false);
+
+  async function bundledFlags() {
+    if (!state.bundledFlags) state.bundledFlags = (await api.get('/api/lobbies/flags/bundled')).flags;
+    return state.bundledFlags;
+  }
+
+  async function openFactionModal(f) {
+    $('#factionModalTitle').textContent = f ? `Edit ${f.name}` : 'New faction';
+    $('#facId').value = f ? f.id : '';
+    $('#facName').value = f ? f.name : '';
+    $('#facColor').value = f ? f.color : PALETTE[state.factions.length % PALETTE.length];
+    $('#facFlagAsset').value = f ? (f.flagAsset || '') : '';
+    $('#facFlagFile').value = '';
+    $('#facDelete').hidden = !f;
+    setFlagPreview(f ? f.flagUrl : null);
+    const flags = await bundledFlags();
+    const grid = $('#facFlagGrid');
+    grid.innerHTML = flags.map(fl => `<div class="cell ${f && f.flagAsset === fl.file ? 'selected' : ''}" data-file="${esc(fl.file)}" data-url="${esc(fl.url)}"><img src="${esc(fl.url)}" alt="">${esc(fl.name)}</div>`).join('') || '<p class="muted">No bundled flags in public/flags.</p>';
+    grid.querySelectorAll('.cell').forEach(c => c.onclick = () => {
+      grid.querySelectorAll('.cell').forEach(x => x.classList.toggle('selected', x === c));
+      $('#facFlagAsset').value = c.dataset.file; $('#facFlagFile').value = '';
+      setFlagPreview(c.dataset.url);
+    });
+    $('#factionModal').classList.add('open');
+  }
+  const PALETTE = ['#3498db', '#e74c3c', '#2ecc71', '#9b59b6', '#f1c40f', '#1abc9c', '#e67e22', '#95a5a6', '#d35400', '#34495e'];
+  function setFlagPreview(url) {
+    $('#facFlagPreview').innerHTML = url ? `<img src="${esc(url)}" alt="">` : '<span class="hint">no flag</span>';
+  }
+  $('#facFlagFile').onchange = () => {
+    const file = $('#facFlagFile').files[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { toast('Flag files must be 5 MB or smaller'); $('#facFlagFile').value = ''; return; }
+    $('#facFlagAsset').value = '';
+    $('#facFlagGrid').querySelectorAll('.cell').forEach(x => x.classList.remove('selected'));
+    setFlagPreview(URL.createObjectURL(file));
+  };
+  $('#facFlagNone').onclick = () => { $('#facFlagAsset').value = ''; $('#facFlagFile').value = ''; $('#facFlagGrid').querySelectorAll('.cell').forEach(x => x.classList.remove('selected')); setFlagPreview(null); $('#facFlagNone').dataset.cleared = '1'; };
+  $('#factionForm').onsubmit = async e => {
+    e.preventDefault();
+    const id = $('#facId').value;
+    const file = $('#facFlagFile').files[0];
+    const body = { name: $('#facName').value, color: $('#facColor').value };
+    const asset = $('#facFlagAsset').value;
+    if (asset) body.flagAsset = asset;
+    else if (!file && ($('#facFlagNone').dataset.cleared === '1' || !id)) body.flagAsset = null;
+    try {
+      let f = id ? (await api.patch(`${base}/factions/${id}`, body)).faction : (await api.post(`${base}/factions`, body)).faction;
+      if (file) { const fd = new FormData(); fd.append('file', file); f = (await api.post(`${base}/factions/${f.id}/flag`, fd)).faction; }
+      $('#facFlagNone').dataset.cleared = '';
+      closeModals();
+      await loadFactions(); await loadMembers(); await loadMarkers();
+      toast(`Saved ${f.name}`);
+    } catch (err) { toast(err.message); }
+  };
+  $('#facDelete').onclick = async () => {
+    const id = $('#facId').value;
+    const f = state.factions.find(x => x.id === Number(id));
+    if (!f || !confirm(`Delete faction "${f.name}"? Members and units keep the name as plain text.`)) return;
+    try { await api.del(`${base}/factions/${id}`); closeModals(); await loadFactions(); } catch (err) { toast(err.message); }
+  };
+
+  // ---- Marker + drawing lists --------------------------------------------------------------------
+  function visBadge(o) {
+    let s = o.locked ? '<span class="badge" title="Locked: clicks pass through; unlock from its popup">🔒</span>' : '';
+    if (o.adminOnly) s += '<span class="badge gm" title="Hidden from players">GM</span>';
+    else if (o.visibleTo && o.visibleTo.length) s += `<span class="vis" title="Visible to ${esc(o.visibleTo.join(', '))}">${esc(o.visibleTo.join(', '))}</span>`;
+    return s;
+  }
+
+  function lockLinks(kind, items) {
+    if (state.role !== 'gm' || !items.length) return '';
+    const ids = items.map(i => i.id);
+    return ` <a href="#" class="hint" data-lockall="${kind}" data-ids="${ids.join(',')}" data-locked="1">lock all</a> · <a href="#" class="hint" data-lockall="${kind}" data-ids="${ids.join(',')}" data-locked="0">unlock all</a>`;
+  }
+
+  async function bulkLock(kind, ids, locked) {
+    try {
+      const body = { locked };
+      body[kind === 'shape' ? 'shapeIds' : 'markerIds'] = ids;
+      const d = await api.post(`${base}/lock`, body);
+      toast(`${locked ? 'Locked' : 'Unlocked'} ${d.changed}`);
+    } catch (err) { toast(err.message); }
+  }
+
+  function renderMarkerLists() {
+    const q = $('#searchInput').value.trim().toLowerCase();
+    const match = s => !q || String(s || '').toLowerCase().includes(q);
+    const all = [...state.markers.values()].filter(m => match(m.name) || match(m.data?.nation));
+    const groups = [];
+    const byNation = new Map();
+    for (const u of all.filter(m => m.type === 'unit')) {
+      const n = u.data?.nation || 'Unaligned';
+      if (!byNation.has(n)) byNation.set(n, []);
+      byNation.get(n).push(u);
+    }
+    for (const [n, list] of [...byNation.entries()].sort((a, b) => a[0].localeCompare(b[0]))) groups.push([`Units · ${n}`, list, flagImg(n)]);
+    const towns = all.filter(m => m.type === 'town' || m.type === 'poi'), scenery = all.filter(m => m.type === 'scenery');
+    groups.push(['Towns & points of interest', towns, lockLinks('marker', towns)]);
+    groups.push(['Players', all.filter(m => m.type === 'player')]);
+    groups.push(['Scenery', scenery, lockLinks('marker', scenery)]);
+    let html = groups.filter(([, list]) => list.length).map(([title, list, extra]) => `
+      <div class="section">${extra && extra.startsWith('<img') ? extra : ''} ${esc(title)} <span class="hint">(${list.length})</span>${extra && !extra.startsWith('<img') ? extra : ''}</div>
+      <ul class="list">${list.sort((a, b) => a.name.localeCompare(b.name)).map(m => `
+        <li class="clickable ${m.id === state.selectedId ? 'selected' : ''}" data-marker="${m.id}">
+          <span class="dot" style="background:${esc(m.color)}"></span>
+          <span class="grow">${esc(m.name)}${m.type === 'unit' && m.data?.unitType ? ` <span class="hint">${esc(m.data.unitType)}</span>` : ''}${m.type === 'town' ? ` <span class="hint">${esc(m.data?.size || '')}</span>` : ''}</span>
+          ${visBadge(m)}
+        </li>`).join('')}</ul>`).join('');
+    const shapes = [...state.shapes.values()].filter(s => match(s.label) || (!q));
+    if (shapes.length) {
+      html += `<div class="section">Drawings <span class="hint">(${shapes.length})</span>${lockLinks('shape', shapes)}</div><ul class="list">${shapes.map(s => `
+        <li class="clickable ${s.id === state.selectedShapeId ? 'selected' : ''}" data-shape="${s.id}">
+          <span class="dot" style="background:${esc(s.color)}"></span>
+          <span class="grow">${esc(s.label || (s.kind === 'area' ? 'Unnamed area' : 'Unnamed line'))} <span class="hint">${s.kind} · ${s.points.length} pts</span></span>
+          ${visBadge(s)}
+        </li>`).join('')}</ul>`;
+    }
+    $('#markerLists').innerHTML = html || '<p class="muted">No markers yet.</p>';
+    $('#markerLists').querySelectorAll('[data-lockall]').forEach(a => a.onclick = e => {
+      e.preventDefault();
+      bulkLock(a.dataset.lockall, a.dataset.ids.split(',').map(Number), a.dataset.locked === '1');
+    });
+    $('#markerLists').querySelectorAll('li[data-marker]').forEach(li => li.onclick = () => {
+      const m = state.markers.get(Number(li.dataset.marker));
+      if (!m) return;
+      renderer.centerOn(m.x, m.y, Math.max(renderer.scale, 1));
+      renderer.select(m.id);
+    });
+    $('#markerLists').querySelectorAll('li[data-shape]').forEach(li => li.onclick = () => {
+      const s = state.shapes.get(Number(li.dataset.shape));
+      if (!s) return;
+      const c = s.points.reduce((a, p) => [a[0] + p[0] / s.points.length, a[1] + p[1] / s.points.length], [0, 0]);
+      renderer.centerOn(c[0], c[1]);
+      renderer.selectShape(s.id);
+    });
+  }
+
+  function highlightList() {
+    const ids = new Set(state.selectedIds || []);
+    $$('#markerLists li').forEach(li => li.classList.toggle('selected',
+      (li.dataset.marker && ids.has(Number(li.dataset.marker))) || (li.dataset.shape && Number(li.dataset.shape) === state.selectedShapeId)));
+  }
+
+  // ---- Popup ---------------------------------------------------------------------------
+  function renderPopup() {
+    const el = $('#popup');
+    const m = state.selectedId != null ? state.markers.get(state.selectedId) : null;
+    const s = state.selectedShapeId != null ? state.shapes.get(state.selectedShapeId) : null;
+    if (!m && !s) { el.style.display = 'none'; return; }
+    el.innerHTML = m ? popupHtml(m) : shapePopupHtml(s);
+    el.style.display = 'block';
+    el.querySelectorAll('[data-act]').forEach(b => b.onclick = () => (m ? popupAction(b.dataset.act, m) : shapeAction(b.dataset.act, s)));
+    positionPopup();
+  }
+
+  function positionPopup() {
+    const el = $('#popup');
+    if (el.style.display !== 'block') return;
+    const p = state.selectedId != null ? renderer.markerScreenPos(state.selectedId) : renderer.shapeScreenPos(state.selectedShapeId);
+    if (!p) return;
+    const stage = $('#stage');
+    const W = stage.clientWidth, H = stage.clientHeight, w = el.offsetWidth, h = el.offsetHeight;
+    let x = p.x + 22, y = p.y - 24;
+    if (x + w > W - 8) x = p.x - w - 22;
+    if (x < 8) x = 8;
+    if (y + h > H - 8) y = H - 8 - h;
+    if (y < 8) y = 8;
+    el.style.left = x + 'px'; el.style.top = y + 'px';
+  }
+
+  const stat = (k, v) => (v !== undefined && v !== null && v !== '') ? `<div class="stat"><span class="muted">${k}</span><span>${esc(v)}</span></div>` : '';
+  const nationStat = n => n ? `<div class="stat"><span class="muted">Faction</span><span>${flagImg(n)} ${esc(n)}</span></div>` : '';
+
+  function popupHtml(m) {
+    const d = m.data || {};
+    let body = '';
+    if (m.iconUrl && Atlas.isRef(m.iconUrl)) body += Atlas.html(m.iconUrl, 120);
+    else if (m.iconUrl) body += `<img class="icon" src="${esc(m.iconUrl)}" alt="">`;
+    if (m.type === 'scenery') {
+      body += stat('Scale', `${d.scale ?? 1}×`) + stat('Rotation', `${d.rotation || 0}°`);
+    } else if (m.type === 'unit') {
+      body += nationStat(d.nation) + stat('Unit type', d.unitType) + stat('Attack', d.attack) + stat('Defend', d.defend)
+        + stat('Action points', d.ap) + stat('Range', d.range) + stat('Movement', d.movement)
+        + stat('Strength', d.strength !== undefined ? `${d.strength}%${d.strength <= 0 ? ' (destroyed)' : ''}` : '');
+      if (d.abilities?.length) body += `<div class="stat"><span class="muted">Abilities</span></div><ul style="margin:2px 0 4px 16px;padding:0;font-size:12px">${d.abilities.map(a => `<li>${esc(a)}</li>`).join('')}</ul>`;
+    } else if (m.type === 'town') {
+      body += stat('Size', d.size) + nationStat(d.nation);
+    } else if (m.type === 'poi') {
+      body += stat('Category', d.category);
+    }
+    const owner = m.ownerId && state.members.find(x => x.userId === m.ownerId);
+    if (owner) body += stat('Owner', owner.displayName);
+    if (m.visibleTo && m.visibleTo.length) body += stat('Visible to', m.visibleTo.join(', '));
+    if (d.notes) body += `<p class="notes">${esc(d.notes)}</p>`;
+    let actions = `<button class="small secondary" data-act="center">Center</button>`;
+    if (canEdit(m)) actions += `<button class="small" data-act="edit">Edit</button>`;
+    if (canEdit(m)) actions += `<button class="small secondary" data-act="lock" title="${m.locked ? 'Let it be selected and dragged again' : 'Clicks and drags pass through a locked token'}">${m.locked ? '🔓 Unlock' : '🔒 Lock'}</button>`;
+    if (m.type === 'unit' && canEdit(m) && (d.strength ?? 100) > 0) actions += `<button class="small danger" data-act="attack">⚔ Attack…</button>`;
+    actions += `<button class="small secondary" data-act="history">History</button>`;
+    if (state.role === 'gm') actions += `<button class="small secondary" data-act="dup">Duplicate</button>`;
+    if (canEdit(m)) actions += `<button class="small danger" data-act="del">Delete</button>`;
+    return `<h3><span class="dot" style="background:${esc(m.color)}"></span>${esc(m.name)} <span class="badge">${TYPE_LABEL[m.type] || m.type}</span>${visBadge(m)}</h3>${body}<div class="actions">${actions}</div>`;
+  }
+
+  function shapePopupHtml(s) {
+    const creator = s.createdBy && state.members.find(x => x.userId === s.createdBy);
+    let body = stat('Kind', s.kind === 'area' ? 'Area' : 'Line') + stat('Points', s.points.length);
+    if (creator) body += stat('Drawn by', creator.displayName);
+    if (s.visibleTo && s.visibleTo.length) body += stat('Visible to', s.visibleTo.join(', '));
+    if (s.kind === 'line') {
+      body += stat('Length', `${fmtNum(pathUnits(s.points))} ${state.lobby?.scaleLabel || ''}`);
+    } else {
+      body += stat('Perimeter', `${fmtNum(pathUnits([...s.points, s.points[0]]))} ${state.lobby?.scaleLabel || ''}`);
+    }
+    let actions = '';
+    if (canEditShape(s)) actions += `<button class="small" data-act="edit">Edit</button>`;
+    if (canEditShape(s)) actions += `<button class="small secondary" data-act="lock">${s.locked ? '🔓 Unlock' : '🔒 Lock'}</button>`;
+    if (canEditShape(s) && !s.locked && s.kind === 'line') actions += `<button class="small secondary" data-act="continue" title="Keep adding points at the end">Continue</button>`;
+    if (canEditShape(s)) actions += `<button class="small secondary" data-act="move" title="Drag the whole drawing to a new place">Move</button>`;
+    actions += `<button class="small secondary" data-act="history">History</button>`;
+    if (canEditShape(s)) actions += `<button class="small danger" data-act="del">Delete</button>`;
+    const hint = canEditShape(s) && !s.locked ? `<p class="hint" style="margin:6px 0 0">Drag a point to move it · grab the line to add a point · right-click (or Alt-click) a point to remove it · Move button or Shift-drag to move everything</p>`
+      : (s.locked ? '<p class="hint" style="margin:6px 0 0">Locked: clicks on the map pass through it. Unlock to edit.</p>' : '');
+    return `<h3><span class="dot" style="background:${esc(s.color)}"></span>${esc(s.label || (s.kind === 'area' ? 'Unnamed area' : 'Unnamed line'))} <span class="badge">Drawing</span>${visBadge(s)}</h3>${body}${hint}<div class="actions">${actions}</div>`;
+  }
+
+  async function popupAction(act, m) {
+    try {
+      if (act === 'center') renderer.centerOn(m.x, m.y);
+      else if (act === 'edit') openEdit(m);
+      else if (act === 'lock') { const d = await api.patch(`${base}/markers/${m.id}`, { locked: !m.locked }); upsertMarker(d.marker); }
+      else if (act === 'attack') openCombat(m);
+      else if (act === 'history') showHistoryFor('marker', m.id);
+      else if (act === 'dup') {
+        const d = await api.post(`${base}/markers`, {
+          type: m.type, name: `${m.name} (copy)`, x: m.x + 40 / renderer.scale, y: m.y + 40 / renderer.scale,
+          color: m.color, iconUrl: m.iconUrl && !m.iconUrl.startsWith('/uploads/') ? m.iconUrl : '',
+          adminOnly: m.adminOnly, visibleTo: m.visibleTo || [], ownerId: m.ownerId, data: m.data,
+        });
+        upsertMarker(d.marker); renderer.select(d.marker.id);
+      } else if (act === 'del') await deleteMarker(m);
+    } catch (err) { toast(err.message); }
+  }
+
+  async function shapeAction(act, s) {
+    try {
+      if (act === 'edit') openShapeModal(s);
+      else if (act === 'lock') { const d = await api.patch(`${base}/shapes/${s.id}`, { locked: !s.locked }); upsertShape(d.shape); }
+      else if (act === 'continue') { renderer.startDraw('line', s.points, s.id); toast('Click to add points at the end; double-click, Enter or Done to finish'); }
+      else if (act === 'move') { renderer.armMove(s.id); toast('Now drag the drawing to move it'); }
+      else if (act === 'history') showHistoryFor('shape', s.id);
+      else if (act === 'del') {
+        if (!confirm(`Delete "${s.label || 'this drawing'}"?`)) return;
+        await api.del(`${base}/shapes/${s.id}`);
+        removeShape(s.id);
+      }
+    } catch (err) { toast(err.message); }
+  }
+
+  async function deleteMarker(m) {
+    if (!confirm(`Delete "${m.name}"? (It can be restored from History.)`)) return;
+    await api.del(`${base}/markers/${m.id}`);
+    removeMarker(m.id);
+  }
+
+  // ---- Marker forms (shared by Add and Edit) ----------------------------------------
+  function formHtml(p, isGm) {
+    const ownerOpts = state.members.map(m => `<option value="${m.userId}">${esc(m.displayName)}</option>`).join('');
+    return `
+      <label>Type<select id="${p}Type" ${isGm ? '' : 'disabled'}>
+        <option value="unit">Unit / army</option><option value="town">Town</option><option value="poi">Point of interest</option><option value="player">Player</option>${isGm ? '<option value="scenery">Scenery / terrain</option>' : ''}
+      </select></label>
+      <label>Name<input id="${p}Name" maxlength="60" autocomplete="off"></label>
+      <div class="grid2">
+        <label>Colour<input id="${p}Color" type="color" value="${esc(state.member?.color || '#3498db')}"></label>
+        <label>Icon <span class="hint">(sprite, URL or file)</span><input id="${p}IconUrl" placeholder="https://… or pick a sprite" autocomplete="off"></label>
+      </div>
+      <div class="iconpreview"><span id="${p}IconPreview"></span><button type="button" class="small" data-pick="${p}">Pick sprite…</button><button type="button" class="small secondary" data-pickclear="${p}">Clear</button></div>
+      <label>Icon file <span class="hint">(optional, replaces the above)</span><input id="${p}IconFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label>
+      <div data-for="scenery">
+        <div class="grid2">
+          <label>Scale <span class="hint">(map px per sprite px)</span><input id="${p}Scale" type="number" step="any" min="0.05" max="50" value="1"></label>
+          <label>Rotation °<input id="${p}Rotation" type="number" step="any" min="0" max="359" value="0"></label>
+        </div>
+        <label class="inline"><input type="checkbox" id="${p}Flip"> Flip horizontally</label>
+        <p class="hint">Scenery is drawn at map scale: it grows and shrinks with zoom, unlike unit counters.</p>
+      </div>
+      <div data-for="unit">
+        <div class="grid2"><label>Faction<select id="${p}NationSel">${nationOptions()}</select></label><label>Unit type <a href="#" data-key title="Show all unit symbols">key</a><select id="${p}UnitTypeSel">${unitTypeOptions()}</select></label></div>
+        <label id="${p}NationCustomWrap" hidden>Custom nation<input id="${p}Nation" list="nationList" maxlength="40"></label>
+        <label id="${p}UnitTypeCustomWrap" hidden>Custom unit type<input id="${p}UnitType" maxlength="40" placeholder="e.g. Cossack sotnia"></label>
+        <div class="grid2"><label>Attack<input id="${p}Attack" type="number" step="any"></label><label>Defend<input id="${p}Defend" type="number" step="any"></label></div>
+        <div class="grid2"><label>Action points<input id="${p}Ap" type="number" step="any"></label><label>Range<input id="${p}Range" type="number" step="any"></label></div>
+        <div class="grid2"><label>Movement<input id="${p}Movement" type="number" step="any"></label><label>Strength %<input id="${p}Strength" type="number" min="0" max="100" value="100"></label></div>
+        <label>Abilities <span class="hint">(one per line)</span><textarea id="${p}Abilities" rows="2"></textarea></label>
+      </div>
+      <div data-for="town"><div class="grid2">
+        <label>Size<select id="${p}Size"><option value="capital">Capital</option><option value="city">City</option><option value="village">Village</option></select></label>
+        <label>Faction<select id="${p}TownNationSel">${nationOptions()}</select></label>
+      </div><label id="${p}TownNationCustomWrap" hidden>Custom nation<input id="${p}TownNation" list="nationList" maxlength="40"></label></div>
+      <div data-for="poi"><label>Category<input id="${p}Category" maxlength="40" placeholder="Ruins, Mine, Fortress…"></label></div>
+      <label>Notes<textarea id="${p}Notes" rows="3"></textarea></label>
+      <label class="inline"><input type="checkbox" id="${p}Locked"> Locked <span class="hint">(clicks and drags pass through; unlock from its popup)</span></label>
+      ${isGm ? `<label>Owner <span class="hint">(player allowed to move it)</span><select id="${p}Owner"><option value="">— none —</option>${ownerOpts}</select></label>
+      <label>Visible to nations <span class="hint">(comma separated, blank = everyone; owner always sees it)</span><input id="${p}VisibleTo" list="nationList" autocomplete="off" placeholder="Everyone"></label>
+      <label class="inline"><input type="checkbox" id="${p}AdminOnly"> GM only (hidden from players)</label>` : ''}`;
+  }
+
+  function toggleTypeFields(form, type, setLockDefault) {
+    form.querySelectorAll('[data-for]').forEach(div => { div.style.display = div.dataset.for === type ? '' : 'none'; });
+    if (setLockDefault) {
+      const lk = form.querySelector('[id$="Locked"]');
+      if (lk) lk.checked = ['town', 'poi', 'scenery'].includes(type);
+    }
+  }
+
+  function unitTypeOptions() {
+    const U = window.UnitTypes;
+    if (!U) return '<option value="__custom">Custom…</option>';
+    return U.categories.map(cat =>
+      `<optgroup label="${esc(cat)}">${U.LIST.filter(t => t.cat === cat).map(t => `<option value="${esc(t.name)}">${esc(t.name)}</option>`).join('')}</optgroup>`
+    ).join('') + '<option value="__custom">Custom…</option>';
+  }
+
+  /** Wire the unit-type picker: choosing "Custom…" reveals a free-text field. */
+  function bindUnitTypePicker(p) {
+    const sel = document.getElementById(p + 'UnitTypeSel'), wrap = document.getElementById(p + 'UnitTypeCustomWrap');
+    if (!sel) return;
+    sel.onchange = () => { wrap.hidden = sel.value !== '__custom'; if (!wrap.hidden) document.getElementById(p + 'UnitType').focus(); };
+    const link = sel.closest('label')?.querySelector('[data-key]');
+    if (link) link.onclick = e => { e.preventDefault(); openSymbolKey(document.getElementById(p + 'Color')?.value); };
+  }
+
+  /** Render every catalogue counter in the chosen colour and show them in a modal. */
+  async function openSymbolKey(color) {
+    const U = window.UnitTypes;
+    if (!U) return;
+    const grid = $('#keyGrid');
+    grid.className = 'keygrid';
+    grid.innerHTML = '<p class="muted">Rendering…</p>';
+    $('#keyModal').classList.add('open');
+    const col = /^#[0-9a-f]{6}$/i.test(color || '') ? color : (state.member?.color || '#3498db');
+    let html = '';
+    for (const cat of U.categories) {
+      html += `<div class="section" style="grid-column:1/-1">${esc(cat)}</div>`;
+      for (const t of U.LIST.filter(x => x.cat === cat)) {
+        const url = await renderer.counterImage(t.name, col);
+        html += `<div class="k"><img src="${url}" alt=""><span>${esc(t.name)}</span></div>`;
+      }
+    }
+    grid.innerHTML = html;
+  }
+  /** Faction/nation picker: select of factions plus a custom text field. `id` is 'Nation' or 'TownNation'. */
+  function bindNationPicker(p, id) {
+    const sel = document.getElementById(p + id + 'Sel'), wrap = document.getElementById(p + id + 'CustomWrap');
+    if (!sel) return;
+    sel.onchange = () => {
+      wrap.hidden = sel.value !== '__custom';
+      const f = factionByName(sel.value);
+      const col = document.getElementById(p + 'Color');
+      if (f && col) col.value = f.color;
+    };
+  }
+  function readNation(p, id) {
+    const sel = document.getElementById(p + id + 'Sel');
+    if (!sel) return document.getElementById(p + id)?.value ?? '';
+    return sel.value === '__custom' ? (document.getElementById(p + id)?.value ?? '') : sel.value;
+  }
+  function setNation(p, id, value) {
+    const sel = document.getElementById(p + id + 'Sel'), wrap = document.getElementById(p + id + 'CustomWrap'), txt = document.getElementById(p + id);
+    if (!sel) { if (txt) txt.value = value ?? ''; return; }
+    const known = [...sel.options].find(o => o.value && o.value !== '__custom' && o.value.toLowerCase() === String(value || '').toLowerCase());
+    if (known) { sel.value = known.value; wrap.hidden = true; txt.value = ''; }
+    else if (value) { sel.value = '__custom'; wrap.hidden = false; txt.value = value; }
+    else { sel.value = ''; wrap.hidden = true; txt.value = ''; }
+  }
+
+  function readUnitType(p) {
+    const sel = document.getElementById(p + 'UnitTypeSel');
+    if (!sel) return document.getElementById(p + 'UnitType')?.value ?? '';
+    return sel.value === '__custom' ? (document.getElementById(p + 'UnitType')?.value ?? '') : sel.value;
+  }
+  function setUnitType(p, value) {
+    const sel = document.getElementById(p + 'UnitTypeSel'), wrap = document.getElementById(p + 'UnitTypeCustomWrap'), txt = document.getElementById(p + 'UnitType');
+    if (!sel) { if (txt) txt.value = value ?? ''; return; }
+    const known = [...sel.options].find(o => o.value.toLowerCase() === String(value || '').toLowerCase());
+    if (known) { sel.value = known.value; wrap.hidden = true; txt.value = ''; }
+    else if (value) { sel.value = '__custom'; wrap.hidden = false; txt.value = value; }
+    else { sel.selectedIndex = 0; wrap.hidden = true; txt.value = ''; }
+  }
+
+  function readForm(p) {
+    const v = id => document.getElementById(p + id)?.value ?? '';
+    const type = v('Type');
+    const data = { notes: v('Notes') };
+    if (type === 'unit') Object.assign(data, {
+      nation: readNation(p, 'Nation'), unitType: readUnitType(p), attack: v('Attack'), defend: v('Defend'), ap: v('Ap'), range: v('Range'),
+      movement: v('Movement'), strength: v('Strength') === '' ? 100 : v('Strength'),
+      abilities: v('Abilities').split('\n').map(s => s.trim()).filter(Boolean),
+    });
+    if (type === 'town') Object.assign(data, { size: v('Size'), nation: readNation(p, 'TownNation') });
+    if (type === 'poi') Object.assign(data, { category: v('Category') });
+    if (type === 'scenery') Object.assign(data, { scale: v('Scale') || 1, rotation: v('Rotation') || 0, flip: !!document.getElementById(p + 'Flip')?.checked });
+    const name = v('Name').trim() || (type === 'scenery' ? sceneryName(v('IconUrl')) : '');
+    const out = { type, name, color: v('Color'), iconUrl: v('IconUrl'), data };
+    const owner = document.getElementById(p + 'Owner');
+    if (owner) out.ownerId = owner.value ? Number(owner.value) : null;
+    const ao = document.getElementById(p + 'AdminOnly');
+    if (ao) out.adminOnly = ao.checked;
+    const lk = document.getElementById(p + 'Locked');
+    if (lk) out.locked = lk.checked;
+    const vt = document.getElementById(p + 'VisibleTo');
+    if (vt) out.visibleTo = vt.value;
+    out.file = document.getElementById(p + 'IconFile')?.files?.[0] || null;
+    return out;
+  }
+
+  function fillForm(p, m) {
+    const set = (id, val) => { const el = document.getElementById(p + id); if (el) el.value = val ?? ''; };
+    const d = m.data || {};
+    set('Type', m.type); set('Name', m.name); set('Color', m.color);
+    set('IconUrl', m.iconUrl && !m.iconUrl.startsWith('/uploads/') ? m.iconUrl : '');
+    setNation(p, 'Nation', m.type === 'unit' ? d.nation : ''); setUnitType(p, d.unitType); set('Attack', d.attack); set('Defend', d.defend); set('Ap', d.ap);
+    set('Range', d.range); set('Movement', d.movement); set('Strength', d.strength ?? 100);
+    set('Abilities', (d.abilities || []).join('\n'));
+    set('Size', d.size || 'village'); setNation(p, 'TownNation', m.type === 'town' ? d.nation : ''); set('Category', d.category); set('Notes', d.notes);
+    set('Owner', m.ownerId ?? ''); set('VisibleTo', (m.visibleTo || []).join(', '));
+    set('Scale', d.scale ?? 1); set('Rotation', d.rotation ?? 0);
+    const fl = document.getElementById(p + 'Flip'); if (fl) fl.checked = !!d.flip;
+    const ao = document.getElementById(p + 'AdminOnly'); if (ao) ao.checked = !!m.adminOnly;
+    const lk = document.getElementById(p + 'Locked'); if (lk) lk.checked = !!m.locked;
+    updateIconPreview(p);
+  }
+
+  function sceneryName(ref) {
+    const p = Atlas.parse(ref);
+    return p ? `${p.sheet.label} #${p.sprite.n}` : 'Scenery';
+  }
+
+  function updateIconPreview(p) {
+    const el = document.getElementById(p + 'IconPreview');
+    const val = document.getElementById(p + 'IconUrl')?.value || '';
+    if (!el) return;
+    if (Atlas.isRef(val)) el.innerHTML = Atlas.html(val, 40);
+    else if (val) el.innerHTML = `<img src="${esc(val)}" alt="" style="max-width:40px;max-height:40px;border-radius:4px">`;
+    else el.innerHTML = '<span class="hint">Drawn symbol</span>';
+  }
+
+  /** Wire the sprite picker buttons and live preview for a form prefix. */
+  function bindIconPicker(p) {
+    const input = document.getElementById(p + 'IconUrl');
+    if (!input) return;
+    input.oninput = () => updateIconPreview(p);
+    document.querySelector(`[data-pick="${p}"]`).onclick = () => openSpritePicker(p);
+    document.querySelector(`[data-pickclear="${p}"]`).onclick = () => { input.value = ''; updateIconPreview(p); };
+    updateIconPreview(p);
+  }
+
+  // ---- Sprite picker ------------------------------------------------------------------------------
+  const picker = { prefix: null, category: null, sheet: null, tiles: false };
+  function openSpritePicker(p) {
+    if (!Atlas.data || !Atlas.data.sheets.length) { toast('No sprite atlas on this server (run scripts/extract-sprites.js)'); return; }
+    picker.prefix = p;
+    const cats = [...new Map(Atlas.data.sheets.map(s => [s.category, s.categoryLabel])).entries()];
+    const catSel = $('#spriteCategory');
+    catSel.innerHTML = cats.map(([id, label]) => `<option value="${id}">${esc(label)}</option>`).join('');
+    const current = Atlas.parse(document.getElementById(p + 'IconUrl').value);
+    picker.category = current ? current.sheet.category : (picker.category || cats[0][0]);
+    catSel.value = picker.category;
+    fillSheetSelect(current ? current.sheet.id : null);
+    $('#spriteModal').classList.add('open');
+  }
+  function fillSheetSelect(preferId) {
+    const sheets = Atlas.data.sheets.filter(s => s.category === picker.category);
+    const sel = $('#spriteSheet');
+    sel.innerHTML = sheets.map(s => `<option value="${s.id}">${esc(s.label)} (${s.sprites.filter(x => !x.tile).length})</option>`).join('');
+    picker.sheet = preferId && sheets.some(s => s.id === preferId) ? preferId : (sheets[0] && sheets[0].id);
+    sel.value = picker.sheet;
+    renderSpriteGrid();
+  }
+  function renderSpriteGrid() {
+    const sheet = Atlas.bySheet.get(picker.sheet);
+    const grid = $('#spriteGrid');
+    if (!sheet) { grid.innerHTML = ''; return; }
+    const cur = document.getElementById(picker.prefix + 'IconUrl').value;
+    const list = sheet.sprites.filter(s => picker.tiles ? true : !s.tile);
+    grid.innerHTML = list.map(s => {
+      const ref = `sprite:${sheet.id}:${s.n}`;
+      return `<div class="cell ${ref === cur ? 'selected' : ''}" data-ref="${ref}" title="${s.w}×${s.h}${s.tile ? ' tile' : ''}">${Atlas.html(ref, 70)}</div>`;
+    }).join('') || '<p class="muted">Nothing in this sheet.</p>';
+    grid.querySelectorAll('.cell').forEach(c => c.onclick = () => {
+      const input = document.getElementById(picker.prefix + 'IconUrl');
+      input.value = c.dataset.ref;
+      updateIconPreview(picker.prefix);
+      closeModals();
+    });
+  }
+  $('#spriteCategory').onchange = e => { picker.category = e.target.value; fillSheetSelect(null); };
+  $('#spriteSheet').onchange = e => { picker.sheet = e.target.value; renderSpriteGrid(); };
+  $('#spriteTiles').onchange = e => { picker.tiles = e.target.checked; renderSpriteGrid(); };
+  $('#spriteClear').onclick = () => { const input = document.getElementById(picker.prefix + 'IconUrl'); input.value = ''; updateIconPreview(picker.prefix); closeModals(); };
+
+  function renderAddForm() {
+    const form = $('#addForm');
+    const gm = state.role === 'gm';
+    form.innerHTML = `${gm ? '' : '<p class="hint">Players can place their own player marker. Ask the GM to place units and towns.</p>'}
+      ${formHtml('add', gm)}
+      <button type="submit" style="width:100%">Place at map centre</button>
+      <p class="hint">Drag markers on the map to move them. Everyone connected sees changes live.</p>`;
+    const typeSel = $('#addType');
+    if (!gm) typeSel.value = 'player';
+    toggleTypeFields(form, typeSel.value, true);
+    typeSel.onchange = () => toggleTypeFields(form, typeSel.value, true);
+    bindUnitTypePicker('add');
+    bindIconPicker('add');
+    bindNationPicker('add', 'Nation'); bindNationPicker('add', 'TownNation');
+    setNation('add', 'Nation', state.member?.nation || '');
+    form.onsubmit = async e => {
+      e.preventDefault();
+      const f = readForm('add');
+      const c = renderer.getCenterWorld();
+      try {
+        const d = await api.post(`${base}/markers`, { ...f, file: undefined, x: round1(c.x), y: round1(c.y) });
+        let marker = d.marker;
+        if (f.file) marker = (await uploadIcon(marker.id, f.file)).marker;
+        upsertMarker(marker);
+        renderer.select(marker.id);
+        form.reset();
+        if (!gm) typeSel.value = 'player';
+        typeSel.value = f.type; // keep placing the same kind of thing
+        toggleTypeFields(form, typeSel.value, true);
+        if (f.type === 'unit') setNation('add', 'Nation', f.data.nation);
+        if (f.type === 'town') setNation('add', 'TownNation', f.data.nation);
+        updateIconPreview('add');
+        toast(`Placed ${marker.name}`);
+      } catch (err) { toast(err.message); }
+    };
+  }
+
+  async function uploadIcon(markerId, file) {
+    const prepared = await prepareImage(file, { maxSide: 256, maxBytes: 300 * 1024 }).catch(() => file);
+    const fd = new FormData(); fd.append('file', prepared, prepared.name);
+    return api.post(`${base}/markers/${markerId}/icon`, fd);
+  }
+
+  function openEdit(m) {
+    const form = $('#editForm');
+    form.innerHTML = `${formHtml('edit', state.role === 'gm')}
+      <div class="row"><button type="submit">Save</button><button type="button" class="danger" id="btnEditDelete">Delete</button></div>`;
+    bindUnitTypePicker('edit');
+    bindIconPicker('edit');
+    bindNationPicker('edit', 'Nation'); bindNationPicker('edit', 'TownNation');
+    fillForm('edit', m);
+    toggleTypeFields(form, m.type);
+    $('#editType').onchange = () => toggleTypeFields(form, $('#editType').value);
+    $('#btnEditDelete').onclick = async () => { try { await deleteMarker(m); closeModals(); } catch (err) { toast(err.message); } };
+    form.onsubmit = async e => {
+      e.preventDefault();
+      const f = readForm('edit');
+      try {
+        const d = await api.patch(`${base}/markers/${m.id}`, { ...f, file: undefined });
+        let marker = d.marker;
+        if (f.file) marker = (await uploadIcon(marker.id, f.file)).marker;
+        upsertMarker(marker);
+        closeModals();
+      } catch (err) { toast(err.message); }
+    };
+    $('#editModal').classList.add('open');
+  }
+
+  function closeModals() { $$('.modal').forEach(m => m.classList.remove('open')); }
+  $$('[data-close]').forEach(b => b.onclick = closeModals);
+  $$('.modal').forEach(m => m.addEventListener('pointerdown', e => { if (e.target === m) closeModals(); }));
+
+  // ---- Shapes: create after drawing, or edit ---------------------------------------------------
+  function openShapeModal(shape, pending) {
+    state.editingShapeId = shape ? shape.id : null;
+    state.pendingShape = pending || null;
+    $('#shapeModalTitle').textContent = shape ? 'Edit drawing' : `New ${pending.kind === 'area' ? 'area' : 'line'}`;
+    $('#shapeLabel').value = shape ? shape.label : '';
+    $('#shapeColor').value = shape ? shape.color : (state.member?.color || '#f1c40f');
+    $('#shapeWidth').value = shape ? shape.width : 3;
+    $('#shapeVisibleTo').value = shape && shape.visibleTo ? shape.visibleTo.join(', ') : '';
+    $('#shapeAdminOnly').checked = !!(shape && shape.adminOnly);
+    $('#btnShapeDelete').hidden = !shape;
+    $('#shapeModal').classList.add('open');
+    setTimeout(() => $('#shapeLabel').focus(), 50);
+  }
+  $('#shapeForm').onsubmit = async e => {
+    e.preventDefault();
+    const body = {
+      label: $('#shapeLabel').value, color: $('#shapeColor').value, width: Number($('#shapeWidth').value) || 3,
+      visibleTo: $('#shapeVisibleTo').value, adminOnly: $('#shapeAdminOnly').checked,
+    };
+    try {
+      if (state.editingShapeId) {
+        const d = await api.patch(`${base}/shapes/${state.editingShapeId}`, body);
+        upsertShape(d.shape);
+      } else if (state.pendingShape) {
+        const d = await api.post(`${base}/shapes`, { ...body, kind: state.pendingShape.kind, points: state.pendingShape.points });
+        upsertShape(d.shape);
+        renderer.selectShape(d.shape.id);
+      }
+      state.pendingShape = null; state.editingShapeId = null;
+      closeModals();
+    } catch (err) { toast(err.message); }
+  };
+  $('#btnShapeDelete').onclick = async () => {
+    const s = state.shapes.get(state.editingShapeId);
+    if (!s) return;
+    await shapeAction('del', s);
+    closeModals();
+  };
+
+  // ---- Combat -------------------------------------------------------------------------------------------
+  function openCombat(attacker) {
+    const targets = [...state.markers.values()].filter(m => m.type === 'unit' && m.id !== attacker.id)
+      .map(m => ({ m, d: distanceUnits(attacker.x, attacker.y, m.x, m.y) })).sort((a, b) => a.d - b.d);
+    if (!targets.length) { toast('No other units to attack'); return; }
+    $('#combatIntro').textContent = `${attacker.name} (attack ${attacker.data?.attack ?? 0}, strength ${attacker.data?.strength ?? 100}%)`;
+    $('#combatTarget').innerHTML = targets.map(({ m, d }) =>
+      `<option value="${m.id}">${esc(m.name)} — ${esc(m.data?.nation || 'Unaligned')}, defend ${m.data?.defend ?? 0}, strength ${m.data?.strength ?? 100}% (${fmtNum(d)} ${esc(state.lobby?.scaleLabel || '')} away)</option>`).join('');
+    const c = state.lobby?.settings?.combat || { die: 20, baseLoss: 10, marginMult: 2, winnerLoss: 5 };
+    $('#combatRule').textContent = `Each side rolls d${c.die} and adds attack or defend. Loser loses ${c.baseLoss}% + ${c.marginMult}% per point of margin; winner loses ${c.winnerLoss}%.`;
+    $('#combatForm').onsubmit = async e => {
+      e.preventDefault();
+      try {
+        const d = await api.post(`${base}/combat`, { attackerId: attacker.id, defenderId: Number($('#combatTarget').value) });
+        closeModals();
+        toast(d.event.message, 6000);
+        if (!state.events.some(x => x.id === d.event.id)) { state.events.push(d.event); renderLog(true); }
+      } catch (err) { toast(err.message); }
+    };
+    $('#combatModal').classList.add('open');
+  }
+
+  // ---- Log / chat / dice ------------------------------------------------------------------------------
+  function renderLog(scroll) {
+    const el = $('#logList');
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    el.innerHTML = state.events.map(e => {
+      if (e.kind === 'chat') return `<div class="ev"><span class="who">${esc(e.displayName)}</span><span class="when">${fmtTime(e.createdAt)}</span><br>${esc(e.message)}</div>`;
+      if (e.kind === 'roll') return `<div class="ev roll"><span class="who">${esc(e.displayName)}</span> ${esc(e.message)}<span class="when">${fmtTime(e.createdAt)}</span></div>`;
+      if (e.kind === 'combat') return `<div class="ev combat">${esc(e.message)}<span class="when">${fmtTime(e.createdAt)}</span></div>`;
+      return `<div class="ev system">${esc(e.message)}<span class="when">${fmtTime(e.createdAt)}</span></div>`;
+    }).join('') || '<p class="muted">Nothing has happened yet.</p>';
+    if (scroll === undefined || atBottom || scroll) el.scrollTop = el.scrollHeight;
+  }
+  $('#chatForm').onsubmit = async e => {
+    e.preventDefault();
+    const input = $('#chatInput');
+    const message = input.value.trim();
+    if (!message) return;
+    input.value = '';
+    try { await api.post(`${base}/chat`, { message }); } catch (err) { toast(err.message); input.value = message; }
+  };
+  $('#btnRoll').onclick = async () => {
+    const expr = prompt('Roll dice (e.g. 2d6+3, d20, 3d8-1):', 'd20');
+    if (!expr) return;
+    try { await api.post(`${base}/chat`, { message: `/roll ${expr.trim().replace(/^\/?r(oll)?\s*/i, '')}` }); } catch (err) { toast(err.message); }
+  };
+
+  // ---- History -----------------------------------------------------------------------------------------
+  let historyFilter = null; // { entity, entityId } or null
+  function renderHistory() {
+    const el = $('#historyList');
+    let list = state.history;
+    let head = '';
+    if (historyFilter) {
+      list = list.filter(h => h.entity === historyFilter.entity && h.entityId === historyFilter.entityId);
+      head = `<p class="hint">Showing one ${historyFilter.entity}. <a href="#" id="historyAll">Show everything</a></p>`;
+    }
+    el.innerHTML = head + (list.map(h => {
+      const mine = h.userId === me.id;
+      const canRevert = !h.revertedBy && (state.role === 'gm' || mine);
+      const verb = h.action === 'delete' ? 'Restore' : (h.action === 'create' ? 'Remove' : 'Revert');
+      return `<div class="ev history ${h.revertedBy ? 'reverted' : ''}">
+        <span class="grow"><span class="who">${esc(h.displayName)}</span> ${esc(h.summary)}${h.reverts ? ' <span class="hint">(revert)</span>' : ''}<span class="when">${fmtTime(h.createdAt)}</span></span>
+        ${canRevert ? `<button class="small secondary" data-revert="${h.id}" title="${verb} this change">${verb}</button>` : (h.revertedBy ? '<span class="badge">reverted</span>' : '')}
+      </div>`;
+    }).join('') || '<p class="muted">No changes yet.</p>');
+    const all = $('#historyAll'); if (all) all.onclick = (e) => { e.preventDefault(); historyFilter = null; renderHistory(); };
+    el.querySelectorAll('[data-revert]').forEach(b => b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const d = await api.post(`${base}/history/${b.dataset.revert}/revert`);
+        toast(`Done: ${d.entry.summary}`);
+        if (d.marker) upsertMarker(d.marker);
+        if (d.shape) upsertShape(d.shape);
+        await loadHistory();
+      } catch (err) { toast(err.message); b.disabled = false; }
+    });
+  }
+  function showHistoryFor(entity, entityId) {
+    historyFilter = { entity, entityId };
+    $$('#sidebar .tabs button').find(b => b.dataset.tab === 'history').click();
+    $('#app').classList.remove('nosidebar');
+    renderHistory();
+  }
+
+  // ---- Settings (GM) -----------------------------------------------------------------------
+  function openSettings() {
+    const l = state.lobby;
+    $('#setName').value = l.name; $('#setUpp').value = l.unitsPerPx; $('#setScaleLabel').value = l.scaleLabel;
+    const c = l.settings?.combat || {};
+    $('#setDie').value = c.die ?? 20; $('#setBaseLoss').value = c.baseLoss ?? 10; $('#setMarginMult').value = c.marginMult ?? 2; $('#setWinnerLoss').value = c.winnerLoss ?? 5;
+    $('#setTokenScale').value = l.settings?.tokenScale || 1;
+    $('#setTokenMode').value = l.settings?.tokenMode || 'map';
+    $('#setJoinCode').textContent = l.joinCode || '';
+    const eb = l.settings?.earth?.borders;
+    $('#mapInfo').textContent = l.mapKind === 'image' ? `Current map: uploaded image, ${l.mapWidth} × ${l.mapHeight} px`
+      : l.mapKind === 'earth' ? `Current map: Earth (${l.settings.earth.style}, ${l.mapWidth} × ${l.mapHeight} px${eb && eb !== 'none' ? `, borders of ${eb === 'modern' ? 'today' : eb}` : ''})` : 'No map yet.';
+    fillEarthYears().then(() => {
+      if (l.settings?.earth) {
+        const e = l.settings.earth;
+        $('#earthStyle').value = e.style; $('#earthWidth').value = String(e.width);
+        $('#earthRivers').checked = e.showRivers !== false; $('#earthLakes').checked = e.showLakes !== false;
+        $('#earthBorders').value = e.borders || (e.showBorders ? 'modern' : 'none');
+        $('#earthTint').checked = e.tint !== false; $('#earthLabels').checked = e.labels !== false;
+        $('#earthGraticule').checked = !!e.showGraticule;
+      }
+    });
+    $('#btnDeleteLobby').hidden = !(l.ownerId === me.id || me.role === 'admin');
+    $('#importBordersBlock').hidden = l.mapKind !== 'earth';
+    $('#settingsModal').classList.add('open');
+  }
+  $('#btnSettings').onclick = openSettings;
+  $('#btnEmptyUpload').onclick = openSettings;
+  $('#settingsForm').onsubmit = async e => {
+    e.preventDefault();
+    try {
+      const d = await api.patch(base, {
+        name: $('#setName').value, unitsPerPx: Number($('#setUpp').value), scaleLabel: $('#setScaleLabel').value,
+        settings: {
+          tokenScale: Number($('#setTokenScale').value) || 1,
+          tokenMode: $('#setTokenMode').value,
+          combat: { die: Number($('#setDie').value), baseLoss: Number($('#setBaseLoss').value), marginMult: Number($('#setMarginMult').value), winnerLoss: Number($('#setWinnerLoss').value) },
+        },
+      });
+      state.lobby = d.lobby; applyLobby(); toast('Saved');
+    } catch (err) { toast(err.message); }
+  };
+  $('#mapForm').onsubmit = async e => {
+    e.preventDefault();
+    const file = $('#mapFile').files[0];
+    if (!file) return;
+    const btn = e.target.querySelector('button'); btn.disabled = true; btn.textContent = 'Preparing…';
+    try {
+      const prepared = await prepareImage(file, { maxSide: 8192, maxBytes: 12 * 1024 * 1024, quality: 0.92 });
+      if (prepared !== file) toast(`Image shrunk from ${Math.round(file.size / 1048576)} MB to ${Math.round(prepared.size / 1048576 * 10) / 10} MB before upload`);
+      const dims = await imageDims(prepared).catch(() => null);
+      const fd = new FormData(); fd.append('file', prepared, prepared.name);
+      if (dims) { fd.append('width', dims.width); fd.append('height', dims.height); }
+      btn.textContent = 'Uploading…';
+      const d = await api.post(`${base}/map`, fd);
+      state.lobby = d.lobby; applyLobby(); await applyMap(); toast('Map updated'); $('#mapFile').value = ''; openSettings();
+    } catch (err) { toast(err.message); }
+    finally { btn.disabled = false; btn.textContent = 'Upload'; }
+  };
+  let earthYearsLoaded = false;
+  async function fillEarthYears() {
+    if (earthYearsLoaded) return;
+    try {
+      const d = await api.get('/api/lobbies/earth/years');
+      const sel = $('#earthBorders');
+      for (const y of d.years) { const o = document.createElement('option'); o.value = String(y); o.textContent = `Borders of ${y}`; sel.appendChild(o); }
+      earthYearsLoaded = true;
+    } catch { /* leave the two default options */ }
+  }
+  $('#earthForm').onsubmit = async e => {
+    e.preventDefault();
+    if (state.lobby.mapKind === 'image' && !confirm('Replace the uploaded map image with the Earth map? Marker positions are kept as pixel coordinates, so they may no longer line up.')) return;
+    const btn = e.target.querySelector('button[type=submit]'); btn.disabled = true;
+    try {
+      const d = await api.post(`${base}/map/earth`, {
+        style: $('#earthStyle').value, width: Number($('#earthWidth').value),
+        showRivers: $('#earthRivers').checked, showLakes: $('#earthLakes').checked,
+        borders: $('#earthBorders').value, tint: $('#earthTint').checked, labels: $('#earthLabels').checked,
+        showGraticule: $('#earthGraticule').checked,
+      });
+      state.lobby = d.lobby; applyLobby(); await applyMap(); openSettings(); toast('Earth map ready');
+    } catch (err) { toast(err.message); }
+    finally { btn.disabled = false; }
+  };
+  $('#btnRotateCode').onclick = async () => {
+    if (!confirm('Generate a new join code? The old one stops working.')) return;
+    try { const d = await api.post(`${base}/code`); state.lobby.joinCode = d.joinCode; applyLobby(); openSettings(); } catch (err) { toast(err.message); }
+  };
+  $('#btnDeleteLobby').onclick = async () => {
+    if (!confirm(`Delete "${state.lobby.name}" and every marker in it? This cannot be undone.`)) return;
+    try { await api.del(base); location.replace('/lobbies.html'); } catch (err) { toast(err.message); }
+  };
+  $('#btnLeave').onclick = async () => {
+    if (!confirm('Leave this campaign?')) return;
+    try { await api.del(`${base}/members/${me.id}`); location.replace('/lobbies.html'); } catch (err) { toast(err.message); }
+  };
+
+  // ---- Client-side image preparation ----------------------------------------------------------------------
+  function imageDims(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file); const img = new Image();
+      img.onload = () => { resolve({ width: img.naturalWidth, height: img.naturalHeight }); URL.revokeObjectURL(url); };
+      img.onerror = () => { reject(new Error('bad image')); URL.revokeObjectURL(url); };
+      img.src = url;
+    });
+  }
+
+  /** Shrink an image in the browser if it is bigger than maxSide or maxBytes; returns the original otherwise. */
+  async function prepareImage(file, { maxSide, maxBytes, quality = 0.9 }) {
+    const dims = await imageDims(file);
+    const longest = Math.max(dims.width, dims.height);
+    if (longest <= maxSide && file.size <= maxBytes) return file;
+    const scale = Math.min(1, maxSide / longest);
+    const w = Math.max(1, Math.round(dims.width * scale)), h = Math.max(1, Math.round(dims.height * scale));
+    const bitmap = await createImageBitmap(file);
+    const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, w, h);
+    bitmap.close?.();
+    const type = file.type === 'image/png' && file.size <= maxBytes ? 'image/png' : 'image/webp';
+    const blob = await new Promise(r => canvas.toBlob(r, type, quality));
+    if (!blob) return file;
+    const ext = type === 'image/png' ? '.png' : '.webp';
+    return new File([blob], file.name.replace(/\.[^.]+$/, '') + ext, { type });
+  }
+
+  // ---- Toolbar / tabs / keys -----------------------------------------------------------------
+  $$('#sidebar .tabs button').forEach(b => b.onclick = () => {
+    $$('#sidebar .tabs button').forEach(x => x.classList.toggle('active', x === b));
+    $$('#sidebar .panel').forEach(p => p.classList.toggle('active', p.dataset.panel === b.dataset.tab));
+    if (b.dataset.tab === 'log') { const el = $('#logList'); el.scrollTop = el.scrollHeight; }
+  });
+  $('#btnSidebar').onclick = () => { $('#app').classList.toggle('nosidebar'); setTimeout(() => renderer.app.resize(), 50); };
+  $('#btnFit').onclick = () => renderer.fit();
+  $('#btnZoomIn').onclick = () => renderer.zoomBy(1.3);
+  $('#btnZoomOut').onclick = () => renderer.zoomBy(1 / 1.3);
+  $('#btnGrid').onclick = () => { renderer.setGrid(!renderer.grid.visible); $('#btnGrid').classList.toggle('active', renderer.grid.visible); };
+  $('#btnMeasure').onclick = () => renderer.setMeasure(renderer.mode !== 'measure');
+  $('#btnSelect').onclick = () => renderer.setSelectMode(renderer.mode !== 'select');
+  $('#btnDrawLine').onclick = () => (renderer.mode === 'draw' && renderer.draw.kind === 'line') ? renderer.cancelMode() : renderer.startDraw('line');
+  $('#btnDrawArea').onclick = () => (renderer.mode === 'draw' && renderer.draw.kind === 'area') ? renderer.cancelMode() : renderer.startDraw('area');
+  $('#btnModeUndo').onclick = () => renderer.modeUndo();
+  $('#btnModeClear').onclick = () => renderer.modeClear();
+  $('#btnModeDone').onclick = () => { if (!renderer.finishDraw()) toast('Add more points first'); };
+  $('#btnModeCancel').onclick = () => renderer.cancelMode();
+  $('#searchInput').oninput = renderMarkerLists;
+  if (window.innerWidth < 800) $('#app').classList.add('nosidebar');
+
+  document.addEventListener('keydown', e => {
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
+    if (e.key === 'Escape') {
+      if ($$('.modal.open').length) { closeModals(); return; }
+      if (renderer.mode) { renderer.cancelMode(); return; }
+      renderer.select(null);
+      return;
+    }
+    if (e.key === 'Enter' && renderer.mode === 'draw' && !typing) { e.preventDefault(); renderer.finishDraw(); return; }
+    if (typing) return;
+    if (e.key === 'm' || e.key === 'M') $('#btnMeasure').click();
+    if (e.key === 's' || e.key === 'S') $('#btnSelect').click();
+    if (e.key === 'g' || e.key === 'G') $('#btnGrid').click();
+    if (e.key === 'f' || e.key === 'F') renderer.fit();
+    if (e.key === 'l' || e.key === 'L') $('#btnDrawLine').click();
+    if (e.key === 'a' || e.key === 'A') $('#btnDrawArea').click();
+    if ((e.key === 'z' || e.key === 'Z') && renderer.mode) renderer.modeUndo();
+    if (e.key === 'Delete') {
+      if ((state.selectedIds || []).length > 1) {
+        const ms = state.selectedIds.map(id => state.markers.get(id)).filter(m => m && canEdit(m));
+        if (ms.length && confirm(`Delete ${ms.length} selected tokens? (They can be restored from History.)`)) {
+          (async () => { for (const m of ms) { try { await api.del(`${base}/markers/${m.id}`); removeMarker(m.id); } catch (err) { toast(err.message); } } })();
+        }
+      } else if (state.selectedId != null) {
+        const m = state.markers.get(state.selectedId);
+        if (m && canEdit(m)) deleteMarker(m).catch(err => toast(err.message));
+      } else if (state.selectedShapeId != null) {
+        const s = state.shapes.get(state.selectedShapeId);
+        if (s && canEditShape(s)) shapeAction('del', s);
+      }
+    }
+  });
+
+  // ---- Go ---------------------------------------------------------------------------------------
+  try {
+    await loadLobby();
+    await loadFactions();
+    await loadMarkers();
+    await loadShapes();
+    await loadEvents();
+    await loadHistory();
+    connectWs();
+  } catch (err) {
+    if (err.status === 403 || err.status === 404) { alert(err.message); location.replace('/lobbies.html'); }
+    else toast(err.message);
+  }
+})();

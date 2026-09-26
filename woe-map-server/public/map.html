@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WoE Strategy Map</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <a class="back" href="/lobbies.html" title="Back to campaigns">←</a>
+      <button id="btnSidebar" class="secondary small" title="Toggle sidebar">☰</button>
+      <h1 id="lobbyName">Loading…</h1>
+      <div id="presence" title="Online now"></div>
+      <div class="toolgroup">
+        <button id="btnSelect" class="secondary small" title="Select several tokens: drag a box (S). Shift-drag on the map does the same anytime">⬚</button>
+        <button id="btnMeasure" class="secondary small" title="Measure distance (M)">📏</button>
+        <button id="btnDrawLine" class="secondary small" title="Draw a line (L)">〰</button>
+        <button id="btnDrawArea" class="secondary small" title="Draw an area (A)">▱</button>
+        <button id="btnGrid" class="secondary small" title="Toggle grid (G)">▦</button>
+        <button id="btnFit" class="secondary small" title="Fit map to screen (F)">⛶</button>
+        <button id="btnNotify" class="secondary small" title="Notifications when something happens while this tab is in the background">🔕</button>
+        <button id="btnSettings" class="secondary small" title="Campaign settings" hidden>⚙</button>
+      </div>
+    </header>
+
+    <aside id="sidebar">
+      <div class="tabs">
+        <button data-tab="markers" class="active">Markers</button>
+        <button data-tab="add">Add</button>
+        <button data-tab="members">Members</button>
+        <button data-tab="log">Log</button>
+        <button data-tab="history">History</button>
+      </div>
+      <div class="panel active" data-panel="markers">
+        <input id="searchInput" placeholder="Search markers and drawings…" autocomplete="off">
+        <div id="markerLists"></div>
+      </div>
+      <div class="panel" data-panel="add">
+        <form id="addForm"></form>
+      </div>
+      <div class="panel" data-panel="members">
+        <div id="joinCodeBlock" hidden></div>
+        <div class="section">Factions <span style="float:right;margin-top:-4px"><button id="btnSeedFactions" class="small secondary" hidden title="Create factions from the powers of a historical year">Seed from history…</button> <button id="btnAddFaction" class="small" hidden>+ Add</button></span></div>
+        <ul id="factionsList" class="list"></ul>
+        <p class="hint" id="factionsHint">Factions give units and players a flag. Members are assigned to a faction from their row below.</p>
+        <div class="section">Members</div>
+        <ul id="membersList" class="list"></ul>
+        <p><button id="btnLeave" class="danger small">Leave campaign</button></p>
+      </div>
+      <div class="panel" data-panel="log">
+        <div id="logList" class="log"></div>
+        <form id="chatForm" class="row" style="margin-top:8px">
+          <input id="chatInput" placeholder="Say something, or /roll 2d6+3" maxlength="500" autocomplete="off">
+          <button type="button" id="btnRoll" class="small secondary" title="Roll dice">🎲</button>
+          <button type="submit" class="small">Send</button>
+        </form>
+      </div>
+      <div class="panel" data-panel="history">
+        <p class="hint">Every change to markers and drawings. GMs can revert any entry; players can revert their own.</p>
+        <div id="historyList" class="log"></div>
+      </div>
+    </aside>
+
+    <main id="stage">
+      <div id="hud">
+        <button id="btnZoomIn" class="small" title="Zoom in">+</button>
+        <button id="btnZoomOut" class="small" title="Zoom out">−</button>
+        <span id="zoomLabel" class="badge">100%</span>
+        <span id="rendererLabel" class="badge" title="Renderer"></span>
+      </div>
+      <div id="modeHud">
+        <span id="modeText">Click points on the map</span>
+        <button id="btnModeUndo" class="small secondary">Undo</button>
+        <button id="btnModeClear" class="small secondary">Clear</button>
+        <button id="btnModeDone" class="small">Done</button>
+        <button id="btnModeCancel" class="small secondary">Cancel</button>
+      </div>
+      <div id="emptyMap">
+        <div class="card">
+          <h3>No map image yet</h3>
+          <p class="muted" id="emptyMapText">The game master has not uploaded a map for this campaign.</p>
+          <button id="btnEmptyUpload" class="small" hidden>Upload a map</button>
+        </div>
+      </div>
+      <div id="popup"></div>
+    </main>
+  </div>
+
+  <datalist id="nationList"></datalist>
+
+  <div id="editModal" class="modal">
+    <div class="card">
+      <button class="close" data-close>×</button>
+      <h2>Edit marker</h2>
+      <form id="editForm"></form>
+    </div>
+  </div>
+
+  <div id="shapeModal" class="modal">
+    <div class="card">
+      <button class="close" data-close>×</button>
+      <h2 id="shapeModalTitle">New drawing</h2>
+      <form id="shapeForm">
+        <label>Label <span class="hint">(optional)</span><input id="shapeLabel" maxlength="60" autocomplete="off" placeholder="Front line, supply route, claimed territory…"></label>
+        <div class="grid2">
+          <label>Colour<input id="shapeColor" type="color" value="#f1c40f"></label>
+          <label>Line width<input id="shapeWidth" type="number" min="1" max="20" value="3"></label>
+        </div>
+        <div id="shapeGmFields">
+          <label>Visible to nations <span class="hint">(comma separated, blank = everyone)</span><input id="shapeVisibleTo" list="nationList" autocomplete="off" placeholder="Everyone"></label>
+          <label class="inline"><input type="checkbox" id="shapeAdminOnly"> GM only (hidden from players)</label>
+        </div>
+        <div class="row"><button type="submit">Save</button><button type="button" class="danger" id="btnShapeDelete" hidden>Delete</button></div>
+      </form>
+    </div>
+  </div>
+
+  <div id="seedModal" class="modal">
+    <div class="card" style="max-width:640px">
+      <button class="close" data-close>×</button>
+      <h2>Seed factions from history</h2>
+      <div class="row">
+        <label style="flex:0 0 200px">Year<select id="seedYear"></select></label>
+        <p class="hint" style="flex:1">One faction per sovereign power. Flags are matched to the bundled set by name where possible; you can change any of them afterwards.</p>
+      </div>
+      <div class="row" style="margin:6px 0"><button type="button" class="small secondary" id="seedAll">Select all</button><button type="button" class="small secondary" id="seedNone">Select none</button><span class="hint" id="seedCount" style="flex:1;text-align:right"></span></div>
+      <div id="seedList" class="log" style="max-height:50vh;overflow:auto"></div>
+      <div class="row" style="margin-top:10px"><button type="button" id="seedCreate">Create selected factions</button></div>
+    </div>
+  </div>
+
+  <div id="factionModal" class="modal">
+    <div class="card" style="max-width:640px">
+      <button class="close" data-close>×</button>
+      <h2 id="factionModalTitle">New faction</h2>
+      <form id="factionForm">
+        <input type="hidden" id="facId">
+        <div class="grid2">
+          <label>Name<input id="facName" maxlength="60" required autocomplete="off" placeholder="e.g. German Empire"></label>
+          <label>Colour <span class="hint">(default for its units)</span><input id="facColor" type="color" value="#3498db"></label>
+        </div>
+        <div class="section">Flag</div>
+        <div class="row" style="align-items:flex-start">
+          <div id="facFlagPreview" class="flagpreview"></div>
+          <div style="flex:1">
+            <label>Upload your own <span class="hint">(PNG, JPEG, WebP or GIF, max 5 MB)</span><input id="facFlagFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label>
+            <button type="button" id="facFlagNone" class="small secondary">No flag</button>
+          </div>
+        </div>
+        <p class="hint">Or pick a bundled flag:</p>
+        <div id="facFlagGrid" class="flaggrid"></div>
+        <input type="hidden" id="facFlagAsset">
+        <div class="row" style="margin-top:10px"><button type="submit">Save faction</button><button type="button" class="danger" id="facDelete" hidden>Delete faction</button></div>
+      </form>
+    </div>
+  </div>
+
+  <div id="memberModal" class="modal">
+    <div class="card">
+      <button class="close" data-close>×</button>
+      <h2 id="memberModalTitle">Edit member</h2>
+      <form id="memberForm">
+        <input type="hidden" id="memId">
+        <label>Faction<select id="memNation"></select></label>
+        <label id="memNationCustomWrap" hidden>Custom nation name<input id="memNationCustom" maxlength="40"></label>
+        <div class="grid2">
+          <label>Colour<input id="memColor" type="color"></label>
+          <label>Role<select id="memRole"><option value="player">Player</option><option value="gm">Game master</option></select></label>
+        </div>
+        <button type="submit">Save</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="spriteModal" class="modal">
+    <div class="card" style="max-width:860px">
+      <button class="close" data-close>×</button>
+      <h2>Choose a sprite</h2>
+      <div class="row" style="margin-bottom:8px">
+        <select id="spriteCategory"></select>
+        <select id="spriteSheet"></select>
+        <label class="inline" style="margin:0;flex:0 0 auto"><input type="checkbox" id="spriteTiles"> grid tiles</label>
+        <button type="button" id="spriteClear" class="small secondary">No sprite</button>
+      </div>
+      <div id="spriteGrid" class="spritegrid"></div>
+      <p class="hint">Click a sprite to use it. Tokens show it as-is with their faction flag above; scenery uses it at map scale.</p>
+    </div>
+  </div>
+
+  <div id="keyModal" class="modal">
+    <div class="card" style="max-width:720px">
+      <button class="close" data-close>×</button>
+      <h2>Unit symbol key</h2>
+      <p class="hint">Counters take the nation colour as background. Pick these names as the unit type, or type your own; unknown names fall back to a short abbreviation.</p>
+      <div id="keyGrid"></div>
+    </div>
+  </div>
+
+  <div id="combatModal" class="modal">
+    <div class="card">
+      <button class="close" data-close>×</button>
+      <h2>Attack</h2>
+      <p id="combatIntro" class="muted"></p>
+      <form id="combatForm">
+        <label>Target<select id="combatTarget"></select></label>
+        <p class="hint" id="combatRule"></p>
+        <button type="submit" class="danger">Roll for combat</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="settingsModal" class="modal">
+    <div class="card">
+      <button class="close" data-close>×</button>
+      <h2>Campaign settings</h2>
+      <form id="settingsForm">
+        <label>Name<input id="setName" maxlength="60" required></label>
+        <div class="grid2">
+          <label>Map units per pixel<input id="setUpp" type="number" step="any" min="0.000001" required></label>
+          <label>Unit label<input id="setScaleLabel" maxlength="12" placeholder="km"></label>
+        </div>
+        <p class="hint">Used by the measure tool. Example: if 100 px on your map is 25 km, enter 0.25 and "km".</p>
+        <div class="grid2">
+          <label>Token sizing<select id="setTokenMode"><option value="map">Scale with the map (shrink when zoomed out)</option><option value="screen">Fixed size on screen</option></select></label>
+          <label>Token size <span class="hint">(1 = normal, 2 = double)</span><input id="setTokenScale" type="number" step="any" min="0.5" max="3" value="1"></label>
+        </div>
+        <div class="section">Combat</div>
+        <div class="grid2">
+          <label>Die size (d?)<input id="setDie" type="number" min="2" max="100" value="20"></label>
+          <label>Base strength loss %<input id="setBaseLoss" type="number" min="0" max="100" value="10"></label>
+          <label>Extra loss per margin point<input id="setMarginMult" type="number" min="0" max="20" step="any" value="2"></label>
+          <label>Winner's loss %<input id="setWinnerLoss" type="number" min="0" max="100" value="5"></label>
+        </div>
+        <p class="hint">Each side rolls the die and adds attack or defend. The loser loses base + margin × extra; the winner loses the winner's loss. Ties cost both half the base.</p>
+        <button type="submit">Save</button>
+      </form>
+      <div class="section">Map</div>
+      <p class="hint" id="mapInfo"></p>
+      <form id="mapForm" class="row">
+        <input type="file" id="mapFile" accept="image/png,image/jpeg,image/webp,image/gif" required>
+        <button type="submit" class="secondary">Upload image</button>
+      </form>
+      <p class="hint">Large images are shrunk in your browser to at most 8192 px on the longest side and re-encoded before upload, so phones are not sent 40 MB files.</p>
+      <div class="section">Or use the Earth</div>
+      <form id="earthForm">
+        <div class="grid2">
+          <label>Style<select id="earthStyle"><option value="atlas">Atlas (blue &amp; green)</option><option value="parchment">Parchment</option><option value="dark">Dark</option></select></label>
+          <label>Detail (map width in px)<select id="earthWidth"><option value="4096">4096 (fast)</option><option value="8192" selected>8192</option><option value="16384">16384</option><option value="32768">32768 (fine placement)</option></select></label>
+        </div>
+        <label>Borders<select id="earthBorders"><option value="none">None</option><option value="modern">Present day</option></select></label>
+        <label class="inline"><input type="checkbox" id="earthTint" checked> Tint each power's territory (historical borders)</label>
+        <label class="inline"><input type="checkbox" id="earthLabels" checked> Country names when zoomed in (historical borders)</label>
+        <label class="inline"><input type="checkbox" id="earthRivers" checked> Rivers</label>
+        <label class="inline"><input type="checkbox" id="earthLakes" checked> Lakes</label>
+        <label class="inline"><input type="checkbox" id="earthGraticule"> Latitude / longitude grid</label>
+        <button type="submit" class="secondary">Use Earth map</button>
+        <p class="hint">Vector coastlines, lakes and rivers from Natural Earth (1:50m, public domain), drawn in WebGL so they stay sharp at any zoom. Replaces any uploaded image. The measure tool then reports true great-circle kilometres.</p>
+      </form>
+      <div id="importBordersBlock" hidden>
+        <div class="section">Editable borders</div>
+        <p class="hint">Turn a year's borders into locked area drawings, one per country, so you can reshape them like any drawing (unlock, then grab the line). Countries are simplified to at most 300 points each.</p>
+        <div class="row">
+          <button type="button" id="btnImportBordersView" class="small secondary">Import countries in the current view</button>
+          <button type="button" id="btnImportBordersAll" class="small secondary">Import the whole world</button>
+        </div>
+        <label class="inline"><input type="checkbox" id="importHideLayer" checked> Hide the built-in border layer afterwards</label>
+      </div>
+      <div class="section">Join code</div>
+      <p><span class="code" id="setJoinCode"></span> <button id="btnRotateCode" class="small secondary">New code</button></p>
+      <div class="section">Danger zone</div>
+      <button id="btnDeleteLobby" class="danger">Delete campaign</button>
+    </div>
+  </div>
+
+  <script src="/vendor/pixi/pixi.min.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/atlas.js"></script>
+  <script src="/js/units.js"></script>
+  <script src="/js/earth.js"></script>
+  <script src="/js/map-renderer.js"></script>
+  <script src="/js/map.js"></script>
+</body>
+</html>
