@@ -65,6 +65,35 @@
           <div class="section">Factions</div>
           <div id="factionTable"></div>
           <p><button id="btnEditTreasuries" class="small secondary">Edit treasuries…</button></p>
+          <div class="section">Diplomacy</div>
+          <div id="diploQueue"></div>
+          <form id="relationForm" class="row" style="flex-wrap:wrap;gap:4px;margin-top:6px">
+            <select id="relA" style="width:auto;margin:0;padding:4px 6px"></select>
+            <select id="relStatus" style="width:auto;margin:0;padding:4px 6px"><option value="war">at war with</option><option value="peace">at peace with</option><option value="alliance">allied with</option></select>
+            <select id="relB" style="width:auto;margin:0;padding:4px 6px"></select>
+            <button type="submit" class="small secondary">Set</button>
+          </form>
+          <div id="relationList" class="hint"></div>
+          <div class="section">Territory</div>
+          <div id="territoryTools">
+            <div class="row" style="flex-wrap:wrap;gap:4px" id="territoryEarthRow">
+              <select id="terrYear" style="width:auto;margin:0;padding:4px 6px"></select>
+              <button type="button" id="btnTerrSeed" class="small secondary" title="Give each faction the states of that year that carry its name; the rest becomes neutral">Assign borders of that year</button>
+            </div>
+            <div class="row" style="flex-wrap:wrap;gap:4px;margin-top:6px">
+              <span class="hint">Selected drawing →</span>
+              <select id="terrAssignFaction" style="width:auto;margin:0;padding:4px 6px"></select>
+              <button type="button" id="btnTerrAssign" class="small secondary" title="Select an area drawing on the map first">Assign</button>
+            </div>
+            <div class="row" style="flex-wrap:wrap;gap:4px;margin-top:6px">
+              <span class="hint">Brush</span>
+              <select id="terrBrushFaction" style="width:auto;margin:0;padding:4px 6px"></select>
+              <input id="terrBrushKm" type="number" min="1" max="5000" value="60" style="width:64px;margin:0;padding:4px 6px" title="Radius in km">
+              <button type="button" id="btnTerrBrush" class="small secondary">Paint…</button>
+            </div>
+            <p style="margin-top:8px"><button type="button" id="btnTerrClear" class="small danger">Clear all territories</button></p>
+            <p class="hint">Land units carve territory as they advance into enemy or neutral ground; naval and air units never do. Nodes, factories and towns follow the ground they stand on.</p>
+          </div>
           <details class="sub"><summary>Rules</summary>
             <form id="rulesForm">
               <div class="grid2">

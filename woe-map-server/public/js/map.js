@@ -78,6 +78,7 @@
         const d = await api.post(`${base}/markers/move`, { moves: moves.map(m => ({ id: m.id, x: round1(m.x), y: round1(m.y) })) });
         for (const m of d.markers) upsertMarker(m);
         if (d.errors.length) { toast(d.errors.join('; ')); await loadMarkers(); }
+        if (d.note) toast(d.note);
       } else {
         const d = await api.patch(`${base}/markers/${id}`, { x: round1(x), y: round1(y) });
         upsertMarker(d.marker);
@@ -188,11 +189,24 @@
       $('#modeText').textContent = `Placing ${r ? r.name.toLowerCase() : 'resource'} nodes (+${state.placing.yield}/turn) for ${quickNation() || 'no one'}: click the map. Esc to stop.`;
       return;
     }
+    if (state.placing.brush) {
+      const b = state.placing.brush;
+      $('#modeText').textContent = `Territory brush: each click ${b.factionId ? 'gives ' + b.name : 'makes neutral'} a ${b.km} km circle. Esc to stop.`;
+      return;
+    }
     const t = state.placing.type;
     $('#modeText').textContent = `Placing ${quickNation() || 'unaligned'} ${t.unit}: click the map (next: ${nextQuickName(t)}). Esc to stop.`;
   }
   renderer.addEventListener('mapclick', async e => {
     if (!state.placing || state.role !== 'gm') return;
+    if (state.placing.brush) {
+      const b = state.placing.brush;
+      try {
+        const r = await api.post(`${base}/game/territory/brush`, { factionId: b.factionId, x: round1(e.detail.x), y: round1(e.detail.y), radiusKm: b.km });
+        if (r.flipped) toast(`${r.flipped} place${r.flipped === 1 ? '' : 's'} changed hands`, 1500);
+      } catch (err) { toast(err.message); }
+      return;
+    }
     if (state.placing.resource) {
       const r = window.GameData?.byKey[state.placing.resource];
       const nation = quickNation();
@@ -261,6 +275,25 @@
     } else {
       await renderer.setMap(l.mapUrl, l.mapWidth, l.mapHeight);
     }
+    if (renderer.territoryViews.size && renderer.earth?.tintLayer) renderer.earth.tintLayer.visible = false;
+  }
+
+  /** Game mode: draw the faction territories (fetched once, then kept up to date over the socket). */
+  async function loadTerritories() {
+    if (!gameOn()) { renderer.setTerritories([], true); return; }
+    try {
+      const d = await api.get(`${base}/game/territories`);
+      renderer.setFactionInfo(state.factions);
+      renderer.setTerritories(d.territories, true);
+    } catch (err) { console.warn('territories', err); }
+  }
+
+  /** GM territory brush: click the map to paint (or erase, factionId 0) a circle of the given radius. */
+  function armBrush(factionId, km, name) {
+    disarmPlacing();
+    state.placing = { brush: { factionId, km, name } };
+    renderer.app.canvas.style.cursor = 'crosshair';
+    updatePlaceHud();
   }
 
   async function loadMarkers() {
@@ -355,6 +388,7 @@
   }
 
   function reapplyFlags() {
+    renderer.setFactionInfo(state.factions);
     for (const m of state.markers.values()) {
       const url = flagFor(m);
       if (url !== m.flagUrl) { m.flagUrl = url; renderer.upsert(m); }
@@ -476,6 +510,8 @@
         case 'factions': await loadFactions(); await loadMembers(); await loadMarkers(); if (gameOn()) GameUI.load().catch(() => {}); break;
         case 'game': GameUI.onGame(msg.game); break;
         case 'faction': GameUI.onFaction(msg); break;
+        case 'territory': renderer.setTerritories(msg.territories, !!msg.replace); GameUI.onTerritories(); break;
+        case 'relations': GameUI.onRelations(msg); break;
         case 'reload': if (msg.what === 'markers') await loadMarkers(); break;
         case 'lobby': {
           state.lobby = { ...msg.lobby, joinCode: msg.lobby.joinCode ?? state.lobby?.joinCode, yourRole: state.role };
@@ -821,7 +857,7 @@
         </li>`).join('')}</ul>`).join('');
     const shapes = [...state.shapes.values()].filter(s => match(s.label) || (!q));
     if (shapes.length) {
-      html += `<div class="section">Drawings <span class="hint">(${shapes.length})</span>${lockLinks('shape', shapes)}</div><ul class="list">${shapes.map(s => `
+      html += `<div class="section">Drawings <span class="hint">(${shapes.length})</span>${lockLinks('shape', shapes)}${state.role === 'gm' && shapes.length > 1 ? ` · <a href="#" data-delall="1" title="Delete every drawing you can see (e.g. imported borders you no longer need)">delete all</a>` : ''}</div><ul class="list">${shapes.map(s => `
         <li class="clickable ${s.id === state.selectedShapeId ? 'selected' : ''}" data-shape="${s.id}">
           <span class="dot" style="background:${esc(s.color)}"></span>
           <span class="grow">${esc(s.label || (s.kind === 'area' ? 'Unnamed area' : 'Unnamed line'))} <span class="hint">${s.kind} · ${s.points.length} pts</span></span>
@@ -833,6 +869,15 @@
       e.preventDefault();
       bulkLock(a.dataset.lockall, a.dataset.ids.split(',').map(Number), a.dataset.locked === '1');
     });
+    const delAll = $('#markerLists').querySelector('[data-delall]');
+    if (delAll) delAll.onclick = async e => {
+      e.preventDefault();
+      const list = [...state.shapes.values()];
+      if (!confirm(`Delete all ${list.length} drawings? Each deletion is recorded in the history and can be reverted one by one.`)) return;
+      let n = 0;
+      for (const s of list) { try { await api.del(`${base}/shapes/${s.id}`); removeShape(s.id); n++; } catch (err) { toast(err.message); break; } }
+      toast(`Deleted ${n} drawings`);
+    };
     $('#markerLists').querySelectorAll('li[data-marker]').forEach(li => li.onclick = () => {
       const m = state.markers.get(Number(li.dataset.marker));
       if (!m) return;
@@ -1728,8 +1773,9 @@
   try {
     await loadLobby();
     await loadFactions();
-    GameUI.init({ state, renderer, base, $, $$, flagImg, loadMarkers, isGm: () => state.role === 'gm' });
+    GameUI.init({ state, renderer, base, $, $$, flagImg, loadMarkers, loadTerritories, armBrush, isGm: () => state.role === 'gm' });
     await GameUI.load().catch(err => console.warn('game state', err));
+    await loadTerritories();
     await loadMarkers();
     await loadShapes();
     await loadEvents();

@@ -224,8 +224,43 @@ function requireGm(req, res, next) {
   next();
 }
 
-// Game layer (turns, treasuries, rules): routes/game.js, sharing this router's lobby middleware.
-router.use('/:id/game', require('./game')({ logEvent, clean, num, clamp }));
+// ---- Game layer hooks ----------------------------------------------------------------------------
+/** Change a marker's faction (territory ownership), recording history and broadcasting like any edit. */
+function setMarkerNation(req, before, nation) {
+  const data = { ...before.data, nation };
+  q.updateMarker.run(before.type, before.name, before.x, before.y, before.iconFile, before.iconFile ? null : before.iconUrl, before.color,
+    before.adminOnly ? 1 : 0, before.visibleTo ? JSON.stringify(before.visibleTo) : null, before.ownerId, JSON.stringify(data), now(), before.locked ? 1 : 0, before.id);
+  const after = access.serializeMarker(q.marker.get(before.id, req.lobby.id));
+  commitChange(req, 'marker', 'update', before, after);
+  return after;
+}
+function shapeById(req, id) { const row = q.shape.get(id, req.lobby.id); return row ? access.serializeShape(row) : null; }
+
+/**
+ * After a committed move: if game mode is on and the unit is a land unit standing on enemy or neutral
+ * ground, carve territory (docs/GAME-DESIGN.md §5.2) and flip the places inside. Returns a note or null.
+ */
+function afterMove(req, unit) {
+  const g = game.get(req.lobby.id);
+  if (!g.enabled || unit.type !== 'unit') return null;
+  const factions = q.factions.all(req.lobby.id).map(access.serializeFaction);
+  const markers = q.markers.all(req.lobby.id).map(access.serializeMarker);
+  const territory = require('../territory');
+  let r;
+  try { r = territory.capture(req.lobby, g, unit, factions, markers, (a, b) => game.relationStatus(req.lobby.id, a, b)); }
+  catch (e) { console.warn('capture failed', e); return null; }
+  if (!r) return null;
+  if (r.held) return `${unit.name} faces enemy troops: the front holds`;
+  for (const f of r.flips) setMarkerNation(req, f.marker, f.nation);
+  if (r.changed.length) hub.broadcast(req.lobby.id, { type: 'territory', territories: r.changed });
+  const ownerName = r.owner === territory.NEUTRAL ? 'neutral' : (factions.find(f => f.id === r.owner)?.name || 'enemy');
+  const what = r.cities.length ? `takes ${r.cities.join(', ')} and the surrounding ${ownerName} territory` : `advances into ${ownerName} territory`;
+  logEvent(req.lobby.id, req.user.id, 'system', `${unit.name} (${r.mine.name}) ${what}`);
+  return r.cities.length ? `${unit.name} takes ${r.cities.join(', ')}!` : null;
+}
+
+// Game layer (turns, treasuries, territories, diplomacy): routes/game.js, sharing this router's lobby middleware.
+router.use('/:id/game', require('./game')({ logEvent, clean, num, clamp, setMarkerNation, shapeById }));
 
 router.get('/:id', (req, res) => {
   const online = new Set(hub.presence(req.lobby.id).map(u => u.id));
@@ -793,7 +828,8 @@ router.patch('/:id/markers/:mid', (req, res) => {
   q.updateMarker.run(type, name, x, y, iconFile, iconUrl, color, adminOnly, visibleTo, ownerId, JSON.stringify(data), now(), locked, before.id);
   const after = access.serializeMarker(q.marker.get(before.id, req.lobby.id));
   commitChange(req, 'marker', 'update', before, after);
-  res.json({ marker: after, note: clampNote });
+  const captureNote = (x !== before.x || y !== before.y) ? afterMove(req, after) : null;
+  res.json({ marker: after, note: [clampNote, captureNote].filter(Boolean).join(' · ') || null });
 });
 
 /** Move several markers at once (group drag). Each move is validated and recorded individually. */
@@ -832,7 +868,8 @@ router.post('/:id/markers/move', (req, res) => {
     commitChange(req, 'marker', 'update', p.before, after);
     out.push(after);
   }
-  res.json({ markers: out, errors });
+  const notes = out.map(m => afterMove(req, m)).filter(Boolean);
+  res.json({ markers: out, errors, note: notes.join(' · ') || null });
 });
 
 /** Lock or unlock many markers and/or drawings at once. */

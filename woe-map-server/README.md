@@ -307,6 +307,35 @@ design, including the phases still to come (territory that follows armies, produ
 - **Rules** (Game tab): distance per movement point, waive limits, base money/RP/manpower, city and factory
   income rates, upkeep, starting stockpiles and public treasuries.
 
+### Territory and war (game mode)
+
+- **Territories** are one polygon set per faction plus neutral land, drawn as tinted fills with outlines and
+  the faction's name on every sizeable piece (a colonial empire shows its name on each colony). On the Earth
+  map, **Assign borders of that year** (Game tab → Territory) gives every state of the chosen year, and every
+  colony of it, to the faction with the same name; unmatched states become neutral. The Earth layer's own
+  historical tint hides itself while territories exist. On any map the GM can **assign a selected area
+  drawing** to a faction (or to neutral) and paint with a **brush**: pick a faction and a radius, then click
+  the map; each click gives that circle to the faction (clipped to land on the Earth map). **Clear all
+  territories** removes them.
+- **Ownership follows the ground.** Resource nodes, factories and towns take the faction whose territory
+  they stand in, at every capture, assignment or brush stroke, and again before income is paid at End turn.
+  Places at sea or outside any territory keep their faction.
+- **Advancing moves the border.** When a **land unit** (infantry, mounted, artillery, support) ends a move on
+  ground that belongs to a faction it is **at war** with, or on neutral ground (rule switch), it carves a
+  circle of the capture radius (60 km) out of that territory into its own. A city or capital of the enemy
+  inside the circle is taken with a larger district (150 km) and flips to the attacker, with a campaign
+  event. If an enemy land unit stands within the capture radius the front holds and nothing changes: contested
+  ground is settled by combat. Naval and air units never change borders, and allies can march through each
+  other. Units at zero strength do not capture. Territory is never given back automatically: the line stays
+  until someone advances the other way.
+- **Relations and diplomacy.** Every pair of factions is at peace, at war or allied. A player queues a
+  **declaration of war**, a **peace offer** or an **alliance proposal** from the Nation tab (the GM can do it
+  for any faction). Declarations and offers wait for the GM: **Approve** puts a declaration into effect at
+  once, or passes an offer to the other faction, whose player (or the GM) then **accepts** or **declines**;
+  **Block** stops it. The Game tab also sets any relation directly. Everything is logged; war declarations
+  are announced campaign-wide.
+- **Undo last turn** also restores territories and relations from the snapshot.
+
 ### Dice and combat
 
 Type `/roll 2d6+3 optional note` (or `/r d20`) in the chat, or use the 🎲 button. Rolls happen on the server with
@@ -372,6 +401,7 @@ public/
 server/game.js    game rows, faction treasuries, income, End turn / undo, movement and action-point rules
 server/routes/game.js  /api/lobbies/:id/game routes
 server/geo.js     server-side projection and great-circle distance (mirrors earth.js)
+server/territory.js  faction territories: seeding from a year, brush/assign, the capture rule, ownership of places
   js/stats-editor.js  GM table of per-campaign unit stat overrides (+/- steppers), shared by both pages
   sprites/        pixel-art sheets and atlas.json (generated)
   js/map.js       app logic: REST + WebSocket sync, sidebar, forms, popups, history, combat, notifications

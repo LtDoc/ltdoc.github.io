@@ -83,6 +83,7 @@ const EarthMap = {
     // Historical states: faint tint per power (so an empire and its colonies match), drawn over the land.
     const stateRings = [];
     const labelData = [];
+    let tintLayer = null;   // exposed so game-mode territories can hide the historical tint
     if (world) {
       const tintG = new PIXI.Graphics();
       for (const c of world.countries) {
@@ -109,7 +110,7 @@ const EarthMap = {
         }
         if (best && c.n) labelData.push({ name: c.n, sub: c.s, x: best.x, y: best.y, size: Math.sqrt(Math.abs(best.area)) });
       }
-      if (opts.tint !== false) container.addChild(tintG);
+      if (opts.tint !== false) { container.addChild(tintG); tintLayer = tintG; }
     }
 
     if (lakes) {
@@ -189,7 +190,7 @@ const EarthMap = {
     }
 
     return {
-      container, redraw,
+      container, redraw, tintLayer,
       destroy() { container.destroy({ children: true }); },
     };
   },

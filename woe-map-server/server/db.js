@@ -161,6 +161,38 @@ CREATE TABLE IF NOT EXISTS turn_snapshots (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_turn_snapshots_lobby ON turn_snapshots(lobby_id, turn);
+
+CREATE TABLE IF NOT EXISTS territories (
+  id         INTEGER PRIMARY KEY,
+  lobby_id   INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  faction_id INTEGER NOT NULL,                     -- factions.id, or 0 for neutral land
+  geometry   TEXT NOT NULL,                        -- JSON multipolygon in map pixels
+  updated_at INTEGER NOT NULL,
+  UNIQUE (lobby_id, faction_id)
+);
+
+CREATE TABLE IF NOT EXISTS relations (
+  lobby_id   INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  a          INTEGER NOT NULL,                     -- faction ids, a < b
+  b          INTEGER NOT NULL,
+  status     TEXT NOT NULL DEFAULT 'peace',        -- peace | war | alliance
+  since_turn INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (lobby_id, a, b)
+);
+
+CREATE TABLE IF NOT EXISTS diplomacy (
+  id           INTEGER PRIMARY KEY,
+  lobby_id     INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  from_faction INTEGER NOT NULL,
+  to_faction   INTEGER NOT NULL,
+  kind         TEXT NOT NULL,                      -- war | peace | alliance
+  status       TEXT NOT NULL DEFAULT 'pending',    -- pending (GM) | offered (other player) | accepted | blocked | declined | withdrawn
+  note         TEXT NOT NULL DEFAULT '',
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   INTEGER NOT NULL,
+  resolved_at  INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_diplomacy_lobby ON diplomacy(lobby_id, id);
 `);
 
 // ---- Lightweight migrations for databases created by earlier versions -------------

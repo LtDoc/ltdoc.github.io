@@ -27,6 +27,14 @@ const q = {
   markers: db.prepare('SELECT * FROM markers WHERE lobby_id = ?'),
   resetUnits: db.prepare(`UPDATE markers SET data = json_set(data, '$.movedKm', 0, '$.apUsed', 0), updated_at = ? WHERE lobby_id = ? AND type = 'unit'`),
   setStrength: db.prepare(`UPDATE markers SET data = json_set(data, '$.strength', ?), updated_at = ? WHERE id = ?`),
+  relations: db.prepare('SELECT * FROM relations WHERE lobby_id = ?'),
+  relation: db.prepare('SELECT * FROM relations WHERE lobby_id = ? AND a = ? AND b = ?'),
+  setRelation: db.prepare(`INSERT INTO relations (lobby_id, a, b, status, since_turn) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(lobby_id, a, b) DO UPDATE SET status = excluded.status, since_turn = excluded.since_turn`),
+  diplomacy: db.prepare('SELECT * FROM diplomacy WHERE lobby_id = ? ORDER BY id DESC LIMIT 100'),
+  diplomacyOne: db.prepare('SELECT * FROM diplomacy WHERE id = ? AND lobby_id = ?'),
+  insertDiplomacy: db.prepare('INSERT INTO diplomacy (lobby_id, from_faction, to_faction, kind, status, note, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
+  resolveDiplomacy: db.prepare('UPDATE diplomacy SET status = ?, resolved_at = ? WHERE id = ?'),
   insertSnapshot: db.prepare('INSERT INTO turn_snapshots (lobby_id, turn, data, created_at) VALUES (?, ?, ?, ?)'),
   lastSnapshot: db.prepare('SELECT * FROM turn_snapshots WHERE lobby_id = ? ORDER BY turn DESC, id DESC LIMIT 1'),
   deleteSnapshot: db.prepare('DELETE FROM turn_snapshots WHERE id = ?'),
@@ -129,6 +137,23 @@ function incomeFor(lobby, g, faction, state, markers) {
   return inc;
 }
 
+// ---- Relations and diplomacy ------------------------------------------------------------------
+const pair = (a, b) => (a < b ? [a, b] : [b, a]);
+function relationStatus(lobbyId, a, b) {
+  if (a === b) return 'self';
+  const [x, y] = pair(Number(a), Number(b));
+  return q.relation.get(lobbyId, x, y)?.status || 'peace';
+}
+function setRelation(lobbyId, a, b, status, turn) {
+  const [x, y] = pair(Number(a), Number(b));
+  q.setRelation.run(lobbyId, x, y, status, turn || 1);
+}
+function relations(lobbyId) { return q.relations.all(lobbyId).map(r => ({ a: r.a, b: r.b, status: r.status, sinceTurn: r.since_turn })); }
+function serializeDiplomacy(d) {
+  return { id: d.id, from: d.from_faction, to: d.to_faction, kind: d.kind, status: d.status, note: d.note, createdBy: d.created_by, createdAt: d.created_at, resolvedAt: d.resolved_at };
+}
+function diplomacy(lobbyId) { return q.diplomacy.all(lobbyId).map(serializeDiplomacy); }
+
 // ---- Turn resolution --------------------------------------------------------------------
 /**
  * End the current turn. Returns { game, summaries: [{faction, text, data}], shortages }.
@@ -140,8 +165,9 @@ function endTurn(lobby) {
   const markers = q.markers.all(lobby.id).map(access.serializeMarker);
   const fs = factionStates(lobby.id, g.settings);
   const summaries = [], strengthHits = [];
+  const territory = require('./territory');
   transaction(() => {
-    q.insertSnapshot.run(lobby.id, g.turn, JSON.stringify({ states: fs.map(x => x.state), game: { turn: g.turn, date: g.date } }), now());
+    q.insertSnapshot.run(lobby.id, g.turn, JSON.stringify({ states: fs.map(x => x.state), game: { turn: g.turn, date: g.date }, territories: territory.all(lobby.id), relations: relations(lobby.id) }), now());
     q.pruneSnapshots.run(lobby.id, lobby.id);
     for (const { faction, state } of fs) {
       const inc = incomeFor(lobby, g, faction, state, markers);
@@ -191,8 +217,14 @@ function undoTurn(lobby) {
   if (!snap) return null;
   const data = access.safeJson(snap.data);
   const g = get(lobby.id);
+  const territory = require('./territory');
   transaction(() => {
     for (const s of data.states || []) if (q.state.get(s.factionId)) writeState(s);
+    if (Array.isArray(data.territories)) {
+      territory.clear(lobby.id);
+      for (const t of data.territories) territory.write(lobby.id, t.factionId, t.geometry);
+    }
+    if (Array.isArray(data.relations)) for (const r of data.relations) setRelation(lobby.id, r.a, r.b, r.status, r.sinceTurn);
     g.turn = data.game.turn; g.date = data.game.date;
     save(g);
     q.deleteSnapshot.run(snap.id);
@@ -234,4 +266,5 @@ const PROTECTED_UNIT_FIELDS = ['attack', 'defend', 'ap', 'range', 'movement', 's
 module.exports = {
   get, save, serializeGame, ensureState, serializeState, writeState, factionStates, incomeFor, endTurn, undoTurn,
   checkMove, checkAttack, PROTECTED_UNIT_FIELDS, emptyResources, q,
+  relationStatus, setRelation, relations, diplomacy, serializeDiplomacy,
 };

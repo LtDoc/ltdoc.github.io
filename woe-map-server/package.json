@@ -16,6 +16,7 @@
     "express": "^5.1.0",
     "multer": "^2.0.0",
     "pixi.js": "^8.0.0",
+    "polygon-clipping": "^0.15.7",
     "ws": "^8.18.0"
   }
 }

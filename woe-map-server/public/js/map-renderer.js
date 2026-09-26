@@ -66,6 +66,9 @@ class MapRenderer extends EventTarget {
     this.world = new PIXI.Container();
     this.mapLayer = new PIXI.Container();
     this.gridLayer = new PIXI.Graphics();
+    this.territoryLayer = new PIXI.Container();  // game mode: faction territories (fill + outline + name)
+    this.territoryViews = new Map();             // factionId -> { geometry, g, label, color, name }
+    this.factionInfo = new Map();                // factionId -> { color, name }
     this.sceneryLayer = new PIXI.Container();   // buildings, trenches, craters: scale with the map
     this.sceneryLayer.sortableChildren = true;
     this.shapesLayer = new PIXI.Container();
@@ -75,7 +78,7 @@ class MapRenderer extends EventTarget {
     this.boomLayer = new PIXI.Container();     // explosions, above the markers
     this.overlayLayer = new PIXI.Container();
     this.handleLayer = new PIXI.Container();
-    this.world.addChild(this.mapLayer, this.gridLayer, this.sceneryLayer, this.shapesLayer, this.fxLayer, this.markerLayer, this.boomLayer, this.overlayLayer, this.handleLayer);
+    this.world.addChild(this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.shapesLayer, this.fxLayer, this.markerLayer, this.boomLayer, this.overlayLayer, this.handleLayer);
     app.stage.addChild(this.world);
 
     app.stage.eventMode = 'static';
@@ -272,6 +275,10 @@ class MapRenderer extends EventTarget {
     this._redrawMode();
     this._redrawShapes();
     this._positionHandles();
+    if (this.territoryViews.size) {
+      clearTimeout(this._territoryTimer);
+      this._territoryTimer = setTimeout(() => this._redrawTerritories(), 120);
+    }
     if (this.earth) {
       clearTimeout(this._earthTimer);
       this._earthTimer = setTimeout(() => { if (this.earth) { this.earth.redraw(this.scale); this.invalidate(); } }, 120);
@@ -730,6 +737,66 @@ class MapRenderer extends EventTarget {
     }
   }
 
+  // ---- Territories (game mode) --------------------------------------------------------
+  /** Faction colours and names for territory fills; call before setTerritories and whenever factions change. */
+  setFactionInfo(list) {
+    this.factionInfo = new Map(list.map(f => [f.id, { color: parseInt(String(f.color || '#888888').slice(1), 16) || 0x888888, name: f.name }]));
+    for (const v of this.territoryViews.values()) this._drawTerritory(v);
+  }
+  /** Replace (replace=true) or merge the territory set. Each item: { factionId, geometry }. */
+  setTerritories(list, replace) {
+    if (replace) { for (const v of this.territoryViews.values()) this._dropTerritory(v); this.territoryViews.clear(); }
+    for (const t of list || []) {
+      let v = this.territoryViews.get(t.factionId);
+      if (!t.geometry || !t.geometry.length) { if (v) { this._dropTerritory(v); this.territoryViews.delete(t.factionId); } continue; }
+      if (!v) {
+        v = { factionId: t.factionId, g: new PIXI.Graphics(), labels: [] };
+        v.g.eventMode = 'none';
+        this.territoryLayer.addChild(v.g);
+        this.territoryViews.set(t.factionId, v);
+      }
+      v.geometry = t.geometry;
+      this._drawTerritory(v);
+    }
+    // The Earth's own political tint would fight with territories: hide it while any exist.
+    if (this.earth && this.earth.tintLayer) this.earth.tintLayer.visible = this.territoryViews.size === 0;
+    this.invalidate();
+  }
+  _dropTerritory(v) { this.territoryLayer.removeChild(v.g, ...v.labels); v.g.destroy(); for (const l of v.labels) l.destroy(); v.labels = []; }
+  _redrawTerritories() { for (const v of this.territoryViews.values()) this._drawTerritory(v); this.invalidate(); }
+  _drawTerritory(v) {
+    const info = this.factionInfo.get(v.factionId);
+    const neutral = v.factionId === 0;
+    const color = neutral ? 0x9aa5a1 : (info ? info.color : 0x888888);
+    const s = this.scale, g = v.g;
+    g.clear();
+    // Every sizeable piece gets its own name (a colonial empire is many pieces), like the Earth layer's state labels.
+    const pieces = [];
+    for (const poly of v.geometry) {
+      if (!poly.length) continue;
+      g.poly(poly[0].flat()).fill({ color, alpha: neutral ? 0.1 : 0.3 });
+      for (let i = 1; i < poly.length; i++) g.poly(poly[i].flat()).cut();
+      g.poly(poly[0].flat()).stroke({ width: 1.6 / s, color, alpha: 0.95 });
+      for (let i = 1; i < poly.length; i++) g.poly(poly[i].flat()).stroke({ width: 1.6 / s, color, alpha: 0.95 });
+      if (!neutral && info) {
+        const size = Math.sqrt(ringArea(poly[0]));
+        if (size * s > 90) pieces.push({ c: ringCentroid(poly[0]), size });
+      }
+    }
+    pieces.sort((a, b) => b.size - a.size);
+    while (v.labels.length < pieces.length) {
+      const t = new PIXI.Text({ text: '', style: { ...LABEL_STYLE, fontSize: 14, fontWeight: '700', fontStyle: 'italic' }, resolution: 2 });
+      t.eventMode = 'none'; t.anchor.set(0.5); t.alpha = 0.85;
+      this.territoryLayer.addChild(t); v.labels.push(t);
+    }
+    v.labels.forEach((t, i) => {
+      const p = pieces[i];
+      t.visible = !!p;
+      if (!p) return;
+      t.text = info.name; t.position.set(p.c[0], p.c[1]); t.scale.set(1 / s);
+    });
+  }
+
   // ---- Movement range ring (game mode) ----------------------------------------------
   /** Draw the remaining-movement circle (world units) around a unit being dragged. */
   showRange(x, y, radius, exhausted) {
@@ -1021,6 +1088,21 @@ class MapRenderer extends EventTarget {
     }
     return tex;
   }
+}
+
+function ringArea(ring) {
+  let a = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) a += (ring[j][0] + ring[i][0]) * (ring[j][1] - ring[i][1]);
+  return Math.abs(a / 2);
+}
+function ringCentroid(ring) {
+  let a = 0, cx = 0, cy = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const f = ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+    a += f; cx += (ring[j][0] + ring[i][0]) * f; cy += (ring[j][1] + ring[i][1]) * f;
+  }
+  if (!a) return ring[0];
+  return [cx / (3 * a), cy / (3 * a)];
 }
 
 /** Ease a view's scale towards target; returns true while still moving (snaps when close). */

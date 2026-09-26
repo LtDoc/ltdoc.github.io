@@ -118,6 +118,13 @@ details.sub > summary .hint { text-transform: none; letter-spacing: 0; }
 .resicon { width: 18px; height: 18px; vertical-align: -4px; margin-right: 6px; image-rendering: auto; }
 .reskey { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; border: 1px solid rgba(255,255,255,.25); }
 .hintlist { margin: 4px 0 0 16px; padding: 0; font-size: 12px; color: var(--muted); }
+.rel { display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.rel.war { background: rgba(231,76,60,.25); color: #ff9f80; }
+.rel.peace { background: rgba(255,255,255,.08); color: var(--muted); }
+.rel.alliance { background: rgba(46,204,113,.22); color: #7ee2a8; }
+.diplo { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 4px 0; border-bottom: 1px solid #3d566e; font-size: 12px; line-height: 1.2; }
+.diplo button.small { padding: 2px 6px; font-size: 11px; }
+.diplo .grow { flex: 1; min-width: 120px; }
 .qalist { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 6px; }
 .qalist .section { grid-column: 1 / -1; margin: 10px 0 2px; }
 .qa { display: flex; align-items: center; gap: 6px; padding: 3px 6px; background: var(--panel2); text-align: left; font-size: 12px; line-height: 1.15; border: 1px solid transparent; min-height: 36px; }

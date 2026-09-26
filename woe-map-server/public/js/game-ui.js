@@ -22,12 +22,120 @@ const GameUI = (() => {
     $('#btnEditTreasuries').onclick = openTreasuryEditor;
     $('#turnForm').onsubmit = saveTurn;
     $('#rulesForm').onsubmit = saveRules;
+    $('#relationForm').onsubmit = setRelation;
+    $('#btnTerrSeed').onclick = seedTerritories;
+    $('#btnTerrAssign').onclick = assignDrawing;
+    $('#btnTerrBrush').onclick = () => {
+      const sel = $('#terrBrushFaction');
+      ctx.armBrush(Number(sel.value) || 0, Number($('#terrBrushKm').value) || 60, sel.options[sel.selectedIndex]?.textContent || 'neutral');
+    };
+    $('#btnTerrClear').onclick = clearTerritories;
+    // Diplomacy buttons live inside re-rendered panels: delegate.
+    document.addEventListener('click', e => {
+      const b = e.target.closest('[data-diplo]');
+      if (!b) return;
+      const [action, id] = b.dataset.diplo.split(':');
+      if (action === 'propose') proposeDiplomacy(b.dataset.kind, Number(b.dataset.to), b.dataset.from ? Number(b.dataset.from) : undefined);
+      else diplomacyAct(Number(id), action);
+    });
+    fetch('/api/lobbies/earth/years').then(r => r.json()).then(d => {
+      $('#terrYear').innerHTML = (d.years || []).map(y => `<option value="${y}" ${y === 1914 ? 'selected' : ''}>${y}</option>`).join('');
+    }).catch(() => {});
   }
 
   async function load() {
     const d = await api.get(`${ctx.base}/game`);
     ctx.state.game = d.game; ctx.state.gameFactions = d.factions; ctx.state.myFactionId = d.myFactionId; ctx.state.canUndo = d.canUndo;
+    ctx.state.relations = d.relations || []; ctx.state.diplomacy = d.diplomacy || []; ctx.state.hasTerritories = !!d.hasTerritories;
     refresh();
+  }
+  function onRelations(msg) {
+    ctx.state.relations = msg.relations || []; ctx.state.diplomacy = msg.diplomacy || [];
+    renderNation(); renderGameTab();
+  }
+  function onTerritories() { ctx.state.hasTerritories = ctx.renderer.territoryViews.size > 0; renderGameTab(); }
+
+  // ---- Relations helpers ------------------------------------------------------------------
+  function relStatus(a, b) {
+    if (a === b) return 'self';
+    const [x, y] = a < b ? [a, b] : [b, a];
+    return (ctx.state.relations || []).find(r => r.a === x && r.b === y)?.status || 'peace';
+  }
+  const relBadge = s => `<span class="rel ${s}">${s === 'war' ? 'war' : s === 'alliance' ? 'allied' : 'peace'}</span>`;
+  const factionName = id => (ctx.state.gameFactions || []).find(x => x.faction.id === id)?.faction.name || (id === 0 ? 'neutral' : `#${id}`);
+  const openBetween = (a, b) => (ctx.state.diplomacy || []).find(d => ['pending', 'offered'].includes(d.status) && ((d.from === a && d.to === b) || (d.from === b && d.to === a)));
+  const KIND_LABEL = { war: 'declaration of war', peace: 'peace offer', alliance: 'alliance proposal' };
+
+  /** Diplomacy block for the Nation tab: every other faction with its status and the actions this viewer may take. */
+  function diplomacyHtml(e) {
+    const me = e.faction.id;
+    const actor = ctx.isGm() || ctx.state.myFactionId === me;
+    const others = (ctx.state.gameFactions || []).filter(x => x.faction.id !== me);
+    if (!others.length) return '';
+    const from = ctx.isGm() ? ` data-from="${me}"` : '';
+    const rows = others.map(x => {
+      const st = relStatus(me, x.faction.id), open = openBetween(me, x.faction.id);
+      let act = '';
+      if (actor && !open) {
+        if (st !== 'war') act += `<button class="small danger" data-diplo="propose" data-kind="war" data-to="${x.faction.id}"${from} title="Declare war (queued for the GM to approve)">War</button>`;
+        if (st === 'war') act += `<button class="small secondary" data-diplo="propose" data-kind="peace" data-to="${x.faction.id}"${from} title="Offer peace">Peace</button>`;
+        if (st === 'peace') act += `<button class="small secondary" data-diplo="propose" data-kind="alliance" data-to="${x.faction.id}"${from} title="Propose an alliance">Ally</button>`;
+      } else if (open) act = `<span class="hint">${open.status === 'pending' ? 'awaiting the GM' : 'awaiting an answer'}</span>`;
+      return `<div class="diplo"><span class="grow">${ctx.flagImg(x.faction.name)} ${esc(x.faction.name)}</span>${relBadge(st)}${act}</div>`;
+    }).join('');
+    const mine = (ctx.state.diplomacy || []).filter(d => ['pending', 'offered'].includes(d.status) && (d.from === me || d.to === me));
+    const items = mine.map(d => {
+      const incoming = d.to === me;
+      let act = '';
+      if (incoming && d.status === 'offered' && actor) act = `<button class="small" data-diplo="accept:${d.id}">Accept</button><button class="small secondary" data-diplo="decline:${d.id}">Decline</button>`;
+      else if (!incoming && actor) act = `<button class="small secondary" data-diplo="withdraw:${d.id}">Withdraw</button>`;
+      const text = incoming ? `${esc(factionName(d.from))}: ${KIND_LABEL[d.kind]}${d.status === 'pending' ? ' (with the GM)' : ''}` : `To ${esc(factionName(d.to))}: ${KIND_LABEL[d.kind]}, ${d.status === 'pending' ? 'awaiting the GM' : 'awaiting their answer'}`;
+      return `<div class="diplo"><span class="grow">${text}</span>${act}</div>`;
+    }).join('');
+    return `<div class="section">Diplomacy</div>${rows}${items ? `<div class="section">Open proposals</div>${items}` : ''}`;
+  }
+
+  async function proposeDiplomacy(kind, to, from) {
+    const label = { war: `Queue a declaration of war on ${factionName(to)}? The GM decides whether it goes through.`, peace: `Offer peace to ${factionName(to)}? The GM reviews it, then they answer.`, alliance: `Propose an alliance to ${factionName(to)}? The GM reviews it, then they answer.` }[kind];
+    if (!confirm(label)) return;
+    try { await api.post(`${ctx.base}/game/diplomacy`, { kind, toFactionId: to, fromFactionId: from }); toast('Sent to the GM'); }
+    catch (err) { toast(err.message); }
+  }
+  async function diplomacyAct(id, action) {
+    try { await api.post(`${ctx.base}/game/diplomacy/${id}/${action}`, {}); }
+    catch (err) { toast(err.message); }
+  }
+  async function setRelation(e) {
+    e.preventDefault();
+    const { $ } = ctx;
+    try { await api.patch(`${ctx.base}/game/relations`, { a: Number($('#relA').value), b: Number($('#relB').value), status: $('#relStatus').value }); }
+    catch (err) { toast(err.message); }
+  }
+
+  // ---- Territory tools (GM) ------------------------------------------------------------------
+  async function seedTerritories() {
+    const { $ } = ctx;
+    const year = Number($('#terrYear').value);
+    if (!year) { toast('No historical borders bundled'); return; }
+    if (ctx.state.hasTerritories && !confirm(`Replace every territory with the borders of ${year}?`)) return;
+    try {
+      const d = await api.post(`${ctx.base}/game/territory/seed-earth`, { year });
+      toast(`${d.assigned.length} states assigned, ${d.unassigned.length} neutral${d.flipped ? `, ${d.flipped} places changed hands` : ''}`, 4000);
+      await ctx.loadTerritories();
+    } catch (err) { toast(err.message); }
+  }
+  async function assignDrawing() {
+    const { $, state } = ctx;
+    if (state.selectedShapeId == null) { toast('Select an area drawing on the map first'); return; }
+    try {
+      const d = await api.post(`${ctx.base}/game/territory/assign`, { shapeId: state.selectedShapeId, factionId: Number($('#terrAssignFaction').value) || 0 });
+      toast(d.flipped ? `Assigned; ${d.flipped} places changed hands` : 'Assigned');
+    } catch (err) { toast(err.message); }
+  }
+  async function clearTerritories() {
+    if (!confirm('Remove every territory? Ownership of places stays as it is until you assign new borders.')) return;
+    try { await api.post(`${ctx.base}/game/territory/clear`, {}); await ctx.loadTerritories(); }
+    catch (err) { toast(err.message); }
   }
   function onGame(game) {
     const was = ctx.state.game;
@@ -116,6 +224,7 @@ const GameUI = (() => {
       ${inc.notes && inc.notes.length ? `<details class="sub"><summary>Where it comes from</summary><ul class="hintlist">${inc.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul></details>` : ''}
       <div class="section">Forces <span class="hint">(${units.length})</span></div>
       ${Object.keys(cats).length ? `<table class="treasury"><tbody>${Object.entries(cats).map(([c, v]) => `<tr><td>${esc(c)}</td><td class="num">${v.n}</td><td class="hint">${v.moved ? `${v.moved} moved` : ''}${v.spent ? `${v.moved ? ', ' : ''}${v.spent} attacked` : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="hint">No units on the map.</p>'}
+      ${diplomacyHtml(e)}
       ${lastTurn ? `<div class="section">Last turn</div><p class="hint">${esc(lastTurn.message)}</p>` : ''}`;
   }
 
@@ -141,6 +250,20 @@ const GameUI = (() => {
       $('#factionTable').innerHTML = list.length ? `<table class="treasury"><thead><tr><th>Faction</th><th class="num">Money</th><th class="num">RP</th><th class="num">Units</th></tr></thead><tbody>${
         list.map(x => `<tr><td>${ctx.flagImg(x.faction.name)} ${esc(x.faction.name)}</td><td class="num">${x.state ? fmt(x.state.money) : '·'}</td><td class="num">${x.state ? fmt(x.state.rp) : '·'}</td><td class="num">${x.unitCount}</td></tr>`).join('')
       }</tbody></table>` : '<p class="hint">No factions yet.</p>';
+      // Diplomacy queue and relation setter.
+      const pending = (state.diplomacy || []).filter(d => d.status === 'pending');
+      $('#diploQueue').innerHTML = pending.length ? pending.map(d => `<div class="diplo"><span class="grow">${esc(factionName(d.from))} → ${esc(factionName(d.to))}: ${KIND_LABEL[d.kind]}${d.note ? ` <span class="hint">${esc(d.note)}</span>` : ''}</span><button class="small" data-diplo="approve:${d.id}">Approve</button><button class="small secondary" data-diplo="block:${d.id}">Block</button></div>`).join('')
+        : '<p class="hint">No proposals waiting for you. Players queue declarations and offers from their Nation tab.</p>';
+      const opts = list.map(x => `<option value="${x.faction.id}">${esc(x.faction.name)}</option>`).join('');
+      for (const id of ['#relA', '#relB', '#terrAssignFaction', '#terrBrushFaction']) {
+        const sel = $(id), cur = sel.value;
+        sel.innerHTML = (id === '#terrAssignFaction' || id === '#terrBrushFaction' ? '<option value="0">neutral</option>' : '') + opts;
+        if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+      }
+      if ($('#relB').options.length > 1 && $('#relA').value === $('#relB').value) $('#relB').selectedIndex = 1;
+      const rels = (state.relations || []).filter(r => r.status !== 'peace');
+      $('#relationList').innerHTML = rels.length ? rels.map(r => `${esc(factionName(r.a))} ${relBadge(r.status)} ${esc(factionName(r.b))}`).join(' · ') : 'Everyone is at peace.';
+      $('#territoryEarthRow').hidden = state.lobby?.mapKind !== 'earth';
     }
     // Rules form (only overwrite fields the GM is not typing in).
     const s = game.settings;
@@ -280,7 +403,7 @@ const GameUI = (() => {
     finally { btn.disabled = false; }
   }
 
-  return { init, load, refresh, onGame, onFaction, renderNation };
+  return { init, load, refresh, onGame, onFaction, onRelations, onTerritories, renderNation };
 })();
 
 // Small helper so the modifiers table starts with every resource present.
