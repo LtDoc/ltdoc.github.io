@@ -194,6 +194,20 @@ CREATE TABLE IF NOT EXISTS diplomacy (
 );
 CREATE INDEX IF NOT EXISTS idx_diplomacy_lobby ON diplomacy(lobby_id, id);
 
+CREATE TABLE IF NOT EXISTS provinces (
+  id         INTEGER PRIMARY KEY,
+  lobby_id   INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  state      TEXT NOT NULL DEFAULT '',              -- state of the seed year the province was cut from
+  subject    TEXT NOT NULL DEFAULT '',              -- that state's overlord (colonies), if any
+  cx         REAL NOT NULL,                         -- centre in map pixels (capture and brush radii test this)
+  cy         REAL NOT NULL,
+  faction_id INTEGER NOT NULL DEFAULT 0,            -- owner, 0 = neutral
+  geometry   TEXT NOT NULL,                         -- JSON multipolygon in map pixels
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_provinces_lobby ON provinces(lobby_id);
+
 CREATE TABLE IF NOT EXISTS turn_reports (
   id         INTEGER PRIMARY KEY,
   lobby_id   INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,

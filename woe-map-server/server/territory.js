@@ -168,8 +168,8 @@ function landClip(lobby, multi) {
 // ---- Storage ---------------------------------------------------------------------------------
 function serialize(row) { return { factionId: row.faction_id, geometry: access.safeJson(row.geometry) || [], updatedAt: row.updated_at }; }
 function all(lobbyId) { return q.all.all(lobbyId).map(serialize); }
-function write(lobbyId, factionId, geometry) {
-  const g = clean(geometry);
+function write(lobbyId, factionId, geometry, opts) {
+  const g = clean(geometry, opts?.tol, opts?.minArea);
   if (!g.length) { q.remove.run(lobbyId, factionId); return { factionId, geometry: [], updatedAt: now() }; }
   q.upsert.run(lobbyId, factionId, JSON.stringify(g), now());
   return { factionId, geometry: g, updatedAt: now() };
@@ -187,21 +187,23 @@ function ownerAt(terrs, x, y) {
  * Give `multi` to `factionId` (NEUTRAL to make it unowned): subtract it from every other territory that
  * overlaps and union it into the receiver's. Returns the territories that changed (serialized).
  */
-function carve(lobbyId, factionId, multi) {
+function carve(lobbyId, factionId, multi, opts) {
   if (!multi || !multi.length) return [];
   const bb = bboxOf(multi);
   const changed = [];
   for (const t of all(lobbyId)) {
     if (t.factionId === factionId || !t.geometry.length || !overlaps(bboxOf(t.geometry), bb)) continue;
-    const next = clean(pc.difference(t.geometry, multi));
+    const next = clean(pc.difference(t.geometry, multi), opts?.tol, opts?.minArea);
     if (JSON.stringify(next) === JSON.stringify(t.geometry)) continue;   // bbox overlapped but nothing was cut
-    changed.push(write(lobbyId, t.factionId, next));
+    changed.push(write(lobbyId, t.factionId, next, opts));
   }
   const mine = q.one.get(lobbyId, factionId);
   const merged = pc.union(mine ? access.safeJson(mine.geometry) || [] : [], multi);
-  changed.push(write(lobbyId, factionId, merged));
+  changed.push(write(lobbyId, factionId, merged, opts));
   return changed;
 }
+/** Lazily required: provinces.js depends on this module. */
+const provinces = () => require('./provinces');
 
 // ---- Seeding and GM tools -------------------------------------------------------------------
 /**
@@ -209,6 +211,8 @@ function carve(lobbyId, factionId, multi) {
  * colonies) goes to the faction of the same name; the rest becomes neutral.
  */
 function seedFromYear(lobby, year, factions) {
+  // With provinces, "the borders of that year" means the states the provinces were cut from.
+  if (provinces().has(lobby.id)) return provinces().assignByState(lobby.id, factions);
   const world = earthYears().includes(Number(year)) ? loadGz(`world_${Number(year)}`) : null;
   if (!world) throw new Error('No borders bundled for that year');
   const W = lobby.map_width, H = lobby.map_height;
@@ -233,9 +237,15 @@ function seedFromYear(lobby, year, factions) {
 }
 function assignArea(lobby, factionId, points) {
   const ring = points.map(p => [r1(p[0]), r1(p[1])]);
+  if (provinces().has(lobby.id)) {
+    const ids = provinces().list(lobby.id).filter(p => pointInMulti(p.cx, p.cy, [[ring]])).map(p => p.id);
+    return provinces().give(lobby, ids, factionId);
+  }
   return carve(lobby.id, factionId, landClip(lobby, [[ring]]));
 }
+/** Brush: provinces whose centre is within km (0 = the clicked province) when provinces exist, else a circle. */
 function brush(lobby, factionId, x, y, km) {
+  if (provinces().has(lobby.id)) return provinces().give(lobby, provinces().within(lobby, x, y, km).map(p => p.id), factionId);
   return carve(lobby.id, factionId, landClip(lobby, circle(lobby, x, y, km)));
 }
 
@@ -343,21 +353,29 @@ function capture(lobby, g, unit, factions, markers, relation) {
     (() => { const f = factions.find(x => x.name.toLowerCase() === String(m.data?.nation || '').toLowerCase()); return f && relation(mine.id, f.id) === 'war'; })() &&
     geo.distance(lobby, unit.x, unit.y, m.x, m.y) <= radius);
   if (enemyNear) return { held: true, changed: [], flips: [], cities: [] };
-  let multi = circle(lobby, unit.x, unit.y, radius);
   const cities = [];
-  for (const m of markers) {
-    if (m.type !== 'town' || !['city', 'capital'].includes(m.data?.size)) continue;
-    if (String(m.data?.nation || '').toLowerCase() === mine.name.toLowerCase()) continue;
-    if (String(m.data?.nation || '').toLowerCase() !== ownerName) continue;
-    if (geo.distance(lobby, unit.x, unit.y, m.x, m.y) > radius) continue;
-    multi = pc.union(multi, circle(lobby, m.x, m.y, Number(s.cityRadiusKm) || 150));
-    cities.push(m);
+  const enemyCities = markers.filter(m => m.type === 'town' && ['city', 'capital'].includes(m.data?.size) &&
+    String(m.data?.nation || '').toLowerCase() === ownerName && String(m.data?.nation || '').toLowerCase() !== mine.name.toLowerCase() &&
+    geo.distance(lobby, unit.x, unit.y, m.x, m.y) <= radius);
+  let changed;
+  if (provinces().has(lobby.id)) {
+    // Province rule: the province under the unit and the owner's provinces whose centre is within the
+    // capture radius; an enemy city inside adds the owner's provinces within the city radius.
+    const pv = provinces();
+    const theirs = p => p.factionId === owner;
+    const ids = new Set(pv.within(lobby, unit.x, unit.y, radius, theirs).map(p => p.id));
+    const landing = pv.at(lobby.id, unit.x, unit.y);
+    if (landing && theirs(landing)) ids.add(landing.id);
+    for (const m of enemyCities) { for (const p of pv.within(lobby, m.x, m.y, Number(s.cityRadiusKm) || 150, theirs)) ids.add(p.id); cities.push(m); }
+    changed = pv.give(lobby, [...ids], mine.id);
+  } else {
+    let multi = circle(lobby, unit.x, unit.y, radius);
+    for (const m of enemyCities) { multi = pc.union(multi, circle(lobby, m.x, m.y, Number(s.cityRadiusKm) || 150)); cities.push(m); }
+    changed = carve(lobby.id, mine.id, landClip(lobby, multi));
   }
-  multi = landClip(lobby, multi);
-  const changed = carve(lobby.id, mine.id, multi);
   const flips = ownershipChanges(all(lobby.id), factions, markers).filter(f => f.nation.toLowerCase() === mine.name.toLowerCase());
   return { held: false, changed, flips, cities: cities.map(c => c.name), owner, mine };
 }
 
 module.exports = { NEUTRAL, all, write, clear, carve, circle, landClip, ownerAt, seedFromYear, assignArea, brush, ownershipChanges, capture, isLandUnit, earthYears, clean,
-  trenchOwner, trenchOwnershipChanges, trenchCover, distanceToPath, isLand, isCoastal, landFor, loadGz };
+  trenchOwner, trenchOwnershipChanges, trenchCover, distanceToPath, isLand, isCoastal, landFor, loadGz, bboxOf, pointInMulti, overlaps };

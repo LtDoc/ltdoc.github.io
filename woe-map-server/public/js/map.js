@@ -227,7 +227,8 @@
     }
     if (state.placing.brush) {
       const b = state.placing.brush;
-      $('#modeText').textContent = `Territory brush: each click ${b.factionId ? 'gives ' + b.name : 'makes neutral'} a ${b.km} km circle. Esc to stop.`;
+      const what = b.km > 0 ? (renderer.provinces?.length ? `every province within ${b.km} km` : `a ${b.km} km circle`) : 'the clicked province';
+      $('#modeText').textContent = `Territory brush: each click ${b.factionId ? 'gives ' + b.name : 'makes neutral'} ${what}. Esc to stop.`;
       return;
     }
     if (state.placing.factory) {
@@ -341,7 +342,47 @@
     updatePlaceHud();
   }
 
-  /** GM territory brush: click the map to paint (or erase, factionId 0) a circle of the given radius. */
+  /** Game mode on the Earth map: the province set (edges and names), fetched once and after regeneration. */
+  async function loadProvinces() {
+    if (!gameOn() || !isEarth()) { renderer.setProvinces([]); return; }
+    try {
+      const d = await api.get(`${base}/game/provinces`);
+      renderer.setProvinces(d.provinces || []);
+    } catch (err) { console.warn('provinces', err); }
+  }
+  /**
+   * Border drawings imported from a historical year ("Norway", "Norway (2)"…, locked areas) are redundant once
+   * provinces exist and clutter the map: remove the ones whose label is a state the provinces were cut from.
+   */
+  async function removeBorderDrawings() {
+    if (state.role !== 'gm') return 0;
+    const names = new Set((renderer.provinces || []).map(p => p.s).filter(Boolean).map(s => s.toLowerCase()));
+    if (!names.size) return 0;
+    const doomed = [...state.shapes.values()].filter(s => s.kind === 'area' && s.locked && names.has(String(s.label || '').replace(/ \(\d+\)$/, '').toLowerCase()));
+    let n = 0;
+    for (const s of doomed) { try { await api.del(`${base}/shapes/${s.id}`); removeShape(s.id); n++; } catch (err) { toast(err.message); break; } }
+    return n;
+  }
+  // Hover: name the province (and its owner) under the pointer on the HUD.
+  let hoverRaf = 0;
+  renderer.app.canvas.addEventListener('pointermove', e => {
+    if (hoverRaf || !renderer.provinces || !renderer.provinces.length) return;
+    hoverRaf = requestAnimationFrame(() => {
+      hoverRaf = 0;
+      const rect = renderer.app.canvas.getBoundingClientRect();
+      const p = renderer.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+      const prov = renderer.provinceAt(p.x, p.y);
+      const el = $('#provinceLabel');
+      if (!prov) { el.hidden = true; return; }
+      const owner = renderer.territoryOwnerAt(p.x, p.y);
+      const f = owner ? state.factions.find(x => x.id === owner) : null;
+      el.textContent = `${prov.n} · ${f ? f.name : owner === 0 ? 'neutral' : 'unclaimed'}`;
+      el.hidden = false;
+    });
+  });
+  renderer.app.canvas.addEventListener('pointerleave', () => { $('#provinceLabel').hidden = true; });
+
+  /** GM territory brush: click the map to paint (or erase, factionId 0) a circle of the given radius (0: one province). */
   function armBrush(factionId, km, name) {
     disarmPlacing();
     state.placing = { brush: { factionId, km, name } };
@@ -566,6 +607,8 @@
         case 'turn': GameUI.onTurn(msg); break;
         case 'faction': GameUI.onFaction(msg); break;
         case 'territory': renderer.setTerritories(msg.territories, !!msg.replace); GameUI.onTerritories(); break;
+        case 'provinces': await loadProvinces(); break;
+        case 'progress': GameUI.onProgress(msg); break;
         case 'relations': GameUI.onRelations(msg); break;
         case 'reload': if (msg.what === 'markers') await loadMarkers(); break;
         case 'lobby': {
@@ -1862,9 +1905,10 @@
   try {
     await loadLobby();
     await loadFactions();
-    GameUI.init({ state, renderer, base, $, $$, flagImg, loadMarkers, loadTerritories, armBrush, armFactory, notify, isGm: () => state.role === 'gm' });
+    GameUI.init({ state, renderer, base, $, $$, flagImg, loadMarkers, loadTerritories, loadProvinces, removeBorderDrawings, armBrush, armFactory, notify, isGm: () => state.role === 'gm' });
     await GameUI.load().catch(err => console.warn('game state', err));
     await loadTerritories();
+    loadProvinces();
     await loadMarkers();
     await loadShapes();
     await loadEvents();

@@ -85,7 +85,10 @@
           <div id="territoryTools">
             <div class="row" style="flex-wrap:wrap;gap:4px" id="territoryEarthRow">
               <select id="terrYear" style="width:auto;margin:0;padding:4px 6px"></select>
-              <button type="button" id="btnTerrSeed" class="small secondary" title="Give each faction the states of that year that carry its name; the rest becomes neutral">Assign borders of that year</button>
+              <button type="button" id="btnProvGen" class="small" title="Cut the land into provinces that follow that year's borders and the coast, then give each faction the states that carry its name">Cut provinces</button>
+              <label class="inline" style="margin:0" title="Rough size of a province"><input id="provSize" type="number" min="40" max="400" step="10" value="100" style="width:56px;margin:0;padding:3px 6px"> km</label>
+              <button type="button" id="btnTerrSeed" class="small secondary" title="Give each faction the provinces (or, without provinces, the states) of that year that carry its name; the rest becomes neutral">Assign borders of that year</button>
+              <span id="provProgress" class="hint" hidden></span>
             </div>
             <div class="row" style="flex-wrap:wrap;gap:4px;margin-top:6px">
               <span class="hint">Selected drawing →</span>
@@ -97,9 +100,10 @@
               <select id="terrBrushFaction" style="width:auto;margin:0;padding:4px 6px"></select>
               <input id="terrBrushKm" type="number" min="1" max="5000" value="60" style="width:64px;margin:0;padding:4px 6px" title="Radius in km">
               <button type="button" id="btnTerrBrush" class="small secondary">Paint…</button>
+              <button type="button" id="btnTerrPick" class="small secondary" title="Click single provinces to hand them to the chosen faction">Pick provinces…</button>
             </div>
-            <p style="margin-top:8px"><button type="button" id="btnTerrClear" class="small danger">Clear all territories</button></p>
-            <p class="hint">Land units carve territory as they advance into enemy or neutral ground; naval and air units never do. Nodes, factories and towns follow the ground they stand on.</p>
+            <p style="margin-top:8px"><button type="button" id="btnTerrClear" class="small danger">Clear territories and provinces</button></p>
+            <p class="hint">Land units take provinces as they advance into enemy or neutral ground; naval and air units never do. Nodes, factories and towns follow the ground they stand on.</p>
           </div>
           <details class="sub"><summary>Rules</summary>
             <form id="rulesForm">
@@ -172,6 +176,7 @@
         <button id="btnZoomOut" class="small" title="Zoom out">−</button>
         <span id="zoomLabel" class="badge">100%</span>
         <span id="turnLabel" class="badge turn" hidden></span>
+        <span id="provinceLabel" class="badge province" hidden></span>
         <span id="rendererLabel" class="badge" title="Renderer"></span>
       </div>
       <div id="modeHud">

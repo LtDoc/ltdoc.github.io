@@ -10,6 +10,8 @@ const game = require('../game');
 const GameData = require('../../public/js/game-data');
 
 const territory = require('../territory');
+const provinces = require('../provinces');
+const zlib = require('node:zlib');
 
 const production = require('../production');
 const research = require('../research');
@@ -129,9 +131,54 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
 
   router.post('/territory/clear', requireGm, (req, res) => {
     territory.clear(req.lobby.id);
+    const hadProvinces = provinces.has(req.lobby.id);
+    provinces.clear(req.lobby.id);
     hub.broadcast(req.lobby.id, { type: 'territory', territories: [], replace: true });
-    logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} cleared all territories`);
+    if (hadProvinces) hub.broadcast(req.lobby.id, { type: 'provinces' });
+    logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} cleared all territories${hadProvinces ? ' and provinces' : ''}`);
     res.json({ ok: true });
+  });
+
+  // ---- Provinces (Earth map) --------------------------------------------------------------------
+  /** The province set, gzipped (about 15k small polygons for the whole world); cached until it is regenerated. */
+  const provinceCache = new Map();   // lobbyId -> { stamp, buf }
+  router.get('/provinces', (req, res) => {
+    const list = provinces.list(req.lobby.id);
+    const stamp = list.length ? `${list.length}:${list[list.length - 1].id}` : '0';
+    let hit = provinceCache.get(req.lobby.id);
+    if (!hit || hit.stamp !== stamp) {
+      const body = JSON.stringify({ provinces: list.map(p => ({ id: p.id, n: p.name, s: p.state, x: p.cx, y: p.cy, g: p.geometry })) });
+      hit = { stamp, buf: zlib.gzipSync(Buffer.from(body, 'utf8')) };
+      provinceCache.set(req.lobby.id, hit);
+    }
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Encoding', 'gzip');
+    res.setHeader('Cache-Control', 'no-store');
+    res.end(hit.buf);
+  });
+
+  const generating = new Set();
+  router.post('/provinces/generate', requireGm, async (req, res) => {
+    if (!geo.isEarth(req.lobby)) return res.status(400).json({ error: 'Provinces need the Earth map' });
+    if (generating.has(req.lobby.id)) return res.status(409).json({ error: 'Provinces are already being generated' });
+    const year = Number(req.body?.year) || 1914, sizeKm = clamp(num(req.body?.sizeKm, 100), 40, 400);
+    generating.add(req.lobby.id);
+    const lobbyId = req.lobby.id;
+    const progress = (text, done, total) => hub.broadcast(lobbyId, { type: 'progress', task: 'provinces', text, done, total }, ws => ws.lobbyRole === 'gm');
+    res.json({ started: true });   // the rest arrives over the socket
+    try {
+      const r = await provinces.generate(req.lobby, { year, sizeKm }, progress);
+      const factions = game.q.factions.all(lobbyId).map(access.serializeFaction);
+      const a = provinces.assignByState(lobbyId, factions);
+      const flipped = applyOwnership(req);
+      logEvent(lobbyId, req.user.id, 'system', `${req.user.displayName} cut the world of ${year} into ${r.count} provinces (about ${sizeKm} km across); ${a.assigned.length} states assigned, ${a.unassigned.length} left neutral${flipped.length ? `, ${flipped.length} places changed hands` : ''}`);
+      hub.broadcast(lobbyId, { type: 'provinces' });
+      hub.broadcast(lobbyId, { type: 'territory', territories: territory.all(lobbyId), replace: true });
+      progress('Done', 1, 1);
+    } catch (e) {
+      console.warn('province generation failed', e);
+      hub.broadcast(lobbyId, { type: 'progress', task: 'provinces', text: `Failed: ${e.message}`, done: 0, total: 0, error: true }, ws => ws.lobbyRole === 'gm');
+    } finally { generating.delete(lobbyId); }
   });
 
   // ---- Production ------------------------------------------------------------------------------

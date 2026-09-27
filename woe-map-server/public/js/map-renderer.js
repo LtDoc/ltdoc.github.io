@@ -179,6 +179,7 @@ class MapRenderer extends EventTarget {
     this.mapSize = { w: opts.width, h: opts.height };
     this.earth = earth;
     this.mapLayer.addChild(earth.container);
+    earth.hidePolitical = this.territoryViews.size > 0;   // territories may have arrived before the Earth did
     earth.redraw(this.scale);
     this._drawGrid();
     this.fit();
@@ -282,6 +283,7 @@ class MapRenderer extends EventTarget {
       clearTimeout(this._territoryTimer);
       this._territoryTimer = setTimeout(() => this._redrawTerritories(), 120);
     }
+    this._syncProvinceVisibility();
     if (this.earth) {
       clearTimeout(this._earthTimer);
       this._earthTimer = setTimeout(() => { if (this.earth) { this.earth.redraw(this.scale); this.invalidate(); } }, 120);
@@ -793,9 +795,48 @@ class MapRenderer extends EventTarget {
       v.geometry = t.geometry;
       this._drawTerritory(v);
     }
-    // The Earth's own political tint would fight with territories: hide it while any exist.
-    if (this.earth && this.earth.tintLayer) this.earth.tintLayer.visible = this.territoryViews.size === 0;
+    // The Earth's own political borders and tint would fight with territories: hide them while any exist.
+    this._syncEarthPolitical();
     this.invalidate();
+  }
+  _syncEarthPolitical() {
+    if (!this.earth) return;
+    const hide = this.territoryViews.size > 0;
+    if (this.earth.hidePolitical !== hide) { this.earth.hidePolitical = hide; this.earth.redraw(this.scale); }
+    else if (this.earth.tintLayer) this.earth.tintLayer.visible = !hide;
+  }
+
+  // ---- Provinces (game mode, Earth map) --------------------------------------------------
+  /** The province set: [{ id, n, s, x, y, g }]. Draws hairline province edges and answers provinceAt(). */
+  setProvinces(list) {
+    if (this.provinceG) { this.territoryLayer.removeChild(this.provinceG); this.provinceG.destroy(); this.provinceG = null; }
+    this.provinces = (list || []).map(p => ({ ...p, bbox: multiBbox(p.g) }));
+    if (!this.provinces.length) { this.invalidate(); return; }
+    const g = new PIXI.Graphics();
+    g.eventMode = 'none';
+    for (const p of this.provinces) for (const poly of p.g) for (const ring of poly) g.poly(ring.flat());
+    g.stroke({ width: 1, pixelLine: true, color: 0x0e1a14, alpha: 0.22 });
+    this.provinceG = g;
+    this.territoryLayer.addChildAt(g, 0);
+    this._syncProvinceVisibility();
+    this.invalidate();
+  }
+  /** Province edges are detail: shown from about a third zoom, hidden at continental scale. */
+  _syncProvinceVisibility() { if (this.provinceG) this.provinceG.visible = this.scale >= 0.35; }
+  /** Province under a world point, or null. */
+  provinceAt(x, y) {
+    for (const p of this.provinces || []) {
+      const b = p.bbox;
+      if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) continue;
+      if (pointInMulti(x, y, p.g)) return p;
+    }
+    return null;
+  }
+  /** Faction id owning a world point according to the territory layer (0 neutral, null nobody). */
+  territoryOwnerAt(x, y) {
+    for (const v of this.territoryViews.values()) if (v.factionId !== 0 && pointInMulti(x, y, v.geometry)) return v.factionId;
+    for (const v of this.territoryViews.values()) if (v.factionId === 0 && pointInMulti(x, y, v.geometry)) return 0;
+    return null;
   }
   _dropTerritory(v) { this.territoryLayer.removeChild(v.g, ...v.labels); v.g.destroy(); for (const l of v.labels) l.destroy(); v.labels = []; }
   _redrawTerritories() { for (const v of this.territoryViews.values()) this._drawTerritory(v); this.invalidate(); }
@@ -811,8 +852,9 @@ class MapRenderer extends EventTarget {
       if (!poly.length) continue;
       g.poly(poly[0].flat()).fill({ color, alpha: neutral ? 0.1 : 0.3 });
       for (let i = 1; i < poly.length; i++) g.poly(poly[i].flat()).cut();
-      g.poly(poly[0].flat()).stroke({ width: 1.6 / s, color, alpha: 0.95 });
-      for (let i = 1; i < poly.length; i++) g.poly(poly[i].flat()).stroke({ width: 1.6 / s, color, alpha: 0.95 });
+      // Border: a dark line with the owner's colour inside it, drawn along every ring (holes are other people's land).
+      for (let i = 0; i < poly.length; i++) g.poly(poly[i].flat()).stroke({ width: 2.6 / s, color: 0x101c15, alpha: neutral ? 0.35 : 0.7 });
+      for (let i = 0; i < poly.length; i++) g.poly(poly[i].flat()).stroke({ width: 1.2 / s, color, alpha: neutral ? 0.5 : 0.95 });
       if (!neutral && info) {
         const size = Math.sqrt(ringArea(poly[0]));
         if (size * s > 90) pieces.push({ c: ringCentroid(poly[0]), size });
@@ -1145,6 +1187,30 @@ function ringArea(ring) {
   let a = 0;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) a += (ring[j][0] + ring[i][0]) * (ring[j][1] - ring[i][1]);
   return Math.abs(a / 2);
+}
+function multiBbox(multi) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const poly of multi || []) for (const ring of poly) for (const [x, y] of ring) {
+    if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y;
+  }
+  return [x0, y0, x1, y1];
+}
+function pointInRing(x, y, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+function pointInMulti(x, y, multi) {
+  for (const poly of multi || []) {
+    if (!poly.length || !pointInRing(x, y, poly[0])) continue;
+    let inHole = false;
+    for (let i = 1; i < poly.length; i++) if (pointInRing(x, y, poly[i])) { inHole = true; break; }
+    if (!inHole) return true;
+  }
+  return false;
 }
 function ringCentroid(ring) {
   let a = 0, cx = 0, cy = 0;

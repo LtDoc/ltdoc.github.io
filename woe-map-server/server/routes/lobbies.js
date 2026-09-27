@@ -512,7 +512,7 @@ router.post('/:id/shapes/import-borders', requireGm, (req, res) => {
   const W = req.lobby.map_width, H = req.lobby.map_height;
   const project = ([lon, lat]) => [(lon + 180) / 360 * W, (90 - lat) / 180 * H];
   const bbox = Array.isArray(b.bbox) && b.bbox.length === 4 ? b.bbox.map(Number) : null;
-  const maxPoints = clamp(num(b.maxPoints, 300), 30, 500);
+  const maxPoints = clamp(num(b.maxPoints, 800), 30, 4000);
   const minArea = (W / 400) ** 2;   // skip specks smaller than ~1/400 of the map width squared
   const existing = new Set(q.shapes.all(req.lobby.id).map(s => s.label.toLowerCase()));
   const created = [];

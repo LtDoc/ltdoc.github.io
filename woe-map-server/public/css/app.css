@@ -124,6 +124,7 @@ details.sub > summary .hint { text-transform: none; letter-spacing: 0; }
 .rel.alliance { background: rgba(46,204,113,.22); color: #7ee2a8; }
 /* Phase 5: turn reports, deadline countdown, captured places */
 .badge.turn.overdue { background: #7a2e2e; color: #ffd9d9; }
+.badge.province { background: rgba(20,30,25,.85); color: #e8f0ea; font-style: italic; }
 .deadline-quick { flex-wrap: wrap; gap: 4px; margin: 2px 0 8px; }
 .deadline-quick .hint { flex: 0 0 auto; }
 .deadline-quick button.small { padding: 2px 8px; font-size: 11px; }

@@ -211,7 +211,7 @@ function endTurn(lobby, hooks = {}) {
   const summaries = [], strengthHits = [];
   const territory = require('./territory');
   transaction(() => {
-    q.insertSnapshot.run(lobby.id, g.turn, JSON.stringify({ states: fs.map(x => x.state), game: { turn: g.turn, date: g.date }, territories: territory.all(lobby.id), relations: relations(lobby.id) }), now());
+    q.insertSnapshot.run(lobby.id, g.turn, JSON.stringify({ states: fs.map(x => x.state), game: { turn: g.turn, date: g.date }, territories: territory.all(lobby.id), relations: relations(lobby.id), provinces: require('./provinces').ownership(lobby.id) }), now());
     q.pruneSnapshots.run(lobby.id, lobby.id);
     for (const { faction, state } of fs) {
       const inc = incomeFor(lobby, g, faction, state, markers);
@@ -326,8 +326,9 @@ function undoTurn(lobby) {
     for (const s of data.states || []) if (q.state.get(s.factionId)) writeState(s);
     if (Array.isArray(data.territories)) {
       territory.clear(lobby.id);
-      for (const t of data.territories) territory.write(lobby.id, t.factionId, t.geometry);
+      for (const t of data.territories) territory.write(lobby.id, t.factionId, t.geometry, require('./provinces').CLEAN);
     }
+    if (Array.isArray(data.provinces)) require('./provinces').restoreOwnership(lobby.id, data.provinces);
     if (Array.isArray(data.relations)) for (const r of data.relations) setRelation(lobby.id, r.a, r.b, r.status, r.sinceTurn);
     g.turn = data.game.turn; g.date = data.game.date;
     save(g);

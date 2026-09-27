@@ -129,6 +129,20 @@ Today borders are imported as locked area drawings. That works for a static map 
 they are independent polygons with no owner and no notion of "inside". Game mode introduces **territories**:
 one multipolygon per faction plus one neutral multipolygon, stored server-side in map-pixel coordinates.
 
+**Provinces (added 27 Sep 2026).** Free-form territories carved by circles produced ugly borders: three
+border systems on top of each other, coarse historical outlines that did not meet the coastline, and
+slivers of tinted sea. The Earth map now cuts its land into **provinces** about 100 km across
+(`server/provinces.js`, GM: Game → Territory → Cut provinces): Voronoi cells around jittered seeds, one
+per major city plus a grid inside every state of the seed year, each cell clipped to the Natural Earth
+coast and cut along the state border, so every bit of land belongs to exactly one province, national
+borders are exact, and no province straddles a coast. Fragments merge into their neighbour; a province is
+named after the city inside it or the nearest one with a compass direction ("Reims NE"). Ownership lives
+per province and the faction territories are derived from the provinces a faction holds, so rendering,
+"inside or outside", trench ownership, income and undo are unchanged. Borders are drawn once from the
+territory layer (a dark line with the owner's colour inside it, hairline province edges when zoomed in);
+the Earth layer's own political borders, tint and labels hide while territories exist. Hovering names the
+province and its owner. Custom (non-Earth) maps keep free-form territories for now.
+
 - **Seeding for Earth**: "Assign 1914 borders to factions" maps each state polygon from the 1914 dataset to a
   faction by the same name matching the faction seeder already uses (aliases included); unmatched states become
   neutral. Colonies use the `SUBJECTO` field (the dataset records who a territory belonged to), so British India
@@ -152,8 +166,11 @@ territory that is not its own:
    Contested ground is resolved by combat, not by who clicks first.
 3. Otherwise carve a circle of `captureRadius` (default 60 km) around the unit out of the owner's territory
    and union it into the mover's. The circle is clipped to land, so coastal advances do not paint the sea.
+   With provinces, the unit takes the province it stands in plus the owner's provinces whose centre lies
+   within `captureRadius`; borders therefore always follow province edges.
 4. **Cities**: if a **major city** lies within the circle, the capture radius around that city grows to
    `cityRadius` (default 150 km) so taking the city takes its district, and the town marker's faction flips.
+   With provinces: the owner's provinces whose centre lies within `cityRadius` of the city.
    Capitals additionally post a campaign-wide event.
 5. Resource nodes inside the carved area change hands immediately (their income counts at the next end of turn).
 
@@ -394,3 +411,6 @@ Rough size: phases 1 and 2 are each about the size of the Earth-map work; 3 and 
    site with its own industry level. Villages produce nothing.
 7. **Tech tree: the authored default**, editable in the browser.
 8. **Capture radii approved**: 60 km per unit, 150 km per city.
+9. **Provinces (27 Sep 2026).** Territory on the Earth map is made of irregular provinces about 100 km
+   across, cut along the seed year's borders and the coastline; custom maps keep free-form territories for
+   now. Capture and the GM tools work on whole provinces.

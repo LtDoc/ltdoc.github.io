@@ -13,6 +13,7 @@
     "node": ">=22.13"
   },
   "dependencies": {
+    "d3-delaunay": "^6.0.4",
     "express": "^5.1.0",
     "multer": "^2.0.0",
     "pixi.js": "^8.0.0",

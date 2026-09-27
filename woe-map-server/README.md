@@ -287,7 +287,7 @@ you want and they become factions; existing names are skipped. Add your own flag
 the power (e.g. `OttomanEmpire.png`, `France.png`) and they match automatically.
 
 **Editable borders.** Campaign settings → Editable borders converts a year's borders into locked area drawings,
-one per country (largest pieces only, simplified to 300 points), for the whole world or just the countries in the
+one per country (largest pieces only, simplified to 800 points), for the whole world or just the countries in the
 current view. They are named and tinted like the drawn layer, which is hidden afterwards so the two do not overlap.
 Unlock a country from its popup and reshape it like any drawing: drag vertices, grab the line to add one,
 right-click to remove one, Move to shift it. Every change is in History.
@@ -421,14 +421,26 @@ design is in `docs/GAME-DESIGN.md`.
 
 ### Territory and war (game mode)
 
-- **Territories** are one polygon set per faction plus neutral land, drawn as tinted fills with outlines and
-  the faction's name on every sizeable piece (a colonial empire shows its name on each colony). On the Earth
-  map, **Assign borders of that year** (Game tab → Territory) gives every state of the chosen year, and every
+- **Provinces (Earth map).** **Cut provinces** (Game tab → Territory; pick the year and a size, 100 km by
+  default) slices the land into provinces that follow that year's state borders and the coastline: one
+  around every major city plus a jittered grid inside each state, every cell clipped to the coast and cut
+  along the border, fragments merged into their neighbour. The whole world is about 15,000 provinces and
+  takes a minute or two; progress shows next to the button. Each province is named after the city inside
+  it or the nearest one with a compass direction ("Reims NE"), and hovering the map names the province and
+  its owner on the HUD. Provinces are then assigned to factions by state name, and every capture, brush
+  stroke and assignment works on whole provinces, so borders always follow province edges and never paint
+  the sea. Zoomed in, hairline province edges show inside each territory. Border drawings imported from
+  history (locked areas named after states) are removed when provinces are cut, since they would only draw
+  a second, coarser border on top.
+- **Territories** are one polygon set per faction plus neutral land (derived from the provinces when they
+  exist), drawn as tinted fills with a dark border carrying the owner's colour and the faction's name on every
+  sizeable piece. On the Earth
+  map, **Assign borders of that year** gives every state of the chosen year, and every
   colony of it, to the faction with the same name; unmatched states become neutral. The Earth layer's own
-  historical tint hides itself while territories exist. On any map the GM can **assign a selected area
-  drawing** to a faction (or to neutral) and paint with a **brush**: pick a faction and a radius, then click
-  the map; each click gives that circle to the faction (clipped to land on the Earth map). **Clear all
-  territories** removes them.
+  political borders, tint and labels hide while territories exist. On any map the GM can **assign a selected area
+  drawing** to a faction (or to neutral), paint with a **brush** (pick a faction and a radius, then click
+  the map; each click gives that circle, or the provinces whose centre is inside it, to the faction) or
+  **pick provinces** one click at a time. **Clear territories and provinces** removes them all.
 - **Ownership follows the ground.** Resource nodes, factories and towns take the faction whose territory
   they stand in, at every capture, assignment or brush stroke, and again before income is paid at End turn.
   Places at sea or outside any territory keep their faction.

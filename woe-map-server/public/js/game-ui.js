@@ -29,7 +29,12 @@ const GameUI = (() => {
       const sel = $('#terrBrushFaction');
       ctx.armBrush(Number(sel.value) || 0, Number($('#terrBrushKm').value) || 60, sel.options[sel.selectedIndex]?.textContent || 'neutral');
     };
+    $('#btnTerrPick').onclick = () => {
+      const sel = $('#terrBrushFaction');
+      ctx.armBrush(Number(sel.value) || 0, 0, sel.options[sel.selectedIndex]?.textContent || 'neutral');
+    };
     $('#btnTerrClear').onclick = clearTerritories;
+    $('#btnProvGen').onclick = generateProvinces;
     $('#btnCosts').onclick = () => CostEditor.open(ctx.state.lobby, { settings: g().settings, onSaved: game => { ctx.state.game = game; refresh(); loadProduction(); } });
     $('#btnSeedCities').onclick = seedCities;
     $('#btnGenResources').onclick = generateResources;
@@ -169,9 +174,37 @@ const GameUI = (() => {
     } catch (err) { toast(err.message); }
   }
   async function clearTerritories() {
-    if (!confirm('Remove every territory? Ownership of places stays as it is until you assign new borders.')) return;
-    try { await api.post(`${ctx.base}/game/territory/clear`, {}); await ctx.loadTerritories(); }
+    if (!confirm('Remove every territory and province? Ownership of places stays as it is until you assign new borders.')) return;
+    try { await api.post(`${ctx.base}/game/territory/clear`, {}); await ctx.loadTerritories(); await ctx.loadProvinces(); }
     catch (err) { toast(err.message); }
+  }
+  async function generateProvinces() {
+    const { $ } = ctx;
+    const year = Number($('#terrYear').value), sizeKm = Number($('#provSize').value) || 100;
+    if (!year) { toast('No historical borders bundled'); return; }
+    if (!confirm(`Cut the world of ${year} into provinces about ${sizeKm} km across? This replaces every territory and province, removes border drawings imported from history, and takes a minute or two.`)) return;
+    try {
+      await api.post(`${ctx.base}/game/provinces/generate`, { year, sizeKm });
+      onProgress({ task: 'provinces', text: 'Starting…', done: 0, total: 1 });
+    } catch (err) { toast(err.message); }
+  }
+  /** WS `progress`: long server jobs (province generation) report here. */
+  function onProgress(msg) {
+    const { $ } = ctx;
+    if (msg.task !== 'provinces') return;
+    const el = $('#provProgress');
+    el.hidden = false;
+    el.textContent = msg.error ? msg.text : (msg.total > 1 ? `${msg.text} ${Math.round(msg.done / msg.total * 100)}%` : msg.text);
+    $('#btnProvGen').disabled = !msg.error && msg.text !== 'Done';
+    if (msg.text === 'Done') {
+      setTimeout(() => { el.hidden = true; }, 4000);
+      (async () => {
+        await ctx.loadProvinces();
+        const n = await ctx.removeBorderDrawings();
+        toast(n ? `Provinces ready; ${n} imported border drawing${n === 1 ? '' : 's'} removed` : 'Provinces ready', 4000);
+      })();
+    }
+    if (msg.error) toast(msg.text);
   }
   function onGame(game) {
     const was = ctx.state.game;
@@ -670,7 +703,7 @@ const GameUI = (() => {
       </div>`;
   }
 
-  return { init, load, refresh, onGame, onFaction, onRelations, onTerritories, onTurn, openReports, renderNation, loadProduction, buildFactoryAt };
+  return { init, load, refresh, onGame, onFaction, onRelations, onTerritories, onTurn, onProgress, openReports, renderNation, loadProduction, buildFactoryAt };
 })();
 
 // Small helper so the modifiers table starts with every resource present.

@@ -156,10 +156,12 @@ const EarthMap = {
       if (close) g.closePath();
     };
 
+    const api = { hidePolitical: false };   // game-mode territories replace the political borders and tint
     function redraw(scale) {
       const g = strokes;
       g.clear();
       const w = 1 / scale;
+      const political = !api.hidePolitical;
       if (opts.showGraticule) {
         for (let lon = -180; lon <= 180; lon += 15) { const [x] = P([lon, 0]); g.moveTo(x, 0).lineTo(x, H); }
         for (let lat = -90; lat <= 90; lat += 15) { const [, y] = P([0, lat]); g.moveTo(0, y).lineTo(W, y); }
@@ -175,24 +177,25 @@ const EarthMap = {
         for (const l of riverLines) drawPath(g, l, false);
         g.stroke({ width: Math.max(0.8 * w, Math.min(2.2 * w, 1.4 * w)), color: st.river, alpha: 0.85 });
       }
-      if (borderLines.length) {
+      if (political && borderLines.length) {
         for (const l of borderLines) drawPath(g, l, false);
         g.stroke({ width: 1.2 * w, color: st.border, alpha: 0.75 });
       }
-      if (stateRings.length) {
+      if (political && stateRings.length) {
         for (const r of stateRings) drawPath(g, r, true);
         g.stroke({ width: 1.3 * w, color: st.border, alpha: 0.8 });
       }
+      if (tintLayer) tintLayer.visible = political;
       for (const l of labels) {
         l.t.scale.set(1 / scale);
-        l.t.visible = l.size * scale > 70;   // roughly: the state spans 70+ screen px
+        l.t.visible = political && l.size * scale > 70;   // roughly: the state spans 70+ screen px
       }
     }
 
-    return {
+    return Object.assign(api, {
       container, redraw, tintLayer,
       destroy() { container.destroy({ children: true }); },
-    };
+    });
   },
 };
 
