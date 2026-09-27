@@ -259,7 +259,7 @@ class MapRenderer extends EventTarget {
 
   setTokenScale(s) { this.tokenScale = Math.max(0.5, Math.min(3, Number(s) || 1)); this.invalidate(); }
   setGameRules(rules) {
-    this.gameRules = rules && rules.enabled ? rules : null;
+    this.gameRules = rules && rules.enabled ? { turn: Number(rules.turn) || 0, ...rules } : null;
     for (const v of this.views.values()) v._refreshMovedDot();
     this.invalidate();
   }
@@ -1100,6 +1100,7 @@ class MapRenderer extends EventTarget {
       v.ring.visible = sel || v.hover;
       if (v.ring.visible) v.ring.alpha = sel ? 0.65 + 0.35 * Math.sin(t * 5) : 0.45;
       if (sel) anim = true;
+      if (v.capRing && v.capRing.visible) { v.capRing.alpha = 0.55 + 0.45 * Math.sin(t * 3 + v.phase); v.capRing.scale.set(1 + 0.06 * Math.sin(t * 3 + v.phase)); anim = true; }
     }
 
     for (const layer of [this.fxLayer, this.boomLayer]) {
@@ -1252,7 +1253,7 @@ class MarkerView {
     this.unitCat = (marker.type === 'unit' && window.UnitTypes) ? (window.UnitTypes.resolve(marker.data?.unitType)?.cat || '') : '';
     this.root.eventMode = marker.locked ? 'none' : 'static';   // locked tokens let clicks and drags pass through
     const visualKey = [marker.type, marker.color, marker.iconUrl, marker.data?.unitType, marker.data?.size,
-      marker.data?.strength, marker.adminOnly, JSON.stringify(marker.visibleTo), marker.name[0], marker.flagUrl].join('|');
+      marker.data?.strength, marker.adminOnly, JSON.stringify(marker.visibleTo), marker.name[0], marker.flagUrl, marker.data?.industry].join('|');
     if (visualKey !== this._visualKey) { this._visualKey = visualKey; this._buildBody(); }
     this._refreshMovedDot();
     if (prev && (prev.x !== marker.x || prev.y !== marker.y) && !this.dragging) {
@@ -1373,6 +1374,7 @@ class MarkerView {
   /** Game mode: a small dot on units that have moved this turn (amber) or used all their movement (red). */
   _refreshMovedDot() {
     const rules = this.r.gameRules, m = this.marker;
+    this._refreshCaptured(rules);
     const moved = rules && rules.enabled && m.type === 'unit' ? Number(m.data?.movedKm) || 0 : 0;
     if (!moved) { if (this.movedDot) { this.movedDot.visible = false; } return; }
     if (!this.movedDot) { this.movedDot = new PIXI.Graphics(); this.movedDot.eventMode = 'none'; this.root.addChild(this.movedDot); }
@@ -1380,6 +1382,18 @@ class MarkerView {
     const spent = moved >= allowance - 0.01;
     this.movedDot.clear().circle(this.w / 2 - 1, -this.h / 2 + 3, 4).fill(spent ? 0xe74c3c : 0xf1c40f).stroke({ width: 1.2, color: 0x1e2b1a });
     this.movedDot.visible = true;
+  }
+
+  /** Game mode: a place that changed hands this turn pulses a ring in its new owner's colour until the turn ends. */
+  _refreshCaptured(rules) {
+    const m = this.marker;
+    const flash = rules && rules.enabled && ['town', 'resource', 'factory'].includes(m.type) && Number(m.data?.capturedTurn) === rules.turn;
+    if (!flash) { if (this.capRing) { this.capRing.visible = false; } return; }
+    if (!this.capRing) { this.capRing = new PIXI.Graphics(); this.capRing.eventMode = 'none'; this.root.addChildAt(this.capRing, 0); }
+    const rr = Math.max(this.w, this.h) / 2 + 5;
+    this.capRing.clear().circle(0, 0, rr).stroke({ width: 3, color: this.colorNum, alpha: 0.9 }).circle(0, 0, rr + 5).stroke({ width: 1.5, color: 0xffffff, alpha: 0.5 });
+    this.capRing.visible = true;
+    this.r.invalidate();
   }
 
   /** A unit at zero strength burns (looping sprite) until it is removed or its strength is restored. */

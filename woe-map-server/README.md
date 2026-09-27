@@ -89,10 +89,15 @@ next to it) and copy `backups\uploads\*` back into `data\uploads\`.
 - **Reset a lost admin password:** `node scripts/create-admin.js <username> <newpassword>` creates the user as a
   site admin, or promotes an existing user and sets the password.
 - **Manage users:** site admins see a user list on the campaigns page (promote, reset password, delete).
-- **Import the old Firebase markers:** export the `markers` node from the Firebase console as JSON, upload
-  the map image to a campaign first (so the height is known), then
-  `node scripts/import-firebase.js export.json <lobbyId>`. Old army markers become units, `lat` is flipped to
-  top-left pixel coordinates automatically.
+- **Import the old Firebase data:** export the database (or a node of it) from the Firebase console as JSON,
+  then `node scripts/import-firebase.js export.json <lobbyId>`. It imports every section it finds, or only
+  the ones you name: `--markers` (the old WoE-Player-Map; upload the map image to the campaign first so the
+  height is known, or pass `--height N`; army markers become units and `lat` is flipped to top-left pixel
+  coordinates), `--tree` (the techtree page's `research_tree`: trees → branches → techs with year, RP cost,
+  money cost, description and prerequisites become techs in the campaign's tree, branch "Tree: Branch";
+  `--replace-tree` wipes the current tree first; imported techs have no effects until the GM adds them in the
+  tree editor) and `--nations` (the techtree page's `nations`: a faction per nation, created if missing, its
+  banked RP, its RP per week as a per-turn modifier, and its unlocked techs).
 - **Reclaim disk:** icon files are kept when a marker is edited or deleted so History can restore them.
   `node scripts/cleanup-uploads.js --dry-run` lists files no marker, map or recent history entry references;
   drop `--dry-run` to delete them (`--history-days N` sets how far back history counts, default 90).
@@ -304,14 +309,30 @@ a history entry, so it can be reverted too.
 Off by default: a campaign is the plain map tracker described above. A GM switches it on from the **Game**
 tab (pick a start date; the 1914 scenario uses 28 July 1914) and the campaign gains turns, treasuries,
 movement limits and action points. Switching it off pauses all of that and keeps the treasuries. The full
-design, including the phases still to come (territory that follows armies, production, research), is in
-`docs/GAME-DESIGN.md`.
+design is in `docs/GAME-DESIGN.md`.
 
 - **Turns.** Weekly by default (fortnight, month and season are options). The HUD shows the turn, the game
-  date and any deadline text the GM sets. Everyone acts during the turn; the GM presses **End turn**, which
+  date and the deadline. Everyone acts during the turn; the GM presses **End turn**, which
   pays income, resets every unit's movement and action points, advances the date and posts a private turn
   summary to each faction (and the GM). **Undo last turn** restores treasuries and the calendar from a
   snapshot taken before the resolution (the last five are kept); units stay where they are.
+- **Deadlines.** The GM picks a real-world date and time on the Game tab (or "1 day / 3 days / 7 days" from
+  now). The HUD counts down ("ends in 46h 12m", red once it has passed), the campaign log gets a reminder
+  24 hours before and another when the deadline passes (with a chime and desktop notification for anyone
+  who has them on), and nothing is forced: the turn still ends only when the GM presses End turn, which also
+  clears the deadline.
+- **Turn reports.** Ending a turn writes a report per faction: money, manpower and research points with
+  their change, every stockpile's change and new level, where the income came from, places taken and lost
+  (and from or to whom), builds completed, builds lost with a captured site, what is still in production,
+  research completed and the active project's progress, and any shortage. The report opens for every
+  player (their own) and the GM (every faction, in tabs) as soon as the turn ends, and can be reopened from
+  the Nation tab's **Turn report…** button or the Game tab's **Reports…**, with arrows to earlier turns
+  (the last 60 are kept). Undoing a turn removes its reports.
+- **Captured this turn.** A resource node, factory or town that changes hands is stamped with the turn and
+  its previous owner. On the map it pulses a ring in its new owner's colour until the turn ends, the Nation
+  tab lists what the faction took and lost this turn, and by default (rule switch) a place captured this
+  turn yields nothing at End turn: it produces for its new owner from the next turn. Builds queued at a city
+  by its previous owner are lost with the city, without refund.
 - **Treasuries.** Each faction has stockpiles of the ten map resources (grain, coal, iron, oil, copper,
   rubber, nitrates, timber, cotton, horses) plus money, manpower and research points. New factions start
   with the campaign's starting stockpiles. The GM's **Edit treasuries…** table sets every number with +/-
@@ -320,7 +341,9 @@ design, including the phases still to come (territory that follows armies, produ
   city and village rates) + factories (rate × industry level) + the GM's modifiers − upkeep when enabled.
   The **Nation** tab shows each faction its stockpiles with the change it will receive, where the change
   comes from, its forces by category with how many have moved or attacked, and its last turn summary. The
-  GM can view any faction from the same tab; players see only their own unless the GM makes treasuries public.
+  GM can view any faction from the same tab; players see only their own unless the GM makes treasuries
+  public, in which case the Nation tab adds an **All nations** table (money, manpower, RP, units) and
+  players can read every faction's turn report.
 - **Resource nodes** are markers (Add tab: pick the resource and yield, choose the faction, click the map)
   drawn with the bundled painted icons in `public/icons/` inside a ring in the owner's colour; the ring
   colour and the owner follow the faction. **Factories** are markers with an industry level 1–5. Both are
@@ -335,7 +358,8 @@ design, including the phases still to come (territory that follows armies, produ
 - **Upkeep** is built in but off: when enabled every unit costs grain per turn and vehicles, aircraft and
   ships cost oil; a faction that runs out has its three strongest units lose 10 % strength.
 - **Rules** (Game tab): distance per movement point, waive limits, base money/RP/manpower, city and factory
-  income rates, upkeep, starting stockpiles and public treasuries.
+  income rates, upkeep, starting stockpiles, public treasuries and whether captured places yield nothing
+  the turn they change hands.
 
 ### Production, cities and resources (game mode)
 

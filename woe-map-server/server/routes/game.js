@@ -63,7 +63,19 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       relations: game.relations(req.lobby.id),
       diplomacy: game.diplomacy(req.lobby.id).filter(d => req.lobbyRole === 'gm' || d.from === (mine && mine.id) || d.to === (mine && mine.id)),
       hasTerritories: territory.all(req.lobby.id).length > 0,
+      reports: g.enabled ? visibleReports(req, g, game.reports(req.lobby.id)) : { turn: null, turns: [], reports: [] },
     });
+  });
+
+  /** Turn reports the viewer may read: the GM sees every faction, a player their own (everyone when treasuries are public). */
+  function visibleReports(req, g, r) {
+    const factions = game.q.factions.all(req.lobby.id).map(access.serializeFaction);
+    return { ...r, reports: r.reports.map(x => ({ ...x, faction: factions.find(f => f.id === x.factionId) || null }))
+      .filter(x => x.faction && canSeeState(req, g, x.faction)) };
+  }
+  router.get('/reports', (req, res) => {
+    const g = game.get(req.lobby.id);
+    res.json(visibleReports(req, g, game.reports(req.lobby.id, Number(req.query.turn) || undefined)));
   });
 
   // ---- Territories ----------------------------------------------------------------------------
@@ -441,7 +453,12 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const g = game.get(req.lobby.id);
     const b = req.body || {};
     if (b.turnStep !== undefined && GameData.TURN_STEPS[b.turnStep]) g.turnStep = b.turnStep;
-    if (b.deadline !== undefined) g.deadline = clean(b.deadline, 80);
+    if (b.deadline !== undefined) {
+      // A date (ISO, from the Game tab's picker) is normalised so the countdown and reminders can parse it; free text is kept as written.
+      const raw = clean(b.deadline, 80);
+      const at = /^\d{4}-\d{2}-\d{2}T/.test(raw) ? Date.parse(raw) : NaN;
+      g.deadline = Number.isFinite(at) ? new Date(at).toISOString() : raw;
+    }
     if (b.date !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(String(b.date))) g.date = b.date;
     if (b.turn !== undefined) g.turn = clamp(Math.round(num(b.turn, g.turn)), 1, 100000);
     if (b.settings && typeof b.settings === 'object') {
@@ -472,7 +489,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
         }
         out.unitCosts = cur;
       }
-      for (const k of ['waiveMovement', 'occupyNeutrals', 'upkeep', 'publicTreasury']) if (s[k] !== undefined) out[k] = !!s[k];
+      for (const k of ['waiveMovement', 'occupyNeutrals', 'upkeep', 'publicTreasury', 'capturedIdle']) if (s[k] !== undefined) out[k] = !!s[k];
       for (const grp of ['cityIncome', 'factoryIncome', 'startStock']) {
         if (s[grp] && typeof s[grp] === 'object') {
           out[grp] = {};
@@ -528,6 +545,8 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     broadcastGame(req.lobby.id, g);
     hub.broadcast(req.lobby.id, { type: 'reload', what: 'markers' });
     for (const f of game.q.factions.all(req.lobby.id)) broadcastFaction(req, g, f);
+    // Everyone learns the turn ended (toast, chime, report modal); the report itself is fetched per viewer.
+    hub.broadcast(req.lobby.id, { type: 'turn', ended: before.turn, turn: g.turn, date: g.date });
     res.json({ game: g, summaries: result.summaries.map(s => ({ faction: s.faction.name, text: s.text })) });
   });
 

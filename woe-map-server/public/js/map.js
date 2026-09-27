@@ -556,12 +556,14 @@
             if (e.kind === 'chat') notify(e.displayName, e.message);
             else if (e.kind === 'roll') notify(`${e.displayName} rolled`, e.message);
             else if (e.kind === 'combat') notify('Combat', e.message);
+            else if (e.data && e.data.deadline) { notify('Turn deadline', e.message); toast(e.message, 5000); }
           }
           break;
         }
         case 'members': await loadMembers(); break;
         case 'factions': await loadFactions(); await loadMembers(); await loadMarkers(); if (gameOn()) GameUI.load().catch(() => {}); break;
         case 'game': GameUI.onGame(msg.game); break;
+        case 'turn': GameUI.onTurn(msg); break;
         case 'faction': GameUI.onFaction(msg); break;
         case 'territory': renderer.setTerritories(msg.territories, !!msg.replace); GameUI.onTerritories(); break;
         case 'relations': GameUI.onRelations(msg); break;
@@ -1860,7 +1862,7 @@
   try {
     await loadLobby();
     await loadFactions();
-    GameUI.init({ state, renderer, base, $, $$, flagImg, loadMarkers, loadTerritories, armBrush, armFactory, isGm: () => state.role === 'gm' });
+    GameUI.init({ state, renderer, base, $, $$, flagImg, loadMarkers, loadTerritories, armBrush, armFactory, notify, isGm: () => state.role === 'gm' });
     await GameUI.load().catch(err => console.warn('game state', err));
     await loadTerritories();
     await loadMarkers();

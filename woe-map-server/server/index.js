@@ -63,6 +63,7 @@ server.listen(config.port, config.host, () => {
   console.log(`WoE Strategy Map listening on http://${config.host}:${config.port}`);
   console.log(`Data directory: ${config.dataDir}`);
   if (require('./backup').schedule()) console.log(`Automatic backups every ${config.backupHours}h into ${config.backupDir}`);
+  require('./deadlines').schedule();   // turn deadline reminders, checked once a minute
 });
 
 function shutdown() {

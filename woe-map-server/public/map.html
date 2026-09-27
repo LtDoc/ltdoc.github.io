@@ -51,12 +51,13 @@
         <div id="gameOnBlock" hidden>
           <div class="section">Turn</div>
           <p><b id="turnInfo"></b></p>
-          <p class="row"><button id="btnEndTurn" class="danger">End turn</button><button id="btnUndoTurn" class="small secondary" title="Restore treasuries and the calendar from before the last end of turn">Undo last turn</button></p>
+          <p class="row"><button id="btnEndTurn" class="danger">End turn</button><button id="btnUndoTurn" class="small secondary" title="Restore treasuries and the calendar from before the last end of turn">Undo last turn</button><button id="btnTurnReports" class="small secondary" title="What every faction gained last turn">Reports…</button></p>
           <form id="turnForm">
             <div class="grid2">
               <label>Turn length<select id="turnStep"><option value="week">1 week</option><option value="fortnight">2 weeks</option><option value="month">1 month</option><option value="season">1 season</option></select></label>
-              <label>Deadline <span class="hint">(shown to players)</span><input id="turnDeadline" maxlength="80" placeholder="ends Sunday 8pm"></label>
+              <label>Deadline <span class="hint">(countdown on the HUD)</span><input id="turnDeadline" type="datetime-local"></label>
             </div>
+            <p class="row deadline-quick"><span class="hint">Deadline in</span><button type="button" class="small secondary" data-deadline="1">1 day</button><button type="button" class="small secondary" data-deadline="3">3 days</button><button type="button" class="small secondary" data-deadline="7">7 days</button><button type="button" class="small secondary" data-deadline="0">none</button><span class="hint">Players are reminded 24 h before and when it passes.</span></p>
             <div class="grid2">
               <label>Game date<input id="turnDate" type="date"></label>
               <label>Turn number<input id="turnNumber" type="number" min="1" step="1"></label>
@@ -129,6 +130,7 @@
               <div class="section">Starting stockpiles <span class="hint">(new factions)</span></div>
               <div class="grid3"><label>Each resource<input id="ruleStartRes" type="number" step="any"></label><label>Money<input id="ruleStartMoney" type="number" step="any"></label><label>Manpower<input id="ruleStartMp" type="number" step="any"></label></div>
               <label class="inline"><input type="checkbox" id="rulePublic"> Treasuries are public (players see every faction)</label>
+              <label class="inline"><input type="checkbox" id="ruleCapturedIdle"> Captured places yield nothing the turn they change hands</label>
               <button type="submit" class="small">Save rules</button>
             </form>
           </details>

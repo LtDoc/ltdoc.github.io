@@ -14,7 +14,7 @@ const GameUI = (() => {
 
   function init(c) {
     ctx = c;
-    const { $ } = ctx;
+    const { $, $$ } = ctx;
     $('#nationFaction').onchange = () => { renderNation(); loadProduction(); };
     $('#btnGameToggle').onclick = toggleGame;
     $('#btnEndTurn').onclick = endTurn;
@@ -34,6 +34,17 @@ const GameUI = (() => {
     $('#btnSeedCities').onclick = seedCities;
     $('#btnGenResources').onclick = generateResources;
     $('#buildFilter').oninput = renderBuildList;
+    $('#btnTurnReports').onclick = () => openReports();
+    // Deadline quick-set: N days from now at the same time of day, or none.
+    $$('[data-deadline]').forEach(b => b.onclick = () => {
+      const days = Number(b.dataset.deadline);
+      $('#turnDeadline').value = days ? toLocalInput(Date.now() + days * 86400e3) : '';
+    });
+    document.addEventListener('click', e => {
+      const r = e.target.closest('[data-report]');
+      if (r) openReports(Number(r.dataset.report) || undefined, Number(r.dataset.faction) || undefined);
+    });
+    setInterval(() => { if (g()?.enabled && g().deadline) updateHud(); }, 30e3);   // countdown ticks
     document.addEventListener('click', e => {
       const b = e.target.closest('[data-build]');
       if (b) { queueBuild(b.dataset.build, Number(b.dataset.site)); return; }
@@ -62,9 +73,18 @@ const GameUI = (() => {
     const d = await api.get(`${ctx.base}/game`);
     ctx.state.game = d.game; ctx.state.gameFactions = d.factions; ctx.state.myFactionId = d.myFactionId; ctx.state.canUndo = d.canUndo;
     ctx.state.relations = d.relations || []; ctx.state.diplomacy = d.diplomacy || []; ctx.state.hasTerritories = !!d.hasTerritories;
+    ctx.state.reports = d.reports || { turn: null, turns: [], reports: [] };
     refresh();
     loadProduction();
   }
+  /** WS `turn`: the GM ended a turn. Refresh, tell the viewer, and show their report. */
+  async function onTurn(msg) {
+    try { await load(); } catch { /* keep going with what we have */ }
+    toast(`Turn ${msg.turn} begins: ${GameData.fmtDate(msg.date)}`, 4000);
+    if (ctx.notify) ctx.notify('New turn', `Turn ${msg.turn} begins: ${GameData.fmtDate(msg.date)}`);
+    if (ctx.isGm() || ctx.state.myFactionId) openReports(msg.ended);
+  }
+  const toLocalInput = ms => { const d = new Date(ms); const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
   function onRelations(msg) {
     ctx.state.relations = msg.relations || []; ctx.state.diplomacy = msg.diplomacy || [];
     renderNation(); renderGameTab();
@@ -276,16 +296,24 @@ const GameUI = (() => {
   function refresh() {
     const { $, state, renderer } = ctx;
     const game = g();
-    renderer.setGameRules(game ? { enabled: game.enabled, kmPerMove: game.settings.kmPerMove } : null);
+    renderer.setGameRules(game ? { enabled: game.enabled, kmPerMove: game.settings.kmPerMove, turn: game.turn } : null);
     const on = !!(game && game.enabled);
     $('#sidebar .tabs [data-tab="nation"]').hidden = !on;
     $('#sidebar .tabs [data-tab="game"]').hidden = !ctx.isGm();
     $('#turnLabel').hidden = !on;
-    if (on) {
-      $('#turnLabel').textContent = `Turn ${game.turn} · ${GameData.fmtDate(game.date)}${game.deadline ? ' · ' + game.deadline : ''}`;
-      $('#turnLabel').title = `${GameData.TURN_STEPS[game.turnStep] || game.turnStep}ly turns. Movement: ${game.settings.kmPerMove} ${state.lobby?.scaleLabel || 'km'} per movement point.`;
-    }
+    updateHud();
     renderNation(); renderGameTab();
+  }
+  /** Turn HUD: turn, date and the deadline as a live countdown when it is a date. */
+  function updateHud() {
+    const { $, state } = ctx;
+    const game = g();
+    if (!game || !game.enabled) return;
+    const dl = GameData.deadlineInfo(game.deadline);
+    const el = $('#turnLabel');
+    el.textContent = `Turn ${game.turn} · ${GameData.fmtDate(game.date)}${dl ? ' · ' + dl.text : ''}`;
+    el.classList.toggle('overdue', !!(dl && dl.overdue));
+    el.title = `${GameData.TURN_STEPS[game.turnStep] || game.turnStep}ly turns. Movement: ${game.settings.kmPerMove} ${state.lobby?.scaleLabel || 'km'} per movement point.${dl && dl.at ? ' ' + dl.title + '.' : ''}`;
   }
 
   // ---- Nation tab -----------------------------------------------------------------------
@@ -332,6 +360,21 @@ const GameUI = (() => {
       if (Number(u.data?.apUsed) > 0) cats[cat].spent++;
     }
     const lastTurn = [...state.events].reverse().find(ev => ev.kind === 'turn' && String(ev.data?.faction || '').toLowerCase() === e.faction.name.toLowerCase());
+    const hasReport = (state.reports?.reports || []).some(r => r.factionId === e.faction.id);
+    // Places that changed hands this turn (flagged on the map with a pulsing ring).
+    const me = e.faction.name.toLowerCase();
+    const flipped = [...state.markers.values()].filter(m => ['town', 'resource', 'factory'].includes(m.type) && Number(m.data?.capturedTurn) === game.turn);
+    const took = flipped.filter(m => String(m.data.nation || '').toLowerCase() === me);
+    const lost = flipped.filter(m => String(m.data.capturedFrom || '').toLowerCase() === me);
+    const capturedHtml = took.length || lost.length ? `<div class="section">This turn</div>
+      ${took.length ? `<p class="captured up">⚑ Took ${took.map(m => `<b>${esc(m.name)}</b>`).join(', ')}${game.settings.capturedIdle ? ' <span class="hint">(no yield until next turn)</span>' : ''}</p>` : ''}
+      ${lost.length ? `<p class="captured down">⚑ Lost ${lost.map(m => `<b>${esc(m.name)}</b> to ${esc(m.data.nation || 'no one')}`).join(', ')}</p>` : ''}` : '';
+    // Public treasuries: players see every nation side by side (the GM has the Game tab for this).
+    const others = !ctx.isGm() && game.settings.publicTreasury ? (state.gameFactions || []).filter(x => x.visible && x.state) : [];
+    const othersHtml = others.length > 1 ? `<div class="section">All nations <span class="hint">(treasuries are public)</span></div>
+      <table class="treasury"><thead><tr><th>Faction</th><th class="num">Money</th><th class="num">Men</th><th class="num">RP</th><th class="num">Units</th></tr></thead><tbody>${
+        others.map(x => `<tr${x.faction.id === e.faction.id ? ' class="me"' : ''}><td>${ctx.flagImg(x.faction.name)} ${esc(x.faction.name)}</td><td class="num">${fmt(x.state.money)}</td><td class="num">${fmt(x.state.manpower)}</td><td class="num">${fmt(x.state.rp)}</td><td class="num">${x.unitCount}</td></tr>`).join('')
+      }</tbody></table>` : '';
     el.innerHTML = `
       <h3 class="nationhead">${ctx.flagImg(e.faction.name)} ${esc(e.faction.name)} <span class="hint">turn ${game.turn} · ${GameData.fmtDate(game.date)}</span></h3>
       <div class="pools">
@@ -342,12 +385,14 @@ const GameUI = (() => {
       <div class="section">Stockpiles <span class="hint">(change per turn)</span></div>
       <table class="treasury"><tbody>${rows}</tbody></table>
       ${inc.notes && inc.notes.length ? `<details class="sub"><summary>Where it comes from</summary><ul class="hintlist">${inc.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul></details>` : ''}
+      ${capturedHtml}
       <div class="section">Forces <span class="hint">(${units.length})</span></div>
       ${Object.keys(cats).length ? `<table class="treasury"><tbody>${Object.entries(cats).map(([c, v]) => `<tr><td>${esc(c)}</td><td class="num">${v.n}</td><td class="hint">${v.moved ? `${v.moved} moved` : ''}${v.spent ? `${v.moved ? ', ' : ''}${v.spent} attacked` : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="hint">No units on the map.</p>'}
       ${ResearchUI.sectionHtml(e)}
       ${productionHtml(e)}
       ${diplomacyHtml(e)}
-      ${lastTurn ? `<div class="section">Last turn</div><p class="hint">${esc(lastTurn.message)}</p>` : ''}`;
+      ${othersHtml}
+      ${lastTurn || hasReport ? `<div class="section">Last turn</div>${lastTurn ? `<p class="hint">${esc(lastTurn.message)}</p>` : ''}${hasReport ? `<p><button class="small secondary" data-report="${state.reports.turn}" data-faction="${e.faction.id}">Turn report…</button></p>` : ''}` : ''}`;
   }
 
   // ---- Game tab (GM) ----------------------------------------------------------------------
@@ -364,7 +409,8 @@ const GameUI = (() => {
     if (on) {
       $('#turnInfo').textContent = `Turn ${game.turn} · ${GameData.fmtDate(game.date)}`;
       if (document.activeElement !== $('#turnStep')) $('#turnStep').value = game.turnStep;
-      if (document.activeElement !== $('#turnDeadline')) $('#turnDeadline').value = game.deadline || '';
+      if (document.activeElement !== $('#turnDeadline')) { const dl = GameData.deadlineInfo(game.deadline); $('#turnDeadline').value = dl && dl.at ? toLocalInput(dl.at) : ''; }
+      $('#btnTurnReports').disabled = !(state.reports && state.reports.turn);
       if (document.activeElement !== $('#turnDate')) $('#turnDate').value = game.date;
       if (document.activeElement !== $('#turnNumber')) $('#turnNumber').value = game.turn;
       $('#btnUndoTurn').disabled = !state.canUndo;
@@ -393,7 +439,7 @@ const GameUI = (() => {
     set('#ruleKmPerMove', s.kmPerMove); set('#ruleWaive', s.waiveMovement); set('#ruleUpkeep', s.upkeep);
     set('#ruleUpkeepGrain', s.upkeepGrain); set('#ruleUpkeepOil', s.upkeepOil);
     set('#ruleBaseMoney', s.baseMoney); set('#ruleBaseRp', s.baseRp); set('#ruleBaseManpower', s.baseManpower);
-    set('#rulePublic', s.publicTreasury);
+    set('#rulePublic', s.publicTreasury); set('#ruleCapturedIdle', s.capturedIdle);
     set('#ruleTrenchRange', s.trenchRangeKm); set('#ruleTrenchDug', s.trenchBonusDug); set('#ruleTrenchReinforced', s.trenchBonusReinforced);
     set('#ruleCapCapital', s.cityCapacity.capital); set('#ruleCapCity', s.cityCapacity.city); set('#ruleCapVillage', s.cityCapacity.village);
     set('#ruleFactoryRange', s.factoryRangeKm); set('#ruleCoastal', s.coastalKm);
@@ -437,7 +483,9 @@ const GameUI = (() => {
     e.preventDefault();
     const { $ } = ctx;
     try {
-      const d = await api.patch(`${ctx.base}/game`, { turnStep: $('#turnStep').value, deadline: $('#turnDeadline').value, date: $('#turnDate').value, turn: Number($('#turnNumber').value) });
+      const local = $('#turnDeadline').value;   // datetime-local, no zone: send it as an instant
+      const deadline = local ? new Date(local).toISOString() : '';
+      const d = await api.patch(`${ctx.base}/game`, { turnStep: $('#turnStep').value, deadline, date: $('#turnDate').value, turn: Number($('#turnNumber').value) });
       ctx.state.game = d.game; refresh(); toast('Saved');
     } catch (err) { toast(err.message); }
   }
@@ -449,6 +497,7 @@ const GameUI = (() => {
       kmPerMove: v('#ruleKmPerMove'), waiveMovement: $('#ruleWaive').checked, upkeep: $('#ruleUpkeep').checked,
       upkeepGrain: v('#ruleUpkeepGrain'), upkeepOil: v('#ruleUpkeepOil'),
       baseMoney: v('#ruleBaseMoney'), baseRp: v('#ruleBaseRp'), baseManpower: v('#ruleBaseManpower'), publicTreasury: $('#rulePublic').checked,
+      capturedIdle: $('#ruleCapturedIdle').checked,
       trenchRangeKm: v('#ruleTrenchRange'), trenchBonusDug: v('#ruleTrenchDug'), trenchBonusReinforced: v('#ruleTrenchReinforced'),
       cityCapacity: { capital: v('#ruleCapCapital'), city: v('#ruleCapCity'), village: v('#ruleCapVillage') },
       factoryRangeKm: v('#ruleFactoryRange'), coastalKm: v('#ruleCoastal'), researchLead: v('#ruleResearchLead'),
@@ -533,7 +582,95 @@ const GameUI = (() => {
     finally { btn.disabled = false; }
   }
 
-  return { init, load, refresh, onGame, onFaction, onRelations, onTerritories, renderNation, loadProduction, buildFactoryAt };
+  // ---- Turn reports: what each faction gained, built, researched, took and lost when a turn ended ----------
+  let reportModal = null, reportView = null;   // reportView: { turn, turns, reports, factionId }
+  function ensureReportModal() {
+    if (reportModal) return;
+    reportModal = document.createElement('div');
+    reportModal.id = 'reportModal'; reportModal.className = 'modal';
+    reportModal.innerHTML = `<div class="card wide report">
+      <button class="close" data-close>×</button>
+      <div class="row" style="gap:6px;margin-right:30px"><h2 style="margin:0;flex:1">Turn report</h2><button type="button" class="small secondary" data-nav="-1" title="Earlier turn">‹</button><span id="reportTurn" class="hint" style="flex:0 0 auto"></span><button type="button" class="small secondary" data-nav="1" title="Later turn">›</button></div>
+      <div id="reportTabs" class="tabs small"></div>
+      <div id="reportBody"></div>
+    </div>`;
+    document.body.appendChild(reportModal);
+    reportModal.querySelectorAll('[data-close]').forEach(b => b.onclick = () => reportModal.classList.remove('open'));
+    reportModal.addEventListener('click', e => { if (e.target === reportModal) reportModal.classList.remove('open'); });
+    reportModal.querySelectorAll('[data-nav]').forEach(b => b.onclick = () => {
+      if (!reportView) return;
+      const turns = [...reportView.turns].sort((a, b) => a - b);
+      const i = turns.indexOf(reportView.turn) + Number(b.dataset.nav);
+      if (turns[i] !== undefined) openReports(turns[i], reportView.factionId);
+    });
+    reportModal.querySelector('#reportTabs').addEventListener('click', e => {
+      const t = e.target.closest('[data-fid]');
+      if (t) { reportView.factionId = Number(t.dataset.fid); renderReport(); }
+    });
+  }
+  async function openReports(turn, factionId) {
+    ensureReportModal();
+    let d;
+    try { d = turn ? await api.get(`${ctx.base}/game/reports?turn=${turn}`) : (ctx.state.reports && ctx.state.reports.turn ? ctx.state.reports : await api.get(`${ctx.base}/game/reports`)); }
+    catch (err) { toast(err.message); return; }
+    if (!d.turn) { toast('No turn has ended yet'); return; }
+    const keep = factionId ?? reportView?.factionId ?? ctx.state.myFactionId;
+    reportView = { ...d, factionId: d.reports.some(r => r.factionId === keep) ? keep : (d.reports[0]?.factionId ?? null) };
+    renderReport();
+    reportModal.classList.add('open');
+  }
+  function renderReport() {
+    const v = reportView;
+    const turns = [...v.turns].sort((a, b) => a - b), i = turns.indexOf(v.turn);
+    reportModal.querySelector('#reportTurn').textContent = `turn ${v.turn}`;
+    reportModal.querySelector('[data-nav="-1"]').disabled = i <= 0;
+    reportModal.querySelector('[data-nav="1"]').disabled = i < 0 || i >= turns.length - 1;
+    const tabs = reportModal.querySelector('#reportTabs');
+    tabs.hidden = v.reports.length < 2;
+    tabs.innerHTML = v.reports.map(r => `<button type="button" class="${r.factionId === v.factionId ? 'active' : ''}" data-fid="${r.factionId}">${ctx.flagImg(r.faction.name)} ${esc(r.faction.name)}</button>`).join('');
+    const r = v.reports.find(x => x.factionId === v.factionId);
+    const body = reportModal.querySelector('#reportBody');
+    if (!r) { body.innerHTML = '<p class="hint">No report for you this turn: you were not assigned to a faction when it ended.</p>'; return; }
+    const d = r.data, inc = d.income || { resources: {}, upkeep: {}, notes: [] }, stock = d.stock || { resources: {} };
+    const resRows = GameData.RESOURCES.map(x => {
+      const delta = (inc.resources[x.key] || 0) - (inc.upkeep[x.key] || 0);
+      const ic = x.icon ? `<img class="resicon" src="/icons/${x.icon}" alt="">` : '';
+      return `<tr><td>${ic}${x.name}</td><td class="num ${delta > 0 ? 'up' : delta < 0 ? 'down' : ''}">${delta ? signed(delta) : '·'}</td><td class="num">${fmt(stock.resources[x.key] || 0)}</td></tr>`;
+    }).join('');
+    const list = (items, f) => items && items.length ? `<ul class="hintlist">${items.map(f).join('')}</ul>` : '';
+    const research = d.research ? `<p><b>${esc(d.research.name)}</b> <span class="hint">${fmt(d.research.progress)}/${d.research.rp} RP</span><div class="progress"><i style="width:${Math.min(100, Math.round(d.research.progress / Math.max(1, d.research.rp) * 100))}%"></i></div>${d.research.queue.length ? `<span class="hint">Next: ${d.research.queue.map(esc).join(' → ')}</span>` : ''}</p>` : '<p class="hint">No active research project.</p>';
+    body.innerHTML = `
+      <h3 class="nationhead">${ctx.flagImg(r.faction.name)} ${esc(r.faction.name)} <span class="hint">turn ${d.turn} · ${GameData.fmtDate(d.date)} → ${GameData.fmtDate(d.nextDate)}</span></h3>
+      <div class="pools">
+        <div><span class="hint"><img class="resicon" src="/icons/cash.png" alt="">Money</span><b>${fmt(stock.money)}</b><span class="delta ${inc.money >= 0 ? 'up' : 'down'}">${signed(inc.money || 0)}</span></div>
+        <div><span class="hint">Manpower</span><b>${fmt(stock.manpower)}</b><span class="delta up">${signed(inc.manpower || 0)}</span></div>
+        <div><span class="hint"><img class="resicon" src="/icons/paper_roll.png" alt="">Research</span><b>${fmt(stock.rp)}</b><span class="delta up">${signed(inc.rp || 0)}</span></div>
+      </div>
+      <div class="report-cols">
+        <div>
+          <div class="section">Stockpiles <span class="hint">(change · now)</span></div>
+          <table class="treasury"><tbody>${resRows}</tbody></table>
+          ${inc.notes && inc.notes.length ? `<details class="sub"><summary>Where it came from</summary><ul class="hintlist">${inc.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul></details>` : ''}
+          ${d.shortages && d.shortages.length ? `<div class="section">Shortages</div>${list(d.shortages, s => `<li class="down">Ran out of ${esc(GameData.byKey[s.resource]?.name || s.resource)}: ${s.units.length ? esc(s.units.join(', ')) + ' lose 10% strength' : 'no units to suffer'}</li>`)}` : ''}
+        </div>
+        <div>
+          <div class="section">Territory</div>
+          ${d.gained && d.gained.length ? list(d.gained, x => `<li class="up">⚑ Took ${esc(x.name)} <span class="hint">from ${esc(x.from)}</span></li>`) : ''}
+          ${d.lost && d.lost.length ? list(d.lost, x => `<li class="down">⚑ Lost ${esc(x.name)} <span class="hint">to ${esc(x.to)}</span></li>`) : ''}
+          ${!(d.gained && d.gained.length) && !(d.lost && d.lost.length) ? '<p class="hint">No places changed hands.</p>' : ''}
+          <div class="section">Production</div>
+          ${d.built && d.built.length ? list(d.built, n => `<li class="up">Completed ${esc(n)}</li>`) : ''}
+          ${d.lostBuilds && d.lostBuilds.length ? list(d.lostBuilds, b => `<li class="down">Lost ${esc(b.type)} with ${esc(b.site)}</li>`) : ''}
+          ${d.queued && d.queued.length ? list(d.queued, b => `<li>${esc(b.type)}${b.site ? ` at ${esc(b.site)}` : ''} <span class="hint">${b.turnsLeft} turn${b.turnsLeft === 1 ? '' : 's'} left</span></li>`) : ''}
+          ${!(d.built && d.built.length) && !(d.queued && d.queued.length) && !(d.lostBuilds && d.lostBuilds.length) ? '<p class="hint">Nothing in production.</p>' : ''}
+          <div class="section">Research</div>
+          ${d.researched && d.researched.length ? list(d.researched, n => `<li class="up">🔬 ${esc(n)}</li>`) : ''}
+          ${research}
+        </div>
+      </div>`;
+  }
+
+  return { init, load, refresh, onGame, onFaction, onRelations, onTerritories, onTurn, openReports, renderNation, loadProduction, buildFactoryAt };
 })();
 
 // Small helper so the modifiers table starts with every resource present.

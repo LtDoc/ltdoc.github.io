@@ -194,6 +194,16 @@ CREATE TABLE IF NOT EXISTS diplomacy (
 );
 CREATE INDEX IF NOT EXISTS idx_diplomacy_lobby ON diplomacy(lobby_id, id);
 
+CREATE TABLE IF NOT EXISTS turn_reports (
+  id         INTEGER PRIMARY KEY,
+  lobby_id   INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  turn       INTEGER NOT NULL,                     -- the turn that was ended
+  faction_id INTEGER NOT NULL,
+  data       TEXT NOT NULL,                        -- JSON: income, builds, research, places gained and lost (server/game.js)
+  created_at INTEGER NOT NULL,
+  UNIQUE (lobby_id, turn, faction_id)
+);
+
 CREATE TABLE IF NOT EXISTS techs (
   id          INTEGER PRIMARY KEY,
   lobby_id    INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
@@ -222,6 +232,7 @@ addColumnIfMissing('markers', 'locked', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('shapes', 'locked', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('shapes', 'data', 'TEXT');   // per-kind extras (trench: facing, state, zigzag)
 addColumnIfMissing('events', 'data', 'TEXT');
+addColumnIfMissing('game', 'deadline_notified', "TEXT NOT NULL DEFAULT ''");   // "<deadline>|<stage>" of the last reminder sent
 
 function now() { return Date.now(); }
 

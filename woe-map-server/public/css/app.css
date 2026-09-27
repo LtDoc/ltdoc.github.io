@@ -122,6 +122,19 @@ details.sub > summary .hint { text-transform: none; letter-spacing: 0; }
 .rel.war { background: rgba(231,76,60,.25); color: #ff9f80; }
 .rel.peace { background: rgba(255,255,255,.08); color: var(--muted); }
 .rel.alliance { background: rgba(46,204,113,.22); color: #7ee2a8; }
+/* Phase 5: turn reports, deadline countdown, captured places */
+.badge.turn.overdue { background: #7a2e2e; color: #ffd9d9; }
+.deadline-quick { flex-wrap: wrap; gap: 4px; margin: 2px 0 8px; }
+.deadline-quick .hint { flex: 0 0 auto; }
+.deadline-quick button.small { padding: 2px 8px; font-size: 11px; }
+.captured { font-size: 12px; margin: 4px 0; }
+.captured.up { color: #2ecc71; } .captured.down { color: #e74c3c; }
+.treasury tr.me td { background: rgba(255,255,255,.05); }
+.report-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; }
+@media (max-width: 640px) { .report-cols { grid-template-columns: 1fr; } }
+.report .tabs.small { flex-wrap: wrap; }
+.report .tabs.small button { flex: 0 1 auto; padding: 4px 8px; font-size: 12px; }
+.hintlist li.up { color: #2ecc71; } .hintlist li.down { color: #e74c3c; }
 .diplo { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 4px 0; border-bottom: 1px solid #3d566e; font-size: 12px; line-height: 1.2; }
 .diplo button.small { padding: 2px 6px; font-size: 11px; }
 .diplo .grow { flex: 1; min-width: 120px; }

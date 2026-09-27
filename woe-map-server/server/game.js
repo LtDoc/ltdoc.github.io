@@ -41,6 +41,14 @@ const q = {
   deleteSnapshot: db.prepare('DELETE FROM turn_snapshots WHERE id = ?'),
   pruneSnapshots: db.prepare(`DELETE FROM turn_snapshots WHERE lobby_id = ? AND id NOT IN
     (SELECT id FROM turn_snapshots WHERE lobby_id = ? ORDER BY turn DESC, id DESC LIMIT 5)`),
+  insertReport: db.prepare(`INSERT INTO turn_reports (lobby_id, turn, faction_id, data, created_at) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(lobby_id, turn, faction_id) DO UPDATE SET data = excluded.data, created_at = excluded.created_at`),
+  reports: db.prepare('SELECT * FROM turn_reports WHERE lobby_id = ? AND turn = ? ORDER BY faction_id'),
+  reportTurns: db.prepare('SELECT DISTINCT turn FROM turn_reports WHERE lobby_id = ? ORDER BY turn DESC LIMIT 60'),
+  deleteReports: db.prepare('DELETE FROM turn_reports WHERE lobby_id = ? AND turn = ?'),
+  pruneReports: db.prepare('DELETE FROM turn_reports WHERE lobby_id = ? AND turn < ?'),
+  enabledGames: db.prepare("SELECT * FROM game WHERE enabled = 1 AND deadline != ''"),
+  setDeadlineNotified: db.prepare('UPDATE game SET deadline_notified = ? WHERE lobby_id = ?'),
 };
 
 const num = (v, f = 0) => { const n = Number(v); return Number.isFinite(n) ? n : f; };
@@ -137,6 +145,11 @@ function incomeFor(lobby, g, faction, state, markers) {
   const mine = markers.filter(m => String(m.data?.nation || '').toLowerCase() === name);
   const inc = { resources: emptyResources(), money: num(s.baseMoney), rp: num(s.baseRp), manpower: num(s.baseManpower), notes: [], upkeep: emptyResources() };
   for (const m of mine) {
+    // Phase 5: a place taken this turn is still being secured and yields nothing until the next turn.
+    if (s.capturedIdle && ['resource', 'town', 'factory'].includes(m.type) && num(m.data?.capturedTurn, -1) === g.turn) {
+      inc.notes.push(`${m.name}: captured this turn, no yield yet`);
+      continue;
+    }
     if (m.type === 'resource' && GameData.byKey[m.data.kind]) {
       const y = num(m.data.yield);
       inc.resources[m.data.kind] += y;
@@ -231,6 +244,22 @@ function endTurn(lobby, hooks = {}) {
           q.setStrength.run(st, now(), u.id); u.data.strength = st;
         }
       }
+      // Places that changed hands during the turn (stamped by setMarkerNation).
+      const flipped = markers.filter(m => ['resource', 'town', 'factory'].includes(m.type) && num(m.data?.capturedTurn, -1) === g.turn);
+      const gained = flipped.filter(m => String(m.data.nation || '').toLowerCase() === faction.name.toLowerCase()).map(m => ({ name: m.name, from: m.data.capturedFrom || 'neutral' }));
+      const lost = flipped.filter(m => String(m.data.capturedFrom || '').toLowerCase() === faction.name.toLowerCase()).map(m => ({ name: m.name, to: m.data.nation || 'neutral' }));
+      // A build at a site the faction no longer holds is lost with the site (no refund: the enemy has the works).
+      const lostBuilds = [];
+      state.production = (state.production || []).filter(item => {
+        if (item.typeId === 'factory' || !item.siteId) return true;
+        const site = markers.find(m => m.id === item.siteId);
+        if (!site || String(site.data?.nation || '').toLowerCase() === faction.name.toLowerCase()) return true;
+        lostBuilds.push({ type: UnitTypes.LIST.find(u => u.id === item.typeId)?.unit || item.typeId, site: site.name });
+        return false;
+      });
+      if (gained.length) parts.push(`took ${gained.map(x => x.name).join(', ')}`);
+      if (lost.length) parts.push(`lost ${lost.map(x => x.name).join(', ')}`);
+      if (lostBuilds.length) parts.push(`${lostBuilds.length} build${lostBuilds.length === 1 ? '' : 's'} lost with ${[...new Set(lostBuilds.map(x => x.site))].join(', ')}`);
       // Production: builds advance; finished ones become markers via the hook.
       const built = [];
       for (const item of production.advance(state)) {
@@ -241,7 +270,14 @@ function endTurn(lobby, hooks = {}) {
       const queued = (state.production || []).length;
       if (queued) parts.push(`${queued} build${queued === 1 ? '' : 's'} in progress`);
       writeState(state);
-      summaries.push({ faction, text: parts.length ? parts.join(', ') : 'no income', data: { income: inc, built, researched } });
+      const rs = research.researchState(state);
+      const active = rs.active ? techs.find(t => t.key === rs.active) : null;
+      summaries.push({ faction, text: parts.length ? parts.join(', ') : 'no income', data: {
+        income: inc, built, researched, gained, lost, lostBuilds, shortages: [],
+        stock: { resources: { ...state.resources }, money: state.money, manpower: state.manpower, rp: state.rp },
+        research: active ? { name: active.name, progress: num(rs.progress[active.key]), rp: active.rp, queue: rs.queue.map(k => techs.find(t => t.key === k)?.name || k) } : null,
+        queued: (state.production || []).map(item => ({ type: item.typeId === 'factory' ? 'Factory' : (UnitTypes.LIST.find(u => u.id === item.typeId)?.unit || item.typeId), site: item.siteName || '', turnsLeft: item.turnsLeft })),
+      } });
     }
     // Shortages bite: up to three of the faction's strongest units lose 10 % strength per short resource.
     for (const hit of strengthHits) {
@@ -253,14 +289,30 @@ function endTurn(lobby, hooks = {}) {
         u.data.strength = st;
       }
       hit.units = units.map(u => u.name);
+      const s = summaries.find(x => x.faction.id === hit.faction.id);
+      if (s) s.data.shortages.push({ resource: hit.resource, units: hit.units });
     }
     q.resetUnits.run(now(), lobby.id);
+    const ended = { turn: g.turn, date: g.date };
     g.turn += 1;
     g.date = GameData.stepDate(g.date, g.turnStep);
     g.deadline = '';
     save(g);
+    // One report per faction, kept for the last 60 turns, for the turn report modal.
+    for (const s of summaries) {
+      q.insertReport.run(lobby.id, ended.turn, s.faction.id, JSON.stringify({ ...s.data, turn: ended.turn, date: ended.date, nextDate: g.date, text: s.text }), now());
+    }
+    q.pruneReports.run(lobby.id, ended.turn - 60);
   });
   return { game: get(lobby.id), summaries, shortages: strengthHits };
+}
+
+/** Turn reports of one ended turn (the latest when turn is omitted): [{ turn, factionId, data }]. */
+function reports(lobbyId, turn) {
+  const turns = q.reportTurns.all(lobbyId).map(r => r.turn);
+  const t = turn ? Number(turn) : turns[0];
+  if (!t) return { turn: null, turns, reports: [] };
+  return { turn: t, turns, reports: q.reports.all(lobbyId, t).map(r => ({ turn: r.turn, factionId: r.faction_id, data: access.safeJson(r.data) || {}, createdAt: r.created_at })) };
 }
 
 /** Restore the faction states and calendar from the last snapshot. Returns the restored game or null. */
@@ -280,6 +332,7 @@ function undoTurn(lobby) {
     g.turn = data.game.turn; g.date = data.game.date;
     save(g);
     q.deleteSnapshot.run(snap.id);
+    q.deleteReports.run(lobby.id, data.game.turn);
   });
   return get(lobby.id);
 }
@@ -317,7 +370,7 @@ function checkAttack(g, isGm, marker) {
 const PROTECTED_UNIT_FIELDS = ['attack', 'defend', 'ap', 'range', 'movement', 'strength', 'unitType', 'nation', 'movedKm', 'apUsed'];
 
 module.exports = {
-  get, save, serializeGame, ensureState, serializeState, writeState, factionStates, incomeFor, endTurn, undoTurn,
+  get, save, serializeGame, ensureState, serializeState, writeState, factionStates, incomeFor, endTurn, undoTurn, reports,
   checkMove, checkAttack, PROTECTED_UNIT_FIELDS, emptyResources, q,
   relationStatus, setRelation, relations, diplomacy, serializeDiplomacy, factionEffects,
 };

@@ -228,6 +228,9 @@ function requireGm(req, res, next) {
 /** Change a marker's faction (territory ownership), recording history and broadcasting like any edit. */
 function setMarkerNation(req, before, nation) {
   const data = { ...before.data, nation };
+  // Game mode remembers when a place changed hands (turn reports, the "captured this turn" flash, idle yield).
+  const g = game.get(req.lobby.id);
+  if (g.enabled && String(before.data?.nation || '') !== String(nation || '')) { data.capturedTurn = g.turn; data.capturedFrom = String(before.data?.nation || ''); }
   q.updateMarker.run(before.type, before.name, before.x, before.y, before.iconFile, before.iconFile ? null : before.iconUrl, before.color,
     before.adminOnly ? 1 : 0, before.visibleTo ? JSON.stringify(before.visibleTo) : null, before.ownerId, JSON.stringify(data), now(), before.locked ? 1 : 0, before.id);
   const after = access.serializeMarker(q.marker.get(before.id, req.lobby.id));

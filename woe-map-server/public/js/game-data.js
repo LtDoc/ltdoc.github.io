@@ -60,7 +60,30 @@ const GameData = (() => {
     trenchRangeKm: 20,        // units this close to a friendly dug trench get cover
     trenchBonusDug: 2,        // added to defend when attacked
     trenchBonusReinforced: 4,
+    capturedIdle: true,       // phase 5: a place that changed hands this turn yields nothing at End turn
   };
+
+  // ---- Deadlines ---------------------------------------------------------------------------
+  /**
+   * The turn deadline is stored as text. When it parses as a date it is shown as a countdown; anything else
+   * ("ends Sunday 8pm") is shown as written. Returns { text, title, at (ms) | null, overdue }.
+   */
+  function deadlineInfo(deadline, nowMs) {
+    const s = String(deadline || '').trim();
+    if (!s) return null;
+    const at = /^\d{4}-\d{2}-\d{2}T/.test(s) ? Date.parse(s) : NaN;
+    if (!Number.isFinite(at)) return { text: s, title: s, at: null, overdue: false };
+    const now = nowMs || Date.now();
+    const d = new Date(at);
+    const title = d.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const left = at - now;
+    let text;
+    if (left <= 0) text = 'deadline passed';
+    else if (left < 3600e3) text = `ends in ${Math.max(1, Math.round(left / 60e3))} min`;
+    else if (left < 48 * 3600e3) { const h = Math.floor(left / 3600e3), m = Math.floor((left % 3600e3) / 60e3); text = `ends in ${h}h${m ? ` ${m}m` : ''}`; }
+    else text = `ends in ${Math.round(left / 86400e3)} days`;
+    return { text, title: `Turn deadline: ${title}`, at, overdue: left <= 0 };
+  }
 
   // ---- Production costs ----------------------------------------------------------------------
   // Per unit type: resources, money, manpower and build time in turns. Campaigns override per type via
@@ -176,7 +199,7 @@ const GameData = (() => {
     return out;
   }
 
-  return { RESOURCES, RESOURCE_KEYS, byKey, iconUrl, POOLS, FACTORY_ICON, TURN_STEPS, DEFAULT_SETTINGS, OIL_CATEGORIES, OIL_TYPES, stepDate, fmtDate, mergeSettings,
+  return { RESOURCES, RESOURCE_KEYS, byKey, iconUrl, POOLS, FACTORY_ICON, TURN_STEPS, DEFAULT_SETTINGS, OIL_CATEGORIES, OIL_TYPES, stepDate, fmtDate, mergeSettings, deadlineInfo,
     COST_KEYS, DEFAULT_COSTS, costFor, costLabel };
 })();
 
