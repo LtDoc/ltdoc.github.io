@@ -36,8 +36,8 @@ const GameData = (() => {
   const DEFAULT_SETTINGS = {
     kmPerMove: 50,            // km (or map units on image maps) per movement point per turn
     waiveMovement: false,     // GM switch: nobody is limited
-    captureRadiusKm: 60,      // phase 2: territory carved around an advancing land unit
-    cityRadiusKm: 150,        // phase 2: district that changes hands with a major city
+    captureRadiusKm: 30,      // phase 2: ground taken around an advancing land unit (halved 27 Sep 2026: one unit should not take a country)
+    cityRadiusKm: 75,         // phase 2: district that changes hands with a major city
     occupyNeutrals: true,
     upkeep: false,            // built in, off by default
     upkeepGrain: 1,           // per unit per turn when upkeep is on

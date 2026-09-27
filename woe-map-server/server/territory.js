@@ -345,7 +345,7 @@ function capture(lobby, g, unit, factions, markers, relation) {
   if (owner === NEUTRAL) { if (!g.settings.occupyNeutrals) return null; }
   else if (relation(mine.id, owner) !== 'war') return null;
   const s = g.settings;
-  const radius = Number(s.captureRadiusKm) || 60;
+  const radius = Number(s.captureRadiusKm) || 30;
   const ownerName = owner === NEUTRAL ? '' : (factions.find(f => f.id === owner)?.name || '').toLowerCase();
   // Contested ground: an enemy land unit within the radius holds the front.
   const enemyNear = markers.some(m => m.id !== unit.id && isLandUnit(m) && Number(m.data?.strength ?? 100) > 0 &&
@@ -366,11 +366,11 @@ function capture(lobby, g, unit, factions, markers, relation) {
     const ids = new Set(pv.within(lobby, unit.x, unit.y, radius, theirs).map(p => p.id));
     const landing = pv.at(lobby.id, unit.x, unit.y);
     if (landing && theirs(landing)) ids.add(landing.id);
-    for (const m of enemyCities) { for (const p of pv.within(lobby, m.x, m.y, Number(s.cityRadiusKm) || 150, theirs)) ids.add(p.id); cities.push(m); }
+    for (const m of enemyCities) { for (const p of pv.within(lobby, m.x, m.y, Number(s.cityRadiusKm) || 75, theirs)) ids.add(p.id); cities.push(m); }
     changed = pv.give(lobby, [...ids], mine.id);
   } else {
     let multi = circle(lobby, unit.x, unit.y, radius);
-    for (const m of enemyCities) { multi = pc.union(multi, circle(lobby, m.x, m.y, Number(s.cityRadiusKm) || 150)); cities.push(m); }
+    for (const m of enemyCities) { multi = pc.union(multi, circle(lobby, m.x, m.y, Number(s.cityRadiusKm) || 75)); cities.push(m); }
     changed = carve(lobby.id, mine.id, landClip(lobby, multi));
   }
   const flips = ownershipChanges(all(lobby.id), factions, markers).filter(f => f.nation.toLowerCase() === mine.name.toLowerCase());

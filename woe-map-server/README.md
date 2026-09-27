@@ -358,8 +358,9 @@ design is in `docs/GAME-DESIGN.md`.
 - **Upkeep** is built in but off: when enabled every unit costs grain per turn and vehicles, aircraft and
   ships cost oil; a faction that runs out has its three strongest units lose 10 % strength.
 - **Rules** (Game tab): distance per movement point, waive limits, base money/RP/manpower, city and factory
-  income rates, upkeep, starting stockpiles, public treasuries and whether captured places yield nothing
-  the turn they change hands.
+  income rates, upkeep, starting stockpiles, public treasuries, the capture radius and city district (30 km
+  and 75 km by default, so a single unit takes about one province and a city its immediate neighbours),
+  whether units may occupy neutral ground, and whether captured places yield nothing the turn they change hands.
 
 ### Production, cities and resources (game mode)
 
@@ -446,8 +447,8 @@ design is in `docs/GAME-DESIGN.md`.
   Places at sea or outside any territory keep their faction.
 - **Advancing moves the border.** When a **land unit** (infantry, mounted, artillery, support) ends a move on
   ground that belongs to a faction it is **at war** with, or on neutral ground (rule switch), it carves a
-  circle of the capture radius (60 km) out of that territory into its own. A city or capital of the enemy
-  inside the circle is taken with a larger district (150 km) and flips to the attacker, with a campaign
+  circle of the capture radius (30 km) out of that territory into its own. A city or capital of the enemy
+  inside the circle is taken with a larger district (75 km) and flips to the attacker, with a campaign
   event. If an enemy land unit stands within the capture radius the front holds and nothing changes: contested
   ground is settled by combat. Naval and air units never change borders, and allies can march through each
   other. Units at zero strength do not capture. Territory is never given back automatically: the line stays

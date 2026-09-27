@@ -164,12 +164,12 @@ territory that is not its own:
    campaign allows occupying neutrals, continue; otherwise nothing happens (you can march through an ally).
 2. If an **enemy land unit** is within `captureRadius` of the landing point, the front holds: no change.
    Contested ground is resolved by combat, not by who clicks first.
-3. Otherwise carve a circle of `captureRadius` (default 60 km) around the unit out of the owner's territory
+3. Otherwise carve a circle of `captureRadius` (default 30 km) around the unit out of the owner's territory
    and union it into the mover's. The circle is clipped to land, so coastal advances do not paint the sea.
    With provinces, the unit takes the province it stands in plus the owner's provinces whose centre lies
    within `captureRadius`; borders therefore always follow province edges.
 4. **Cities**: if a **major city** lies within the circle, the capture radius around that city grows to
-   `cityRadius` (default 150 km) so taking the city takes its district, and the town marker's faction flips.
+   `cityRadius` (default 75 km) so taking the city takes its district, and the town marker's faction flips.
    With provinces: the owner's provinces whose centre lies within `cityRadius` of the city.
    Capitals additionally post a campaign-wide event.
 5. Resource nodes inside the carved area change hands immediately (their income counts at the next end of turn).
@@ -350,7 +350,7 @@ A new sidebar tab (visible in game mode) for a player's faction, with the GM abl
 ## 9. Settings (per campaign, all GM-editable)
 
 `game.settings`: `turnStep` (week | fortnight | month | season), `startDate`, `kmPerMove` (50),
-`captureRadiusKm` (60), `cityRadiusKm` (150), `occupyNeutrals` (true), `upkeep` (false), `researchLead` (1),
+`captureRadiusKm` (30), `cityRadiusKm` (75), `occupyNeutrals` (true), `upkeep` (false), `researchLead` (1),
 `waiveMovement` (false), `baseRp` (per faction per turn, default 5), `baseMoney` (10), `costs` (unit cost
 table overrides, like `unitStats`).
 
@@ -410,7 +410,7 @@ Rough size: phases 1 and 2 are each about the size of the Earth-map work; 3 and 
    can also build a **factory** within 50 km of a city or town, never a village; a factory is a production
    site with its own industry level. Villages produce nothing.
 7. **Tech tree: the authored default**, editable in the browser.
-8. **Capture radii approved**: 60 km per unit, 150 km per city.
+8. **Capture radii approved**: 60 km per unit, 150 km per city. **Halved on 27 Sep 2026 to 30 km and 75 km**: with 100 km provinces a single unit was taking all of Luxembourg in one move, and the user wants serious military power to be needed. Both remain campaign rules.
 9. **Provinces (27 Sep 2026).** Territory on the Earth map is made of irregular provinces about 100 km
    across, cut along the seed year's borders and the coastline; custom maps keep free-form territories for
    now. Capture and the GM tools work on whole provinces.
