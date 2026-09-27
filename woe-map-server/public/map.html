@@ -122,6 +122,8 @@
               <div class="section">Production</div>
               <div class="grid3"><label>Capital builds<input id="ruleCapCapital" type="number" min="0" max="20" step="1"></label><label>City builds<input id="ruleCapCity" type="number" min="0" max="20" step="1"></label><label>Village builds<input id="ruleCapVillage" type="number" min="0" max="20" step="1"></label></div>
               <div class="grid2"><label>Factory range from a city/town<input id="ruleFactoryRange" type="number" step="any" min="1"></label><label>Coastal city: sea within<input id="ruleCoastal" type="number" step="any" min="1"></label></div>
+              <div class="section">Research</div>
+              <div class="grid2"><label>Research lead <span class="hint">(years ahead of the date)</span><input id="ruleResearchLead" type="number" step="1" min="0"></label><label>Start year <span class="hint">(techs of this year or earlier are free)</span><input id="ruleStartYear" type="number" step="1"></label></div>
               <div class="section">Trenches</div>
               <div class="grid3"><label>Cover range<input id="ruleTrenchRange" type="number" step="any" min="0"></label><label>Dug: +defend<input id="ruleTrenchDug" type="number" step="any" min="0"></label><label>Reinforced: +defend<input id="ruleTrenchReinforced" type="number" step="any" min="0"></label></div>
               <div class="section">Starting stockpiles <span class="hint">(new factions)</span></div>
@@ -221,6 +223,38 @@
           <label class="inline"><input type="checkbox" id="shapeAdminOnly"> GM only (hidden from players)</label>
         </div>
         <div class="row"><button type="submit">Save</button><button type="button" class="danger" id="btnShapeDelete" hidden>Delete</button></div>
+      </form>
+    </div>
+  </div>
+
+  <div id="techModal" class="modal">
+    <div class="card wide">
+      <button class="close" data-close>×</button>
+      <h2>Research · <span id="techFaction"></span></h2>
+      <p class="hint" id="techHint"></p>
+      <div class="row" style="flex-wrap:wrap;gap:6px">
+        <input id="techFilter" type="search" placeholder="Filter techs…" autocomplete="off" style="width:200px;margin:0">
+        <label class="inline" style="margin:0"><input type="checkbox" id="techHideDone"> Hide researched</label>
+        <span id="techGmTools" hidden><button type="button" class="small secondary" id="btnTechEdit">Edit tree…</button> <button type="button" class="small secondary" id="btnTechReset">Reset to default tree</button></span>
+      </div>
+      <div id="techTree" class="techtree"></div>
+    </div>
+  </div>
+
+  <div id="techEditModal" class="modal">
+    <div class="card">
+      <button class="close" data-close>×</button>
+      <h2 id="techEditTitle">Edit tech</h2>
+      <form id="techEditForm">
+        <div class="grid2"><label>Key <span class="hint">(a-z, 0-9, _)</span><input id="teKey" maxlength="40" required></label><label>Branch<input id="teBranch" maxlength="40" list="teBranches"></label></div>
+        <datalist id="teBranches"></datalist>
+        <label>Name<input id="teName" maxlength="80" required></label>
+        <div class="grid3"><label>Year<input id="teYear" type="number" step="1" required></label><label>RP cost<input id="teRp" type="number" step="any" min="0" required></label><label>Money to start<input id="teMoney" type="number" step="any" min="0"></label></div>
+        <label>Prerequisites <span class="hint">(keys, comma separated)</span><input id="tePrereqs" list="teKeys"></label>
+        <datalist id="teKeys"></datalist>
+        <label>Effects <span class="hint">(JSON array, see the README for shapes)</span><textarea id="teEffects" rows="4" style="font-family:monospace;font-size:12px"></textarea></label>
+        <label>Description<textarea id="teDesc" rows="2" maxlength="400"></textarea></label>
+        <div class="row"><button type="submit">Save</button><button type="button" class="danger" id="btnTechDelete" hidden>Delete</button></div>
       </form>
     </div>
   </div>
@@ -400,6 +434,7 @@
   <script src="/js/naming.js"></script>
   <script src="/js/game-data.js"></script>
   <script src="/js/game-ui.js"></script>
+  <script src="/js/research-ui.js"></script>
   <script src="/js/cost-editor.js"></script>
   <script src="/js/stats-editor.js"></script>
   <script src="/js/earth.js"></script>

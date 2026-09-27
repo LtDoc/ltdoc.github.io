@@ -368,6 +368,33 @@ design, including the phases still to come (territory that follows armies, produ
   of small random deposits on land so remote factions have something to work with. Everything is an ordinary
   resource marker afterwards.
 
+### Research (game mode)
+
+- **The tree.** When game mode starts the campaign gets a copy of the default WW1 tree
+  (`defaults/techtree-ww1.json`: 81 techs in eight branches, Infantry, Artillery, Armour & motor, Aviation,
+  Naval, Chemical, Industry & logistics and Doctrine, dated 1890–1918). Each tech has a year, an RP cost, a
+  money cost paid when the project starts, prerequisites, effects and a description. Every faction starts
+  with every tech dated on or before the campaign's **start year** (1914 for the scenario), so nations begin
+  with rifles, machine guns, field artillery, dreadnoughts and balloons but no tanks, gas or fighters.
+- **Researching.** Research points come in each turn (base allowance, cities, factories, modifiers). From
+  the Nation tab's **Open tech tree**, a player starts one project at a time and can queue up to five more;
+  at End turn the faction's banked RP flows into the active project, it unlocks when paid for, its effects
+  apply, and the next queued project starts (if its money can be paid). A tech can be researched only when
+  its prerequisites are known and its year is within the **research lead** (1 year) of the game date, so
+  1918 tanks cannot appear in 1915. Progress on a dropped project is kept. Completed research is announced
+  campaign-wide.
+- **Effects** are data on each tech and are recomputed from the unlocked set whenever they are needed,
+  so a GM locking a tech again cleanly removes its bonuses: `unlockUnit` makes a type buildable (types no
+  tech gates are always buildable; 45 of the 54 are gated), `stat` adds attack/defend/movement/range/AP to a
+  type or category (applied in combat and to movement allowances, never baked into units), `cost`
+  multiplies production costs, `buildTime` changes build turns, `income` adds to or scales money, RP,
+  manpower or a resource, `removeCost` makes a resource unnecessary (Haber process: nitrates), `cover`
+  adds to trench cover, `capacity` adds parallel builds per site, `recover` heals damaged units each turn
+  (medical services) and `flag` marks a rule for later. The combat log shows tech bonuses on either side.
+- **GM.** From the same tree the GM can **Unlock** or **Lock** any tech for any faction, **edit** any tech
+  (key, branch, year, costs, prerequisites, effects as JSON, description), add new ones, delete, or
+  **reset to the default tree**. Research lead and start year are rules on the Game tab.
+
 ### Territory and war (game mode)
 
 - **Territories** are one polygon set per faction plus neutral land, drawn as tinted fills with outlines and
@@ -463,7 +490,12 @@ server/game.js    game rows, faction treasuries, income, End turn / undo, moveme
 server/routes/game.js  /api/lobbies/:id/game routes
 server/geo.js     server-side projection and great-circle distance (mirrors earth.js)
 server/territory.js  faction territories: seeding from a year, brush/assign, the capture rule, ownership of places
+server/production.js  build queues, costs, sites, coastal and industry rules, factory placement
+server/research.js  tech tree storage, research queue and the effects engine
+defaults/techtree-ww1.json  the default WW1 research tree
   js/stats-editor.js  GM table of per-campaign unit stat overrides (+/- steppers), shared by both pages
+  js/cost-editor.js  GM table of production costs
+  js/research-ui.js  research section, tech tree modal and the GM tech editor
   sprites/        pixel-art sheets and atlas.json (generated)
   js/map.js       app logic: REST + WebSocket sync, sidebar, forms, popups, history, combat, notifications
   earth/          land, lakes, rivers, borders (gzipped JSON, public domain)

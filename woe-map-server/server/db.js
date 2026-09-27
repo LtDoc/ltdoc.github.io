@@ -193,6 +193,23 @@ CREATE TABLE IF NOT EXISTS diplomacy (
   resolved_at  INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_diplomacy_lobby ON diplomacy(lobby_id, id);
+
+CREATE TABLE IF NOT EXISTS techs (
+  id          INTEGER PRIMARY KEY,
+  lobby_id    INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  key         TEXT NOT NULL,
+  branch      TEXT NOT NULL DEFAULT 'General',
+  name        TEXT NOT NULL,
+  year        INTEGER NOT NULL DEFAULT 1914,
+  rp          REAL NOT NULL DEFAULT 10,
+  money       REAL NOT NULL DEFAULT 0,
+  prereqs     TEXT NOT NULL DEFAULT '[]',              -- JSON array of tech keys
+  effects     TEXT NOT NULL DEFAULT '[]',              -- JSON array, see server/research.js
+  description TEXT NOT NULL DEFAULT '',
+  sort        INTEGER NOT NULL DEFAULT 0,
+  updated_at  INTEGER NOT NULL,
+  UNIQUE (lobby_id, key)
+);
 `);
 
 // ---- Lightweight migrations for databases created by earlier versions -------------

@@ -52,6 +52,7 @@ const GameUI = (() => {
       if (action === 'propose') proposeDiplomacy(b.dataset.kind, Number(b.dataset.to), b.dataset.from ? Number(b.dataset.from) : undefined);
       else diplomacyAct(Number(id), action);
     });
+    ResearchUI.init({ ...c, renderNation, currentFaction: myEntry });
     fetch('/api/lobbies/earth/years').then(r => r.json()).then(d => {
       $('#terrYear').innerHTML = (d.years || []).map(y => `<option value="${y}" ${y === 1914 ? 'selected' : ''}>${y}</option>`).join('');
     }).catch(() => {});
@@ -179,6 +180,7 @@ const GameUI = (() => {
       if (prod.factionId !== e.faction.id) prod = null;
     } catch { prod = null; }
     renderNation();
+    ResearchUI.load(e.faction.id);
   }
   function productionHtml(e) {
     if (!prod || prod.factionId !== e.faction.id) return `<div class="section">Production</div><p class="hint">Loading…</p>`;
@@ -228,7 +230,7 @@ const GameUI = (() => {
         for (const k of GameData.RESOURCE_KEYS) if ((st.resources[k] || 0) < cost[k]) short.push(GameData.byKey[k].name.toLowerCase());
         if (st.money < cost.money) short.push('money');
         if (st.manpower < cost.manpower) short.push('manpower');
-        let blocked = short.length ? `short of ${short.join(', ')}` : '';
+        let blocked = prod.buildable && prod.buildable[t.id] === false ? 'not yet researched' : (short.length ? `short of ${short.join(', ')}` : '');
         if (!blocked && t.cat === 'Naval' && site && !site.coastal) blocked = 'needs a coastal city';
         if (!blocked && t.cat === 'Air' && site && site.industry < 2) blocked = 'needs industry 2';
         html += `<div class="diplo"><span class="grow"><b>${esc(t.unit)}</b><br><span class="hint">${esc(GameData.costLabel(cost))}</span>${blocked ? `<br><span class="hint" style="color:#ff9f80">${esc(blocked)}</span>` : ''}</span><button class="small" data-build="${t.id}" data-site="${buildSiteId}" ${blocked ? 'disabled' : ''}>Build</button></div>`;
@@ -342,6 +344,7 @@ const GameUI = (() => {
       ${inc.notes && inc.notes.length ? `<details class="sub"><summary>Where it comes from</summary><ul class="hintlist">${inc.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul></details>` : ''}
       <div class="section">Forces <span class="hint">(${units.length})</span></div>
       ${Object.keys(cats).length ? `<table class="treasury"><tbody>${Object.entries(cats).map(([c, v]) => `<tr><td>${esc(c)}</td><td class="num">${v.n}</td><td class="hint">${v.moved ? `${v.moved} moved` : ''}${v.spent ? `${v.moved ? ', ' : ''}${v.spent} attacked` : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="hint">No units on the map.</p>'}
+      ${ResearchUI.sectionHtml(e)}
       ${productionHtml(e)}
       ${diplomacyHtml(e)}
       ${lastTurn ? `<div class="section">Last turn</div><p class="hint">${esc(lastTurn.message)}</p>` : ''}`;
@@ -394,6 +397,7 @@ const GameUI = (() => {
     set('#ruleTrenchRange', s.trenchRangeKm); set('#ruleTrenchDug', s.trenchBonusDug); set('#ruleTrenchReinforced', s.trenchBonusReinforced);
     set('#ruleCapCapital', s.cityCapacity.capital); set('#ruleCapCity', s.cityCapacity.city); set('#ruleCapVillage', s.cityCapacity.village);
     set('#ruleFactoryRange', s.factoryRangeKm); set('#ruleCoastal', s.coastalKm);
+    set('#ruleResearchLead', s.researchLead); set('#ruleStartYear', s.startYear || '');
     $('#earthSeedRow').hidden = state.lobby?.mapKind !== 'earth';
     for (const size of ['capital', 'city', 'village']) for (const k of ['money', 'rp', 'manpower']) set(`#rule_${size}_${k}`, s.cityIncome[size][k]);
     set('#ruleFactoryMoney', s.factoryIncome.money); set('#ruleFactoryRp', s.factoryIncome.rp);
@@ -447,7 +451,7 @@ const GameUI = (() => {
       baseMoney: v('#ruleBaseMoney'), baseRp: v('#ruleBaseRp'), baseManpower: v('#ruleBaseManpower'), publicTreasury: $('#rulePublic').checked,
       trenchRangeKm: v('#ruleTrenchRange'), trenchBonusDug: v('#ruleTrenchDug'), trenchBonusReinforced: v('#ruleTrenchReinforced'),
       cityCapacity: { capital: v('#ruleCapCapital'), city: v('#ruleCapCity'), village: v('#ruleCapVillage') },
-      factoryRangeKm: v('#ruleFactoryRange'), coastalKm: v('#ruleCoastal'),
+      factoryRangeKm: v('#ruleFactoryRange'), coastalKm: v('#ruleCoastal'), researchLead: v('#ruleResearchLead'),
       cityIncome: {}, factoryIncome: { money: v('#ruleFactoryMoney'), rp: v('#ruleFactoryRp') },
       startStock: { resources: v('#ruleStartRes'), money: v('#ruleStartMoney'), manpower: v('#ruleStartMp') },
     };

@@ -9,6 +9,7 @@ const access = require('./lobbyAccess');
 const geo = require('./geo');
 const GameData = require('../public/js/game-data');
 const UnitTypes = require('../public/js/units');
+const research = require('./research');
 
 const q = {
   game: db.prepare('SELECT * FROM game WHERE lobby_id = ?'),
@@ -77,9 +78,27 @@ function save(g) {
 function emptyResources(fill = 0) { return Object.fromEntries(GameData.RESOURCE_KEYS.map(k => [k, fill])); }
 
 function ensureState(lobbyId, factionId, settings) {
-  const s = (settings || get(lobbyId).settings).startStock || GameData.DEFAULT_SETTINGS.startStock;
-  q.insertState.run(factionId, lobbyId, JSON.stringify(emptyResources(num(s.resources))), num(s.money), num(s.manpower), num(s.rp), now());
+  const gm = get(lobbyId);
+  const s = (settings || gm.settings).startStock || GameData.DEFAULT_SETTINGS.startStock;
+  const inserted = q.insertState.run(factionId, lobbyId, JSON.stringify(emptyResources(num(s.resources))), num(s.money), num(s.manpower), num(s.rp), now()).changes > 0;
+  if (inserted) {
+    // A new faction starts with every tech dated on or before the campaign's start year.
+    research.ensureTree(lobbyId);
+    const st = serializeState(q.state.get(factionId));
+    st.techs = research.startingKeys(research.list(lobbyId), research.yearOf(gm.settings.startYear || gm.date));
+    writeState(st);
+  }
   return q.state.get(factionId);
+}
+
+/** Aggregated tech effects for a faction (by id or name); empty effects when the faction is unknown. */
+function factionEffects(lobbyId, factionRef) {
+  const techs = research.list(lobbyId);
+  const f = typeof factionRef === 'number' ? q.faction.get(factionRef, lobbyId)
+    : q.factions.all(lobbyId).find(x => x.name.toLowerCase() === String(factionRef || '').toLowerCase());
+  if (!f) return research.emptyEffects(techs);
+  const st = q.state.get(f.id);
+  return research.effectsFor(techs, st ? (access.safeJson(st.techs) || []) : []);
 }
 function serializeState(row) {
   const res = { ...emptyResources(), ...access.safeJson(row.resources) };
@@ -95,10 +114,16 @@ function writeState(s) {
 }
 /** Every faction of the lobby with its state (created on demand). */
 function factionStates(lobbyId, settings) {
-  return q.factions.all(lobbyId).map(f => ({
-    faction: access.serializeFaction(f),
-    state: serializeState(q.state.get(f.id) || ensureState(lobbyId, f.id, settings)),
-  }));
+  const gm = get(lobbyId);
+  let starting = null;   // lazily computed: states created before the tree existed get the starting kit
+  return q.factions.all(lobbyId).map(f => {
+    const state = serializeState(q.state.get(f.id) || ensureState(lobbyId, f.id, settings));
+    if (gm.enabled && !state.techs.length) {
+      if (!starting) { research.ensureTree(lobbyId); starting = research.startingKeys(research.list(lobbyId), research.yearOf(gm.settings.startYear || gm.date)); }
+      if (starting.length) { state.techs = starting; writeState(state); }
+    }
+    return { faction: access.serializeFaction(f), state };
+  });
 }
 
 // ---- Income -----------------------------------------------------------------------------
@@ -127,6 +152,7 @@ function incomeFor(lobby, g, faction, state, markers) {
   const mods = state.mods || {};
   inc.money += num(mods.money); inc.rp += num(mods.rp); inc.manpower += num(mods.manpower);
   for (const k of GameData.RESOURCE_KEYS) inc.resources[k] += num(mods.resources?.[k]);
+  research.applyIncome(research.effectsFor(research.list(lobby.id), state.techs || []), inc);
   if (s.upkeep) {
     for (const u of mine.filter(m => m.type === 'unit' && num(m.data.strength, 100) > 0)) {
       inc.upkeep.grain += num(s.upkeepGrain);
@@ -193,6 +219,18 @@ function endTurn(lobby, hooks = {}) {
       if (inc.money) parts.push(`${inc.money >= 0 ? '+' : ''}${round(inc.money)} money`);
       if (inc.rp) parts.push(`+${round(inc.rp)} RP`);
       if (inc.manpower) parts.push(`+${round(inc.manpower)} manpower`);
+      // Research: the bank of research points flows into the active project.
+      const techs = research.list(lobby.id);
+      const researched = research.advance(state, techs, g).map(t => t.name);
+      if (researched.length) parts.push(`researched ${researched.join(', ')}`);
+      // Recovery: damaged units heal when the faction has medical services.
+      const fx = research.effectsFor(techs, state.techs || []);
+      if (fx.recover > 0) {
+        for (const u of markers.filter(m => m.type === 'unit' && String(m.data?.nation || '').toLowerCase() === faction.name.toLowerCase() && num(m.data.strength, 100) > 0 && num(m.data.strength, 100) < 100)) {
+          const st = Math.min(100, num(u.data.strength, 100) + fx.recover);
+          q.setStrength.run(st, now(), u.id); u.data.strength = st;
+        }
+      }
       // Production: builds advance; finished ones become markers via the hook.
       const built = [];
       for (const item of production.advance(state)) {
@@ -203,7 +241,7 @@ function endTurn(lobby, hooks = {}) {
       const queued = (state.production || []).length;
       if (queued) parts.push(`${queued} build${queued === 1 ? '' : 's'} in progress`);
       writeState(state);
-      summaries.push({ faction, text: parts.length ? parts.join(', ') : 'no income', data: { income: inc, built } });
+      summaries.push({ faction, text: parts.length ? parts.join(', ') : 'no income', data: { income: inc, built, researched } });
     }
     // Shortages bite: up to three of the faction's strongest units lose 10 % strength per short resource.
     for (const hit of strengthHits) {
@@ -255,7 +293,8 @@ function checkMove(lobby, g, isGm, marker, x, y) {
   if (!g.enabled || isGm || g.settings.waiveMovement || marker.type !== 'unit') return { x, y, clamped: false };
   const dist = geo.distance(lobby, marker.x, marker.y, x, y);
   if (dist < 1e-6) return { x, y, clamped: false };
-  const allowance = num(marker.data.movement) * num(g.settings.kmPerMove);
+  const bonus = research.statBonus(factionEffects(lobby.id, marker.data?.nation), UnitTypes.resolve(marker.data?.unitType)).movement;
+  const allowance = (num(marker.data.movement) + bonus) * num(g.settings.kmPerMove);
   const used = num(marker.data.movedKm);
   const remaining = Math.max(0, allowance - used);
   const unit = geo.isEarth(lobby) ? 'km' : (lobby.scale_label || 'units');
@@ -280,5 +319,5 @@ const PROTECTED_UNIT_FIELDS = ['attack', 'defend', 'ap', 'range', 'movement', 's
 module.exports = {
   get, save, serializeGame, ensureState, serializeState, writeState, factionStates, incomeFor, endTurn, undoTurn,
   checkMove, checkAttack, PROTECTED_UNIT_FIELDS, emptyResources, q,
-  relationStatus, setRelation, relations, diplomacy, serializeDiplomacy,
+  relationStatus, setRelation, relations, diplomacy, serializeDiplomacy, factionEffects,
 };

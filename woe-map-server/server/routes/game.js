@@ -12,6 +12,7 @@ const GameData = require('../../public/js/game-data');
 const territory = require('../territory');
 
 const production = require('../production');
+const research = require('../research');
 const UnitTypes = require('../../public/js/units');
 const geo = require('../geo');
 
@@ -129,13 +130,15 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
   function productionView(req, g, faction) {
     const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
     const state = game.serializeState(game.q.state.get(faction.id) || game.ensureState(req.lobby.id, faction.id, g.settings));
-    const sites = production.sites(req.lobby, g, access.serializeFaction(faction), markers).map(s => ({
+    const fx = research.effectsFor(research.list(req.lobby.id), state.techs || []);
+    const sites = production.sites(req.lobby, g, access.serializeFaction(faction), markers, fx).map(s => ({
       ...s, coastal: geo.isEarth(req.lobby) ? territory.isCoastal(req.lobby, s.x, s.y, num(g.settings.coastalKm, 30)) : true,
       queue: (state.production || []).filter(q => q.siteId === s.id && q.typeId !== 'factory'),
     }));
     const factories = (state.production || []).filter(q => q.typeId === 'factory');
-    const costs = Object.fromEntries([...UnitTypes.LIST.map(t => t.id), 'factory'].map(id => [id, GameData.costFor(id, g.settings.unitCosts)]));
-    return { factionId: faction.id, sites, factoryBuilds: factories, costs, state };
+    const costs = Object.fromEntries([...UnitTypes.LIST.map(t => t.id), 'factory'].map(id => [id, production.costWith(g, fx, id)]));
+    const buildable = Object.fromEntries(UnitTypes.LIST.map(t => [t.id, research.canBuild(fx, t.id)]));
+    return { factionId: faction.id, sites, factoryBuilds: factories, costs, buildable, state };
   }
 
   router.get('/production', (req, res) => {
@@ -156,7 +159,8 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const state = game.serializeState(game.q.state.get(f.id) || game.ensureState(req.lobby.id, f.id, g.settings));
     const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
     let item;
-    try { item = production.queue(req.lobby, g, faction, state, markers, { typeId: String(req.body?.typeId || ''), siteId: req.body?.siteId, x: req.body?.x, y: req.body?.y }); }
+    const fx = research.effectsFor(research.list(req.lobby.id), state.techs || []);
+    try { item = production.queue(req.lobby, g, faction, state, markers, { typeId: String(req.body?.typeId || ''), siteId: req.body?.siteId, x: req.body?.x, y: req.body?.y }, fx); }
     catch (e) { return res.status(400).json({ error: e.message }); }
     game.writeState(state);
     const what = item.typeId === 'factory' ? 'a factory' : (UnitTypes.LIST.find(t => t.id === item.typeId)?.unit || item.typeId);
@@ -175,6 +179,82 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     game.writeState(state);
     broadcastFaction(req, g, f);
     res.json(productionView(req, g, f));
+  });
+
+  // ---- Research --------------------------------------------------------------------------------
+  function techView(req, g, faction) {
+    const techs = research.list(req.lobby.id);
+    const state = game.serializeState(game.q.state.get(faction.id) || game.ensureState(req.lobby.id, faction.id, g.settings));
+    const r = research.researchState(state);
+    const fx = research.effectsFor(techs, state.techs || []);
+    const have = new Set(state.techs || []);
+    const items = techs.map(t => ({
+      ...t, unlocked: have.has(t.key), active: r.active === t.key, queued: r.queue.includes(t.key), progress: r.progress[t.key] || 0,
+      blocker: have.has(t.key) ? null : research.blocker(t, state, techs, g),
+    }));
+    return {
+      factionId: faction.id, techs: items, research: r, rp: state.rp, money: state.money, year: research.yearOf(g.date), lead: num(g.settings.researchLead, 1),
+      effects: { unlocked: [...fx.unlocked], gated: [...fx.gated], cover: fx.cover, capacity: fx.capacity, recover: fx.recover, flags: [...fx.flags], income: fx.income, statCat: fx.statCat, statUnit: fx.statUnit },
+    };
+  }
+  router.get('/techs', (req, res) => {
+    const g = game.get(req.lobby.id);
+    research.ensureTree(req.lobby.id);
+    const f = factionFor(req, req.query.factionId);
+    if (!f) return res.json({ factionId: null, techs: research.list(req.lobby.id), research: null, year: research.yearOf(g.date), lead: num(g.settings.researchLead, 1) });
+    res.json(techView(req, g, f));
+  });
+  /** Player (or GM for a faction) starts or queues a project. */
+  router.post('/research', (req, res) => {
+    const g = game.get(req.lobby.id);
+    if (!g.enabled) return res.status(400).json({ error: 'Game mode is off' });
+    const f = factionFor(req, req.body?.factionId);
+    if (!f) return res.status(400).json({ error: 'You need a faction to research' });
+    const techs = research.list(req.lobby.id), tech = techs.find(t => t.key === String(req.body?.key || ''));
+    const state = game.serializeState(game.q.state.get(f.id) || game.ensureState(req.lobby.id, f.id, g.settings));
+    try { research.start(state, tech, techs, g); } catch (e) { return res.status(400).json({ error: e.message }); }
+    game.writeState(state);
+    const r = research.researchState(state);
+    logEvent(req.lobby.id, req.user.id, 'system', `${f.name} ${r.active === tech.key ? 'begins researching' : 'plans to research'} ${tech.name}`, { faction: f.name },
+      ws => ws.lobbyRole === 'gm' || g.settings.publicTreasury || String(ws.nation || '').toLowerCase() === f.name.toLowerCase());
+    broadcastFaction(req, g, f);
+    res.status(201).json(techView(req, g, f));
+  });
+  router.delete('/research/:key', (req, res) => {
+    const g = game.get(req.lobby.id);
+    const f = factionFor(req, req.query.factionId);
+    if (!f) return res.status(400).json({ error: 'You need a faction' });
+    const state = game.serializeState(game.q.state.get(f.id) || game.ensureState(req.lobby.id, f.id, g.settings));
+    research.drop(state, String(req.params.key));
+    research.promote(state, research.list(req.lobby.id), g);
+    game.writeState(state);
+    broadcastFaction(req, g, f);
+    res.json(techView(req, g, f));
+  });
+  /** GM: unlock or lock a tech for a faction directly. */
+  router.post('/factions/:fid/techs', requireGm, (req, res) => {
+    const g = game.get(req.lobby.id);
+    const f = game.q.faction.get(Number(req.params.fid), req.lobby.id);
+    if (!f) return res.status(404).json({ error: 'No such faction' });
+    const tech = research.get(req.lobby.id, String(req.body?.key || ''));
+    if (!tech) return res.status(404).json({ error: 'No such tech' });
+    const state = game.serializeState(game.q.state.get(f.id) || game.ensureState(req.lobby.id, f.id, g.settings));
+    research.setUnlocked(state, tech.key, !!req.body?.unlocked);
+    game.writeState(state);
+    logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} ${req.body?.unlocked ? 'granted' : 'removed'} ${tech.name} ${req.body?.unlocked ? 'to' : 'from'} ${f.name}`);
+    broadcastFaction(req, g, f);
+    res.json(techView(req, g, f));
+  });
+  /** GM tree editing. */
+  router.post('/techs', requireGm, (req, res) => {
+    try { res.status(201).json({ tech: research.upsert(req.lobby.id, req.body || {}) }); }
+    catch (e) { res.status(400).json({ error: e.message }); }
+  });
+  router.delete('/techs/:key', requireGm, (req, res) => { research.remove(req.lobby.id, String(req.params.key)); res.json({ ok: true }); });
+  router.post('/techs/reset', requireGm, (req, res) => {
+    const n = research.seedDefault(req.lobby.id, true);
+    logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} reset the tech tree to the default (${n} techs)`);
+    res.json({ count: n });
   });
 
   // ---- Earth datasets: major cities and resource deposits ------------------------------------
@@ -341,8 +421,17 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       if (req.body?.resetTurn) g.turn = 1;
     }
     g.enabled = on;
+    if (on && !g.settings.startYear) g.settings = { ...g.settings, startYear: research.yearOf(g.date) };
     const saved = game.save(g);
-    if (on) for (const f of game.q.factions.all(req.lobby.id)) game.ensureState(req.lobby.id, f.id, saved.settings);
+    if (on) {
+      research.ensureTree(req.lobby.id);
+      const techs = research.list(req.lobby.id), starting = research.startingKeys(techs, research.yearOf(saved.settings.startYear || saved.date));
+      for (const f of game.q.factions.all(req.lobby.id)) {
+        game.ensureState(req.lobby.id, f.id, saved.settings);
+        const st = game.serializeState(game.q.state.get(f.id));
+        if (!st.techs.length) { st.techs = starting; game.writeState(st); }
+      }
+    }
     logEvent(req.lobby.id, req.user.id, 'system', on ? `${req.user.displayName} switched game mode on: turn ${saved.turn}, ${GameData.fmtDate(saved.date)}` : `${req.user.displayName} switched game mode off`);
     broadcastGame(req.lobby.id, saved);
     res.json({ game: saved });
@@ -362,7 +451,8 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       numIn('researchLead', 0, 50); numIn('baseMoney', -1000, 100000); numIn('baseRp', -1000, 100000); numIn('baseManpower', -1000, 100000);
       numIn('upkeepGrain', 0, 100); numIn('upkeepOil', 0, 100);
       numIn('trenchRangeKm', 0, 1000); numIn('trenchBonusDug', 0, 50); numIn('trenchBonusReinforced', 0, 50);
-      numIn('factoryRangeKm', 1, 5000); numIn('coastalKm', 1, 500);
+      numIn('factoryRangeKm', 1, 5000); numIn('coastalKm', 1, 500); numIn('researchLead', 0, 50);
+      if (s.startYear !== undefined) out.startYear = clamp(Math.round(num(s.startYear, 1914)), 1000, 3000);
       if (s.cityCapacity && typeof s.cityCapacity === 'object') {
         out.cityCapacity = {};
         for (const k of ['capital', 'city', 'village']) if (s.cityCapacity[k] !== undefined) out.cityCapacity[k] = clamp(Math.round(num(s.cityCapacity[k])), 0, 20);
@@ -428,6 +518,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     logEvent(req.lobby.id, req.user.id, 'system', `Turn ${before.turn} ended. Turn ${g.turn} begins: ${GameData.fmtDate(g.date)}. Movement and action points are reset.`);
     for (const s of result.summaries) {
       const nation = s.faction.name.toLowerCase();
+      for (const name of s.data.researched || []) logEvent(req.lobby.id, null, 'system', `🔬 ${s.faction.name} completes research: ${name}`);
       logEvent(req.lobby.id, null, 'turn', `${s.faction.name}, turn ${before.turn}: ${s.text}`, { faction: s.faction.name, factionId: s.faction.id, income: s.data.income, turn: before.turn },
         ws => ws.lobbyRole === 'gm' || g.settings.publicTreasury || String(ws.nation || '').toLowerCase() === nation);
     }

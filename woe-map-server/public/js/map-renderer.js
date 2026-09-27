@@ -231,7 +231,8 @@ class MapRenderer extends EventTarget {
     const { w, h } = this.mapSize;
     const sw = this.app.screen.width, sh = this.app.screen.height;
     this._fitWasDegenerate = sw < 100 || sh < 100;
-    const s = Math.min(sw / w, sh / h) * 0.95;
+    // A hidden or collapsed pane reports a 0×0 screen; never let the scale hit zero (1/scale stroke widths would explode).
+    const s = Math.max(0.01, Math.min(sw / w, sh / h) * 0.95);
     this.minScale = Math.min(s * 0.35, 0.05);
     this.world.scale.set(s);
     this.world.x = (sw - w * s) / 2;

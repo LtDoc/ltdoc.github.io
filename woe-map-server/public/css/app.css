@@ -127,6 +127,21 @@ details.sub > summary .hint { text-transform: none; letter-spacing: 0; }
 .diplo .grow { flex: 1; min-width: 120px; }
 .site { margin-bottom: 6px; }
 .buildlist { max-height: 60vh; overflow: auto; }
+.techtree { max-height: 66vh; overflow: auto; margin-top: 8px; }
+.techtree .branch { margin: 10px 0 4px; }
+.techgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px; }
+.tech { background: var(--panel2); border-radius: 6px; padding: 6px 8px; font-size: 12px; border: 1px solid transparent; display: flex; flex-direction: column; gap: 3px; }
+.tech .t { font-weight: 600; font-size: 13px; display: flex; justify-content: space-between; gap: 6px; }
+.tech .t .yr { color: var(--muted); font-weight: 400; }
+.tech.done { border-color: rgba(46,204,113,.5); }
+.tech.active { border-color: #f1c40f; }
+.tech.queued { border-color: rgba(241,196,15,.45); border-style: dashed; }
+.tech.locked { opacity: .6; }
+.tech .bar { height: 5px; background: rgba(255,255,255,.08); border-radius: 3px; overflow: hidden; }
+.tech .bar i { display: block; height: 100%; background: #f1c40f; }
+.tech .actions { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 2px; }
+.progress { height: 8px; background: rgba(255,255,255,.08); border-radius: 4px; overflow: hidden; margin: 4px 0; }
+.progress i { display: block; height: 100%; background: #f1c40f; }
 .qalist { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 6px; }
 .qalist .section { grid-column: 1 / -1; margin: 10px 0 2px; }
 .qa { display: flex; align-items: center; gap: 6px; padding: 3px 6px; background: var(--panel2); text-align: left; font-size: 12px; line-height: 1.15; border: 1px solid transparent; min-height: 36px; }

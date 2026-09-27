@@ -1163,8 +1163,12 @@ router.post('/:id/combat', (req, res) => {
   if (g.enabled) a.data = { ...a.data, apUsed: num(a.data.apUsed) + 1 };   // spent even if the attack is repelled
 
   const cfg = access.serializeLobby(req.lobby, 'player').settings.combat;
+  const research = require('../research');
+  const fxA = game.factionEffects(req.lobby.id, a.data?.nation), fxD = game.factionEffects(req.lobby.id, d.data?.nation);
+  const bonusA = research.statBonus(fxA, UnitTypes.resolve(a.data?.unitType)), bonusD = research.statBonus(fxD, UnitTypes.resolve(d.data?.unitType));
   const cover = require('../territory').trenchCover(req.lobby, g.settings, d, q.shapes.all(req.lobby.id).map(access.serializeShape));
-  const atk = num(a.data.attack), def = num(d.data.defend) + (cover ? cover.bonus : 0);
+  if (cover) cover.bonus += fxD.cover;
+  const atk = num(a.data.attack) + bonusA.attack, def = num(d.data.defend) + bonusD.defend + (cover ? cover.bonus : 0);
   const aRoll = crypto.randomInt(1, cfg.die + 1), dRoll = crypto.randomInt(1, cfg.die + 1);
   const aTotal = aRoll + atk, dTotal = dRoll + def;
   const margin = aTotal - dTotal;
@@ -1190,7 +1194,8 @@ router.post('/:id/combat', (req, res) => {
   apply(a, aLoss); apply(d, dLoss);
 
   const fmt = (m, l) => `${m.name} ${l.loss ? `loses ${l.loss}% (${l.from}→${l.to}${l.to === 0 ? ', destroyed' : ''})` : 'is unharmed'}`;
-  const text = `⚔ ${a.name} attacked ${d.name}: ${aRoll}+${atk}=${aTotal} vs ${dRoll}+${def}${cover ? ` (incl. +${cover.bonus} trench cover)` : ''}=${dTotal} → ` +
+  const notes = [bonusA.attack ? `attacker +${bonusA.attack} tech` : '', bonusD.defend ? `defender +${bonusD.defend} tech` : '', cover ? `+${cover.bonus} trench cover` : ''].filter(Boolean);
+  const text = `⚔ ${a.name} attacked ${d.name}: ${aRoll}+${atk}=${aTotal} vs ${dRoll}+${def}=${dTotal}${notes.length ? ` (${notes.join(', ')})` : ''} → ` +
     (outcome === 'tie' ? 'stalemate. ' : outcome === 'attacker' ? 'attack succeeds. ' : 'attack repelled. ') +
     `${fmt(d, losses[d.id])}; ${fmt(a, losses[a.id])}`;
   const hidden = !!(a.adminOnly || d.adminOnly || a.visibleTo || d.visibleTo);
