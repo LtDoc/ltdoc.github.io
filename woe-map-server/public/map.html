@@ -109,8 +109,9 @@
             <form id="rulesForm">
               <div class="grid2">
                 <label>Distance per movement point <span class="hint">(km / map units per turn)</span><input id="ruleKmPerMove" type="number" step="any" min="1"></label>
-                <label class="inline" style="margin-top:22px"><input type="checkbox" id="ruleWaive"> Waive movement limits</label>
+                <label>Attack reach per range point <span class="hint">(infantry 1, cavalry 2, artillery 3)</span><input id="ruleKmPerRange" type="number" step="any" min="1"></label>
               </div>
+              <label class="inline"><input type="checkbox" id="ruleWaive"> Waive movement and range limits</label>
               <div class="grid3">
                 <label>Base money / turn<input id="ruleBaseMoney" type="number" step="any"></label>
                 <label>Base RP / turn<input id="ruleBaseRp" type="number" step="any"></label>

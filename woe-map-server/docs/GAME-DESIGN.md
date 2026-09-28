@@ -116,6 +116,8 @@ Unit categories already exist in the catalogue. Movement and capture behaviour p
 
 ### 4.3 Action points and combat
 
+**Reach (added 27 Sep 2026).** A unit can only attack targets within `range × kmPerRange` (50 km per range point by default): infantry 50 km, cavalry 100 km, field artillery 150 km, heavy artillery 200 km, railway guns 300 km, aircraft and capital ships further. The attack picker lists only enemies within reach; the server enforces it for players (the GM and the waive switch pass), with tech range bonuses counted.
+
 - `ap` finally does something: each attack costs 1 AP and the server refuses attacks from a unit with none
   left. Most units have 1 AP; cavalry, armoured cars, aircraft and destroyers have 2.
 - Combat itself is unchanged (d20 + attack vs d20 + defend, strength losses, explosions). Tech effects can
@@ -350,7 +352,7 @@ A new sidebar tab (visible in game mode) for a player's faction, with the GM abl
 ## 9. Settings (per campaign, all GM-editable)
 
 `game.settings`: `turnStep` (week | fortnight | month | season), `startDate`, `kmPerMove` (50),
-`captureRadiusKm` (30), `cityRadiusKm` (75), `occupyNeutrals` (true), `upkeep` (false), `researchLead` (1),
+`kmPerRange` (50), `captureRadiusKm` (30), `cityRadiusKm` (75), `occupyNeutrals` (true), `upkeep` (false), `researchLead` (1),
 `waiveMovement` (false), `baseRp` (per faction per turn, default 5), `baseMoney` (10), `costs` (unit cost
 table overrides, like `unitStats`).
 

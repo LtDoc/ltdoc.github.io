@@ -358,6 +358,20 @@ function checkMove(lobby, g, isGm, marker, x, y) {
   return { x: round(marker.x + (x - marker.x) * t), y: round(marker.y + (y - marker.y) * t), clamped: true, movedKm: round(allowance), remaining, dist: round(dist) };
 }
 
+/** Attack reach of a unit in campaign units: (range + tech bonus) × kmPerRange. */
+function attackRange(lobby, g, marker) {
+  const bonus = research.statBonus(factionEffects(lobby.id, marker.data?.nation), UnitTypes.resolve(marker.data?.unitType)).range;
+  return Math.max(0, num(marker.data?.range) + num(bonus)) * num(g.settings.kmPerRange, 50);
+}
+/** Is the defender within the attacker's reach? Returns an error string or null. GMs and the waive switch pass. */
+function checkRange(lobby, g, isGm, attacker, defender) {
+  if (!g.enabled || isGm || g.settings.waiveMovement) return null;
+  const reach = attackRange(lobby, g, attacker);
+  const dist = geo.distance(lobby, attacker.x, attacker.y, defender.x, defender.y);
+  if (dist <= reach + 1e-6) return null;
+  const unit = geo.isEarth(lobby) ? 'km' : (lobby.scale_label || 'units');
+  return `${defender.name} is ${round(dist)} ${unit} away; ${attacker.name} reaches ${round(reach)} ${unit}`;
+}
 /** Whether a unit may attack this turn; returns an error string or null. */
 function checkAttack(g, isGm, marker) {
   if (!g.enabled || isGm) return null;
@@ -372,6 +386,6 @@ const PROTECTED_UNIT_FIELDS = ['attack', 'defend', 'ap', 'range', 'movement', 's
 
 module.exports = {
   get, save, serializeGame, ensureState, serializeState, writeState, factionStates, incomeFor, endTurn, undoTurn, reports,
-  checkMove, checkAttack, PROTECTED_UNIT_FIELDS, emptyResources, q,
+  checkMove, checkAttack, checkRange, attackRange, PROTECTED_UNIT_FIELDS, emptyResources, q,
   relationStatus, setRelation, relations, diplomacy, serializeDiplomacy, factionEffects,
 };

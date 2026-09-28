@@ -1036,7 +1036,8 @@
       body += stat('Scale', `${d.scale ?? 1}×`) + stat('Rotation', `${d.rotation || 0}°`);
     } else if (m.type === 'unit') {
       body += nationStat(d.nation) + stat('Unit type', d.unitType) + stat('Attack', d.attack) + stat('Defend', d.defend)
-        + stat('Action points', d.ap) + stat('Range', d.range) + stat('Movement', d.movement)
+        + stat('Action points', d.ap) + stat('Range', gameOn() ? `${d.range ?? 0} (${(Number(d.range) || 0) * (Number(state.game.settings.kmPerRange) || 50)} ${state.lobby?.scaleLabel || 'km'})` : d.range)
+        + stat('Movement', gameOn() ? `${d.movement ?? 0} (${(Number(d.movement) || 0) * (Number(state.game.settings.kmPerMove) || 50)} ${state.lobby?.scaleLabel || 'km'}/turn)` : d.movement)
         + stat('Strength', d.strength !== undefined ? `${d.strength}%${d.strength <= 0 ? ' (destroyed)' : ''}` : '');
       if (gameOn()) {
         const km = state.game.settings.kmPerMove, allow = (Number(d.movement) || 0) * km, used = Number(d.movedKm) || 0;
@@ -1640,11 +1641,15 @@
       const [a, b] = f.id < myFaction.id ? [f.id, myFaction.id] : [myFaction.id, f.id];
       return (state.relations || []).some(r => r.a === a && r.b === b && r.status === 'alliance');
     };
+    // Game mode: only targets within the unit's reach (range points × km per range point).
+    const limited = gameOn() && !state.game.settings.waiveMovement;
+    const reach = limited ? (Number(attacker.data?.range) || 0) * (Number(state.game.settings.kmPerRange) || 50) : Infinity;
+    const unitLabel = state.lobby?.scaleLabel || 'km';
     const targets = [...state.markers.values()]
       .filter(m => m.type === 'unit' && m.id !== attacker.id && !(mine && String(m.data?.nation || '').toLowerCase() === mine) && !allied(m))
-      .map(m => ({ m, d: distanceUnits(attacker.x, attacker.y, m.x, m.y) })).sort((a, b) => a.d - b.d);
-    if (!targets.length) { toast('No enemy units to attack'); return; }
-    $('#combatIntro').textContent = `${attacker.name} (attack ${attacker.data?.attack ?? 0}, strength ${attacker.data?.strength ?? 100}%)`;
+      .map(m => ({ m, d: distanceUnits(attacker.x, attacker.y, m.x, m.y) })).filter(t => t.d <= reach + 1e-6).sort((a, b) => a.d - b.d);
+    if (!targets.length) { toast(limited ? `No enemy units within ${attacker.name}'s reach (${fmtNum(reach)} ${unitLabel})` : 'No enemy units to attack'); return; }
+    $('#combatIntro').textContent = `${attacker.name} (attack ${attacker.data?.attack ?? 0}, strength ${attacker.data?.strength ?? 100}%${limited ? `, reach ${fmtNum(reach)} ${unitLabel}` : ''})`;
     $('#combatTarget').innerHTML = targets.map(({ m, d }) =>
       `<option value="${m.id}">${esc(m.name)} — ${esc(m.data?.nation || 'Unaligned')}, defend ${m.data?.defend ?? 0}, strength ${m.data?.strength ?? 100}% (${fmtNum(d)} ${esc(state.lobby?.scaleLabel || '')} away)</option>`).join('');
     const c = state.lobby?.settings?.combat || { die: 20, baseLoss: 10, marginMult: 2, winnerLoss: 5 };

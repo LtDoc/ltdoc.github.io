@@ -1171,6 +1171,8 @@ router.post('/:id/combat', (req, res) => {
   }
   const apError = game.checkAttack(g, req.lobbyRole === 'gm', a);
   if (apError) return res.status(409).json({ error: apError });
+  const rangeError = game.checkRange(req.lobby, g, req.lobbyRole === 'gm', a, d);
+  if (rangeError) return res.status(409).json({ error: rangeError });
   if (g.enabled) a.data = { ...a.data, apUsed: num(a.data.apUsed) + 1 };   // spent even if the attack is repelled
 
   const cfg = access.serializeLobby(req.lobby, 'player').settings.combat;

@@ -511,7 +511,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     if (b.settings && typeof b.settings === 'object') {
       const s = b.settings, out = {};
       const numIn = (k, lo, hi) => { if (s[k] !== undefined) out[k] = clamp(num(s[k], g.settings[k]), lo, hi); };
-      numIn('kmPerMove', 1, 100000); numIn('captureRadiusKm', 1, 5000); numIn('cityRadiusKm', 1, 5000);
+      numIn('kmPerMove', 1, 100000); numIn('kmPerRange', 1, 100000); numIn('captureRadiusKm', 1, 5000); numIn('cityRadiusKm', 1, 5000);
       numIn('researchLead', 0, 50); numIn('baseMoney', -1000, 100000); numIn('baseRp', -1000, 100000); numIn('baseManpower', -1000, 100000);
       numIn('upkeepGrain', 0, 100); numIn('upkeepOil', 0, 100);
       numIn('trenchRangeKm', 0, 1000); numIn('trenchBonusDug', 0, 50); numIn('trenchBonusReinforced', 0, 50);

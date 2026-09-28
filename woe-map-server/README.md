@@ -353,6 +353,11 @@ design is in `docs/GAME-DESIGN.md`.
   a drop beyond it is clamped to the ring and the player is told. A formation moves as one and is limited
   by its slowest unit. Units that have moved carry an amber dot (red when their allowance is spent). The GM
   is never limited, and a rule switch waives the limits for everyone.
+- **Attack reach.** A unit's range stat times the campaign's *attack reach per range point* (50 km by
+  default) is how far it can strike: infantry (range 1) 50 km, cavalry (2) 100 km, field artillery (3)
+  150 km, heavy artillery (4) 200 km, aircraft and battleships further. The attack picker lists only enemy
+  units within reach, sorted by distance, and the server refuses anything further. Tech bonuses to range
+  count; the GM and the waive switch are not limited.
 - **Action points.** Attacking costs one AP; a unit with none left cannot attack until the next turn.
   Players cannot edit their units' stats, type or faction while game mode is on.
 - **Upkeep** is built in but off: when enabled every unit costs grain per turn and vehicles, aircraft and

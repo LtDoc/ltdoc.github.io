@@ -61,6 +61,7 @@ const GameData = (() => {
     trenchBonusDug: 2,        // added to defend when attacked
     trenchBonusReinforced: 4,
     capturedIdle: true,       // phase 5: a place that changed hands this turn yields nothing at End turn
+    kmPerRange: 50,           // attack reach per range point: infantry (1) 50 km, cavalry (2) 100 km, field artillery (3) 150 km
   };
 
   // ---- Deadlines ---------------------------------------------------------------------------
