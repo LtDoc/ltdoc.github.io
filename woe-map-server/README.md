@@ -466,7 +466,8 @@ design is in `docs/GAME-DESIGN.md`.
 Type `/roll 2d6+3 optional note` (or `/r d20`) in the chat, or use the 🎲 button. Rolls happen on the server with
 a cryptographic RNG and are logged for everyone, so nobody can fudge them. Up to 20 dice of up to 1000 sides.
 
-A unit's popup has **Attack…** for its owner or a GM. Pick a target (sorted by distance) and the server rolls:
+A unit's popup has **Attack…** for its owner or a GM. Pick a target (enemy units only, sorted by distance; the
+attacker's own nation and, in game mode, its allies are never offered or accepted) and the server rolls:
 each side rolls the campaign's combat die and adds attack or defend. The loser loses *base loss* + *margin ×
 extra per point* of strength, the winner loses the *winner's loss*, ties cost both half the base. The defaults
 (d20, 10 %, 2 %, 5 %) live in campaign settings. Results go to the log, both units shake and an explosion

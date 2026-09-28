@@ -1630,9 +1630,20 @@
 
   // ---- Combat -------------------------------------------------------------------------------------------
   function openCombat(attacker) {
-    const targets = [...state.markers.values()].filter(m => m.type === 'unit' && m.id !== attacker.id)
+    // Only the other side's units: never the attacker's own nation, and never an ally while the game is on.
+    const mine = String(attacker.data?.nation || '').toLowerCase();
+    const myFaction = mine ? (state.factions || []).find(f => f.name.toLowerCase() === mine) : null;
+    const allied = m => {
+      if (!gameOn() || !myFaction) return false;
+      const f = (state.factions || []).find(x => x.name.toLowerCase() === String(m.data?.nation || '').toLowerCase());
+      if (!f || f.id === myFaction.id) return false;
+      const [a, b] = f.id < myFaction.id ? [f.id, myFaction.id] : [myFaction.id, f.id];
+      return (state.relations || []).some(r => r.a === a && r.b === b && r.status === 'alliance');
+    };
+    const targets = [...state.markers.values()]
+      .filter(m => m.type === 'unit' && m.id !== attacker.id && !(mine && String(m.data?.nation || '').toLowerCase() === mine) && !allied(m))
       .map(m => ({ m, d: distanceUnits(attacker.x, attacker.y, m.x, m.y) })).sort((a, b) => a.d - b.d);
-    if (!targets.length) { toast('No other units to attack'); return; }
+    if (!targets.length) { toast('No enemy units to attack'); return; }
     $('#combatIntro').textContent = `${attacker.name} (attack ${attacker.data?.attack ?? 0}, strength ${attacker.data?.strength ?? 100}%)`;
     $('#combatTarget').innerHTML = targets.map(({ m, d }) =>
       `<option value="${m.id}">${esc(m.name)} — ${esc(m.data?.nation || 'Unaligned')}, defend ${m.data?.defend ?? 0}, strength ${m.data?.strength ?? 100}% (${fmtNum(d)} ${esc(state.lobby?.scaleLabel || '')} away)</option>`).join('');

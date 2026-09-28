@@ -1161,6 +1161,14 @@ router.post('/:id/combat', (req, res) => {
   if (!canEditMarker(req, a)) return res.status(403).json({ error: 'You can only attack with units you control' });
   if ((a.data.strength ?? 100) <= 0) return res.status(400).json({ error: `${a.name} has no strength left` });
   const g = game.get(req.lobby.id);
+  // Never your own side: same nation, or an ally while the game is on.
+  const nationA = String(a.data?.nation || '').toLowerCase(), nationD = String(d.data?.nation || '').toLowerCase();
+  if (nationA && nationA === nationD) return res.status(400).json({ error: `${d.name} is on ${a.name}'s own side` });
+  if (g.enabled && nationA && nationD) {
+    const factions = q.factions.all(req.lobby.id);
+    const fa = factions.find(f => f.name.toLowerCase() === nationA), fd = factions.find(f => f.name.toLowerCase() === nationD);
+    if (fa && fd && game.relationStatus(req.lobby.id, fa.id, fd.id) === 'alliance') return res.status(400).json({ error: `${d.data.nation} is allied with ${a.data.nation}` });
+  }
   const apError = game.checkAttack(g, req.lobbyRole === 'gm', a);
   if (apError) return res.status(409).json({ error: apError });
   if (g.enabled) a.data = { ...a.data, apUsed: num(a.data.apUsed) + 1 };   // spent even if the attack is repelled
