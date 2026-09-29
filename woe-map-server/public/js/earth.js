@@ -86,8 +86,11 @@ const EarthMap = {
     let tintLayer = null;   // exposed so game-mode territories can hide the historical tint
     if (world) {
       const tintG = new PIXI.Graphics();
+      const year = Number(world.year) || 0;
       for (const c of world.countries) {
-        const power = c.s || c.n;
+        // Ownership resolved by public/js/powers.js, so an empire and all its colonies share one tint.
+        const own = window.Powers ? window.Powers.resolve(year, c) : { state: c.n, power: c.s || c.n };
+        const power = own.power || own.state || '';
         const color = this.tintFor(power);
         let best = null;
         for (const poly of c.p) {
@@ -108,7 +111,7 @@ const EarthMap = {
           area /= 2;
           if (Math.abs(area) > Math.abs(best?.area || 0)) best = { area, x: cx / (6 * area), y: cy / (6 * area) };
         }
-        if (best && c.n) labelData.push({ name: c.n, sub: c.s, x: best.x, y: best.y, size: Math.sqrt(Math.abs(best.area)) });
+        if (best && own.state) labelData.push({ name: own.state, sub: own.power && own.power !== own.state && !(window.Powers && window.Powers.same(own.power, own.state)) ? own.power : "", x: best.x, y: best.y, size: Math.sqrt(Math.abs(best.area)) });
       }
       if (opts.tint !== false) { container.addChild(tintG); tintLayer = tintG; }
     }

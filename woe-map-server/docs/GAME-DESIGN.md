@@ -148,7 +148,10 @@ province and its owner. Custom (non-Earth) maps keep free-form territories for n
 - **Seeding for Earth**: "Assign 1914 borders to factions" maps each state polygon from the 1914 dataset to a
   faction by the same name matching the faction seeder already uses (aliases included); unmatched states become
   neutral. Colonies use the `SUBJECTO` field (the dataset records who a territory belonged to), so British India
-  and French West Africa land with the right owner.
+  and French West Africa land with the right owner. That field turned out to be patchy (27–29 Sep 2026: a
+  "British Empire" faction got nothing, "United Kingdom" only the Raj and Hong Kong), so `public/js/powers.js`
+  now folds each power's names into one key, lists the owners of unlabelled holdings per bundled year, names
+  nameless islands by position, and New Guinea is split along the 1885 Anglo-German line.
 - **Seeding for image maps**: the GM draws areas and assigns them to factions ("Assign to faction" on an
   area's popup), or paints with a brush (section 8.2).
 - Territories render as a filled, faction-tinted layer with outlines, replacing the tint that the 1914

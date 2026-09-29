@@ -372,17 +372,9 @@ function earthYears() {
 }
 router.get('/earth/years', (req, res) => res.json({ years: earthYears() }));
 
-const zlib = require('node:zlib');
-const worldCache = new Map();
-function loadWorld(year) {
-  year = Number(year);
-  if (!earthYears().includes(year)) return null;
-  if (!worldCache.has(year)) {
-    const gz = fs.readFileSync(path.join(config.root, 'public', 'earth', `world_${year}.json.gz`));
-    worldCache.set(year, JSON.parse(zlib.gunzipSync(gz).toString('utf8')));
-  }
-  return worldCache.get(year);
-}
+const Powers = require('../../public/js/powers');
+/** A year's borders with ownership resolved (each country has .state and .power; see public/js/powers.js). */
+function loadWorld(year) { return require('../territory').world(year); }
 
 /** Same stable pastel tint the client uses for a power's territory (earth.js tintFor). */
 function tintHex(name) {
@@ -433,16 +425,16 @@ router.get('/:id/factions/seed-preview', requireGm, (req, res) => {
   const world = loadWorld(req.query.year);
   if (!world) return res.status(400).json({ error: 'No borders bundled for that year' });
   const flags = bundledFlags();
-  const existing = new Set(q.factions.all(req.lobby.id).map(f => f.name.toLowerCase()));
-  const powers = new Map();
+  const existing = new Set(q.factions.all(req.lobby.id).map(f => Powers.canon(f.name)));
+  const powers = new Map();   // canonical key -> { name, territories }
   for (const c of world.countries) {
-    const power = c.s || c.n;
-    if (!power) continue;
-    if (!powers.has(power)) powers.set(power, { name: power, territories: 0 });
-    powers.get(power).territories++;
+    if (!c.power) continue;
+    const key = Powers.canon(c.power);
+    if (!powers.has(key)) powers.set(key, { name: c.power, territories: 0 });
+    powers.get(key).territories++;
   }
   const list = [...powers.values()].sort((a, b) => a.name.localeCompare(b.name)).map(p => ({
-    ...p, color: tintHex(p.name), flagAsset: matchFlag(p.name, flags), exists: existing.has(p.name.toLowerCase()),
+    ...p, color: tintHex(p.name), flagAsset: matchFlag(p.name, flags), exists: existing.has(Powers.canon(p.name)),
   }));
   res.json({ year: world.year, powers: list });
 });
@@ -453,11 +445,12 @@ router.post('/:id/factions/seed', requireGm, (req, res) => {
   if (!world) return res.status(400).json({ error: 'No borders bundled for that year' });
   const wanted = new Set((Array.isArray(req.body?.names) ? req.body.names : []).map(n => String(n)));
   const flags = bundledFlags();
-  const existing = new Set(q.factions.all(req.lobby.id).map(f => f.name.toLowerCase()));
-  const powers = new Set(world.countries.map(c => c.s || c.n).filter(Boolean));
+  const existing = new Set(q.factions.all(req.lobby.id).map(f => Powers.canon(f.name)));
+  const powers = new Set(world.countries.map(c => c.power).filter(Boolean));
   const created = [];
   for (const power of powers) {
-    if (!wanted.has(power) || existing.has(power.toLowerCase())) continue;
+    if (!wanted.has(power) || existing.has(Powers.canon(power))) continue;
+    existing.add(Powers.canon(power));
     const overrides = (req.body?.flags && typeof req.body.flags === 'object') ? req.body.flags[power] : undefined;
     const asset = overrides !== undefined ? factionFlagAsset(overrides) : matchFlag(power, flags);
     try {
@@ -518,7 +511,7 @@ router.post('/:id/shapes/import-borders', requireGm, (req, res) => {
   const created = [];
   const t0 = now();
   for (const c of world.countries) {
-    const power = c.s || c.n;
+    const power = c.power || c.state || c.n;
     const color = tintHex(power);
     const polys = c.p.map(poly => poly[0]);   // outer rings only
     if (bbox) {
@@ -533,7 +526,7 @@ router.post('/:id/shapes/import-borders', requireGm, (req, res) => {
       let pts = r, tol = W / 4000;
       while (pts.length > maxPoints) { pts = simplify(r, tol); tol *= 1.6; }
       if (pts.length < 3) continue;
-      const label = n === 0 ? c.n : `${c.n} (${n + 1})`;
+      const label = n === 0 ? (c.state || c.n) : `${c.state || c.n} (${n + 1})`;
       if (existing.has(label.toLowerCase())) { n++; continue; }
       const points = pts.map(p => [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10]);
       const id = q.insertShape.run(null, req.lobby.id, 'area', label.slice(0, 60), JSON.stringify(points), color, 2, 0, null, req.user.id, t0, t0, 1, null).lastInsertRowid;

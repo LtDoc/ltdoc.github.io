@@ -89,7 +89,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const factions = game.q.factions.all(req.lobby.id).map(access.serializeFaction);
     const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
     const terrs = territory.all(req.lobby.id);
-    const changes = territory.ownershipChanges(terrs, factions, markers);
+    const changes = territory.ownershipChanges(terrs, factions, markers, req.lobby);
     const out = changes.map(c => setMarkerNation(req, c.marker, c.nation));
     for (const c of territory.trenchOwnershipChanges(terrs, factions, shapeById(req, null, true))) out.push(setShapeNation(req, c.shape, c.nation));
     return out;
@@ -183,7 +183,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       progress('Assigning states to factions…', 0, 1);
       await yieldToLoop();
       const factions = game.q.factions.all(lobbyId).map(access.serializeFaction);
-      const a = provinces.assignByState(lobbyId, factions);
+      const a = provinces.assignByState(req.lobby, factions);
       let extra = '';
       if (opts.full) {
         progress('Adding major cities and resources…', 0, 1);

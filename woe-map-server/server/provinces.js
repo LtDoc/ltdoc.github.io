@@ -20,12 +20,13 @@ const config = require('./config');
 const access = require('./lobbyAccess');
 const geo = require('./geo');
 const territory = require('./territory');
+const Powers = require('../public/js/powers');
 
 const q = {
   all: db.prepare('SELECT * FROM provinces WHERE lobby_id = ? ORDER BY id'),
   count: db.prepare('SELECT COUNT(*) AS n FROM provinces WHERE lobby_id = ?'),
   clear: db.prepare('DELETE FROM provinces WHERE lobby_id = ?'),
-  insert: db.prepare('INSERT INTO provinces (lobby_id, name, state, subject, cx, cy, faction_id, geometry, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+  insert: db.prepare('INSERT INTO provinces (lobby_id, name, state, subject, cx, cy, faction_id, geometry, updated_at, year) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
   setOwner: db.prepare('UPDATE provinces SET faction_id = ?, updated_at = ? WHERE id = ? AND lobby_id = ?'),
   owners: db.prepare('SELECT id, faction_id FROM provinces WHERE lobby_id = ?'),
 };
@@ -89,7 +90,7 @@ function clip(kind, a, b, fallback) {
 // ---- Cache and storage -----------------------------------------------------------------------
 const cache = new Map();   // lobbyId -> { list, byId }
 function serialize(row) {
-  return { id: row.id, name: row.name, state: row.state, subject: row.subject, cx: row.cx, cy: row.cy, factionId: row.faction_id, geometry: access.safeJson(row.geometry) || [] };
+  return { id: row.id, name: row.name, state: row.state, subject: row.subject, year: row.year || 1914, cx: row.cx, cy: row.cy, factionId: row.faction_id, geometry: access.safeJson(row.geometry) || [] };
 }
 function get(lobbyId) {
   if (!cache.has(lobbyId)) {
@@ -148,20 +149,90 @@ function rebuildTerritories(lobbyId) {
   return out;
 }
 /** Assign every province to the faction named like its state (or its state's overlord); the rest is neutral. */
-function assignByState(lobbyId, factions) {
-  const byName = new Map(factions.map(f => [f.name.toLowerCase(), f.id]));
+function assignByState(lobby, factions) {
+  const lobbyId = lobby.id;
   const assigned = new Set(), unassigned = new Set();
-  const byFaction = new Map();
-  for (const p of get(lobbyId).list) {
-    const power = p.subject || p.state;
-    const fid = power ? (byName.get(power.toLowerCase()) ?? 0) : 0;
+  const byFaction = new Map(), memo = new Map();
+  const list = get(lobbyId).list;
+  // Provinces cut before stateless coastal land adopted a state: borrow the nearest province that has one.
+  const stated = list.filter(p => p.state);
+  const pxY = 150 * lobby.map_height / 20037;
+  const stateOf = p => {
+    if (p.state || !stated.length) return p;
+    let best = null, bd = 150;
+    for (const o of stated) {
+      if (Math.abs(o.cy - p.cy) > pxY) continue;
+      const d = geo.distance(lobby, p.cx, p.cy, o.cx, o.cy);
+      if (d < bd) { bd = d; best = o; }
+    }
+    return best || p;
+  };
+  for (const p0 of list) {
+    const p = stateOf(p0);
+    // The province's power: the holdings table first (fixes rows cut before it existed), then the stored overlord,
+    // then the state itself; matched to a faction under any of its names ("British Empire" = "United Kingdom…").
+    const key = `${p.year}|${p.state}|${p.subject}`;
+    if (!memo.has(key)) {
+      const power = p.state ? Powers.display(Powers.overlordOf(p.year, p.state, p.subject) || p.state) : '';
+      memo.set(key, power ? (factions.find(f => Powers.same(f.name, power))?.id ?? 0) : 0);
+    }
+    const fid = memo.get(key);
     if (p.state) (fid ? assigned : unassigned).add(p.state);
+    const p1 = p0;
     if (!byFaction.has(fid)) byFaction.set(fid, []);
-    byFaction.get(fid).push(p.id);
+    byFaction.get(fid).push(p1.id);
   }
   for (const [fid, ids] of byFaction) setOwner(lobbyId, ids, fid);
   const territories = rebuildTerritories(lobbyId);
   return { territories, assigned: [...assigned], unassigned: [...unassigned] };
+}
+
+/**
+ * The historical state outlines are coarser than the coastline, so land along the coast (and most port cities,
+ * which sit right on it) often lies outside every state. Such a seed takes the state of the nearest seed that has
+ * one, if that seed is within maxKm; land far from any state (remote islands nobody claimed) stays stateless.
+ */
+function adoptNearestState(lobby, seeds, maxKm) {
+  const W = lobby.map_width;
+  const cell = Math.max(4, maxKm * W / 40075);        // grid cell ≈ maxKm at the equator, in map px
+  const grid = new Map();
+  for (const s of seeds) {
+    if (s.state < 0) continue;
+    const k = `${Math.floor(s.x / cell)},${Math.floor(s.y / cell)}`;
+    if (!grid.has(k)) grid.set(k, []);
+    grid.get(k).push(s);
+  }
+  for (const s of seeds) {
+    if (s.state >= 0) continue;
+    const [, lat] = geo.unproject(s.x, s.y, lobby.map_width, lobby.map_height);
+    const rx = Math.min(12, Math.ceil(1 / Math.max(0.1, Math.cos(lat * Math.PI / 180))));   // a km spans more px east-west near the poles
+    const gx = Math.floor(s.x / cell), gy = Math.floor(s.y / cell);
+    let best = null, bd = maxKm;
+    for (let dx = -rx; dx <= rx; dx++) for (let dy = -1; dy <= 1; dy++) {
+      for (const o of grid.get(`${gx + dx},${gy + dy}`) || []) {
+        const d = geo.distance(lobby, s.x, s.y, o.x, o.y);
+        if (d < bd) { bd = d; best = o; }
+      }
+    }
+    if (best) s.state = best.state;
+  }
+}
+
+/**
+ * Owner of the province nearest to a point no province contains (a port city a little offshore on the coastline
+ * data): the faction id (0 = neutral), or null when there are no provinces or none within maxKm.
+ */
+function nearestOwner(lobby, x, y, maxKm = 80) {
+  const list = get(lobby.id).list;
+  if (!list.length) return null;
+  const pxY = maxKm * lobby.map_height / 20037;            // km → px north-south
+  let best = null, bd = maxKm;
+  for (const p of list) {
+    if (Math.abs(p.cy - y) > pxY * 1.5) continue;
+    const d = geo.distance(lobby, x, y, p.cx, p.cy);
+    if (d < bd) { bd = d; best = p; }
+  }
+  return best ? best.factionId : null;
 }
 
 // ---- Land tiles: the coastline chopped into a grid so clipping a small cell stays cheap -------------------
@@ -197,7 +268,7 @@ async function generate(lobby, opts = {}, progress = () => {}) {
   if (!geo.isEarth(lobby)) throw new Error('Provinces need the Earth map');
   const year = Number(opts.year) || 1914;
   const sizeKm = Math.max(40, Math.min(400, Number(opts.sizeKm) || 100));
-  const world = territory.earthYears().includes(year) ? territory.loadGz(`world_${year}`) : null;
+  const world = territory.world(year);   // ownership resolved: public/js/powers.js
   if (!world) throw new Error('No borders bundled for that year');
   const W = lobby.map_width, H = lobby.map_height;
   const P = (lon, lat) => { const [x, y] = geo.project(lon, lat, W, H); return [r1(x), r1(y)]; };
@@ -212,7 +283,7 @@ async function generate(lobby, opts = {}, progress = () => {}) {
   // States of the seed year in map pixels.
   const states = world.countries.map((c, i) => {
     const multi = c.p.map(poly => poly.map(ring => ring.map(p => P(p[0], p[1]))));
-    return { i, name: c.n, subject: c.s || '', multi, bbox: bboxOf(multi) };
+    return { i, name: c.state, subject: c.power && !Powers.same(c.power, c.state) ? c.power : '', multi, bbox: bboxOf(multi) };
   });
   const stateAt = (x, y) => { for (const s of states) if (inBbox(x, y, s.bbox) && pointInMulti(x, y, s.multi)) return s.i; return -1; };
 
@@ -250,6 +321,7 @@ async function generate(lobby, opts = {}, progress = () => {}) {
     for (let i = seeds.length - 1; i >= 0; i--) if (!seeds[i].city && geo.distance(lobby, c.x, c.y, seeds[i].x, seeds[i].y) < near) seeds.splice(i, 1);
     seeds.push({ x: c.x, y: c.y, state: stateAt(c.x, c.y), city: c.name });
   }
+  adoptNearestState(lobby, seeds, Math.max(150, sizeKm * 1.5));
 
   // Voronoi cells, clipped to land and cut along state borders.
   const pts = new Float64Array(seeds.length * 2);
@@ -346,7 +418,7 @@ async function generate(lobby, opts = {}, progress = () => {}) {
   try {
     q.clear.run(lobby.id);
     const t = now();
-    for (const r of rows) q.insert.run(lobby.id, r.name, r.state, r.subject, r.cx, r.cy, 0, JSON.stringify(r.geometry), t);
+    for (const r of rows) q.insert.run(lobby.id, r.name, r.state, r.subject, r.cx, r.cy, 0, JSON.stringify(r.geometry), t, year);
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
   invalidate(lobby.id);
@@ -355,4 +427,4 @@ async function generate(lobby, opts = {}, progress = () => {}) {
   return { count: rows.length, year, sizeKm, seeds: seeds.length };
 }
 
-module.exports = { CLEAN, get, list, count, has, at, within, setOwner, ownership, restoreOwnership, clear, give, rebuildTerritories, assignByState, generate, invalidate, unionAll, landTiles };
+module.exports = { CLEAN, nearestOwner, get, list, count, has, at, within, setOwner, ownership, restoreOwnership, clear, give, rebuildTerritories, assignByState, generate, invalidate, unionAll, landTiles };

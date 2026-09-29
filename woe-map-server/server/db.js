@@ -246,7 +246,8 @@ addColumnIfMissing('markers', 'locked', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('shapes', 'locked', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('shapes', 'data', 'TEXT');   // per-kind extras (trench: facing, state, zigzag)
 addColumnIfMissing('events', 'data', 'TEXT');
-addColumnIfMissing('game', 'deadline_notified', "TEXT NOT NULL DEFAULT ''");   // "<deadline>|<stage>" of the last reminder sent
+addColumnIfMissing('game', 'deadline_notified', "TEXT NOT NULL DEFAULT ''");
+addColumnIfMissing('provinces', 'year', 'INTEGER NOT NULL DEFAULT 0');   // borders year the province was cut from (0 = before this column: 1914)   // "<deadline>|<stage>" of the last reminder sent
 
 function now() { return Date.now(); }
 

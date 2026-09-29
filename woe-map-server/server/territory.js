@@ -16,6 +16,7 @@ const config = require('./config');
 const access = require('./lobbyAccess');
 const geo = require('./geo');
 const UnitTypes = require('../public/js/units');
+const Powers = require('../public/js/powers');
 
 const q = {
   all: db.prepare('SELECT * FROM territories WHERE lobby_id = ?'),
@@ -41,6 +42,36 @@ function loadGz(name) {
 function earthYears() {
   try { return JSON.parse(fs.readFileSync(path.join(config.root, 'public', 'earth', 'index.json'), 'utf8')).years || []; }
   catch { return []; }
+}
+// New Guinea 1885–1914: the dataset has one "Papua New Guinea"; the Anglo-German line ran along 5°S from the Dutch
+// border to 144°E, then south-east to the coast at 8°S. Everything north of it (and the Bismarck Archipelago and
+// Bougainville) was German New Guinea; the south was British New Guinea (Papua, Australian from 1906).
+const GERMAN_NEW_GUINEA = [[[[141, -5], [144, -5], [147.9, -8], [162, -8], [162, 0], [141, 0], [141, -5]]]];
+/**
+ * A year's historical states with ownership resolved (public/js/powers.js): each country gets `state` (its name,
+ * nameless islands named by position) and `power` (its overlord's display name, e.g. "British Empire").
+ * Every reader of the bundled borders should use this rather than the raw file. Cached per year.
+ */
+function world(year) {
+  year = Number(year);
+  if (!earthYears().includes(year)) return null;
+  const key = `world+${year}`;
+  if (!cache.has(key)) {
+    const raw = loadGz(`world_${year}`);
+    if (!raw) return null;
+    const countries = [];
+    for (const c of raw.countries) {
+      if (c.n === 'Papua New Guinea' && year >= 1885 && year <= 1914) {
+        const north = pc.intersection(c.p, GERMAN_NEW_GUINEA), south = pc.difference(c.p, GERMAN_NEW_GUINEA);
+        if (north.length) countries.push({ n: 'German New Guinea', s: '', p: north });
+        if (south.length) countries.push({ n: 'British New Guinea (Papua)', s: '', p: south });
+        continue;
+      }
+      countries.push(c);
+    }
+    cache.set(key, { year, countries: countries.map(c => ({ ...c, ...Powers.resolve(year, c) })) });
+  }
+  return cache.get(key);
 }
 /** Land as a projected multipolygon (with bboxes) for a map size, cached per size. */
 function landFor(lobby) {
@@ -212,17 +243,17 @@ const provinces = () => require('./provinces');
  */
 function seedFromYear(lobby, year, factions) {
   // With provinces, "the borders of that year" means the states the provinces were cut from.
-  if (provinces().has(lobby.id)) return provinces().assignByState(lobby.id, factions);
-  const world = earthYears().includes(Number(year)) ? loadGz(`world_${Number(year)}`) : null;
-  if (!world) throw new Error('No borders bundled for that year');
+  if (provinces().has(lobby.id)) return provinces().assignByState(lobby, factions);
+  const w = world(year);
+  if (!w) throw new Error('No borders bundled for that year');
   const W = lobby.map_width, H = lobby.map_height;
-  const byName = new Map(factions.map(f => [f.name.toLowerCase(), f.id]));
   const groups = new Map();   // factionId -> polygons
   const assigned = [], unassigned = [];
-  for (const c of world.countries) {
-    const power = c.s || c.n;
-    const fid = byName.get(String(power).toLowerCase()) ?? NEUTRAL;
-    (fid === NEUTRAL ? unassigned : assigned).push(c.n);
+  for (const c of w.countries) {
+    // A faction takes every state whose power has its name under any alias ("British Empire" = "United Kingdom…").
+    const f = c.power ? factions.find(x => Powers.same(x.name, c.power)) : null;
+    const fid = f ? f.id : NEUTRAL;
+    if (c.state) (fid === NEUTRAL ? unassigned : assigned).push(c.state);
     if (!groups.has(fid)) groups.set(fid, []);
     for (const poly of c.p) groups.get(fid).push(poly.map(ring => ring.map(p => { const [x, y] = geo.project(p[0], p[1], W, H); return [r1(x), r1(y)]; })));
   }
@@ -253,13 +284,15 @@ function brush(lobby, factionId, x, y, km) {
  * Markers that follow territory ownership: resource nodes, factories and towns take the faction that owns
  * the ground under them. Returns [{ marker, nation }] for the ones whose nation should change.
  */
-function ownershipChanges(terrs, factions, markers) {
+function ownershipChanges(terrs, factions, markers, lobby) {
   const byId = new Map(factions.map(f => [f.id, f]));
   const out = [];
   if (!terrs.length) return out;
   for (const m of markers) {
     if (!['resource', 'factory', 'town'].includes(m.type)) continue;
-    const owner = ownerAt(terrs, m.x, m.y);
+    let owner = ownerAt(terrs, m.x, m.y);
+    // A port a little offshore on the coastline data takes the owner of the nearest province.
+    if (owner === null && lobby && provinces().has(lobby.id)) owner = provinces().nearestOwner(lobby, m.x, m.y);
     if (owner === null) continue;                       // sea or unclaimed: leave as is
     const nation = owner === NEUTRAL ? '' : (byId.get(owner)?.name || '');
     if (String(m.data?.nation || '').toLowerCase() !== nation.toLowerCase()) out.push({ marker: m, nation });
@@ -373,9 +406,9 @@ function capture(lobby, g, unit, factions, markers, relation) {
     for (const m of enemyCities) { multi = pc.union(multi, circle(lobby, m.x, m.y, Number(s.cityRadiusKm) || 75)); cities.push(m); }
     changed = carve(lobby.id, mine.id, landClip(lobby, multi));
   }
-  const flips = ownershipChanges(all(lobby.id), factions, markers).filter(f => f.nation.toLowerCase() === mine.name.toLowerCase());
+  const flips = ownershipChanges(all(lobby.id), factions, markers, lobby).filter(f => f.nation.toLowerCase() === mine.name.toLowerCase());
   return { held: false, changed, flips, cities: cities.map(c => c.name), owner, mine };
 }
 
 module.exports = { NEUTRAL, all, write, clear, carve, circle, landClip, ownerAt, seedFromYear, assignArea, brush, ownershipChanges, capture, isLandUnit, earthYears, clean,
-  trenchOwner, trenchOwnershipChanges, trenchCover, distanceToPath, isLand, isCoastal, landFor, loadGz, bboxOf, pointInMulti, overlaps };
+  trenchOwner, trenchOwnershipChanges, trenchCover, distanceToPath, isLand, isCoastal, landFor, loadGz, world, bboxOf, pointInMulti, overlaps };
