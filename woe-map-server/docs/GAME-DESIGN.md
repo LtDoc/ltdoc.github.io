@@ -23,6 +23,8 @@ Principles that shaped every choice below:
 - **Keep the numbers small and legible.** Resources in whole units per turn, unit costs in the tens, research
   in single-digit turns. Players should be able to do the arithmetic in their head.
 
+Automatic fog of war is proposed separately in `docs/FOG-OF-WAR.md` (29 Sep 2026).
+
 Non-goals for this design: AI opponents, supply lines, terrain and weather modifiers, naval pathfinding,
 trade routes as map objects. Each could be a later layer.
 
