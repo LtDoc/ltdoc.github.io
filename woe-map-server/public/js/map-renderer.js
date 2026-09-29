@@ -69,6 +69,8 @@ class MapRenderer extends EventTarget {
     this.gridLayer = new PIXI.Graphics();
     this.territoryLayer = new PIXI.Container();  // game mode: faction territories (fill + outline + name)
     this.territoryViews = new Map();             // factionId -> { geometry, g, label, color, name }
+    this.provinceLayer = window.ProvinceLayer ? new window.ProvinceLayer.Layer(this) : null;   // provinces coloured by owner (Earth, game mode)
+    if (this.provinceLayer) this.territoryLayer.addChild(this.provinceLayer.container);
     this.factionInfo = new Map();                // factionId -> { color, name }
     this.sceneryLayer = new PIXI.Container();   // buildings, trenches, craters: scale with the map
     this.sceneryLayer.sortableChildren = true;
@@ -80,7 +82,9 @@ class MapRenderer extends EventTarget {
     this.boomLayer = new PIXI.Container();     // explosions, above the markers
     this.overlayLayer = new PIXI.Container();
     this.handleLayer = new PIXI.Container();
-    this.world.addChild(this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.trenchLayer, this.shapesLayer, this.fxLayer, this.markerLayer, this.boomLayer, this.overlayLayer, this.handleLayer);
+    this.unitDots = new PIXI.Graphics();          // zoomed out on the Earth map: one dot per unit instead of its icon
+    this.unitDots.eventMode = 'none';
+    this.world.addChild(this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.trenchLayer, this.shapesLayer, this.fxLayer, this.unitDots, this.markerLayer, this.boomLayer, this.overlayLayer, this.handleLayer);
     app.stage.addChild(this.world);
 
     app.stage.eventMode = 'static';
@@ -265,6 +269,28 @@ class MapRenderer extends EventTarget {
     this.invalidate();
   }
   setTokenMode(m) { this.tokenMode = m === 'screen' ? 'screen' : 'map'; this.invalidate(); }
+  /** Unit icons are hidden on the Earth map at 100 % zoom and below: too small to read, and costly in numbers. */
+  unitsHidden() { return !!this.earth && this.scale <= UNIT_ICON_MIN_SCALE; }
+  /** One small dot per unit in its faction colour while the icons are hidden; redrawn when units or the zoom change. */
+  _drawUnitDots(hide) {
+    const g = this.unitDots;
+    if (!hide) { if (g.visible) { g.visible = false; g.clear(); this._dotsScale = 0; } return; }
+    if (g.visible && !this._dotsDirty && this._dotsScale === this.scale) return;
+    this._dotsDirty = false; this._dotsScale = this.scale;
+    g.clear();
+    const r = 2.2 / this.scale;   // no outline: on a dense front outlines merge into one dark band
+    const byColor = new Map();
+    for (const v of this.views.values()) {
+      if (v.dying || v.marker.type !== 'unit') continue;
+      if (!byColor.has(v.colorNum)) byColor.set(v.colorNum, []);
+      byColor.get(v.colorNum).push(v);
+    }
+    for (const [color, list] of byColor) {
+      for (const v of list) g.circle(v.tx, v.ty, r);
+      g.fill({ color, alpha: 0.95 });
+    }
+    g.visible = true;
+  }
   /** Placing mode: tokens, scenery and drawings stop taking clicks so every click reaches the map. */
   setPassThrough(on) {
     on = !!on;
@@ -285,7 +311,7 @@ class MapRenderer extends EventTarget {
     const sw = this.app.screen.width, sh = this.app.screen.height;
     const cand = [], obstacles = [];
     for (const v of this.views.values()) {
-      if (v.dying || v.marker.type === 'scenery') continue;
+      if (v.dying || v.marker.type === 'scenery' || !v.root.visible) continue;
       // Every token's body is an obstacle: a name half hidden under the next counter is as unreadable as two
       // names on top of each other. Bodies are shrunk a little so a grazing corner does not cost a label.
       const k = v.root.scale.x * s, cx = wx + v.x * s, cy = wy + v.y * s;
@@ -294,7 +320,7 @@ class MapRenderer extends EventTarget {
     }
     for (const v of this.views.values()) {
       const l = v.label;
-      if (v.dying || v.marker.type === 'scenery' || !l.visible || !l.text) { v._labelShown = false; continue; }
+      if (v.dying || v.marker.type === 'scenery' || !v.root.visible || !l.visible || !l.text) { v._labelShown = false; continue; }
       const k = v.root.scale.x * s;                       // screen px per token px
       const cx = wx + v.x * s, top = wy + v.y * s + l.y * k;
       const w = l.width * k, h = l.height * k;
@@ -344,7 +370,7 @@ class MapRenderer extends EventTarget {
       clearTimeout(this._territoryTimer);
       this._territoryTimer = setTimeout(() => this._redrawTerritories(), 120);
     }
-    this._syncProvinceVisibility();
+    if (this.provinceLayer) this.provinceLayer.setZoom(this.scale);
     if (this.earth) {
       clearTimeout(this._earthTimer);
       this._earthTimer = setTimeout(() => { if (this.earth) { this.earth.redraw(this.scale); this.invalidate(); } }, 120);
@@ -372,6 +398,7 @@ class MapRenderer extends EventTarget {
 
   upsert(marker) {
     this.invalidate();
+    if (marker.type === 'unit') this._dotsDirty = true;
     let v = this.views.get(marker.id);
     if (v && v.dying) { v.root.parent?.removeChild(v.root); v.root.destroy({ children: true }); v = null; }
     if (!v) {
@@ -388,6 +415,7 @@ class MapRenderer extends EventTarget {
 
   remove(id) {
     this.invalidate();
+    this._dotsDirty = true;
     const v = this.views.get(id);
     if (v) {
       v.dying = true;
@@ -840,6 +868,7 @@ class MapRenderer extends EventTarget {
   setFactionInfo(list) {
     this.factionInfo = new Map(list.map(f => [f.id, { color: parseInt(String(f.color || '#888888').slice(1), 16) || 0x888888, name: f.name }]));
     for (const v of this.territoryViews.values()) this._drawTerritory(v);
+    if (this.provinceLayer) this.provinceLayer.setFactionInfo(list);
   }
   /** Replace (replace=true) or merge the territory set. Each item: { factionId, geometry }. */
   setTerritories(list, replace) {
@@ -862,39 +891,32 @@ class MapRenderer extends EventTarget {
   }
   _syncEarthPolitical() {
     if (!this.earth) return;
-    const hide = this.territoryViews.size > 0;
+    const hide = this.territoryViews.size > 0 || !!(this.provinceLayer && this.provinceLayer.hasOwners);
     if (this.earth.hidePolitical !== hide) { this.earth.hidePolitical = hide; this.earth.redraw(this.scale); }
     else if (this.earth.tintLayer) this.earth.tintLayer.visible = !hide;
   }
 
   // ---- Provinces (game mode, Earth map) --------------------------------------------------
-  /** The province set: [{ id, n, s, x, y, g }]. Draws hairline province edges and answers provinceAt(). */
+  /** The province set: [{ id, n, s, x, y, g }], drawn and recoloured by the province layer (public/js/province-layer.js). */
   setProvinces(list) {
-    if (this.provinceG) { this.territoryLayer.removeChild(this.provinceG); this.provinceG.destroy(); this.provinceG = null; }
-    this.provinces = (list || []).map(p => ({ ...p, bbox: multiBbox(p.g) }));
-    if (!this.provinces.length) { this.invalidate(); return; }
-    const g = new PIXI.Graphics();
-    g.eventMode = 'none';
-    for (const p of this.provinces) for (const poly of p.g) for (const ring of poly) g.poly(ring.flat());
-    g.stroke({ width: 1, pixelLine: true, color: 0x0e1a14, alpha: 0.22 });
-    this.provinceG = g;
-    this.territoryLayer.addChildAt(g, 0);
-    this._syncProvinceVisibility();
-    this.invalidate();
+    if (!this.provinceLayer) return;
+    this.provinceLayer.setProvinces(list);
+    this.provinceLayer.setFactionInfo([...this.factionInfo.entries()].map(([id, f]) => ({ id, name: f.name, color: '#' + f.color.toString(16).padStart(6, '0') })));
+    this.provinceLayer.flushPending();
+    this._syncEarthPolitical();
   }
-  /** Province edges are detail: shown from about a third zoom, hidden at continental scale. */
-  _syncProvinceVisibility() { if (this.provinceG) this.provinceG.visible = this.scale >= 0.35; }
+  get provinces() { return this.provinceLayer ? this.provinceLayer.list : []; }
+  /** Province owners: [[provinceId, factionId], ...]; replace = the full set. */
+  setProvinceOwners(pairs, replace) {
+    if (!this.provinceLayer) return;
+    this.provinceLayer.setOwners(pairs, replace);
+    this._syncEarthPolitical();
+  }
   /** Province under a world point, or null. */
-  provinceAt(x, y) {
-    for (const p of this.provinces || []) {
-      const b = p.bbox;
-      if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) continue;
-      if (pointInMulti(x, y, p.g)) return p;
-    }
-    return null;
-  }
-  /** Faction id owning a world point according to the territory layer (0 neutral, null nobody). */
+  provinceAt(x, y) { return this.provinceLayer && this.provinceLayer.size ? this.provinceLayer.provinceAt(x, y) : null; }
+  /** Faction id owning a world point (0 neutral, null nobody): provinces first, else the territory polygons. */
   territoryOwnerAt(x, y) {
+    if (this.provinceLayer && this.provinceLayer.size) return this.provinceLayer.ownerAt(x, y);
     for (const v of this.territoryViews.values()) if (v.factionId !== 0 && pointInMulti(x, y, v.geometry)) return v.factionId;
     for (const v of this.territoryViews.values()) if (v.factionId === 0 && pointInMulti(x, y, v.geometry)) return 0;
     return null;
@@ -1128,6 +1150,9 @@ class MapRenderer extends EventTarget {
     const t = nowMs / 1000;
     const k = 1 - Math.pow(0.001, dt / 700); // movement easing
     let anim = this.fxLayer.children.length > 0 || this.boomLayer.children.length > 0;
+    // Unit icons hide on the Earth map at 100 % zoom and below (dots stand in); tokens off screen are not drawn.
+    const hideUnits = this.unitsHidden();
+    const wx = this.world.x, wy = this.world.y, sw = this.app.screen.width, sh = this.app.screen.height, M = 140;
 
     for (const v of this.views.values()) {
       if (v.dying) {
@@ -1147,6 +1172,14 @@ class MapRenderer extends EventTarget {
       }
       v.root.position.set(v.x, v.y);
       const sel = this.selected.has(v.id);
+      if (v.marker.type !== 'scenery') {
+        const sx = wx + v.x * s, sy = wy + v.y * s;
+        const onScreen = sx > -M && sy > -M && sx < sw + M && sy < sh + M;
+        const show = v.dragging || (onScreen && !(hideUnits && v.marker.type === 'unit' && !sel));
+        if (v.root.visible !== show) v.root.visible = show;
+        if (!show) continue;                                 // no animation, no label work for what is not drawn
+        if (v._bodyPending) { v._bodyPending = false; v._buildBody(); }
+      }
       v.root.zIndex = v.y + (v.dragging ? 1e6 : 0) + (sel ? 5e5 : 0);
 
       // spawn pop
@@ -1206,6 +1239,7 @@ class MapRenderer extends EventTarget {
       if (v.capRing && v.capRing.visible) { v.capRing.alpha = 0.55 + 0.45 * Math.sin(t * 3 + v.phase); v.capRing.scale.set(1 + 0.06 * Math.sin(t * 3 + v.phase)); anim = true; }
     }
     this._declutterLabels();
+    this._drawUnitDots(hideUnits);
 
     for (const layer of [this.fxLayer, this.boomLayer]) {
       for (const fx of [...layer.children]) {
@@ -1327,6 +1361,8 @@ function shapeAnchor(s) {
   return [(mid[0] + next[0]) / 2, (mid[1] + next[1]) / 2 - 10];
 }
 
+/** Unit icons show above this zoom on the Earth map (1 = 100 %); below it each unit is a dot. */
+const UNIT_ICON_MIN_SCALE = 1;
 /** Base size of unit, town and player tokens relative to the original art scale (reduced 25 % on 29 Sep 2026). */
 const TOKEN_BASE = 0.75;
 
@@ -1385,7 +1421,10 @@ class MarkerView {
     this.root.eventMode = marker.locked ? 'none' : 'static';   // locked tokens let clicks and drags pass through
     const visualKey = [marker.type, marker.color, marker.iconUrl, marker.data?.unitType, marker.data?.size,
       marker.data?.strength, marker.adminOnly, JSON.stringify(marker.visibleTo), marker.name[0], marker.flagUrl, marker.data?.industry].join('|');
-    if (visualKey !== this._visualKey) { this._visualKey = visualKey; this._buildBody(); }
+    if (visualKey !== this._visualKey) {
+      this._visualKey = visualKey;
+      if (marker.type === 'unit' && this.r.unitsHidden()) this._bodyPending = true; else this._buildBody();
+    }
     this._refreshMovedDot();
     if (prev && (prev.x !== marker.x || prev.y !== marker.y) && !this.dragging) {
       const d = Math.hypot(marker.x - this.x, marker.y - this.y);

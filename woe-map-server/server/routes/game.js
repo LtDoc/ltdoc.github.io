@@ -64,7 +64,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       canUndo: req.lobbyRole === 'gm' && !!game.q.lastSnapshot.get(req.lobby.id),
       relations: game.relations(req.lobby.id),
       diplomacy: game.diplomacy(req.lobby.id).filter(d => req.lobbyRole === 'gm' || d.from === (mine && mine.id) || d.to === (mine && mine.id)),
-      hasTerritories: territory.all(req.lobby.id).length > 0,
+      hasTerritories: provinces.has(req.lobby.id) || territory.all(req.lobby.id).length > 0,
       reports: g.enabled ? visibleReports(req, g, game.reports(req.lobby.id)) : { turn: null, turns: [], reports: [] },
     });
   });
@@ -81,21 +81,25 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
   });
 
   // ---- Territories ----------------------------------------------------------------------------
-  function broadcastTerritories(lobbyId, changed) {
-    if (changed && changed.length) hub.broadcast(lobbyId, { type: 'territory', territories: changed });
+  /** Push a land change of either model: free-form territory polygons and/or province owner pairs. */
+  function broadcastLand(lobbyId, r) {
+    if (r.territories && r.territories.length) hub.broadcast(lobbyId, { type: 'territory', territories: r.territories });
+    if (r.owners && (r.owners.length || r.replace)) hub.broadcast(lobbyId, { type: 'provinceOwners', owners: r.owners, replace: !!r.replace });
   }
   /** Apply territory-driven ownership to nodes, factories and towns; returns the markers that changed. */
   function applyOwnership(req) {
     const factions = game.q.factions.all(req.lobby.id).map(access.serializeFaction);
     const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
-    const terrs = territory.all(req.lobby.id);
-    const changes = territory.ownershipChanges(terrs, factions, markers, req.lobby);
+    const lookup = territory.ownerLookup(req.lobby);
+    const changes = territory.ownershipChanges(lookup, factions, markers, req.lobby);
     const out = changes.map(c => setMarkerNation(req, c.marker, c.nation));
-    for (const c of territory.trenchOwnershipChanges(terrs, factions, shapeById(req, null, true))) out.push(setShapeNation(req, c.shape, c.nation));
+    for (const c of territory.trenchOwnershipChanges(lookup, factions, shapeById(req, null, true))) out.push(setShapeNation(req, c.shape, c.nation));
     return out;
   }
 
-  router.get('/territories', (req, res) => res.json({ territories: territory.all(req.lobby.id) }));
+  // With provinces the land is drawn from the province owners instead (GET /provinces/owners).
+  router.get('/territories', (req, res) => res.json({ territories: provinces.has(req.lobby.id) ? [] : territory.all(req.lobby.id) }));
+  router.get('/provinces/owners', (req, res) => res.json({ owners: provinces.ownership(req.lobby.id) }));
 
   router.post('/territory/seed-earth', requireGm, (req, res) => {
     const g = game.get(req.lobby.id);
@@ -104,8 +108,9 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     try { r = territory.seedFromYear(req.lobby, req.body?.year, factions); } catch (e) { return res.status(400).json({ error: e.message }); }
     const flipped = applyOwnership(req);
     logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} assigned the borders of ${Number(req.body.year)} to ${r.assigned.length} factions (${r.unassigned.length} states left neutral)`);
-    hub.broadcast(req.lobby.id, { type: 'territory', territories: territory.all(req.lobby.id), replace: true });
-    res.json({ territories: territory.all(req.lobby.id), assigned: r.assigned, unassigned: r.unassigned, flipped: flipped.length, game: g });
+    hub.broadcast(req.lobby.id, { type: 'territory', territories: provinces.has(req.lobby.id) ? [] : territory.all(req.lobby.id), replace: true });
+    broadcastLand(req.lobby.id, { owners: r.owners, replace: r.replace });
+    res.json({ assigned: r.assigned, unassigned: r.unassigned, flipped: flipped.length, game: g });
   });
 
   router.post('/territory/assign', requireGm, (req, res) => {
@@ -113,20 +118,20 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     if (!shape || shape.kind !== 'area') return res.status(400).json({ error: 'Pick an area drawing' });
     const fid = Number(req.body?.factionId) || territory.NEUTRAL;
     if (fid && !game.q.faction.get(fid, req.lobby.id)) return res.status(404).json({ error: 'No such faction' });
-    const changed = territory.assignArea(req.lobby, fid, shape.points);
+    const r = territory.assignArea(req.lobby, fid, shape.points);
     const flipped = applyOwnership(req);
-    broadcastTerritories(req.lobby.id, changed);
-    res.json({ changed: changed.length, flipped: flipped.length });
+    broadcastLand(req.lobby.id, r);
+    res.json({ changed: r.territories.length + r.owners.length, flipped: flipped.length });
   });
 
   router.post('/territory/brush', requireGm, (req, res) => {
     const fid = Number(req.body?.factionId) || territory.NEUTRAL;
     if (fid && !game.q.faction.get(fid, req.lobby.id)) return res.status(404).json({ error: 'No such faction' });
     const x = num(req.body?.x), y = num(req.body?.y), km = clamp(num(req.body?.radiusKm, 60), 1, 5000);
-    const changed = territory.brush(req.lobby, fid, x, y, km);
-    const flipped = applyOwnership(req);
-    broadcastTerritories(req.lobby.id, changed);
-    res.json({ changed: changed.length, flipped: flipped.length });
+    const r = territory.brush(req.lobby, fid, x, y, km);
+    broadcastLand(req.lobby.id, r);   // colour first: the owner pairs are tiny and clients recolour at once
+    const flipped = r.territories.length || r.owners.length ? applyOwnership(req) : [];
+    res.json({ changed: r.territories.length + r.owners.length, flipped: flipped.length });
   });
 
   router.post('/territory/clear', requireGm, (req, res) => {
@@ -194,8 +199,8 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       const flipped = applyOwnership(req);
       const hint = factions.length ? '' : ' No factions exist yet: seed them from history on the People tab, then press "Assign borders of that year" on the Game tab.';
       logEvent(lobbyId, req.user.id, 'system', `${req.user.displayName} set up the world of ${opts.year}: ${r.count} provinces (about ${opts.sizeKm} km across), ${a.assigned.length} states assigned, ${a.unassigned.length} left neutral${extra}${flipped.length ? `, ${flipped.length} places changed hands` : ''}.${hint}`);
-      hub.broadcast(lobbyId, { type: 'provinces' });
-      hub.broadcast(lobbyId, { type: 'territory', territories: territory.all(lobbyId), replace: true });
+      hub.broadcast(lobbyId, { type: 'territory', territories: [], replace: true });
+      hub.broadcast(lobbyId, { type: 'provinces' });   // clients reload geometry and owners
       if (opts.full) hub.broadcast(lobbyId, { type: 'reload', what: 'markers' });
       progress('Done', 1, 1);
     } catch (e) {
@@ -367,14 +372,14 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const W = req.lobby.map_width, H = req.lobby.map_height;
     const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
     const existing = new Set(markers.filter(m => m.type === 'town').map(m => m.name.toLowerCase()));
-    const terrs = territory.all(req.lobby.id);
+    const lookup = territory.ownerLookup(req.lobby);
     const factions = game.q.factions.all(req.lobby.id).map(access.serializeFaction);
     const byId = new Map(factions.map(f => [f.id, f]));
     let created = 0;
     for (const c of cities) {
       if (existing.has(c.n.toLowerCase())) continue;
       const [x, y] = geo.project(c.lon, c.lat, W, H);
-      const owner = terrs.length ? territory.ownerAt(terrs, x, y) : null;
+      const owner = lookup ? lookup(x, y) : null;
       const faction = owner && owner !== territory.NEUTRAL ? byId.get(owner) : null;
       const size = c.cap ? 'capital' : 'city';
       createMarker(req, { type: 'town', name: c.n, x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, color: faction ? faction.color : '#95a5a6', locked: true,
@@ -399,11 +404,11 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const W = req.lobby.map_width, H = req.lobby.map_height;
     const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
     const existing = new Set(markers.filter(m => m.type === 'resource').map(m => m.name.toLowerCase()));
-    const terrs = territory.all(req.lobby.id);
+    const lookup = territory.ownerLookup(req.lobby);
     const factions = game.q.factions.all(req.lobby.id).map(access.serializeFaction);
     const byId = new Map(factions.map(f => [f.id, f]));
     const place = (name, kind, x, y, yieldN) => {
-      const owner = terrs.length ? territory.ownerAt(terrs, x, y) : null;
+      const owner = lookup ? lookup(x, y) : null;
       const faction = owner && owner !== territory.NEUTRAL ? byId.get(owner) : null;
       createMarker(req, { type: 'resource', name, x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, color: faction ? faction.color : '#95a5a6', locked: true,
         data: { kind, yield: yieldN, nation: faction ? faction.name : '' } }, true);
@@ -656,7 +661,8 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     if (!g) return res.status(400).json({ error: 'Nothing to undo' });
     logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} undid the last turn: back to turn ${g.turn}, ${GameData.fmtDate(g.date)}`);
     broadcastGame(req.lobby.id, g);
-    hub.broadcast(req.lobby.id, { type: 'territory', territories: territory.all(req.lobby.id), replace: true });
+    hub.broadcast(req.lobby.id, { type: 'territory', territories: provinces.has(req.lobby.id) ? [] : territory.all(req.lobby.id), replace: true });
+    if (provinces.has(req.lobby.id)) broadcastLand(req.lobby.id, { owners: provinces.ownership(req.lobby.id), replace: true });
     broadcastRelations(req.lobby.id);
     for (const f of game.q.factions.all(req.lobby.id)) broadcastFaction(req, g, f);
     res.json({ game: g });

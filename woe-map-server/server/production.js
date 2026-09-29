@@ -66,9 +66,9 @@ function queue(lobby, g, faction, state, markers, { typeId, siteId, x, y }, fx) 
       || markers.find(m => m.type === 'town' && m.data?.size !== 'village' && sameNation(m.data?.nation, faction.name) && geo.distance(lobby, x, y, m.x, m.y) <= range);
     if (!anchor) throw new Error(`A factory must be within ${range} ${geo.isEarth(lobby) ? 'km' : lobby.scale_label || 'units'} of one of your cities or towns (not a village)`);
     if (geo.isEarth(lobby) && !territory.isLand(lobby, x, y)) throw new Error('Factories are built on land');
-    const terrs = territory.all(lobby.id);
-    if (terrs.length) {
-      const owner = territory.ownerAt(terrs, x, y);
+    const lookup = territory.ownerLookup(lobby);
+    if (lookup) {
+      const owner = lookup(x, y);
       if (owner !== null && owner !== territory.NEUTRAL && owner !== faction.id) throw new Error('That ground belongs to another faction');
     }
     item = { typeId, siteId: anchor.id, siteName: anchor.name, x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };

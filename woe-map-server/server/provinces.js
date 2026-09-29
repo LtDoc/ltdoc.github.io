@@ -92,10 +92,21 @@ const cache = new Map();   // lobbyId -> { list, byId }
 function serialize(row) {
   return { id: row.id, name: row.name, state: row.state, subject: row.subject, year: row.year || 1914, cx: row.cx, cy: row.cy, factionId: row.faction_id, geometry: access.safeJson(row.geometry) || [] };
 }
+const GRID = 32;   // map px per index cell (provinces are ~20 px across on the default Earth map)
 function get(lobbyId) {
   if (!cache.has(lobbyId)) {
     const list = q.all.all(lobbyId).map(r => { const p = serialize(r); p.bbox = bboxOf(p.geometry); return p; });
-    cache.set(lobbyId, { list, byId: new Map(list.map(p => [p.id, p])) });
+    // Grid index: every cell a province's bbox touches lists it, so a point lookup tests only a handful.
+    const grid = new Map();
+    for (const p of list) {
+      for (let gx = Math.floor(p.bbox[0] / GRID); gx <= Math.floor(p.bbox[2] / GRID); gx++)
+        for (let gy = Math.floor(p.bbox[1] / GRID); gy <= Math.floor(p.bbox[3] / GRID); gy++) {
+          const k = gx * 100000 + gy;
+          if (!grid.has(k)) grid.set(k, []);
+          grid.get(k).push(p);
+        }
+    }
+    cache.set(lobbyId, { list, byId: new Map(list.map(p => [p.id, p])), grid });
   }
   return cache.get(lobbyId);
 }
@@ -105,12 +116,15 @@ function has(lobbyId) { return count(lobbyId) > 0; }
 function list(lobbyId) { return get(lobbyId).list; }
 /** The province under a map point, or null (sea). */
 function at(lobbyId, x, y) {
-  for (const p of get(lobbyId).list) {
+  const cell = get(lobbyId).grid.get(Math.floor(x / GRID) * 100000 + Math.floor(y / GRID));
+  for (const p of cell || []) {
     if (!inBbox(x, y, p.bbox)) continue;
     if (pointInMulti(x, y, p.geometry)) return p;
   }
   return null;
 }
+/** Faction owning the ground at a point (0 = neutral), or null at sea. */
+function ownerAt(lobbyId, x, y) { const p = at(lobbyId, x, y); return p ? p.factionId : null; }
 /** Provinces whose centre lies within `km` of a point (km = 0: just the province under the point). */
 function within(lobby, x, y, km, filter = null) {
   if (!(km > 0)) { const p = at(lobby.id, x, y); return p && (!filter || filter(p)) ? [p] : []; }
@@ -129,24 +143,17 @@ function restoreOwnership(lobbyId, pairs) {
 function clear(lobbyId) { q.clear.run(lobbyId); invalidate(lobbyId); }
 
 /**
- * Hand provinces to a faction (NEUTRAL = 0) and carve the derived territories to match.
- * Returns the territories that changed (serialized), like territory.carve.
+ * Hand provinces to a faction (NEUTRAL = 0). Ownership is the province table itself: clients recolour the
+ * provinces from the returned [[id, factionId], ...] pairs, so no faction polygons are rebuilt (that used to cost
+ * seconds per brush stroke on a world map).
  */
 function give(lobby, ids, factionId) {
   const c = get(lobby.id);
   const provs = ids.map(id => c.byId.get(id)).filter(p => p && p.factionId !== factionId);
   if (!provs.length) return [];
-  setOwner(lobby.id, provs.map(p => p.id), factionId);
-  return territory.carve(lobby.id, factionId, unionAll(provs.map(p => p.geometry)), CLEAN);
-}
-/** Rebuild every faction's territory from its provinces (after seeding or generation). */
-function rebuildTerritories(lobbyId) {
-  const groups = new Map();
-  for (const p of get(lobbyId).list) { if (!groups.has(p.factionId)) groups.set(p.factionId, []); groups.get(p.factionId).push(p.geometry); }
-  territory.clear(lobbyId);
-  const out = [];
-  for (const [fid, multis] of groups) out.push(territory.write(lobbyId, fid, unionAll(multis), CLEAN));
-  return out;
+  db.exec('BEGIN');
+  try { setOwner(lobby.id, provs.map(p => p.id), factionId); db.exec('COMMIT'); } catch (e) { db.exec('ROLLBACK'); throw e; }
+  return provs.map(p => [p.id, factionId]);
 }
 /** Assign every province to the faction named like its state (or its state's overlord); the rest is neutral. */
 function assignByState(lobby, factions) {
@@ -182,9 +189,10 @@ function assignByState(lobby, factions) {
     if (!byFaction.has(fid)) byFaction.set(fid, []);
     byFaction.get(fid).push(p1.id);
   }
-  for (const [fid, ids] of byFaction) setOwner(lobbyId, ids, fid);
-  const territories = rebuildTerritories(lobbyId);
-  return { territories, assigned: [...assigned], unassigned: [...unassigned] };
+  db.exec('BEGIN');
+  try { for (const [fid, ids] of byFaction) setOwner(lobbyId, ids, fid); db.exec('COMMIT'); } catch (e) { db.exec('ROLLBACK'); throw e; }
+  territory.clear(lobbyId);   // free-form territories are not used once a campaign has provinces
+  return { owners: ownership(lobbyId), replace: true, territories: [], assigned: [...assigned], unassigned: [...unassigned] };
 }
 
 /**
@@ -427,4 +435,4 @@ async function generate(lobby, opts = {}, progress = () => {}) {
   return { count: rows.length, year, sizeKm, seeds: seeds.length };
 }
 
-module.exports = { CLEAN, nearestOwner, get, list, count, has, at, within, setOwner, ownership, restoreOwnership, clear, give, rebuildTerritories, assignByState, generate, invalidate, unionAll, landTiles };
+module.exports = { CLEAN, nearestOwner, ownerAt, get, list, count, has, at, within, setOwner, ownership, restoreOwnership, clear, give, assignByState, generate, invalidate, unionAll, landTiles };

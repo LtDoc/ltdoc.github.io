@@ -98,7 +98,7 @@ const GameUI = (() => {
     ctx.state.relations = msg.relations || []; ctx.state.diplomacy = msg.diplomacy || [];
     renderNation(); renderGameTab();
   }
-  function onTerritories() { ctx.state.hasTerritories = ctx.renderer.territoryViews.size > 0; renderGameTab(); }
+  function onTerritories() { ctx.state.hasTerritories = ctx.renderer.territoryViews.size > 0 || (ctx.renderer.provinces || []).length > 0; renderGameTab(); }
 
   // ---- Relations helpers ------------------------------------------------------------------
   function relStatus(a, b) {

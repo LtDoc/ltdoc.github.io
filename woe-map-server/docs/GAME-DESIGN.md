@@ -139,11 +139,15 @@ per major city plus a grid inside every state of the seed year, each cell clippe
 coast and cut along the state border, so every bit of land belongs to exactly one province, national
 borders are exact, and no province straddles a coast. Fragments merge into their neighbour; a province is
 named after the city inside it or the nearest one with a compass direction ("Reims NE"). Ownership lives
-per province and the faction territories are derived from the provinces a faction holds, so rendering,
-"inside or outside", trench ownership, income and undo are unchanged. Borders are drawn once from the
-territory layer (a dark line with the owner's colour inside it, hairline province edges when zoomed in);
-the Earth layer's own political borders, tint and labels hide while territories exist. Hovering names the
-province and its owner. Custom (non-Earth) maps keep free-form territories for now.
+per province and nowhere else: "inside or outside" is a grid-indexed province lookup, and clients draw the
+provinces coloured by owner (`public/js/province-layer.js`: one fill mesh with a colour per vertex, one border
+mesh rebuilt from the edge segments whose two sides have different owners, a dark core with each owner's
+colour on its side, hairline province edges when zoomed in, a faction name on each sizeable group). An owner
+change travels as a few [province, faction] pairs, so a brush stroke recolours in well under a second; the
+first version rebuilt whole faction polygons on the server and re-triangulated them in every browser, 6–10 s
+per stroke on a world map (29 Sep 2026). The Earth layer's own political borders, tint and labels hide while
+territories exist. Hovering names the province and its owner. Custom (non-Earth) maps keep free-form
+territories for now.
 
 - **Seeding for Earth**: "Assign 1914 borders to factions" maps each state polygon from the 1914 dataset to a
   faction by the same name matching the faction seeder already uses (aliases included); unmatched states become

@@ -235,6 +235,17 @@ function carve(lobbyId, factionId, multi, opts) {
 }
 /** Lazily required: provinces.js depends on this module. */
 const provinces = () => require('./provinces');
+/**
+ * Who owns the ground at a point, for either land model: (x, y) => factionId | 0 (neutral) | null (sea or
+ * unclaimed). Provinces answer from a grid index; free-form territories by polygon tests. Null when the
+ * campaign has neither.
+ */
+function ownerLookup(lobby) {
+  if (provinces().has(lobby.id)) return (x, y) => provinces().ownerAt(lobby.id, x, y);
+  const terrs = all(lobby.id);
+  if (!terrs.length) return null;
+  return (x, y) => ownerAt(terrs, x, y);
+}
 
 // ---- Seeding and GM tools -------------------------------------------------------------------
 /**
@@ -244,6 +255,9 @@ const provinces = () => require('./provinces');
 function seedFromYear(lobby, year, factions) {
   // With provinces, "the borders of that year" means the states the provinces were cut from.
   if (provinces().has(lobby.id)) return provinces().assignByState(lobby, factions);
+  return { ...seedFreeForm(lobby, year, factions), owners: [] };
+}
+function seedFreeForm(lobby, year, factions) {
   const w = world(year);
   if (!w) throw new Error('No borders bundled for that year');
   const W = lobby.map_width, H = lobby.map_height;
@@ -270,27 +284,27 @@ function assignArea(lobby, factionId, points) {
   const ring = points.map(p => [r1(p[0]), r1(p[1])]);
   if (provinces().has(lobby.id)) {
     const ids = provinces().list(lobby.id).filter(p => pointInMulti(p.cx, p.cy, [[ring]])).map(p => p.id);
-    return provinces().give(lobby, ids, factionId);
+    return { territories: [], owners: provinces().give(lobby, ids, factionId) };
   }
-  return carve(lobby.id, factionId, landClip(lobby, [[ring]]));
+  return { territories: carve(lobby.id, factionId, landClip(lobby, [[ring]])), owners: [] };
 }
 /** Brush: provinces whose centre is within km (0 = the clicked province) when provinces exist, else a circle. */
 function brush(lobby, factionId, x, y, km) {
-  if (provinces().has(lobby.id)) return provinces().give(lobby, provinces().within(lobby, x, y, km).map(p => p.id), factionId);
-  return carve(lobby.id, factionId, landClip(lobby, circle(lobby, x, y, km)));
+  if (provinces().has(lobby.id)) return { territories: [], owners: provinces().give(lobby, provinces().within(lobby, x, y, km).map(p => p.id), factionId) };
+  return { territories: carve(lobby.id, factionId, landClip(lobby, circle(lobby, x, y, km))), owners: [] };
 }
 
 /**
  * Markers that follow territory ownership: resource nodes, factories and towns take the faction that owns
  * the ground under them. Returns [{ marker, nation }] for the ones whose nation should change.
  */
-function ownershipChanges(terrs, factions, markers, lobby) {
+function ownershipChanges(lookup, factions, markers, lobby) {
   const byId = new Map(factions.map(f => [f.id, f]));
   const out = [];
-  if (!terrs.length) return out;
+  if (!lookup) return out;
   for (const m of markers) {
     if (!['resource', 'factory', 'town'].includes(m.type)) continue;
-    let owner = ownerAt(terrs, m.x, m.y);
+    let owner = lookup(m.x, m.y);
     // A port a little offshore on the coastline data takes the owner of the nearest province.
     if (owner === null && lobby && provinces().has(lobby.id)) owner = provinces().nearestOwner(lobby, m.x, m.y);
     if (owner === null) continue;                       // sea or unclaimed: leave as is
@@ -301,11 +315,12 @@ function ownershipChanges(terrs, factions, markers, lobby) {
 }
 
 /** A trench belongs to the faction whose territory most of its centreline lies in ('' when unowned). */
-function trenchOwner(terrs, factions, shape) {
+function trenchOwner(lookup, factions, shape) {
   const byId = new Map(factions.map(f => [f.id, f]));
   const votes = new Map();
+  if (!lookup) return '';
   for (const p of shape.points || []) {
-    const o = ownerAt(terrs, p[0], p[1]);
+    const o = lookup(p[0], p[1]);
     if (o === null) continue;
     votes.set(o, (votes.get(o) || 0) + 1);
   }
@@ -315,12 +330,12 @@ function trenchOwner(terrs, factions, shape) {
   return byId.get(best)?.name || '';
 }
 /** Trenches whose owner should change with the territory under them. */
-function trenchOwnershipChanges(terrs, factions, shapes) {
+function trenchOwnershipChanges(lookup, factions, shapes) {
   const out = [];
-  if (!terrs.length) return out;
+  if (!lookup) return out;
   for (const s of shapes) {
     if (s.kind !== 'trench') continue;
-    const nation = trenchOwner(terrs, factions, s);
+    const nation = trenchOwner(lookup, factions, s);
     if (String(s.data?.nation || '').toLowerCase() !== nation.toLowerCase()) out.push({ shape: s, nation });
   }
   return out;
@@ -371,9 +386,9 @@ function capture(lobby, g, unit, factions, markers, relation) {
   if (!g.enabled || !isLandUnit(unit) || Number(unit.data?.strength ?? 100) <= 0) return null;
   const mine = factions.find(f => f.name.toLowerCase() === String(unit.data?.nation || '').toLowerCase());
   if (!mine) return null;
-  const terrs = all(lobby.id);
-  if (!terrs.length) return null;
-  const owner = ownerAt(terrs, unit.x, unit.y);
+  const lookup = ownerLookup(lobby);
+  if (!lookup) return null;
+  const owner = lookup(unit.x, unit.y);
   if (owner === null || owner === mine.id) return null;
   if (owner === NEUTRAL) { if (!g.settings.occupyNeutrals) return null; }
   else if (relation(mine.id, owner) !== 'war') return null;
@@ -385,12 +400,12 @@ function capture(lobby, g, unit, factions, markers, relation) {
     String(m.data?.nation || '').toLowerCase() !== mine.name.toLowerCase() &&
     (() => { const f = factions.find(x => x.name.toLowerCase() === String(m.data?.nation || '').toLowerCase()); return f && relation(mine.id, f.id) === 'war'; })() &&
     geo.distance(lobby, unit.x, unit.y, m.x, m.y) <= radius);
-  if (enemyNear) return { held: true, changed: [], flips: [], cities: [] };
+  if (enemyNear) return { held: true, changed: [], owners: [], flips: [], cities: [] };
   const cities = [];
   const enemyCities = markers.filter(m => m.type === 'town' && ['city', 'capital'].includes(m.data?.size) &&
     String(m.data?.nation || '').toLowerCase() === ownerName && String(m.data?.nation || '').toLowerCase() !== mine.name.toLowerCase() &&
     geo.distance(lobby, unit.x, unit.y, m.x, m.y) <= radius);
-  let changed;
+  let changed = [], owners = [];
   if (provinces().has(lobby.id)) {
     // Province rule: the province under the unit and the owner's provinces whose centre is within the
     // capture radius; an enemy city inside adds the owner's provinces within the city radius.
@@ -400,15 +415,15 @@ function capture(lobby, g, unit, factions, markers, relation) {
     const landing = pv.at(lobby.id, unit.x, unit.y);
     if (landing && theirs(landing)) ids.add(landing.id);
     for (const m of enemyCities) { for (const p of pv.within(lobby, m.x, m.y, Number(s.cityRadiusKm) || 75, theirs)) ids.add(p.id); cities.push(m); }
-    changed = pv.give(lobby, [...ids], mine.id);
+    owners = pv.give(lobby, [...ids], mine.id);
   } else {
     let multi = circle(lobby, unit.x, unit.y, radius);
     for (const m of enemyCities) { multi = pc.union(multi, circle(lobby, m.x, m.y, Number(s.cityRadiusKm) || 75)); cities.push(m); }
     changed = carve(lobby.id, mine.id, landClip(lobby, multi));
   }
-  const flips = ownershipChanges(all(lobby.id), factions, markers, lobby).filter(f => f.nation.toLowerCase() === mine.name.toLowerCase());
-  return { held: false, changed, flips, cities: cities.map(c => c.name), owner, mine };
+  const flips = ownershipChanges(ownerLookup(lobby), factions, markers, lobby).filter(f => f.nation.toLowerCase() === mine.name.toLowerCase());
+  return { held: false, changed, owners, flips, cities: cities.map(c => c.name), owner, mine };
 }
 
 module.exports = { NEUTRAL, all, write, clear, carve, circle, landClip, ownerAt, seedFromYear, assignArea, brush, ownershipChanges, capture, isLandUnit, earthYears, clean,
-  trenchOwner, trenchOwnershipChanges, trenchCover, distanceToPath, isLand, isCoastal, landFor, loadGz, world, bboxOf, pointInMulti, overlaps };
+  trenchOwner, trenchOwnershipChanges, trenchCover, distanceToPath, isLand, isCoastal, landFor, loadGz, world, bboxOf, pointInMulti, overlaps, ownerLookup };

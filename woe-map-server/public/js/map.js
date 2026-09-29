@@ -349,8 +349,10 @@
   async function loadProvinces() {
     if (!gameOn() || !isEarth()) { renderer.setProvinces([]); return; }
     try {
-      const d = await api.get(`${base}/game/provinces`);
+      const [d, o] = await Promise.all([api.get(`${base}/game/provinces`), api.get(`${base}/game/provinces/owners`)]);
       renderer.setProvinces(d.provinces || []);
+      renderer.setProvinceOwners(o.owners || [], true);
+      GameUI.onTerritories();
     } catch (err) { console.warn('provinces', err); }
   }
   /**
@@ -520,8 +522,13 @@
     if (['resource', 'factory', 'town'].includes(type)) {
       clearTimeout(gameRefreshTimer);
       gameRefreshTimer = setTimeout(() => GameUI.load().catch(() => {}), 400);
-    } else if (type === 'unit') GameUI.renderNation();
+    } else if (type === 'unit') {
+      // Coalesced: a group move or a reload changes many units at once.
+      clearTimeout(nationTimer);
+      nationTimer = setTimeout(() => GameUI.renderNation(), 150);
+    }
   }
+  let nationTimer = 0;
 
   function upsertShape(s) {
     state.shapes.set(s.id, s);
@@ -611,6 +618,7 @@
         case 'faction': GameUI.onFaction(msg); break;
         case 'territory': renderer.setTerritories(msg.territories, !!msg.replace); GameUI.onTerritories(); break;
         case 'provinces': await loadProvinces(); break;
+        case 'provinceOwners': renderer.setProvinceOwners(msg.owners || [], !!msg.replace); GameUI.onTerritories(); break;
         case 'progress': GameUI.onProgress(msg); break;
         case 'relations': GameUI.onRelations(msg); break;
         case 'reload': if (msg.what === 'markers') await loadMarkers(); break;
@@ -930,7 +938,12 @@
     } catch (err) { toast(err.message); }
   }
 
+  let listFrame = 0;
   function renderMarkerLists() {
+    if (listFrame) return;
+    listFrame = requestAnimationFrame(() => { listFrame = 0; renderMarkerListsNow(); });
+  }
+  function renderMarkerListsNow() {
     const q = $('#searchInput').value.trim().toLowerCase();
     const match = s => !q || String(s || '').toLowerCase().includes(q);
     const all = [...state.markers.values()].filter(m => match(m.name) || match(m.data?.nation));

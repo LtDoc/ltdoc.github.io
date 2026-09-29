@@ -584,6 +584,14 @@ pulse, burning wrecks, explosions) are capped at `idleFps` (24) and stop drawing
 panning, dragging and vertex editing run at the full refresh rate. Before this change a 144 Hz monitor was
 redrawing the whole scene 145 times a second and kept a CPU core busy for a static map.
 
+With many units: tokens off screen are not drawn or animated, and on the Earth map at 100 % zoom and below
+unit icons are replaced by one small dot per unit in its faction's colour (a single shape, redrawn only when
+units or the zoom change); a unit's icon, textures and flag are only built the first time it is shown. The
+sidebar list and the Nation tab are rebuilt at most once per frame however many markers change, so loading a
+campaign or moving a formation no longer rebuilds them once per marker (with 1,300 markers that alone froze the
+page for about 17 s). Provinces are drawn as two meshes built once (fills and borders) and recoloured in place
+when owners change: see `public/js/province-layer.js`.
+
 ## Known limitations
 
 - Touch: pan and tap work on phones, but there is no pinch-to-zoom yet; use the + / − buttons.

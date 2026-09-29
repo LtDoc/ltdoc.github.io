@@ -268,6 +268,7 @@ function afterMove(req, unit) {
   if (r.held) return `${unit.name} faces enemy troops: the front holds`;
   for (const f of r.flips) setMarkerNation(req, f.marker, f.nation);
   if (r.changed.length) hub.broadcast(req.lobby.id, { type: 'territory', territories: r.changed });
+  if (r.owners && r.owners.length) hub.broadcast(req.lobby.id, { type: 'provinceOwners', owners: r.owners });
   const ownerName = r.owner === territory.NEUTRAL ? 'neutral' : (factions.find(f => f.id === r.owner)?.name || 'enemy');
   const what = r.cities.length ? `takes ${r.cities.join(', ')} and the surrounding ${ownerName} territory` : `advances into ${ownerName} territory`;
   logEvent(req.lobby.id, req.user.id, 'system', `${unit.name} (${r.mine.name}) ${what}`);
@@ -964,9 +965,9 @@ function shapeData(kind, raw, before) {
 /** Which faction owns the ground under a trench (from territories); '' when there are none. */
 function trenchNation(req, points) {
   const territory = require('../territory');
-  const terrs = territory.all(req.lobby.id);
-  if (!terrs.length) return '';
-  return territory.trenchOwner(terrs, q.factions.all(req.lobby.id).map(access.serializeFaction), { points });
+  const lookup = territory.ownerLookup(req.lobby);
+  if (!lookup) return '';
+  return territory.trenchOwner(lookup, q.factions.all(req.lobby.id).map(access.serializeFaction), { points });
 }
 
 function parsePoints(req, kind, raw) {
