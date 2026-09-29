@@ -192,9 +192,10 @@ Any marker's icon can be a sprite: press **Pick sprite…** in the Add or Edit f
 click one. It is drawn as-is (no plate) with the faction flag above it; units keep a thin strength bar beneath.
 Aircraft gently float and ships ride a swell; ground units sit still. Icon uploads are capped at 5 MB.
 
-**Token sizing** (campaign settings): by default tokens are map objects about 36 map pixels wide, so they shrink
-as you zoom out and grow as you zoom in, clamped between roughly 12 and 78 screen pixels so they never vanish or
-turn into giants. Labels keep a constant text size and appear once a token is about 24 px or larger (hovered or
+**Token sizing** (campaign settings): by default tokens are map objects about 27 map pixels wide, so they shrink
+as you zoom out and grow as you zoom in, clamped between roughly 9 and 59 screen pixels so they never vanish or
+turn into giants. The map zooms in to 32×, well past the point where tokens stop growing, so a crowded front
+can be spread out until every unit is clear. Labels keep a constant text size and appear once a token is about 24 px or larger (hovered or
 selected tokens always show theirs). The old behaviour, a fixed pixel size at every zoom, is available as
 "Fixed size on screen". **Token size** multiplies either mode.
 

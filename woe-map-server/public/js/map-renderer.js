@@ -39,7 +39,7 @@ class MapRenderer extends EventTarget {
     this.grid = { visible: false, size: 100 };
     this.mapSize = { w: 2000, h: 1200 };
     this.minScale = 0.05;
-    this.maxScale = 8;
+    this.maxScale = 32;              // 32×: dense fronts need room to spread out (tokens stop growing long before this)
     this.tokenScale = 1;             // campaign-wide size multiplier for unit/town/player tokens
     this.tokenMode = 'map';          // 'map': tokens shrink/grow with the zoom (clamped); 'screen': fixed pixel size
     this._pan = null;
@@ -1125,12 +1125,12 @@ class MapRenderer extends EventTarget {
       // so they shrink as you zoom out, clamped so they never vanish or become giants.
       let rs;
       if (this.tokenMode === 'screen') {
-        rs = inv * v.curS * this.tokenScale;
+        rs = inv * v.curS * this.tokenScale * TOKEN_BASE;
         v.label.visible = true;
         v.label.scale.set(1);
       } else {
-        // Tokens are about 36 map px wide at normal size (0.6 × the 60 px art), clamped to 12–78 screen px.
-        const f = Math.max(0.2, Math.min(1.3, this.tokenScale * s * 0.6));   // screen px per token px
+        // Tokens are about 27 map px wide at normal size (0.45 × the 60 px art), clamped to 9–59 screen px.
+        const f = Math.max(0.2 * TOKEN_BASE, Math.min(1.3 * TOKEN_BASE, this.tokenScale * s * 0.6 * TOKEN_BASE));   // screen px per token px
         rs = f * inv * v.curS;
         // Labels keep a constant on-screen size and only show once tokens are big enough to read.
         v.label.visible = sel || v.hover || f >= 0.4;
@@ -1264,6 +1264,9 @@ function shapeAnchor(s) {
   const next = pts[Math.min(pts.length - 1, Math.floor((pts.length - 1) / 2) + 1)];
   return [(mid[0] + next[0]) / 2, (mid[1] + next[1]) / 2 - 10];
 }
+
+/** Base size of unit, town and player tokens relative to the original art scale (reduced 25 % on 29 Sep 2026). */
+const TOKEN_BASE = 0.75;
 
 const LABEL_STYLE = {
   fontFamily: 'Segoe UI, Arial, sans-serif', fontSize: 13, fontWeight: '600', fill: 0xffffff,
