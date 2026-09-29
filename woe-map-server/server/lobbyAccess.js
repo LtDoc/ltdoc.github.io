@@ -39,10 +39,17 @@ function canSee(obj, viewer) {
   if (obj.adminOnly) return false;
   const mine = obj.ownerId === viewer.userId || obj.createdBy === viewer.userId;
   if (mine) return true;
+  const n = String(viewer.nation || '').trim().toLowerCase();
+  const listed = list => !!n && Array.isArray(list) && list.some(v => String(v).trim().toLowerCase() === n);
+  // A spy's recon reveals what it saw to the spy's nation until the end of the turn.
+  if (listed(obj.data?.revealTo)) return true;
+  // Spies are secret: their own nation sees them, and anyone the GM lists under "Visible to".
+  if (obj.type === 'hero' && obj.data?.role === 'spy') {
+    return (!!n && String(obj.data.nation || '').trim().toLowerCase() === n) || listed(obj.visibleTo);
+  }
   const vt = obj.visibleTo;
   if (!vt || !vt.length) return true;
-  const n = String(viewer.nation || '').trim().toLowerCase();
-  return !!n && vt.some(v => String(v).trim().toLowerCase() === n);
+  return listed(vt);
 }
 
 const DEFAULT_COMBAT = { die: 20, baseLoss: 10, marginMult: 2, winnerLoss: 5 };

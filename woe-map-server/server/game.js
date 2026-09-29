@@ -26,7 +26,8 @@ const q = {
   updateState: db.prepare(`UPDATE faction_state SET resources = ?, money = ?, manpower = ?, rp = ?, techs = ?, research = ?,
     production = ?, mods = ?, updated_at = ? WHERE faction_id = ?`),
   markers: db.prepare('SELECT * FROM markers WHERE lobby_id = ?'),
-  resetUnits: db.prepare(`UPDATE markers SET data = json_set(data, '$.movedKm', 0, '$.apUsed', 0), updated_at = ? WHERE lobby_id = ? AND type = 'unit'`),
+  resetUnits: db.prepare(`UPDATE markers SET data = json_set(data, '$.movedKm', 0, '$.apUsed', 0), updated_at = ? WHERE lobby_id = ? AND type IN ('unit', 'hero')`),
+  clearReveals: db.prepare(`UPDATE markers SET data = json_remove(data, '$.revealTo'), updated_at = ? WHERE lobby_id = ? AND json_extract(data, '$.revealTo') IS NOT NULL`),
   setStrength: db.prepare(`UPDATE markers SET data = json_set(data, '$.strength', ?), updated_at = ? WHERE id = ?`),
   relations: db.prepare('SELECT * FROM relations WHERE lobby_id = ?'),
   relation: db.prepare('SELECT * FROM relations WHERE lobby_id = ? AND a = ? AND b = ?'),
@@ -293,6 +294,7 @@ function endTurn(lobby, hooks = {}) {
       if (s) s.data.shortages.push({ resource: hit.resource, units: hit.units });
     }
     q.resetUnits.run(now(), lobby.id);
+    q.clearReveals.run(now(), lobby.id);   // spies' recon lasts until the end of the turn
     const ended = { turn: g.turn, date: g.date };
     g.turn += 1;
     g.date = GameData.stepDate(g.date, g.turnStep);
@@ -344,7 +346,7 @@ function undoTurn(lobby) {
  * GMs, disabled game mode and the waive switch pass straight through.
  */
 function checkMove(lobby, g, isGm, marker, x, y) {
-  if (!g.enabled || isGm || g.settings.waiveMovement || marker.type !== 'unit') return { x, y, clamped: false };
+  if (!g.enabled || isGm || g.settings.waiveMovement || !['unit', 'hero'].includes(marker.type)) return { x, y, clamped: false };
   const dist = geo.distance(lobby, marker.x, marker.y, x, y);
   if (dist < 1e-6) return { x, y, clamped: false };
   const bonus = research.statBonus(factionEffects(lobby.id, marker.data?.nation), UnitTypes.resolve(marker.data?.unitType)).movement;

@@ -493,6 +493,18 @@ design is in `docs/GAME-DESIGN.md`.
   are announced campaign-wide.
 - **Undo last turn** also restores territories and relations from the snapshot.
 
+### Heroes
+
+Generals, diplomats and spies with a star rating (1–5), shown as a 2:3 portrait in an animated golden ring on
+the map and as a card in their popup. **Generals** add +1 to +3 attack and defend to their nation's units within
+60 km. **Diplomats** must be posted to a nation (sent to its capital, arriving at the end of the turn) before a
+peace offer or alliance proposal can go to it; the host can expel them and war sends them home. **Spies** are
+seen only by their own nation; they reconnoitre an area (a report, and hidden units revealed until the end of
+the turn), steal research points, or hunt enemy spies. Missions on hostile ground are contested: the defender's
+sharpest spy nearby rolls d20 + perception against the agent's d20 + intelligence, and a caught spy is taken
+off the map. The GM creates heroes from the Add tab and assigns each an owner. Full rules and numbers:
+`docs/HEROES.md`.
+
 ### Dice and combat
 
 Type `/roll 2d6+3 optional note` (or `/r d20`) in the chat, or use the 🎲 button. Rolls happen on the server with

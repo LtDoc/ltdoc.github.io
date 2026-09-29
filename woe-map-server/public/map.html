@@ -138,6 +138,10 @@
               <div class="section">Territory</div>
               <div class="grid2"><label>Capture radius <span class="hint">(around an advancing unit)</span><input id="ruleCaptureRadius" type="number" step="any" min="1"></label><label>City district <span class="hint">(around a captured city)</span><input id="ruleCityRadius" type="number" step="any" min="1"></label></div>
               <label class="inline"><input type="checkbox" id="ruleOccupyNeutrals"> Units may occupy neutral ground</label>
+              <div class="section">Heroes</div>
+              <div class="grid2"><label>General's aura<input id="ruleHeroAura" type="number" step="any" min="0"></label><label>Spies contest missions within<input id="ruleSpyCounter" type="number" step="any" min="0"></label></div>
+              <div class="grid2"><label>Research stolen per star<input id="ruleSpySteal" type="number" step="any" min="0"></label><label>Security with no spy nearby <span class="hint">(defender's bonus)</span><input id="ruleSpySecurity" type="number" step="1"></label></div>
+              <label class="inline"><input type="checkbox" id="ruleDiplomats"> Peace offers and alliance proposals need a diplomat posted to the other nation</label>
               <div class="section">Trenches</div>
               <div class="grid3"><label>Cover range<input id="ruleTrenchRange" type="number" step="any" min="0"></label><label>Dug: +defend<input id="ruleTrenchDug" type="number" step="any" min="0"></label><label>Reinforced: +defend<input id="ruleTrenchReinforced" type="number" step="any" min="0"></label></div>
               <div class="section">Starting stockpiles <span class="hint">(new factions)</span></div>
@@ -449,6 +453,7 @@
   <script src="/js/units.js"></script>
   <script src="/js/naming.js"></script>
   <script src="/js/game-data.js"></script>
+  <script src="/js/heroes.js"></script>
   <script src="/js/game-ui.js"></script>
   <script src="/js/research-ui.js"></script>
   <script src="/js/cost-editor.js"></script>

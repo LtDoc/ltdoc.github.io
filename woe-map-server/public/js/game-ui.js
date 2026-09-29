@@ -47,6 +47,8 @@ const GameUI = (() => {
       $('#turnDeadline').value = days ? toLocalInput(Date.now() + days * 86400e3) : '';
     });
     document.addEventListener('click', e => {
+      const h = e.target.closest('[data-herofind]');
+      if (h) { const m = ctx.state.markers.get(Number(h.dataset.herofind)); if (m) { ctx.renderer.centerOn(m.x, m.y, Math.max(ctx.renderer.scale, 1.5)); ctx.renderer.select(m.id); } return; }
       const r = e.target.closest('[data-report]');
       if (r) openReports(Number(r.dataset.report) || undefined, Number(r.dataset.faction) || undefined);
     });
@@ -120,11 +122,15 @@ const GameUI = (() => {
     const from = ctx.isGm() ? ` data-from="${me}"` : '';
     const rows = others.map(x => {
       const st = relStatus(me, x.faction.id), open = openBetween(me, x.faction.id);
-      let act = '';
+      const envoy = [...ctx.state.markers.values()].find(m => m.type === 'hero' && m.data?.role === 'diplomat' && m.data?.status === 'posted'
+        && Number(m.data.postedTo) === x.faction.id && String(m.data.nation || '').toLowerCase() === e.faction.name.toLowerCase());
+      const needsEnvoy = g()?.settings?.diplomatsRequired && !envoy;
+      let act = envoy ? `<span class="hint" title="Your diplomat there">✉ ${esc(envoy.name)}</span>` : '';
       if (actor && !open) {
         if (st !== 'war') act += `<button class="small danger" data-diplo="propose" data-kind="war" data-to="${x.faction.id}"${from} title="Declare war (queued for the GM to approve)">War</button>`;
-        if (st === 'war') act += `<button class="small secondary" data-diplo="propose" data-kind="peace" data-to="${x.faction.id}"${from} title="Offer peace">Peace</button>`;
-        if (st === 'peace') act += `<button class="small secondary" data-diplo="propose" data-kind="alliance" data-to="${x.faction.id}"${from} title="Propose an alliance">Ally</button>`;
+        const why = needsEnvoy ? ' (needs a diplomat posted there: send one from a diplomat\'s card)' : '';
+        if (st === 'war') act += `<button class="small secondary" data-diplo="propose" data-kind="peace" data-to="${x.faction.id}"${from} title="Offer peace${why}">Peace</button>`;
+        if (st === 'peace') act += `<button class="small secondary" data-diplo="propose" data-kind="alliance" data-to="${x.faction.id}"${from} title="Propose an alliance${why}">Ally</button>`;
       } else if (open) act = `<span class="hint">${open.status === 'pending' ? 'awaiting the GM' : 'awaiting an answer'}</span>`;
       return `<div class="diplo"><span class="grow">${ctx.flagImg(x.faction.name)} ${esc(x.faction.name)}</span>${relBadge(st)}${act}</div>`;
     }).join('');
@@ -429,11 +435,28 @@ const GameUI = (() => {
       ${capturedHtml}
       <div class="section">Forces <span class="hint">(${units.length})</span></div>
       ${Object.keys(cats).length ? `<table class="treasury"><tbody>${Object.entries(cats).map(([c, v]) => `<tr><td>${esc(c)}</td><td class="num">${v.n}</td><td class="hint">${v.moved ? `${v.moved} moved` : ''}${v.spent ? `${v.moved ? ', ' : ''}${v.spent} attacked` : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="hint">No units on the map.</p>'}
+      ${heroesHtml(e)}
       ${ResearchUI.sectionHtml(e)}
       ${productionHtml(e)}
       ${diplomacyHtml(e)}
       ${othersHtml}
       ${lastTurn || hasReport ? `<div class="section">Last turn</div>${lastTurn ? `<p class="hint">${esc(lastTurn.message)}</p>` : ''}${hasReport ? `<p><button class="small secondary" data-report="${state.reports.turn}" data-faction="${e.faction.id}">Turn report…</button></p>` : ''}` : ''}`;
+  }
+
+  /** The faction's heroes as small cards; click one to find it on the map. */
+  function heroesHtml(e) {
+    const H = window.Heroes;
+    if (!H) return '';
+    const me = e.faction.name.toLowerCase();
+    const list = [...ctx.state.markers.values()].filter(m => m.type === 'hero' && String(m.data?.nation || '').toLowerCase() === me);
+    if (!list.length) return '';
+    const name = id => (ctx.state.gameFactions || []).find(x => x.faction.id === Number(id))?.faction.name || '?';
+    return `<div class="section">Heroes <span class="hint">(${list.length})</span></div><div class="herolist">${list.map(m => {
+      const d = m.data || {}, role = H.ROLES[d.role] || H.ROLES.general;
+      const where = d.status === 'posted' ? ` · posted to ${esc(name(d.postedTo))}` : d.status === 'travelling' ? ` · en route to ${esc(d.travel?.toName || '?')}` : d.status === 'captured' ? ' · captured' : '';
+      const face = m.iconUrl && !m.iconUrl.startsWith('sprite:') ? `<img src="${esc(m.iconUrl)}" alt="">` : `<span>${role.glyph}</span>`;
+      return `<button type="button" class="heroitem" data-herofind="${m.id}"><span class="hero-mini">${face}</span><span class="grow"><b>${esc(m.name)}</b><br><span class="hint">${role.label} ${H.starText(d.stars)}${where}</span></span></button>`;
+    }).join('')}</div>`;
   }
 
   // ---- Game tab (GM) ----------------------------------------------------------------------
@@ -488,6 +511,7 @@ const GameUI = (() => {
     set('#rulePublic', s.publicTreasury); set('#ruleCapturedIdle', s.capturedIdle);
     set('#ruleTrenchRange', s.trenchRangeKm); set('#ruleTrenchDug', s.trenchBonusDug); set('#ruleTrenchReinforced', s.trenchBonusReinforced);
     set('#ruleCaptureRadius', s.captureRadiusKm); set('#ruleCityRadius', s.cityRadiusKm); set('#ruleOccupyNeutrals', s.occupyNeutrals);
+    set('#ruleHeroAura', s.heroAuraKm); set('#ruleSpyCounter', s.spyCounterKm); set('#ruleSpySteal', s.spyStealPerStar); set('#ruleSpySecurity', s.spySecurity); set('#ruleDiplomats', s.diplomatsRequired);
     set('#ruleCapCapital', s.cityCapacity.capital); set('#ruleCapCity', s.cityCapacity.city); set('#ruleCapVillage', s.cityCapacity.village);
     set('#ruleFactoryRange', s.factoryRangeKm); set('#ruleCoastal', s.coastalKm);
     set('#ruleResearchLead', s.researchLead); set('#ruleStartYear', s.startYear || '');
@@ -550,6 +574,7 @@ const GameUI = (() => {
       capturedIdle: $('#ruleCapturedIdle').checked,
       trenchRangeKm: v('#ruleTrenchRange'), trenchBonusDug: v('#ruleTrenchDug'), trenchBonusReinforced: v('#ruleTrenchReinforced'),
       captureRadiusKm: v('#ruleCaptureRadius'), cityRadiusKm: v('#ruleCityRadius'), occupyNeutrals: $('#ruleOccupyNeutrals').checked,
+      heroAuraKm: v('#ruleHeroAura'), spyCounterKm: v('#ruleSpyCounter'), spyStealPerStar: v('#ruleSpySteal'), spySecurity: v('#ruleSpySecurity'), diplomatsRequired: $('#ruleDiplomats').checked,
       cityCapacity: { capital: v('#ruleCapCapital'), city: v('#ruleCapCity'), village: v('#ruleCapVillage') },
       factoryRangeKm: v('#ruleFactoryRange'), coastalKm: v('#ruleCoastal'), researchLead: v('#ruleResearchLead'),
       cityIncome: {}, factoryIncome: { money: v('#ruleFactoryMoney'), rp: v('#ruleFactoryRp') },

@@ -97,7 +97,11 @@ const q = {
   event: db.prepare('SELECT e.*, u.display_name FROM events e LEFT JOIN users u ON u.id = e.user_id WHERE e.id = ?'),
 };
 
-const MARKER_TYPES = ['unit', 'town', 'poi', 'player', 'scenery', 'resource', 'factory'];
+const MARKER_TYPES = ['unit', 'town', 'poi', 'player', 'scenery', 'resource', 'factory', 'hero'];
+const Heroes = require('../../public/js/heroes');
+const heroRules = require('../heroes');
+/** Hero fields only the GM (or the rules) may change: players move and command heroes, they do not rewrite them. */
+const PROTECTED_HERO_FIELDS = ['role', 'stars', 'perception', 'intelligence', 'movement', 'ap', 'nation', 'status', 'postedTo', 'travel', 'capturedBy', 'movedKm', 'apUsed'];
 const game = require('../game');
 const GameData = require('../../public/js/game-data');
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
@@ -241,6 +245,17 @@ function shapeById(req, id, all) {
   if (all) return q.shapes.all(req.lobby.id).map(access.serializeShape);
   const row = q.shape.get(id, req.lobby.id); return row ? access.serializeShape(row) : null;
 }
+/** Rewrite a marker's position and data (heroes' missions and travel), recording history and broadcasting. */
+function writeMarker(req, before, patch) {
+  const x = patch.x !== undefined ? patch.x : before.x, y = patch.y !== undefined ? patch.y : before.y;
+  const data = sanitizeData(before.type, { ...before.data, ...(patch.data || {}) });
+  const adminOnly = patch.adminOnly !== undefined ? (patch.adminOnly ? 1 : 0) : (before.adminOnly ? 1 : 0);
+  q.updateMarker.run(before.type, before.name, x, y, before.iconFile, before.iconFile ? null : before.iconUrl, before.color,
+    adminOnly, before.visibleTo ? JSON.stringify(before.visibleTo) : null, before.ownerId, JSON.stringify(data), now(), before.locked ? 1 : 0, before.id);
+  const after = access.serializeMarker(q.marker.get(before.id, req.lobby.id));
+  commitChange(req, 'marker', 'update', before, after);
+  return after;
+}
 /** Change a drawing's owning nation (trenches follow territory), recording history and broadcasting. */
 function setShapeNation(req, before, nation) {
   const data = { ...(before.data || {}), nation };
@@ -276,7 +291,7 @@ function afterMove(req, unit) {
 }
 
 // Game layer (turns, treasuries, territories, diplomacy): routes/game.js, sharing this router's lobby middleware.
-router.use('/:id/game', require('./game')({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById, createMarker }));
+router.use('/:id/game', require('./game')({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById, createMarker, writeMarker }));
 
 router.get('/:id', (req, res) => {
   const online = new Set(hub.presence(req.lobby.id).map(u => u.id));
@@ -737,7 +752,23 @@ function sanitizeData(type, data) {
     out.scale = clamp(num(d.scale, 1), 0.05, 50);
     out.rotation = ((num(d.rotation, 0) % 360) + 360) % 360;
     out.flip = !!d.flip;
+  } else if (type === 'hero') {
+    const def = Heroes.defaults(d.role, d.stars);
+    Object.assign(out, {
+      nation: clean(d.nation, 60), role: def.role, stars: def.stars, title: clean(d.title, 60),
+      perception: clamp(num(d.perception, def.perception), 0, 20), intelligence: clamp(num(d.intelligence, def.intelligence), 0, 20),
+      movement: clamp(num(d.movement, def.movement), 0, 20), ap: clamp(num(d.ap, def.ap), 0, 5),
+      status: Heroes.STATUS[d.status] ? d.status : 'active',
+      movedKm: Math.max(0, num(d.movedKm)), apUsed: Math.max(0, num(d.apUsed)),
+    });
+    if (out.status === 'posted' && d.postedTo) out.postedTo = num(d.postedTo);
+    if (out.status === 'travelling' && d.travel && typeof d.travel === 'object') {
+      out.travel = { to: num(d.travel.to), toName: clean(d.travel.toName, 60), x: num(d.travel.x), y: num(d.travel.y), arrives: num(d.travel.arrives), home: !!d.travel.home };
+    }
+    if (out.status === 'captured') { out.capturedBy = clean(d.capturedBy, 60); out.capturedTurn = num(d.capturedTurn); }
   }
+  // A spy's recon reveals markers to the spy's nation until the end of the turn (see canSee).
+  if (Array.isArray(d.revealTo) && d.revealTo.length) out.revealTo = [...new Set(d.revealTo.map(n => clean(n, 60)).filter(Boolean))].slice(0, 40);
   return out;
 }
 
@@ -795,7 +826,8 @@ function createMarker(req, b, system = false) {
     JSON.stringify(sanitizeData(type, b.data)), t, t, locked).lastInsertRowid;
   const marker = access.serializeMarker(q.marker.get(id, req.lobby.id));
   commitChange(req, 'marker', 'create', null, marker);
-  if (!adminOnly && !visibleTo && type !== 'scenery' && !system) logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} placed ${name}`);
+  const secret = type === 'hero' && marker.data?.role === 'spy';
+  if (!adminOnly && !visibleTo && type !== 'scenery' && !system && !secret) logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} placed ${name}`);
   return marker;
 }
 
@@ -824,6 +856,14 @@ router.patch('/:id/markers/:mid', (req, res) => {
   let clampNote = null;
   if (b.data && typeof b.data === 'object' && g.enabled && !isGm && before.type === 'unit') {
     for (const k of game.PROTECTED_UNIT_FIELDS) delete b.data[k];
+  }
+  if (b.data && typeof b.data === 'object' && !isGm) {
+    delete b.data.revealTo;
+    if (before.type === 'hero') for (const k of PROTECTED_HERO_FIELDS) delete b.data[k];
+  }
+  if (before.type === 'hero' && (x !== before.x || y !== before.y)) {
+    if (before.data?.status === 'travelling' && !isGm) return res.status(409).json({ error: `${before.name} is travelling and arrives at the end of the turn` });
+    if (before.data?.status === 'posted') b.data = { ...(b.data || {}), status: 'active', postedTo: null };
   }
   if (x !== before.x || y !== before.y) {
     const mv = game.checkMove(req.lobby, g, isGm, before, x, y);
@@ -864,6 +904,7 @@ router.post('/:id/markers/move', (req, res) => {
     const before = row && access.serializeMarker(row);
     if (!before || !access.canSee(before, v)) { errors.push(`${mv.id}: not found`); continue; }
     if (!canEditMarker(req, before) || before.locked) { errors.push(`${before.name}: not movable`); continue; }
+    if (before.type === 'hero' && before.data?.status === 'travelling' && !isGm) { errors.push(`${before.name}: travelling`); continue; }
     const x = num(mv.x, before.x), y = num(mv.y, before.y);
     if (!inBounds(req, x, y)) { errors.push(`${before.name}: off the map`); continue; }
     if (x === before.x && y === before.y) { out.push(before); continue; }
@@ -1175,7 +1216,10 @@ router.post('/:id/combat', (req, res) => {
   const bonusA = research.statBonus(fxA, UnitTypes.resolve(a.data?.unitType)), bonusD = research.statBonus(fxD, UnitTypes.resolve(d.data?.unitType));
   const cover = require('../territory').trenchCover(req.lobby, g.settings, d, q.shapes.all(req.lobby.id).map(access.serializeShape));
   if (cover) cover.bonus += fxD.cover;
-  const atk = num(a.data.attack) + bonusA.attack, def = num(d.data.defend) + bonusD.defend + (cover ? cover.bonus : 0);
+  // Generals: the best general of each side within the aura adds to attack and defend.
+  const allMarkers = q.markers.all(req.lobby.id).map(access.serializeMarker);
+  const genA = heroRules.generalFor(req.lobby, g.settings, allMarkers, a), genD = heroRules.generalFor(req.lobby, g.settings, allMarkers, d);
+  const atk = num(a.data.attack) + bonusA.attack + (genA ? genA.bonus : 0), def = num(d.data.defend) + bonusD.defend + (cover ? cover.bonus : 0) + (genD ? genD.bonus : 0);
   const aRoll = crypto.randomInt(1, cfg.die + 1), dRoll = crypto.randomInt(1, cfg.die + 1);
   const aTotal = aRoll + atk, dTotal = dRoll + def;
   const margin = aTotal - dTotal;
@@ -1201,7 +1245,8 @@ router.post('/:id/combat', (req, res) => {
   apply(a, aLoss); apply(d, dLoss);
 
   const fmt = (m, l) => `${m.name} ${l.loss ? `loses ${l.loss}% (${l.from}→${l.to}${l.to === 0 ? ', destroyed' : ''})` : 'is unharmed'}`;
-  const notes = [bonusA.attack ? `attacker +${bonusA.attack} tech` : '', bonusD.defend ? `defender +${bonusD.defend} tech` : '', cover ? `+${cover.bonus} trench cover` : ''].filter(Boolean);
+  const notes = [bonusA.attack ? `attacker +${bonusA.attack} tech` : '', genA ? `attacker +${genA.bonus} ${genA.hero.name}` : '',
+    bonusD.defend ? `defender +${bonusD.defend} tech` : '', genD ? `defender +${genD.bonus} ${genD.hero.name}` : '', cover ? `+${cover.bonus} trench cover` : ''].filter(Boolean);
   const text = `⚔ ${a.name} attacked ${d.name}: ${aRoll}+${atk}=${aTotal} vs ${dRoll}+${def}=${dTotal}${notes.length ? ` (${notes.join(', ')})` : ''} → ` +
     (outcome === 'tie' ? 'stalemate. ' : outcome === 'attacker' ? 'attack succeeds. ' : 'attack repelled. ') +
     `${fmt(d, losses[d.id])}; ${fmt(a, losses[a.id])}`;

@@ -18,7 +18,7 @@ const research = require('../research');
 const UnitTypes = require('../../public/js/units');
 const geo = require('../geo');
 
-module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById, createMarker }) {
+module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById, createMarker, writeMarker }) {
   const router = express.Router({ mergeParams: true });
 
   function requireGm(req, res, next) {
@@ -460,6 +460,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     if (!game.q.faction.get(a, req.lobby.id) || !game.q.faction.get(b, req.lobby.id)) return res.status(404).json({ error: 'No such faction' });
     const g = game.get(req.lobby.id);
     game.setRelation(req.lobby.id, a, b, status, g.turn);
+    if (status === 'war') expelBetween(req, a, b);
     logEvent(req.lobby.id, req.user.id, 'system', `${factionName(req, a)} and ${factionName(req, b)} are now at ${status === 'alliance' ? 'alliance' : status}`);
     broadcastRelations(req.lobby.id);
     res.json({ relations: game.relations(req.lobby.id) });
@@ -477,7 +478,14 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     if (kind === 'peace' && cur !== 'war') return res.status(400).json({ error: 'Not at war' });
     if (kind === 'alliance' && cur === 'alliance') return res.status(400).json({ error: 'Already allied' });
     const g = game.get(req.lobby.id);
-    const id = game.q.insertDiplomacy.run(req.lobby.id, mine.id, to, kind, 'pending', clean(req.body?.note, 200), req.user.id, Date.now()).lastInsertRowid;
+    // Heroes: a peace offer or alliance proposal travels with a diplomat posted to the other nation.
+    let envoy = null;
+    if (kind !== 'war' && g.settings.diplomatsRequired) {
+      envoy = require('../heroes').postedDiplomat(game.q.markers.all(req.lobby.id).map(access.serializeMarker), mine.name, to);
+      if (!envoy && req.lobbyRole !== 'gm') return res.status(400).json({ error: `Send a diplomat to ${factionName(req, to)} first: ${kind === 'peace' ? 'a peace offer' : 'an alliance proposal'} needs one posted there` });
+    }
+    const note = [clean(req.body?.note, 200), envoy ? `carried by ${require('../../public/js/heroes').starText(envoy.data.stars)} ${envoy.name}` : ''].filter(Boolean).join(' · ');
+    const id = game.q.insertDiplomacy.run(req.lobby.id, mine.id, to, kind, 'pending', note, req.user.id, Date.now()).lastInsertRowid;
     const verb = kind === 'war' ? 'queued a declaration of war on' : kind === 'peace' ? 'offered peace to' : 'proposed an alliance to';
     logEvent(req.lobby.id, req.user.id, 'system', `${mine.name} ${verb} ${factionName(req, to)} (awaiting the GM)`, { diplomacyId: id },
       ws => ws.lobbyRole === 'gm' || String(ws.nation || '').toLowerCase() === mine.name.toLowerCase());
@@ -510,6 +518,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       if (action === 'block') return finish('blocked', `The GM blocked ${from}'s ${d.kind === 'war' ? 'declaration of war on' : d.kind + ' offer to'} ${to}`);
       if (d.kind === 'war') {
         game.setRelation(req.lobby.id, d.from_faction, d.to_faction, 'war', g.turn);
+        expelBetween(req, d.from_faction, d.to_faction);
         return finish('accepted', `⚔ ${from} declares war on ${to}!`);
       }
       // Peace and alliance: approved, now the other side decides.
@@ -570,6 +579,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     if (b.settings && typeof b.settings === 'object') {
       const s = b.settings, out = {};
       const numIn = (k, lo, hi) => { if (s[k] !== undefined) out[k] = clamp(num(s[k], g.settings[k]), lo, hi); };
+      numIn('heroAuraKm', 0, 5000); numIn('spySecurity', -10, 30); numIn('spyCounterKm', 0, 5000); numIn('spyStealPerStar', 0, 1000);
       numIn('kmPerMove', 1, 100000); numIn('kmPerRange', 1, 100000); numIn('captureRadiusKm', 1, 5000); numIn('cityRadiusKm', 1, 5000);
       numIn('researchLead', 0, 50); numIn('baseMoney', -1000, 100000); numIn('baseRp', -1000, 100000); numIn('baseManpower', -1000, 100000);
       numIn('upkeepGrain', 0, 100); numIn('upkeepOil', 0, 100);
@@ -595,7 +605,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
         }
         out.unitCosts = cur;
       }
-      for (const k of ['waiveMovement', 'occupyNeutrals', 'upkeep', 'publicTreasury', 'capturedIdle']) if (s[k] !== undefined) out[k] = !!s[k];
+      for (const k of ['waiveMovement', 'occupyNeutrals', 'upkeep', 'publicTreasury', 'capturedIdle', 'diplomatsRequired']) if (s[k] !== undefined) out[k] = !!s[k];
       for (const grp of ['cityIncome', 'factoryIncome', 'startStock']) {
         if (s[grp] && typeof s[grp] === 'object') {
           out[grp] = {};
@@ -637,6 +647,14 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const g0 = before;
     try { result = game.endTurn(req.lobby, { spawn }); } catch (e) { return res.status(400).json({ error: e.message }); }
     const g = result.game;
+    // Heroes on the road arrive: diplomats take up their post (or come home).
+    for (const h of game.q.markers.all(req.lobby.id).map(access.serializeMarker)) {
+      if (h.type !== 'hero' || h.data?.status !== 'travelling' || !h.data.travel || num(h.data.travel.arrives) > g.turn) continue;
+      const t = h.data.travel;
+      writeMarker(req, h, { x: t.x, y: t.y, data: { status: t.home ? 'active' : 'posted', postedTo: t.home ? null : t.to, travel: null } });
+      const host = t.home ? null : game.q.faction.get(Number(t.to), req.lobby.id);
+      secretLog(req, [h.data.nation, host?.name], t.home ? `✉ ${h.name} is back in ${t.toName}` : `✉ ${h.name} (${h.data.nation}) arrives in ${t.toName} and is received by ${host?.name || 'the host'}`);
+    }
     if (settled.length) logEvent(req.lobby.id, null, 'system', `${settled.length} place${settled.length === 1 ? '' : 's'} changed hands with the front line`);
     logEvent(req.lobby.id, req.user.id, 'system', `Turn ${before.turn} ended. Turn ${g.turn} begins: ${GameData.fmtDate(g.date)}. Movement and action points are reset.`);
     for (const s of result.summaries) {
@@ -693,6 +711,190 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     broadcastFaction(req, g, f);
     const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
     res.json({ faction: access.serializeFaction(f), state: game.serializeState(game.q.state.get(f.id)), income: game.incomeFor(req.lobby, g, access.serializeFaction(f), s, markers) });
+  });
+
+  // ---- Heroes: spies' missions, diplomats' journeys (docs/HEROES.md) ------------------------------------
+  const heroRules = require('../heroes');
+  const Heroes = require('../../public/js/heroes');
+  const norm = heroRules.norm;
+  const factionNamed = (req, name) => game.q.factions.all(req.lobby.id).find(f => norm(f.name) === norm(name)) || null;
+  /** (nation) => true for the nation itself and its allies. */
+  function friendsOf(req, nation) {
+    const me = factionNamed(req, nation);
+    return other => {
+      if (!other) return false;
+      if (norm(other) === norm(nation)) return true;
+      const f = factionNamed(req, other);
+      return !!(me && f && game.relationStatus(req.lobby.id, me.id, f.id) === 'alliance');
+    };
+  }
+  /** A log line only the listed nations and the GM receive. */
+  function secretLog(req, nations, message, data) {
+    const set = new Set(nations.filter(Boolean).map(norm));
+    logEvent(req.lobby.id, null, 'system', message, data || null, ws => ws.lobbyRole === 'gm' || set.has(norm(ws.nation)));
+  }
+  /** The nearest town's name, for reports ("near Strasbourg"). */
+  function placeName(req, markers, x, y) {
+    let best = null, bd = Infinity;
+    for (const m of markers) {
+      if (m.type !== 'town') continue;
+      const dd = geo.distance(req.lobby, x, y, m.x, m.y);
+      if (dd < bd) { bd = dd; best = m; }
+    }
+    return best ? (bd < 25 ? `near ${best.name}` : `${Math.round(bd)} km from ${best.name}`) : 'in the field';
+  }
+  /** Send a diplomat home (expulsion, recall, war): travelling to their own capital, arriving next turn. */
+  function sendHome(req, g, markers, hero) {
+    const home = heroRules.capitalOf(markers, hero.data.nation);
+    if (!home) return writeMarker(req, hero, { data: { status: 'active', postedTo: null } });
+    if (!g.enabled) return writeMarker(req, hero, { x: home.x, y: home.y, data: { status: 'active', postedTo: null } });
+    return writeMarker(req, hero, { data: { status: 'travelling', postedTo: null, travel: { to: factionNamed(req, hero.data.nation)?.id || 0, toName: home.name, x: home.x, y: home.y, arrives: g.turn + 1, home: true } } });
+  }
+  /** War between two factions sends their diplomats home. */
+  function expelBetween(req, aId, bId) {
+    const g = game.get(req.lobby.id);
+    const A = game.q.faction.get(aId, req.lobby.id), B = game.q.faction.get(bId, req.lobby.id);
+    if (!A || !B) return;
+    const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
+    for (const h of markers) {
+      if (!heroRules.ready(h) || h.data.role !== 'diplomat' || h.data.status !== 'posted') continue;
+      const own = norm(h.data.nation), post = Number(h.data.postedTo);
+      if ((own === norm(A.name) && post === B.id) || (own === norm(B.name) && post === A.id)) {
+        sendHome(req, g, markers, h);
+        secretLog(req, [A.name, B.name], `✉ With war declared, ${h.name} (${h.data.nation}) is sent home`);
+      }
+    }
+  }
+  function capture(req, g, hero, by) {
+    return writeMarker(req, hero, { adminOnly: true, data: { status: 'captured', capturedBy: by, capturedTurn: g.turn } });
+  }
+
+  router.post('/heroes/:mid/:action', (req, res) => {
+    const g = game.get(req.lobby.id);
+    const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
+    const hero = markers.find(m => m.id === Number(req.params.mid));
+    const viewer = { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '' };
+    if (!hero || hero.type !== 'hero' || !access.canSee(hero, viewer)) return res.status(404).json({ error: 'No such hero' });
+    const gm = req.lobbyRole === 'gm', action = req.params.action, d = hero.data;
+    const place = placeName(req, markers, hero.x, hero.y);
+
+    // The host nation may expel a diplomat posted to it.
+    if (action === 'expel') {
+      const mine = myFaction(req);
+      if (d.role !== 'diplomat' || d.status !== 'posted') return res.status(400).json({ error: `${hero.name} is not posted anywhere` });
+      if (!gm && !(mine && mine.id === Number(d.postedTo))) return res.status(403).json({ error: 'Only the host nation can expel a diplomat' });
+      const host = game.q.faction.get(Number(d.postedTo), req.lobby.id);
+      sendHome(req, g, markers, hero);
+      secretLog(req, [d.nation, host?.name], `✉ ${host?.name || 'The host'} expels ${hero.name} (${d.nation})`);
+      return res.json({ ok: true, message: `${hero.name} is sent home` });
+    }
+
+    if (!gm && hero.ownerId !== req.user.id) return res.status(403).json({ error: `Only the GM or ${hero.name}'s owner can give orders` });
+    if (d.status === 'captured') return res.status(409).json({ error: `${hero.name} has been captured` });
+    if (d.status === 'travelling') return res.status(409).json({ error: `${hero.name} is travelling and arrives at the end of the turn` });
+    const need = { recon: 'spy', steal: 'spy', hunt: 'spy', send: 'diplomat', recall: 'diplomat' }[action];
+    if (!need) return res.status(400).json({ error: 'Unknown order' });
+    if (d.role !== need) return res.status(400).json({ error: `Only a ${need} can do that` });
+    // One mission or journey per turn in game mode (the GM is never limited).
+    if (g.enabled && !gm && num(d.apUsed) >= Math.max(1, num(d.ap, 1))) return res.status(409).json({ error: `${hero.name} has already acted this turn` });
+    const spent = g.enabled ? { apUsed: num(d.apUsed) + 1 } : {};
+
+    // ---- Diplomats ----
+    if (action === 'send' || action === 'recall') {
+      const target = action === 'send' ? game.q.faction.get(Number(req.body?.factionId), req.lobby.id) : factionNamed(req, d.nation);
+      if (!target) return res.status(400).json({ error: action === 'send' ? 'Pick a nation' : `${d.nation || 'This hero'} has no faction` });
+      if (action === 'send' && norm(target.name) === norm(d.nation)) return res.status(400).json({ error: 'Pick another nation' });
+      if (action === 'send' && d.status === 'posted' && Number(d.postedTo) === target.id) return res.status(400).json({ error: `${hero.name} is already posted to ${target.name}` });
+      const dest = heroRules.capitalOf(markers, target.name);
+      if (!dest) return res.status(400).json({ error: `${target.name} has no capital or city on the map to receive an envoy` });
+      const home = action === 'recall';
+      if (!g.enabled) writeMarker(req, hero, { x: dest.x, y: dest.y, data: { status: home ? 'active' : 'posted', postedTo: home ? null : target.id } });
+      else writeMarker(req, hero, { data: { ...spent, status: 'travelling', postedTo: null, travel: { to: target.id, toName: dest.name, x: dest.x, y: dest.y, arrives: g.turn + 1, home } } });
+      const when = g.enabled ? 'arriving at the end of the turn' : 'arrived';
+      const msg = home ? `✉ ${hero.name} is recalled to ${dest.name}, ${when}` : `✉ ${d.nation} sends ${Heroes.starText(d.stars)} ${hero.name} to ${target.name} (${dest.name}), ${when}`;
+      secretLog(req, [d.nation, home ? null : target.name], msg);
+      return res.json({ ok: true, message: msg });
+    }
+
+    // ---- Spies ----
+    const friend = friendsOf(req, d.nation);
+    const lookup = territory.ownerLookup(req.lobby);
+    const groundId = lookup ? lookup(hero.x, hero.y) : null;
+    const ground = groundId ? game.q.faction.get(groundId, req.lobby.id) : null;
+    const km = Heroes.missionRadiusKm(d.stars);
+    /** Counter-intelligence of `nation`: its sharpest spy nearby, or the campaign's base security. */
+    const contested = nation => {
+      const spy = heroRules.counterSpy(req.lobby, markers, nation, hero.x, hero.y, num(g.settings.spyCounterKm, 150));
+      const per = spy ? num(spy.data.perception) : num(g.settings.spySecurity, 0);
+      return { ...heroRules.contest(per, num(d.intelligence)), spy, per };
+    };
+    const caughtBy = (nation, c) => {
+      capture(req, g, hero, nation);
+      const who = c.spy ? `${nation}'s ${c.spy.name}` : `${nation}'s security`;
+      const msg = `🕵 ${d.nation}'s spy ${hero.name} was caught ${place} by ${who}: ${c.sRoll}+${c.per}=${c.sTotal} vs ${c.hRoll}+${num(d.intelligence)}=${c.hTotal}`;
+      secretLog(req, [d.nation, nation], msg, { heroId: hero.id, caught: true });
+      return res.json({ ok: false, caught: true, message: msg });
+    };
+
+    if (action === 'steal') {
+      if (!g.enabled) return res.status(400).json({ error: 'Stealing research needs game mode' });
+      if (!ground || norm(ground.name) === norm(d.nation)) return res.status(400).json({ error: `${hero.name} must be on another nation's ground to steal its research` });
+      const c = contested(ground.name);
+      if (c.caught) return caughtBy(ground.name, c);
+      const mine = factionNamed(req, d.nation);
+      const theirs = game.serializeState(game.q.state.get(ground.id) || game.ensureState(req.lobby.id, ground.id, g.settings));
+      const amount = Math.max(0, Math.min(num(g.settings.spyStealPerStar, 5) * Heroes.stars(d.stars), num(theirs.rp)));
+      if (amount > 0 && mine) {
+        const ours = game.serializeState(game.q.state.get(mine.id) || game.ensureState(req.lobby.id, mine.id, g.settings));
+        theirs.rp = Math.round((theirs.rp - amount) * 10) / 10; ours.rp = Math.round((ours.rp + amount) * 10) / 10;
+        game.writeState(theirs); game.writeState(ours);
+        broadcastFaction(req, g, ground); broadcastFaction(req, g, mine);
+      }
+      writeMarker(req, hero, { data: spent });
+      const rolls = `${c.hRoll}+${num(d.intelligence)}=${c.hTotal} vs ${c.sRoll}+${c.per}=${c.sTotal}`;
+      const msg = amount > 0 ? `🗝 ${hero.name} stole ${amount} research points from ${ground.name} ${place} (${rolls})` : `🗝 ${hero.name} got into ${ground.name}'s offices ${place} but found no research points to take (${rolls})`;
+      secretLog(req, [d.nation], msg);
+      if (amount > 0) secretLog(req, [ground.name], `🗝 Research papers went missing ${place}: ${ground.name} lost ${amount} research points`);
+      return res.json({ ok: true, message: msg, amount });
+    }
+
+    if (action === 'recon') {
+      if (ground && !friend(ground.name)) {
+        const c = contested(ground.name);
+        if (c.caught) return caughtBy(ground.name, c);
+      }
+      const found = heroRules.unitsNear(req.lobby, markers, hero.x, hero.y, km, friend);
+      // Units hidden from this nation by "Visible to" are revealed to it until the end of the turn.
+      for (const f of found) {
+        const m = f.marker;
+        if (!m.visibleTo || !m.visibleTo.length) continue;
+        const list = Array.isArray(m.data?.revealTo) ? m.data.revealTo : [];
+        if (!list.some(n => norm(n) === norm(d.nation))) writeMarker(req, m, { data: { revealTo: [...list, d.nation] } });
+      }
+      writeMarker(req, hero, { data: spent });
+      const intel = found.slice(0, 40).map(f => ({ id: f.marker.id, name: f.marker.name, nation: f.marker.data?.nation || '', type: f.marker.type === 'hero' ? (Heroes.ROLES[f.marker.data?.role]?.label || 'Hero') : (f.marker.data?.unitType || 'Unit'), strength: f.marker.type === 'unit' ? num(f.marker.data?.strength, 100) : null, km: f.km }));
+      const msg = found.length ? `🔍 ${hero.name} reconnoitred ${km} km (${place}): ${found.length} foreign unit${found.length === 1 ? '' : 's'} (${intel.slice(0, 8).map(i => `${i.name}, ${i.nation || 'unaligned'}${i.strength !== null ? ` ${i.strength}%` : ''}`).join('; ')}${found.length > 8 ? '; …' : ''})`
+        : `🔍 ${hero.name} reconnoitred ${km} km (${place}): no foreign units`;
+      secretLog(req, [d.nation], msg, { intel, heroId: hero.id });
+      return res.json({ ok: true, message: msg, intel });
+    }
+
+    if (action === 'hunt') {
+      const targets = heroRules.spiesNear(req.lobby, markers, hero.x, hero.y, km, friend);
+      const caught = [];
+      for (const t of targets) {
+        const c = heroRules.contest(num(d.perception), num(t.data.intelligence));
+        if (!c.caught) continue;
+        capture(req, g, t, d.nation);
+        caught.push(t);
+        secretLog(req, [t.data.nation, d.nation], `🕵 ${t.data.nation}'s spy ${t.name} was caught ${placeName(req, markers, t.x, t.y)} by ${d.nation}'s ${hero.name}: ${c.sRoll}+${num(d.perception)}=${c.sTotal} vs ${c.hRoll}+${num(t.data.intelligence)}=${c.hTotal}`, { heroId: t.id, caught: true });
+      }
+      writeMarker(req, hero, { data: spent });
+      const msg = caught.length ? `🕵 ${hero.name} hunted within ${km} km (${place}) and caught ${caught.map(t => `${t.name} (${t.data.nation})`).join(', ')}` : `🕵 ${hero.name} hunted within ${km} km (${place}) and caught no one`;
+      secretLog(req, [d.nation], msg);
+      return res.json({ ok: true, message: msg, caught: caught.length });
+    }
+    return res.status(400).json({ error: 'Unknown order' });
   });
 
   return router;

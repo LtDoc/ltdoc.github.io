@@ -122,6 +122,30 @@ details.sub > summary .hint { text-transform: none; letter-spacing: 0; }
 .rel.war { background: rgba(231,76,60,.25); color: #ff9f80; }
 .rel.peace { background: rgba(255,255,255,.08); color: var(--muted); }
 .rel.alliance { background: rgba(46,204,113,.22); color: #7ee2a8; }
+/* Heroes: a 2:3 portrait in an oval golden ring whose light runs round it */
+@property --hero-a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@keyframes hero-spin { to { --hero-a: 360deg; } }
+.herocard { display: flex; gap: 10px; align-items: flex-start; margin: 4px 0; }
+.hero-portrait { flex: 0 0 auto; width: 84px; aspect-ratio: 2 / 3; border-radius: 50%; padding: 4px;
+  background: conic-gradient(from var(--hero-a), #6e4f0e, #d4af37 20%, #fff6c8 28%, #d4af37 36%, #8a6a1a 60%, #f5d76e 80%, #6e4f0e);
+  animation: hero-spin 3.2s linear infinite; box-shadow: 0 0 12px rgba(245, 215, 110, .35); }
+.hero-oval { width: 100%; height: 100%; border-radius: 50%; overflow: hidden; background: #18212b; display: flex; align-items: center; justify-content: center; }
+.hero-oval img, .hero-oval canvas { width: 100%; height: 100%; object-fit: cover; }
+.hero-initials { font: 700 22px Georgia, serif; color: #f5e6b8; display: flex; flex-direction: column; align-items: center; line-height: 1.1; }
+.hero-initials small { font-size: 14px; color: #d4af37; }
+.hero-info { flex: 1; min-width: 0; }
+.hero-role { font-weight: 600; }
+.hero-stars { color: #f5d76e; letter-spacing: 1px; font-size: 15px; margin: 1px 0 4px; }
+.herocard.travelling .hero-portrait, .herocard.captured .hero-portrait { filter: grayscale(.6) brightness(.8); }
+.herosend { display: inline-flex; gap: 4px; align-items: center; }
+.herosend select { width: auto; margin: 0; padding: 3px 6px; }
+.herolist { display: grid; gap: 4px; }
+.heroitem { display: flex; gap: 8px; align-items: center; text-align: left; background: var(--panel2); padding: 4px 8px; width: 100%; }
+.hero-mini { width: 26px; height: 39px; border-radius: 50%; overflow: hidden; flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
+  background: #18212b; box-shadow: 0 0 0 2px #d4af37; color: #f5d76e; }
+.hero-mini img { width: 100%; height: 100%; object-fit: cover; }
+@media (prefers-reduced-motion: reduce) { .hero-portrait { animation: none; } }
+
 /* Phase 5: turn reports, deadline countdown, captured places */
 .badge.turn.overdue { background: #7a2e2e; color: #ffd9d9; }
 .badge.province { background: rgba(20,30,25,.85); color: #e8f0ea; font-style: italic; }

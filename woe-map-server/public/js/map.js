@@ -9,7 +9,7 @@
   const $$ = s => [...document.querySelectorAll(s)];
   const base = `/api/lobbies/${lobbyId}`;
 
-  const TYPE_LABEL = { unit: 'Unit', town: 'Town', poi: 'POI', player: 'Player', scenery: 'Scenery', resource: 'Resource', factory: 'Factory' };
+  const TYPE_LABEL = { unit: 'Unit', town: 'Town', poi: 'POI', player: 'Player', scenery: 'Scenery', resource: 'Resource', factory: 'Factory', hero: 'Hero' };
   const Atlas = window.SpriteAtlas;
   await Atlas.load();
   const state = {
@@ -214,6 +214,7 @@
     renderer.setPassThrough(false);
     $$('#qaList .qa').forEach(b => b.classList.remove('active'));
     $('#qaResPlace')?.classList.remove('active');
+    $('#qaHeroPlace')?.classList.remove('active');
     renderer.app.canvas.style.cursor = renderer.mode ? 'crosshair' : '';
     if (!renderer.mode) $('#modeHud').classList.remove('show');
   }
@@ -236,6 +237,11 @@
     }
     if (state.placing.factory) {
       $('#modeText').textContent = `New factory: click the map within ${state.game?.settings?.factoryRangeKm ?? 50} ${state.lobby?.scaleLabel || 'km'} of one of your cities or towns. Esc to cancel.`;
+      return;
+    }
+    if (state.placing.hero) {
+      const h = state.placing.hero;
+      $('#modeText').textContent = `Placing a ${H.starText(h.stars)} ${(H.ROLES[h.role] || H.ROLES.general).label.toLowerCase()} for ${quickNation() || 'no one'}: click the map. Esc to cancel.`;
       return;
     }
     const t = state.placing.type;
@@ -266,6 +272,20 @@
         });
         upsertMarker(res.marker); toast(`Placed ${res.marker.name} (+${state.placing.yield}/turn${nation ? ' for ' + nation : ''})`);
         if (gameOn()) GameUI.load().catch(() => {});
+      } catch (err) { toast(err.message); }
+      return;
+    }
+    if (state.placing.hero) {
+      const h = state.placing.hero, nation = quickNation(), role = H.ROLES[h.role] || H.ROLES.general;
+      try {
+        const r = await api.post(`${base}/markers`, {
+          type: 'hero', name: h.name || `${nation ? nation + ' ' : ''}${role.label.toLowerCase()}`, color: quickColor(), x: round1(e.detail.x), y: round1(e.detail.y),
+          data: { ...H.defaults(h.role, h.stars), nation },
+        });
+        upsertMarker(r.marker);
+        disarmPlacing();
+        renderer.select(r.marker.id);
+        toast(`Placed ${r.marker.name}: upload a portrait from Edit`);
       } catch (err) { toast(err.message); }
       return;
     }
@@ -955,6 +975,8 @@
       byNation.get(n).push(u);
     }
     for (const [n, list] of [...byNation.entries()].sort((a, b) => a[0].localeCompare(b[0]))) groups.push([`Units · ${n}`, list, flagImg(n)]);
+    const heroes = all.filter(m => m.type === 'hero');
+    if (heroes.length) groups.push(['Heroes', heroes]);
     const towns = all.filter(m => m.type === 'town' || m.type === 'poi'), scenery = all.filter(m => m.type === 'scenery');
     groups.push(['Towns & points of interest', towns, lockLinks('marker', towns)]);
     const nodes = all.filter(m => m.type === 'resource' || m.type === 'factory');
@@ -966,7 +988,7 @@
       <ul class="list">${list.sort((a, b) => a.name.localeCompare(b.name)).map(m => `
         <li class="clickable ${m.id === state.selectedId ? 'selected' : ''}" data-marker="${m.id}">
           <span class="dot" style="background:${esc(m.color)}"></span>
-          <span class="grow">${esc(m.name)}${m.type === 'unit' && m.data?.unitType ? ` <span class="hint">${esc(m.data.unitType)}</span>` : ''}${m.type === 'town' ? ` <span class="hint">${esc(m.data?.size || '')}</span>` : ''}${m.type === 'resource' ? ` <span class="hint">${esc(window.GameData?.byKey[m.data?.kind]?.name || m.data?.kind || '')} +${esc(m.data?.yield ?? '')}${m.data?.nation ? ' · ' + esc(m.data.nation) : ''}</span>` : ''}${m.type === 'factory' ? ` <span class="hint">level ${esc(m.data?.industry ?? 1)}${m.data?.nation ? ' · ' + esc(m.data.nation) : ''}</span>` : ''}</span>
+          <span class="grow">${esc(m.name)}${m.type === 'unit' && m.data?.unitType ? ` <span class="hint">${esc(m.data.unitType)}</span>` : ''}${m.type === 'hero' ? ` <span class="hint">${esc(H.ROLES[m.data?.role]?.label || 'Hero')} ${H.starText(m.data?.stars)}${m.data?.nation ? ' · ' + esc(m.data.nation) : ''}${m.data?.status && m.data.status !== 'active' ? ' · ' + esc(H.STATUS[m.data.status] || '') : ''}</span>` : ''}${m.type === 'town' ? ` <span class="hint">${esc(m.data?.size || '')}</span>` : ''}${m.type === 'resource' ? ` <span class="hint">${esc(window.GameData?.byKey[m.data?.kind]?.name || m.data?.kind || '')} +${esc(m.data?.yield ?? '')}${m.data?.nation ? ' · ' + esc(m.data.nation) : ''}</span>` : ''}${m.type === 'factory' ? ` <span class="hint">level ${esc(m.data?.industry ?? 1)}${m.data?.nation ? ' · ' + esc(m.data.nation) : ''}</span>` : ''}</span>
           ${visBadge(m)}
         </li>`).join('')}</ul>`).join('');
     const shapes = [...state.shapes.values()].filter(s => match(s.label) || (!q));
@@ -1018,6 +1040,7 @@
     const el = $('#popup');
     const m = state.selectedId != null ? state.markers.get(state.selectedId) : null;
     const s = state.selectedShapeId != null ? state.shapes.get(state.selectedShapeId) : null;
+    syncAura(m);
     if (!m && !s) { el.style.display = 'none'; return; }
     el.innerHTML = m ? popupHtml(m) : shapePopupHtml(s);
     el.style.display = 'block';
@@ -1043,12 +1066,114 @@
   const stat = (k, v) => (v !== undefined && v !== null && v !== '') ? `<div class="stat"><span class="muted">${k}</span><span>${esc(v)}</span></div>` : '';
   const nationStat = n => n ? `<div class="stat"><span class="muted">Faction</span><span>${flagImg(n)} ${esc(n)}</span></div>` : '';
 
+
+  // ---- Heroes (public/js/heroes.js) ----------------------------------------------------------------------
+  const H = window.Heroes;
+  const heroSettings = () => state.game?.settings || window.GameData?.DEFAULT_SETTINGS || {};
+  /** World-space radii of a circle of `km` around (x, y): an ellipse on the Earth map, a circle elsewhere. */
+  function kmToWorld(x, y, km) {
+    const l = state.lobby || {};
+    if (isEarth()) {
+      const W = l.mapWidth, Ht = l.mapHeight, lat = 90 - (y / Ht) * 180;
+      return [km / (111.32 * Math.max(0.05, Math.cos(lat * Math.PI / 180))) * W / 360, km / 111.32 * Ht / 180];
+    }
+    const r = km / (l.unitsPerPx || 1);
+    return [r, r];
+  }
+  const heroReady = h => h && h.type === 'hero' && !h.adminOnly && !['captured', 'travelling'].includes(h.data?.status);
+  /** The best general of a unit's own nation within the aura, as the server computes it for combat. */
+  function generalFor(u) {
+    const n = String(u.data?.nation || '').toLowerCase(), km = Number(heroSettings().heroAuraKm ?? 60);
+    if (!n) return null;
+    let best = null;
+    for (const h of state.markers.values()) {
+      if (!heroReady(h) || h.data.role !== 'general' || String(h.data.nation || '').toLowerCase() !== n) continue;
+      if (distanceUnits(u.x, u.y, h.x, h.y) > km) continue;
+      const bonus = H.generalBonus(h.data.stars);
+      if (!best || bonus > best.bonus) best = { bonus, hero: h };
+    }
+    return best;
+  }
+  const factionNameById = id => state.factions.find(f => f.id === Number(id))?.name || '';
+  const rawStat = (k, html) => `<div class="stat"><span class="muted">${k}</span><span>${html}</span></div>`;
+  function heroPortraitHtml(m) {
+    const role = H.ROLES[m.data?.role] || H.ROLES.general;
+    if (m.iconUrl && Atlas.isRef(m.iconUrl)) return Atlas.html(m.iconUrl, 90);
+    if (m.iconUrl) return `<img src="${esc(m.iconUrl)}" alt="">`;
+    return `<span class="hero-initials">${esc(initials(m.name))}<small>${role.glyph}</small></span>`;
+  }
+  /** The hero card shown in the popup: 2:3 portrait in an animated golden ring, stars, role, stats, status. */
+  function heroCardHtml(m) {
+    const d = m.data || {}, role = H.ROLES[d.role] || H.ROLES.general, s = heroSettings(), km = state.lobby?.scaleLabel || 'km';
+    let rows = nationStat(d.nation) + stat('Perception', d.perception) + stat('Intelligence', d.intelligence);
+    if (d.role === 'general') rows += stat('Aura', `+${H.generalBonus(d.stars)} attack and defend within ${s.heroAuraKm ?? 60} ${km}`);
+    if (d.role === 'spy') rows += stat('Missions', `recon and hunt within ${H.missionRadiusKm(d.stars)} ${km}${gameOn() ? ` · steals up to ${(s.spyStealPerStar ?? 5) * H.stars(d.stars)} RP` : ''}`);
+    if (d.status === 'posted') rows += rawStat('Posted to', `${flagImg(factionNameById(d.postedTo))} ${esc(factionNameById(d.postedTo) || '?')}`);
+    if (d.status === 'travelling' && d.travel) rows += rawStat(d.travel.home ? 'Returning to' : 'En route to', `${esc(d.travel.toName || '?')} <span class="hint">(arrives at the end of the turn)</span>`);
+    if (d.status === 'captured') rows += stat('Captured by', d.capturedBy || '?');
+    if (gameOn() && !['captured', 'travelling'].includes(d.status)) {
+      const allow = (Number(d.movement) || 0) * (Number(s.kmPerMove) || 50), used = Number(d.movedKm) || 0;
+      rows += stat('This turn', `${Math.max(0, (Number(d.ap) || 1) - (Number(d.apUsed) || 0))}/${Number(d.ap) || 1} actions · ${fmtNum(Math.max(0, allow - used))} of ${fmtNum(allow)} ${km} left`);
+    }
+    return `<div class="herocard ${esc(d.status || 'active')}">
+      <div class="hero-portrait" title="${esc(role.label)}"><div class="hero-oval">${heroPortraitHtml(m)}</div></div>
+      <div class="hero-info">
+        <div class="hero-role">${role.glyph} ${esc(role.label)}${d.title ? ` <span class="hint">· ${esc(d.title)}</span>` : ''}</div>
+        <div class="hero-stars" title="${H.stars(d.stars)} of 5 stars">${H.starText(d.stars)}</div>
+        ${rows}
+      </div>
+    </div><p class="hint" style="margin:4px 0 0">${esc(role.blurb)}</p>`;
+  }
+  /** Orders a hero's commander (or the host of a posted diplomat) can give from the popup. */
+  function heroActionsHtml(m) {
+    const d = m.data || {};
+    let out = '';
+    const commander = canEdit(m) && !['captured', 'travelling'].includes(d.status);
+    if (commander && d.role === 'spy') {
+      out += `<button class="small" data-act="recon" title="Report every foreign unit within ${H.missionRadiusKm(d.stars)} km; contested on hostile ground">🔍 Recon</button>`;
+      if (gameOn()) out += `<button class="small" data-act="steal" title="Take research points from the nation whose ground this spy stands on; contested by its spies">🗝 Steal research</button>`;
+      out += `<button class="small" data-act="hunt" title="Try to catch enemy spies within ${H.missionRadiusKm(d.stars)} km: d20 + perception against each spy's d20 + intelligence">🕵 Hunt spies</button>`;
+    }
+    if (commander && d.role === 'diplomat') {
+      const own = String(d.nation || '').toLowerCase();
+      const opts = state.factions.filter(f => f.name.toLowerCase() !== own && !(d.status === 'posted' && f.id === Number(d.postedTo)))
+        .map(f => `<option value="${f.id}">${esc(f.name)}</option>`).join('');
+      if (opts) out += `<span class="herosend"><select id="heroSendTo">${opts}</select><button class="small" data-act="send" title="Travel to that nation's capital; arrives at the end of the turn">✉ Send</button></span>`;
+      if (d.status === 'posted') out += `<button class="small secondary" data-act="recall">↩ Recall</button>`;
+    }
+    const host = d.role === 'diplomat' && d.status === 'posted' && (state.role === 'gm' || state.myFactionId === Number(d.postedTo));
+    if (host) out += `<button class="small danger" data-act="expel" title="Send this diplomat home">Expel</button>`;
+    return out;
+  }
+  async function heroOrder(act, m) {
+    const body = act === 'send' ? { factionId: Number($('#heroSendTo')?.value) } : {};
+    if (act === 'steal' && !confirm(`Send ${m.name} to steal research? If the other side's spies catch ${m.name}, the spy is lost.`)) return;
+    const d = await api.post(`${base}/game/heroes/${m.id}/${act}`, body);
+    toast(d.message || 'Done', d.intel ? 9000 : 6000);
+  }
+  function syncAura(m) {
+    if (m && m.type === 'hero' && m.data?.role === 'general' && heroReady(m)) {
+      const [rx, ry] = kmToWorld(m.x, m.y, Number(heroSettings().heroAuraKm ?? 60));
+      renderer.showAura(m.x, m.y, rx, ry);
+    } else renderer.hideAura();
+  }
+  function armHero() {
+    if (state.placing?.hero) { disarmPlacing(); return; }
+    disarmPlacing();
+    state.placing = { hero: { role: $('#qaHeroRole').value, stars: Number($('#qaHeroStars').value) || 1, name: $('#qaHeroName').value.trim() } };
+    $('#qaHeroPlace').classList.add('active');
+    renderer.app.canvas.style.cursor = 'copy';
+    updatePlaceHud();
+  }
+
   function popupHtml(m) {
     const d = m.data || {};
     let body = '';
-    if (m.iconUrl && Atlas.isRef(m.iconUrl)) body += Atlas.html(m.iconUrl, 120);
-    else if (m.iconUrl) body += `<img class="icon" src="${esc(m.iconUrl)}" alt="">`;
-    if (m.type === 'scenery') {
+    if (m.type !== 'hero' && m.iconUrl && Atlas.isRef(m.iconUrl)) body += Atlas.html(m.iconUrl, 120);
+    else if (m.type !== 'hero' && m.iconUrl) body += `<img class="icon" src="${esc(m.iconUrl)}" alt="">`;
+    if (m.type === 'hero') {
+      body += heroCardHtml(m);
+    } else if (m.type === 'scenery') {
       body += stat('Scale', `${d.scale ?? 1}×`) + stat('Rotation', `${d.rotation || 0}°`);
     } else if (m.type === 'unit') {
       body += nationStat(d.nation) + stat('Unit type', d.unitType) + stat('Attack', d.attack) + stat('Defend', d.defend)
@@ -1061,6 +1186,8 @@
       }
       const cover = trenchCoverFor(m);
       if (cover) body += stat('Cover', `+${cover.bonus} defend (${esc(cover.trench.label || 'trench')})`);
+      const gen = generalFor(m);
+      if (gen) body += stat('General', `+${gen.bonus} attack and defend (${gen.hero.name})`);
       if (d.abilities?.length) body += `<div class="stat"><span class="muted">Abilities</span></div><ul style="margin:2px 0 4px 16px;padding:0;font-size:12px">${d.abilities.map(a => `<li>${esc(a)}</li>`).join('')}</ul>`;
     } else if (m.type === 'town') {
       body += stat('Size', d.size) + nationStat(d.nation);
@@ -1080,6 +1207,7 @@
     if (canEdit(m)) actions += `<button class="small" data-act="edit">Edit</button>`;
     if (canEdit(m)) actions += `<button class="small secondary" data-act="lock" title="${m.locked ? 'Let it be selected and dragged again' : 'Clicks and drags pass through a locked token'}">${m.locked ? '🔓 Unlock' : '🔒 Lock'}</button>`;
     if (m.type === 'unit' && canEdit(m) && (d.strength ?? 100) > 0) actions += `<button class="small danger" data-act="attack">⚔ Attack…</button>`;
+    if (m.type === 'hero') actions += heroActionsHtml(m);
     actions += `<button class="small secondary" data-act="history">History</button>`;
     if (state.role === 'gm') actions += `<button class="small secondary" data-act="dup">Duplicate</button>`;
     if (canEdit(m)) actions += `<button class="small danger" data-act="del">Delete</button>`;
@@ -1120,6 +1248,7 @@
       else if (act === 'edit') openEdit(m);
       else if (act === 'lock') { const d = await api.patch(`${base}/markers/${m.id}`, { locked: !m.locked }); upsertMarker(d.marker); }
       else if (act === 'attack') openCombat(m);
+      else if (['recon', 'steal', 'hunt', 'send', 'recall', 'expel'].includes(act)) await heroOrder(act, m);
       else if (act === 'history') showHistoryFor('marker', m.id);
       else if (act === 'dup') {
         const d = await api.post(`${base}/markers`, {
@@ -1158,7 +1287,7 @@
     const ownerOpts = state.members.map(m => `<option value="${m.userId}">${esc(m.displayName)}</option>`).join('');
     return `
       <label>Type<select id="${p}Type" ${isGm ? '' : 'disabled'}>
-        <option value="unit">Unit / army</option><option value="town">Town</option><option value="poi">Point of interest</option><option value="player">Player</option>${isGm ? '<option value="scenery">Scenery / terrain</option><option value="resource">Resource node</option><option value="factory">Factory</option>' : ''}
+        <option value="unit">Unit / army</option><option value="town">Town</option><option value="poi">Point of interest</option><option value="player">Player</option>${isGm ? '<option value="scenery">Scenery / terrain</option><option value="resource">Resource node</option><option value="factory">Factory</option><option value="hero">Hero</option>' : ''}
       </select></label>
       <label>Name<input id="${p}Name" maxlength="60" autocomplete="off" placeholder="${p === 'add' ? 'Units: blank = numbered automatically' : ''}"></label>
       <div class="grid2 coloricon">
@@ -1191,6 +1320,18 @@
         <label>Faction<select id="${p}TownNationSel">${nationOptions()}</select></label>
       </div><div class="grid2"><label>Industry <span class="hint">(game mode: 0–10)</span><input id="${p}Industry2" type="number" min="0" max="10" step="1" placeholder="by size"></label></div><label id="${p}TownNationCustomWrap" hidden>Custom nation<input id="${p}TownNation" list="nationList" maxlength="40"></label></div>
       <div data-for="poi"><label>Category<input id="${p}Category" maxlength="40" placeholder="Ruins, Mine, Fortress…"></label></div>
+      <div data-for="hero">
+        <div class="grid2">
+          <label>Role<select id="${p}HeroRole">${H.ROLE_KEYS.map(k => `<option value="${k}">${H.ROLES[k].glyph} ${H.ROLES[k].label}</option>`).join('')}</select></label>
+          <label>Stars<select id="${p}HeroStars">${[1, 2, 3, 4, 5].map(n => `<option value="${n}">${H.starText(n)}</option>`).join('')}</select></label>
+        </div>
+        <div class="grid2"><label>Faction<select id="${p}HeroNationSel">${nationOptions()}</select></label><label>Title<input id="${p}HeroTitle" maxlength="60" placeholder="e.g. Marshal of France"></label></div>
+        <label id="${p}HeroNationCustomWrap" hidden>Custom nation<input id="${p}HeroNation" list="nationList" maxlength="60"></label>
+        <details class="sub"><summary>Stats <span class="hint">from the role and stars · <a href="#" data-herodefaults>reset</a></span></summary>
+          <div class="grid3"><label>Perception<input id="${p}HeroPer" type="number" min="0" max="20" step="1"></label><label>Intelligence<input id="${p}HeroInt" type="number" min="0" max="20" step="1"></label><label>Move<input id="${p}HeroMove" type="number" min="0" max="20" step="any"></label></div>
+        </details>
+        <p class="hint">Portrait: upload an image under Icon; it is shown 2:3 inside a golden ring. Spies are visible only to their own nation.</p>
+      </div>
       <div data-for="resource"><div class="grid2">
         <label>Resource<select id="${p}Kind">${(window.GameData ? GameData.RESOURCES : []).map(r => `<option value="${r.key}">${esc(r.name)}</option>`).join('')}</select></label>
         <label>Yield per turn<input id="${p}Yield" type="number" min="0" max="50" step="any" value="3"></label>
@@ -1209,6 +1350,19 @@
       </details>`;
   }
 
+  /** Role and stars refill perception, intelligence and movement (the "reset" link does it on demand). */
+  function bindHeroDefaults(p, fillNow) {
+    const fill = () => {
+      const def = H.defaults(document.getElementById(p + 'HeroRole')?.value, document.getElementById(p + 'HeroStars')?.value);
+      for (const [id, k] of [['HeroPer', 'perception'], ['HeroInt', 'intelligence'], ['HeroMove', 'movement']]) { const el = document.getElementById(p + id); if (el) el.value = def[k]; }
+    };
+    const role = document.getElementById(p + 'HeroRole'), st = document.getElementById(p + 'HeroStars');
+    if (!role) return;
+    role.onchange = fill; st.onchange = fill;
+    const link = document.querySelector(`#${p === 'add' ? 'addForm' : 'editForm'} [data-herodefaults]`);
+    if (link) link.onclick = e => { e.preventDefault(); fill(); };
+    if (fillNow) { st.value = '3'; fill(); }
+  }
   function toggleTypeFields(form, type, setLockDefault) {
     form.querySelectorAll('[data-for]').forEach(div => { div.style.display = div.dataset.for === type ? '' : 'none'; });
     if (setLockDefault) {
@@ -1325,7 +1479,11 @@
     if (type === 'resource') Object.assign(data, { kind: v('Kind'), yield: v('Yield') === '' ? 1 : v('Yield'), nation: readNation(p, 'ResNation') });
     if (type === 'factory') Object.assign(data, { industry: v('Industry') || 1, nation: readNation(p, 'FacNation') });
     if (type === 'scenery') Object.assign(data, { scale: v('Scale') || 1, rotation: v('Rotation') || 0, flip: !!document.getElementById(p + 'Flip')?.checked });
-    const name = v('Name').trim() || (type === 'scenery' ? sceneryName(v('IconUrl')) : '');
+    if (type === 'hero') Object.assign(data, {
+      role: v('HeroRole'), stars: Number(v('HeroStars')) || 1, title: v('HeroTitle'), nation: readNation(p, 'HeroNation'),
+      perception: v('HeroPer'), intelligence: v('HeroInt'), movement: v('HeroMove'),
+    });
+    const name = v('Name').trim() || (type === 'scenery' ? sceneryName(v('IconUrl')) : type === 'hero' ? (H.ROLES[v('HeroRole')] || H.ROLES.general).label : '');
     const out = { type, name, color: v('Color'), iconUrl: v('IconUrl'), data, autoName: type === 'unit' && !name };
     const owner = document.getElementById(p + 'Owner');
     if (owner) out.ownerId = owner.value ? Number(owner.value) : null;
@@ -1353,6 +1511,10 @@
     set('Industry2', m.type === 'town' ? (d.industry ?? '') : '');
     set('Owner', m.ownerId ?? ''); set('VisibleTo', (m.visibleTo || []).join(', '));
     set('Scale', d.scale ?? 1); set('Rotation', d.rotation ?? 0);
+    if (m.type === 'hero') {
+      set('HeroRole', d.role || 'general'); set('HeroStars', H.stars(d.stars)); set('HeroTitle', d.title || ''); setNation(p, 'HeroNation', d.nation || '');
+      set('HeroPer', d.perception); set('HeroInt', d.intelligence); set('HeroMove', d.movement);
+    }
     const fl = document.getElementById(p + 'Flip'); if (fl) fl.checked = !!d.flip;
     const ao = document.getElementById(p + 'AdminOnly'); if (ao) ao.checked = !!m.adminOnly;
     const lk = document.getElementById(p + 'Locked'); if (lk) lk.checked = !!m.locked;
@@ -1453,6 +1615,13 @@
         <button type="button" class="small secondary" id="qaResPlace" title="Then click the map to place nodes for the selected faction">Place…</button>
         <button type="button" class="small secondary" data-quick="factory">Factory</button>
       </div>
+      <div class="row" style="margin-top:6px;flex-wrap:wrap;gap:4px" title="Heroes: generals buff nearby units, diplomats carry proposals, spies steal research, scout and hunt spies">
+        <span class="hint">Hero</span>
+        <select id="qaHeroRole" style="width:auto;margin:0;padding:3px 6px">${H.ROLE_KEYS.map(k => `<option value="${k}">${H.ROLES[k].glyph} ${H.ROLES[k].label}</option>`).join('')}</select>
+        <select id="qaHeroStars" style="width:auto;margin:0;padding:3px 6px">${[1, 2, 3, 4, 5].map(n => `<option value="${n}" ${n === 3 ? 'selected' : ''}>${H.starText(n)}</option>`).join('')}</select>
+        <input id="qaHeroName" maxlength="60" placeholder="Name" autocomplete="off" style="width:130px;margin:0;padding:3px 6px">
+        <button type="button" class="small secondary" id="qaHeroPlace" title="Then click the map to place the hero for the selected faction">Place…</button>
+      </div>
       <details class="sub" id="customMarker"><summary>Custom marker</summary>
         ${formHtml('add', gm)}
         <button type="submit" style="width:100%">Place at map centre</button>
@@ -1468,6 +1637,7 @@
     bindUnitTypePicker('add');
     bindIconPicker('add');
     bindNationPicker('add', 'Nation'); bindNationPicker('add', 'TownNation'); bindNationPicker('add', 'ResNation'); bindNationPicker('add', 'FacNation');
+    bindNationPicker('add', 'HeroNation'); bindHeroDefaults('add', true);
     setNation('add', 'Nation', state.member?.nation || '');
     applyTypeDefaults('add');
     if (gm) {
@@ -1511,6 +1681,7 @@
         renderer.app.canvas.style.cursor = 'copy';
         updatePlaceHud();
       };
+      $('#qaHeroPlace').onclick = armHero;
       $$('#addForm [data-quick]').forEach(b => b.onclick = () => {
         disarmPlacing();
         const det = $('#customMarker'); det.open = true;
@@ -1560,6 +1731,7 @@
     bindUnitTypePicker('edit');
     bindIconPicker('edit');
     bindNationPicker('edit', 'Nation'); bindNationPicker('edit', 'TownNation'); bindNationPicker('edit', 'ResNation'); bindNationPicker('edit', 'FacNation');
+    bindNationPicker('edit', 'HeroNation'); bindHeroDefaults('edit', false);
     fillForm('edit', m);
     toggleTypeFields(form, m.type);
     $('#editType').onchange = () => toggleTypeFields(form, $('#editType').value);

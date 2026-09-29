@@ -371,6 +371,7 @@ class MapRenderer extends EventTarget {
       this._territoryTimer = setTimeout(() => this._redrawTerritories(), 120);
     }
     if (this.provinceLayer) this.provinceLayer.setZoom(this.scale);
+    if (this._aura) this._drawAura();
     if (this.earth) {
       clearTimeout(this._earthTimer);
       this._earthTimer = setTimeout(() => { if (this.earth) { this.earth.redraw(this.scale); this.invalidate(); } }, 120);
@@ -970,6 +971,20 @@ class MapRenderer extends EventTarget {
     this.invalidate();
   }
   hideRange() { if (this._rangeG) { this._rangeG.visible = false; this.invalidate(); } }
+  /** A general's aura: an ellipse (rx, ry in world units, so it follows the Earth's projection) around the hero. */
+  showAura(x, y, rx, ry) {
+    if (!this._auraG) { this._auraG = new PIXI.Graphics(); this._auraG.eventMode = 'none'; this.overlayLayer.addChild(this._auraG); }
+    this._aura = { x, y, rx, ry };
+    this._drawAura();
+  }
+  _drawAura() {
+    const a = this._aura, g = this._auraG;
+    if (!a || !g) return;
+    g.clear().ellipse(a.x, a.y, a.rx, a.ry).fill({ color: 0xf5d76e, alpha: 0.07 }).stroke({ width: 1.6 / this.scale, color: 0xd4af37, alpha: 0.85 });
+    g.visible = true;
+    this.invalidate();
+  }
+  hideAura() { this._aura = null; if (this._auraG && this._auraG.visible) { this._auraG.visible = false; this.invalidate(); } }
 
   // ---- Input ------------------------------------------------------------------------
   _bindInput() {
@@ -1231,7 +1246,16 @@ class MapRenderer extends EventTarget {
         v.label.scale.set(1 / (f * v.curS));
       }
       v.root.scale.set(rs);
-      v.root.alpha = Math.min(1, v.spawn * 2.5);
+      v.root.alpha = Math.min(1, v.spawn * 2.5) * (v.dim ?? 1);
+      // Heroes: a band of light runs round the golden ring and the glow breathes.
+      if (v.sheen && !v.sheen.destroyed) {
+        const [ex, ey] = v.sheenR, a0 = t * 1.7 + v.phase, g = v.sheen;
+        g.clear();
+        for (let i = 0; i <= 12; i++) { const a = a0 + 1.15 * i / 12, px = Math.cos(a) * ex, py = Math.sin(a) * ey; if (i) g.lineTo(px, py); else g.moveTo(px, py); }
+        g.stroke({ width: 2.2, color: 0xfff6c8, alpha: 0.95, cap: 'round' });
+        if (v.heroGlow) v.heroGlow.alpha = 0.65 + 0.35 * Math.sin(t * 2.2 + v.phase);
+        anim = true;
+      }
 
       v.ring.visible = sel || v.hover;
       if (v.ring.visible) v.ring.alpha = sel ? 0.65 + 0.35 * Math.sin(t * 5) : 0.45;
@@ -1326,6 +1350,15 @@ function ease(v, target, dt) {
 }
 
 function easeOutCubic(x) { return 1 - Math.pow(1 - x, 3); }
+/** Append a five-pointed star (outer radius r, inner ri) centred on (cx, cy) to a Graphics path. */
+function starPath(g, cx, cy, r, ri) {
+  const pts = [];
+  for (let i = 0; i < 10; i++) {
+    const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? ri : r;
+    pts.push(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+  }
+  g.poly(pts);
+}
 
 /** Closest point on a shape's outline to (x,y): { index of segment start, x, y, dist }. */
 function nearestSegment(shape, x, y) {
@@ -1416,11 +1449,13 @@ class MarkerView {
     this.r.invalidate();
     this.colorNum = parseInt(String(marker.color || '#3498db').slice(1), 16) || 0x3498db;
     if (!this.dragging) { this.tx = marker.x; this.ty = marker.y; }
-    this.label.text = marker.name;
+    this.label.text = marker.type === 'hero' && marker.data?.status === 'travelling' ? `${marker.name} (en route)` : marker.name;
     this.unitCat = (marker.type === 'unit' && window.UnitTypes) ? (window.UnitTypes.resolve(marker.data?.unitType)?.cat || '') : '';
     this.root.eventMode = marker.locked ? 'none' : 'static';   // locked tokens let clicks and drags pass through
     const visualKey = [marker.type, marker.color, marker.iconUrl, marker.data?.unitType, marker.data?.size,
-      marker.data?.strength, marker.adminOnly, JSON.stringify(marker.visibleTo), marker.name[0], marker.flagUrl, marker.data?.industry].join('|');
+      marker.data?.strength, marker.adminOnly, JSON.stringify(marker.visibleTo), marker.name[0], marker.flagUrl, marker.data?.industry,
+      marker.data?.role, marker.data?.stars, marker.name].join('|');
+    this.dim = marker.type === 'hero' ? ({ travelling: 0.55, captured: 0.4 }[marker.data?.status] || 1) : 1;
     if (visualKey !== this._visualKey) {
       this._visualKey = visualKey;
       if (marker.type === 'unit' && this.r.unitsHidden()) this._bodyPending = true; else this._buildBody();
@@ -1451,8 +1486,10 @@ class MarkerView {
     }
     if (gen !== this._gen || this.root.destroyed) return;
     for (const c of this.body.removeChildren()) c.destroy({ children: true });
+    this.sheen = null; this.heroGlow = null;
     let built;
-    if (m.type === 'scenery') built = this._sceneryBody(tex, m);
+    if (m.type === 'hero') built = this._heroBody(tex, m);
+    else if (m.type === 'scenery') built = this._sceneryBody(tex, m);
     else if ((m.type === 'resource' || m.type === 'factory') && tex) built = this._nodeBody(tex, m);
     else if (tex && isSprite) built = this._spriteBody(tex, m);
     else built = tex ? this._iconBody(tex, m) : this._procBody(m);
@@ -1461,6 +1498,53 @@ class MarkerView {
     this.refreshFire();
     this._buildFlag(gen);
     this.r.invalidate();
+  }
+
+  /**
+   * Hero: a 2:3 portrait (the marker's icon, or initials and the role's emblem) in an oval golden ring, the star
+   * rating beneath and a role badge. The tick animates a band of light round the ring.
+   */
+  _heroBody(tex, m) {
+    const c = new PIXI.Container();
+    const d = m.data || {};
+    const role = (window.Heroes && window.Heroes.ROLES[d.role]) || { glyph: '★', label: 'Hero' };
+    const W = 34, H = 51, R = 3.6, rx = W / 2, ry = H / 2;
+    const glow = new PIXI.Graphics().ellipse(0, 0, rx + R + 3.5, ry + R + 3.5).fill({ color: 0xf5d76e, alpha: 0.22 });
+    const ring = new PIXI.Graphics()
+      .ellipse(0, 0, rx + R, ry + R).fill(0x6e4f0e)
+      .ellipse(0, 0, rx + R - 1.1, ry + R - 1.1).fill(0xd4af37)
+      .ellipse(0, 0, rx + 0.7, ry + 0.7).fill(0x5c4310)
+      .ellipse(0, 0, rx, ry).fill(0x18212b);
+    c.addChild(glow, ring);
+    if (tex) {
+      const sp = new PIXI.Sprite(tex);
+      sp.anchor.set(0.5);
+      sp.scale.set(Math.max(W / tex.width, H / tex.height));     // cover the oval, cropping the longer side
+      const mask = new PIXI.Graphics().ellipse(0, 0, rx, ry).fill(0xffffff);
+      c.addChild(mask, sp);
+      sp.mask = mask;
+    } else {
+      const initials = String(m.name || '?').split(/\s+/).filter(Boolean).map(s => s[0]).slice(0, 2).join('').toUpperCase();
+      const t = new PIXI.Text({ text: initials, style: { fontFamily: 'Georgia, serif', fontSize: 15, fontWeight: '700', fill: 0xf5e6b8 }, resolution: 3 });
+      t.anchor.set(0.5); t.y = -4;
+      const e = new PIXI.Text({ text: role.glyph, style: { fontFamily: 'Segoe UI Symbol, Segoe UI Emoji, sans-serif', fontSize: 12, fill: 0xd4af37 }, resolution: 3 });
+      e.anchor.set(0.5); e.y = 13;
+      c.addChild(t, e);
+    }
+    const sheen = new PIXI.Graphics();
+    c.addChild(sheen);
+    this.sheen = sheen; this.heroGlow = glow; this.sheenR = [rx + R / 2 + 0.2, ry + R / 2 + 0.2];
+    const n = window.Heroes ? window.Heroes.stars(d.stars) : 1;
+    const st = new PIXI.Graphics(), sy = ry + R + 6.5, gap = 7.6;
+    for (let i = 0; i < n; i++) starPath(st, (i - (n - 1) / 2) * gap, sy, 3.6, 1.55);
+    st.fill(0xf5d76e).stroke({ width: 0.8, color: 0x5c4310 });
+    const bx = rx + 1.5, by = -ry + 4;
+    const badge = new PIXI.Graphics().circle(bx, by, 6.8).fill(0x18212b).stroke({ width: 1.4, color: 0xd4af37 });
+    const bt = new PIXI.Text({ text: role.glyph, style: { fontFamily: 'Segoe UI Symbol, Segoe UI Emoji, sans-serif', fontSize: 8, fill: 0xf5d76e }, resolution: 3 });
+    bt.anchor.set(0.5); bt.position.set(bx, by + 0.3);
+    c.addChild(st, badge, bt);
+    this.w = W + 2 * R + 2; this.h = H + 2 * R + 12;
+    return c;
   }
 
   /** Scenery: the raw sprite (or a placeholder box) at native pixel size; the tick scales it with the map. */

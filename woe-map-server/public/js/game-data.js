@@ -62,6 +62,11 @@ const GameData = (() => {
     trenchBonusReinforced: 4,
     capturedIdle: true,       // phase 5: a place that changed hands this turn yields nothing at End turn
     kmPerRange: 50,           // attack reach per range point: infantry (1) 50 km, cavalry (2) 100 km, field artillery (3) 150 km
+    heroAuraKm: 60,           // heroes: a general's bonus reaches friendly units this close
+    diplomatsRequired: true,  // heroes: peace offers and alliance proposals need a diplomat posted to the other nation
+    spySecurity: 0,           // heroes: added to the defender's roll when no spy of theirs is near a mission
+    spyCounterKm: 150,        // heroes: a nation's spies within this distance contest a foreign mission
+    spyStealPerStar: 5,       // heroes: research points a successful theft takes per star
   };
 
   // ---- Deadlines ---------------------------------------------------------------------------
