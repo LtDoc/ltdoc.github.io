@@ -265,6 +265,67 @@ class MapRenderer extends EventTarget {
     this.invalidate();
   }
   setTokenMode(m) { this.tokenMode = m === 'screen' ? 'screen' : 'map'; this.invalidate(); }
+  /** Placing mode: tokens, scenery and drawings stop taking clicks so every click reaches the map. */
+  setPassThrough(on) {
+    on = !!on;
+    if (this._passThrough === on) return;
+    this._passThrough = on;
+    for (const layer of [this.markerLayer, this.sceneryLayer, this.shapesLayer, this.handleLayer]) layer.interactiveChildren = !on;
+    if (on) for (const v of this.views.values()) v.hover = false;
+    this.invalidate();
+  }
+
+  /**
+   * Hide token labels that would overlap one already placed. Selected, hovered and dragged tokens always keep
+   * their label; labels that were showing last frame win ties so names do not flicker while panning; units
+   * come before towns and other markers. Screen-space boxes go into a coarse grid so the pass stays cheap.
+   */
+  _declutterLabels() {
+    const s = this.scale, wx = this.world.x, wy = this.world.y;
+    const sw = this.app.screen.width, sh = this.app.screen.height;
+    const cand = [], obstacles = [];
+    for (const v of this.views.values()) {
+      if (v.dying || v.marker.type === 'scenery') continue;
+      // Every token's body is an obstacle: a name half hidden under the next counter is as unreadable as two
+      // names on top of each other. Bodies are shrunk a little so a grazing corner does not cost a label.
+      const k = v.root.scale.x * s, cx = wx + v.x * s, cy = wy + v.y * s;
+      const hw = (v.w || 0) * k * 0.42, hh = (v.h || 0) * k * 0.42;
+      if (hw > 0 && cx + hw > 0 && cx - hw < sw && cy + hh > 0 && cy - hh < sh) obstacles.push({ owner: v.id, x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh });
+    }
+    for (const v of this.views.values()) {
+      const l = v.label;
+      if (v.dying || v.marker.type === 'scenery' || !l.visible || !l.text) { v._labelShown = false; continue; }
+      const k = v.root.scale.x * s;                       // screen px per token px
+      const cx = wx + v.x * s, top = wy + v.y * s + l.y * k;
+      const w = l.width * k, h = l.height * k;
+      if (cx + w / 2 < 0 || cx - w / 2 > sw || top > sh || top + h < 0) continue;   // off screen: nothing to collide with
+      const forced = this.selected.has(v.id) || v.hover || v.dragging;
+      cand.push({ v, x0: cx - w / 2 - 2, y0: top - 1, x1: cx + w / 2 + 2, y1: top + h + 1,
+        rank: forced ? 0 : (v._labelShown ? 1 : 2), unit: v.marker.type === 'unit' ? 0 : 1, forced });
+    }
+    cand.sort((a, b) => a.rank - b.rank || a.unit - b.unit || a.v.id - b.v.id);
+    const CELL = 96, grid = new Map();
+    const cells = b => {
+      const out = [];
+      for (let gx = Math.floor(b.x0 / CELL); gx <= Math.floor(b.x1 / CELL); gx++)
+        for (let gy = Math.floor(b.y0 / CELL); gy <= Math.floor(b.y1 / CELL); gy++) out.push(gx + ',' + gy);
+      return out;
+    };
+    for (const o of obstacles) for (const key of cells(o)) { if (!grid.has(key)) grid.set(key, []); grid.get(key).push(o); }
+    for (const c of cand) {
+      const keys = cells(c);
+      let hit = false;
+      if (!c.forced) {
+        outer: for (const key of keys) for (const o of grid.get(key) || []) {
+          if (o.owner === c.v.id) continue;                 // a token's own body never hides its label
+          if (c.x0 < o.x1 && c.x1 > o.x0 && c.y0 < o.y1 && c.y1 > o.y0) { hit = true; break outer; }
+        }
+      }
+      if (hit) { c.v.label.visible = false; c.v._labelShown = false; continue; }
+      c.v._labelShown = true;
+      for (const key of keys) { if (!grid.has(key)) grid.set(key, []); grid.get(key).push(c); }
+    }
+  }
 
   shapeScreenPos(id) {
     const v = this.shapeViews.get(id);
@@ -1144,6 +1205,7 @@ class MapRenderer extends EventTarget {
       if (sel) anim = true;
       if (v.capRing && v.capRing.visible) { v.capRing.alpha = 0.55 + 0.45 * Math.sin(t * 3 + v.phase); v.capRing.scale.set(1 + 0.06 * Math.sin(t * 3 + v.phase)); anim = true; }
     }
+    this._declutterLabels();
 
     for (const layer of [this.fxLayer, this.boomLayer]) {
       for (const fx of [...layer.children]) {

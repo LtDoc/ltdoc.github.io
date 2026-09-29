@@ -39,6 +39,12 @@ start.cmd
 Then open <http://localhost:8080/>. **The first account you create becomes the site admin.**
 Create a campaign, open its settings (⚙) and upload the map image. Share the join code with players.
 
+There is no build step: `start.cmd` and the service run the code in this folder as it is, so after pulling
+or switching branches just restart the server. The console prints the build at start-up ("Build 45224595
+(woe-map-server)", with a **+** when there are uncommitted changes), the campaigns page shows it at the bottom
+and the map's settings dialog next to its title. Every script and stylesheet URL carries that build, so
+browsers fetch the new code after a restart instead of running a cached copy.
+
 ## Run as a Windows service
 
 Open an elevated PowerShell in the project folder:
@@ -134,7 +140,9 @@ combat reports, so a restricted item never reaches a browser that may not show i
 
 - **Quick add (GM)**: the Add tab opens on a faction picker and a grid of every unit type drawn as a counter in
   that faction's colour. Click a type, then click the map wherever you want the unit; keep clicking to drop
-  more, press Esc (or Cancel on the HUD, or click the type again) to stop. Each unit is named by its type's
+  more, press Esc (or Cancel on the HUD, or click the type again) to stop. While placing, existing tokens and
+  drawings ignore clicks, so a unit can be dropped right next to (or on top of) another one; the same holds for
+  resource nodes, factories and the territory brush. Each unit is named by its type's
   formation and numbered per faction and formation: "1st Infantry Regiment", "2nd Infantry Regiment",
   "1st Assault Regiment", "1st Cavalry Regiment", "1st Field Artillery Battery", "1st Fighter Squadron"…
   The ordinal style comes from keywords in the faction name (`public/js/naming.js`): French, Belgian and
@@ -196,7 +204,9 @@ Aircraft gently float and ships ride a swell; ground units sit still. Icon uploa
 as you zoom out and grow as you zoom in, clamped between roughly 9 and 59 screen pixels so they never vanish or
 turn into giants. The map zooms in to 32×, well past the point where tokens stop growing, so a crowded front
 can be spread out until every unit is clear. Labels keep a constant text size and appear once a token is about 24 px or larger (hovered or
-selected tokens always show theirs). The old behaviour, a fixed pixel size at every zoom, is available as
+selected tokens always show theirs). Where names would overlap, only one shows: units win over towns and
+other markers, a name already showing keeps its place so labels do not flicker while you pan, and hovering or
+selecting a token always brings its name back. The old behaviour, a fixed pixel size at every zoom, is available as
 "Fixed size on screen". **Token size** multiplies either mode.
 
 **Scenery** is a GM-only marker type for buildings, trenches, craters, wrecks and other dressing. Unlike counters it
@@ -428,8 +438,15 @@ design is in `docs/GAME-DESIGN.md`.
 
 ### Territory and war (game mode)
 
-- **Provinces (Earth map).** **Cut provinces** (Game tab → Territory; pick the year and a size, 100 km by
-  default) slices the land into provinces that follow that year's state borders and the coastline: one
+- **Setting up a new Earth campaign.** Pick the Earth map (with the year's borders if you like), seed the
+  factions from history on the People tab, then switch game mode on with **Set up the world** ticked (the
+  default when there are no provinces yet). In one background job of a minute or two the server cuts the
+  provinces for the map's year, gives each faction its states, and adds the major cities and the historical
+  resource regions; progress shows in the Game tab's Territory section. **Set up the world** on that section
+  runs the same job later, keeping any cities and resources already on the map, and **Cut provinces only**
+  redoes just the provinces.
+- **Provinces (Earth map).** **Cut provinces only** (Game tab → Territory; pick the year and a size, 100 km by
+  default; the year defaults to the one the Earth map shows) slices the land into provinces that follow that year's state borders and the coastline: one
   around every major city plus a jittered grid inside each state, every cell clipped to the coast and cut
   along the border, fragments merged into their neighbour. The whole world is about 15,000 provinces and
   takes a minute or two; progress shows next to the button. Each province is named after the city inside

@@ -47,6 +47,10 @@
           <label>Start date<input id="gameStartDate" type="date" value="1914-07-28"></label>
           <label class="inline" style="margin-top:22px"><input type="checkbox" id="gameResetTurn" checked> Reset to turn 1</label>
         </div>
+        <div id="gameSetupWrap" hidden>
+          <label class="inline"><input type="checkbox" id="gameSetupWorld" checked> Set up the world: provinces, major cities and resources</label>
+          <p class="hint" id="gameSetupHint">Takes a minute or two; progress shows in the Territory section.</p>
+        </div>
         <p><button id="btnGameToggle" class="small">Switch game mode on</button></p>
         <div id="gameOnBlock" hidden>
           <div class="section">Turn</div>
@@ -85,7 +89,8 @@
           <div id="territoryTools">
             <div class="row" style="flex-wrap:wrap;gap:4px" id="territoryEarthRow">
               <select id="terrYear" style="width:auto;margin:0;padding:4px 6px"></select>
-              <button type="button" id="btnProvGen" class="small" title="Cut the land into provinces that follow that year's borders and the coast, then give each faction the states that carry its name">Cut provinces</button>
+              <button type="button" id="btnWorldSetup" class="small" title="Cut provinces for that year, give each faction its states, then add the major cities and the historical resource regions (anything already on the map is kept)">Set up the world</button>
+              <button type="button" id="btnProvGen" class="small secondary" title="Cut the land into provinces that follow that year's borders and the coast, then give each faction the states that carry its name">Cut provinces only</button>
               <label class="inline" style="margin:0" title="Rough size of a province"><input id="provSize" type="number" min="40" max="400" step="10" value="100" style="width:56px;margin:0;padding:3px 6px"> km</label>
               <button type="button" id="btnTerrSeed" class="small secondary" title="Give each faction the provinces (or, without provinces, the states) of that year that carry its name; the rest becomes neutral">Assign borders of that year</button>
               <span id="provProgress" class="hint" hidden></span>
@@ -377,7 +382,7 @@
   <div id="settingsModal" class="modal">
     <div class="card">
       <button class="close" data-close>×</button>
-      <h2>Campaign settings</h2>
+      <h2>Campaign settings <span class="hint" style="font-weight:400;font-size:11px" title="The git commit this server is running; + means uncommitted changes">build __WOE_BUILD__</span></h2>
       <form id="settingsForm">
         <label>Name<input id="setName" maxlength="60" required></label>
         <div class="grid2">

@@ -34,7 +34,8 @@ const GameUI = (() => {
       ctx.armBrush(Number(sel.value) || 0, 0, sel.options[sel.selectedIndex]?.textContent || 'neutral');
     };
     $('#btnTerrClear').onclick = clearTerritories;
-    $('#btnProvGen').onclick = generateProvinces;
+    $('#btnProvGen').onclick = () => generateProvinces(false);
+    $('#btnWorldSetup').onclick = () => generateProvinces(true);
     $('#btnCosts').onclick = () => CostEditor.open(ctx.state.lobby, { settings: g().settings, onSaved: game => { ctx.state.game = game; refresh(); loadProduction(); } });
     $('#btnSeedCities').onclick = seedCities;
     $('#btnGenResources').onclick = generateResources;
@@ -70,7 +71,10 @@ const GameUI = (() => {
     });
     ResearchUI.init({ ...c, renderNation, currentFaction: myEntry });
     fetch('/api/lobbies/earth/years').then(r => r.json()).then(d => {
-      $('#terrYear').innerHTML = (d.years || []).map(y => `<option value="${y}" ${y === 1914 ? 'selected' : ''}>${y}</option>`).join('');
+      // Default to the year the campaign's Earth map shows, else 1914.
+      const years = d.years || [], layer = Number(ctx.state.lobby?.settings?.earth?.borders);
+      const pick = years.includes(layer) ? layer : 1914;
+      $('#terrYear').innerHTML = years.map(y => `<option value="${y}" ${y === pick ? 'selected' : ''}>${y}</option>`).join('');
     }).catch(() => {});
   }
 
@@ -178,13 +182,16 @@ const GameUI = (() => {
     try { await api.post(`${ctx.base}/game/territory/clear`, {}); await ctx.loadTerritories(); await ctx.loadProvinces(); }
     catch (err) { toast(err.message); }
   }
-  async function generateProvinces() {
+  const isEarthMap = () => ctx.state.lobby?.mapKind === 'earth';
+  async function generateProvinces(full) {
     const { $ } = ctx;
     const year = Number($('#terrYear').value), sizeKm = Number($('#provSize').value) || 100;
     if (!year) { toast('No historical borders bundled'); return; }
-    if (!confirm(`Cut the world of ${year} into provinces about ${sizeKm} km across? This replaces every territory and province, removes border drawings imported from history, and takes a minute or two.`)) return;
+    const what = full ? `Set up the world of ${year}: provinces about ${sizeKm} km across, then the major cities and resource regions (places already on the map are kept)?`
+      : `Cut the world of ${year} into provinces about ${sizeKm} km across?`;
+    if (!confirm(`${what} This replaces every territory and province, removes border drawings imported from history, and takes a minute or two.`)) return;
     try {
-      await api.post(`${ctx.base}/game/provinces/generate`, { year, sizeKm });
+      await api.post(`${ctx.base}/game/${full ? 'setup-world' : 'provinces/generate'}`, { year, sizeKm });
       onProgress({ task: 'provinces', text: 'Starting…', done: 0, total: 1 });
     } catch (err) { toast(err.message); }
   }
@@ -195,13 +202,14 @@ const GameUI = (() => {
     const el = $('#provProgress');
     el.hidden = false;
     el.textContent = msg.error ? msg.text : (msg.total > 1 ? `${msg.text} ${Math.round(msg.done / msg.total * 100)}%` : msg.text);
-    $('#btnProvGen').disabled = !msg.error && msg.text !== 'Done';
+    $('#btnProvGen').disabled = $('#btnWorldSetup').disabled = !msg.error && msg.text !== 'Done';
     if (msg.text === 'Done') {
       setTimeout(() => { el.hidden = true; }, 4000);
       (async () => {
         await ctx.loadProvinces();
         const n = await ctx.removeBorderDrawings();
-        toast(n ? `Provinces ready; ${n} imported border drawing${n === 1 ? '' : 's'} removed` : 'Provinces ready', 4000);
+        await ctx.loadMarkers();
+        toast(n ? `World ready; ${n} imported border drawing${n === 1 ? '' : 's'} removed` : 'World ready', 4000);
       })();
     }
     if (msg.error) toast(msg.text);
@@ -437,6 +445,11 @@ const GameUI = (() => {
     $('#btnGameToggle').textContent = on ? 'Switch game mode off' : 'Switch game mode on';
     $('#btnGameToggle').className = on ? 'small secondary' : 'small';
     $('#gameStartWrap').hidden = on;
+    $('#gameSetupWrap').hidden = on || !isEarthMap();
+    if (!on && document.activeElement !== $('#gameSetupWorld')) $('#gameSetupWorld').checked = !(ctx.renderer.provinces && ctx.renderer.provinces.length);
+    $('#gameSetupHint').textContent = (state.factions || []).length
+      ? 'Cuts provinces from the map\'s historical year, gives each faction its states, and adds the major cities and resource regions. Takes a minute or two.'
+      : 'No factions yet: seed them from history on the People tab first, or provinces start neutral. Takes a minute or two.';
     $('#gameOnBlock').hidden = !on;
     $('#gameOffHint').hidden = on;
     if (on) {
@@ -488,13 +501,16 @@ const GameUI = (() => {
     const { $ } = ctx;
     const game = g();
     const on = !(game && game.enabled);
-    if (on && !confirm('Switch game mode on? Every faction gets its starting stockpiles and turns begin.')) return;
+    const setup = on && isEarthMap() && $('#gameSetupWorld').checked;
+    if (on && !confirm(`Switch game mode on? Every faction gets its starting stockpiles and turns begin.${setup ? ' The world is then set up: provinces, major cities and resources (a minute or two).' : ''}`)) return;
     if (!on && !confirm('Switch game mode off? Treasuries are kept and turns pause; nothing is deleted.')) return;
     try {
-      const d = await api.post(`${ctx.base}/game/enable`, { enabled: on, startDate: $('#gameStartDate').value || undefined, resetTurn: on && $('#gameResetTurn').checked });
+      const d = await api.post(`${ctx.base}/game/enable`, { enabled: on, startDate: $('#gameStartDate').value || undefined, resetTurn: on && $('#gameResetTurn').checked, setup });
       ctx.state.game = d.game;
       await load();
-      toast(on ? 'Game mode on' : 'Game mode off');
+      if (d.setupStarted) onProgress({ task: 'provinces', text: 'Setting up the world…', done: 0, total: 1 });
+      toast(on ? (d.setupStarted ? 'Game mode on; setting up the world…' : 'Game mode on') : 'Game mode off');
+      if (d.setupError) toast(d.setupError);
     } catch (err) { toast(err.message); }
   }
   async function endTurn() {

@@ -211,12 +211,15 @@
   function disarmPlacing() {
     if (!state.placing) return;
     state.placing = null;
+    renderer.setPassThrough(false);
     $$('#qaList .qa').forEach(b => b.classList.remove('active'));
     $('#qaResPlace')?.classList.remove('active');
     renderer.app.canvas.style.cursor = renderer.mode ? 'crosshair' : '';
     if (!renderer.mode) $('#modeHud').classList.remove('show');
   }
   function updatePlaceHud() {
+    // While placing, existing tokens and drawings let clicks through so every click lands on the map.
+    renderer.setPassThrough(!!state.placing);
     if (!state.placing || renderer.mode) return;
     $('#modeHud').classList.add('show');
     $('#btnModeUndo').hidden = true; $('#btnModeClear').hidden = true; $('#btnModeDone').hidden = true;

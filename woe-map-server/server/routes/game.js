@@ -157,28 +157,69 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     res.end(hit.buf);
   });
 
+  // ---- World setup (Earth): provinces, then major cities and resources, as one background job -------------
   const generating = new Set();
-  router.post('/provinces/generate', requireGm, async (req, res) => {
-    if (!geo.isEarth(req.lobby)) return res.status(400).json({ error: 'Provinces need the Earth map' });
-    if (generating.has(req.lobby.id)) return res.status(409).json({ error: 'Provinces are already being generated' });
-    const year = Number(req.body?.year) || 1914, sizeKm = clamp(num(req.body?.sizeKm, 100), 40, 400);
-    generating.add(req.lobby.id);
+  /** The historical year whose borders a campaign uses: the one asked for, the Earth layer's year, else the nearest bundled one at or before the start. */
+  function worldYear(req, g, asked) {
+    const years = territory.earthYears();
+    if (years.includes(Number(asked))) return Number(asked);
+    const ls = access.serializeLobby(req.lobby, 'gm').settings || {};
+    const layer = Number(ls.earth?.borders);
+    if (years.includes(layer)) return layer;
+    const y = Number(g.settings.startYear) || research.yearOf(g.date);
+    return years.filter(x => x <= y).pop() || years[0] || 1914;
+  }
+  /**
+   * Cut provinces and assign them by state; with opts.full also add the major cities and the resource regions
+   * (skipping any already on the map). Progress goes to GMs over the socket as { type: 'progress', task: 'provinces' }.
+   */
+  async function setupWorld(req, opts) {
     const lobbyId = req.lobby.id;
     const progress = (text, done, total) => hub.broadcast(lobbyId, { type: 'progress', task: 'provinces', text, done, total }, ws => ws.lobbyRole === 'gm');
-    res.json({ started: true });   // the rest arrives over the socket
+    const yieldToLoop = () => new Promise(done => setImmediate(done));
+    generating.add(lobbyId);
     try {
-      const r = await provinces.generate(req.lobby, { year, sizeKm }, progress);
+      const r = await provinces.generate(req.lobby, { year: opts.year, sizeKm: opts.sizeKm }, progress);
+      progress('Assigning states to factions…', 0, 1);
+      await yieldToLoop();
       const factions = game.q.factions.all(lobbyId).map(access.serializeFaction);
       const a = provinces.assignByState(lobbyId, factions);
+      let extra = '';
+      if (opts.full) {
+        progress('Adding major cities and resources…', 0, 1);
+        await yieldToLoop();
+        const c = seedCities(req), rs = generateResources(req, { dataset: true, fill: opts.fill || 0 });
+        extra = `, added ${c.created} major cities and ${rs.created} resource regions${rs.filled ? ` plus ${rs.filled} small deposits` : ''}`;
+      }
       const flipped = applyOwnership(req);
-      logEvent(lobbyId, req.user.id, 'system', `${req.user.displayName} cut the world of ${year} into ${r.count} provinces (about ${sizeKm} km across); ${a.assigned.length} states assigned, ${a.unassigned.length} left neutral${flipped.length ? `, ${flipped.length} places changed hands` : ''}`);
+      const hint = factions.length ? '' : ' No factions exist yet: seed them from history on the People tab, then press "Assign borders of that year" on the Game tab.';
+      logEvent(lobbyId, req.user.id, 'system', `${req.user.displayName} set up the world of ${opts.year}: ${r.count} provinces (about ${opts.sizeKm} km across), ${a.assigned.length} states assigned, ${a.unassigned.length} left neutral${extra}${flipped.length ? `, ${flipped.length} places changed hands` : ''}.${hint}`);
       hub.broadcast(lobbyId, { type: 'provinces' });
       hub.broadcast(lobbyId, { type: 'territory', territories: territory.all(lobbyId), replace: true });
+      if (opts.full) hub.broadcast(lobbyId, { type: 'reload', what: 'markers' });
       progress('Done', 1, 1);
     } catch (e) {
-      console.warn('province generation failed', e);
+      console.warn('world setup failed', e);
       hub.broadcast(lobbyId, { type: 'progress', task: 'provinces', text: `Failed: ${e.message}`, done: 0, total: 0, error: true }, ws => ws.lobbyRole === 'gm');
     } finally { generating.delete(lobbyId); }
+  }
+  /** Start a setup job; returns an error string or null. The caller responds at once; the job reports over the socket. */
+  function startSetup(req, body, full) {
+    if (!geo.isEarth(req.lobby)) return 'The world setup needs the Earth map';
+    if (generating.has(req.lobby.id)) return 'The world is already being set up';
+    const year = worldYear(req, game.get(req.lobby.id), body?.year), sizeKm = clamp(num(body?.sizeKm, 100), 40, 400);
+    setupWorld(req, { year, sizeKm, full, fill: body?.fill }).catch(() => {});
+    return null;
+  }
+  router.post('/provinces/generate', requireGm, (req, res) => {
+    const err = startSetup(req, req.body, false);
+    if (err) return res.status(err.includes('already') ? 409 : 400).json({ error: err });
+    res.json({ started: true });
+  });
+  router.post('/setup-world', requireGm, (req, res) => {
+    const err = startSetup(req, req.body, true);
+    if (err) return res.status(err.includes('already') ? 409 : 400).json({ error: err });
+    res.json({ started: true });
   });
 
   // ---- Production ------------------------------------------------------------------------------
@@ -317,11 +358,12 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
   });
 
   // ---- Earth datasets: major cities and resource deposits ------------------------------------
-  router.post('/cities/seed', requireGm, (req, res) => {
-    if (!geo.isEarth(req.lobby)) return res.status(400).json({ error: 'Major cities come with the Earth map' });
+  /** Add the bundled major cities of 1914 as towns owned by the territory they stand in. Returns { created, skipped }. */
+  function seedCities(req) {
+    if (!geo.isEarth(req.lobby)) throw new Error('Major cities come with the Earth map');
     let cities;
     try { cities = JSON.parse(require('node:fs').readFileSync(require('node:path').join(require('../config').root, 'public', 'earth', 'cities.json'), 'utf8')).cities; }
-    catch { return res.status(500).json({ error: 'cities.json is missing: run scripts/prepare-cities.js' }); }
+    catch { throw new Error('cities.json is missing: run scripts/prepare-cities.js'); }
     const W = req.lobby.map_width, H = req.lobby.map_height;
     const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
     const existing = new Set(markers.filter(m => m.type === 'town').map(m => m.name.toLowerCase()));
@@ -339,16 +381,21 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
         data: { size, nation: faction ? faction.name : '', industry: c.ind + (c.cap ? 1 : 0), major: true } }, true);
       created++;
     }
-    logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} added ${created} major cities of 1914`);
-    res.json({ created, skipped: cities.length - created });
+    return { created, skipped: cities.length - created };
+  }
+  router.post('/cities/seed', requireGm, (req, res) => {
+    let r;
+    try { r = seedCities(req); } catch (e) { return res.status(400).json({ error: e.message }); }
+    logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} added ${r.created} major cities of 1914`);
+    res.json(r);
   });
 
-  /** Place resource nodes from the historical dataset and optionally scatter smaller "fill" nodes on land. */
-  router.post('/resources/generate', requireGm, (req, res) => {
-    if (!geo.isEarth(req.lobby)) return res.status(400).json({ error: 'Resource generation uses the Earth map; place nodes by hand on image maps' });
+  /** Place resource nodes from the historical dataset and optionally scatter smaller "fill" nodes on land. Returns { created, filled }. */
+  function generateResources(req, { dataset = true, fill = 0 } = {}) {
+    if (!geo.isEarth(req.lobby)) throw new Error('Resource generation uses the Earth map; place nodes by hand on image maps');
     let rows;
     try { rows = JSON.parse(require('node:fs').readFileSync(require('node:path').join(require('../config').root, 'public', 'earth', 'resources.json'), 'utf8')).resources; }
-    catch { return res.status(500).json({ error: 'resources.json is missing' }); }
+    catch { throw new Error('resources.json is missing'); }
     const W = req.lobby.map_width, H = req.lobby.map_height;
     const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
     const existing = new Set(markers.filter(m => m.type === 'resource').map(m => m.name.toLowerCase()));
@@ -362,7 +409,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
         data: { kind, yield: yieldN, nation: faction ? faction.name : '' } }, true);
     };
     let created = 0;
-    if (req.body?.dataset !== false) {
+    if (dataset !== false) {
       for (const r of rows) {
         if (existing.has(r.n.toLowerCase()) || !GameData.byKey[r.k]) continue;
         const [x, y] = geo.project(r.lon, r.lat, W, H);
@@ -371,14 +418,14 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       }
     }
     // Fill: random small nodes on land (rejection sampling in the map's land bbox), seeded so reruns differ.
-    const fill = clamp(Math.round(num(req.body?.fill, 0)), 0, 400);
+    const nFill = clamp(Math.round(num(fill, 0)), 0, 400);
     let filled = 0;
-    if (fill > 0) {
+    if (nFill > 0) {
       const keys = GameData.RESOURCE_KEYS;
       let seed = (Date.now() % 100000) + 1;
       const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
       let tries = 0;
-      while (filled < fill && tries < fill * 40) {
+      while (filled < nFill && tries < nFill * 40) {
         tries++;
         const x = rnd() * W, y = (0.08 + rnd() * 0.78) * H;   // skip the polar rows
         if (!territory.isLand(req.lobby, x, y)) continue;
@@ -387,8 +434,13 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
         filled++;
       }
     }
-    logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} generated ${created} historical resource regions${filled ? ` and ${filled} smaller deposits` : ''}`);
-    res.json({ created, filled });
+    return { created, filled };
+  }
+  router.post('/resources/generate', requireGm, (req, res) => {
+    let r;
+    try { r = generateResources(req, { dataset: req.body?.dataset, fill: req.body?.fill }); } catch (e) { return res.status(400).json({ error: e.message }); }
+    logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} generated ${r.created} historical resource regions${r.filled ? ` and ${r.filled} smaller deposits` : ''}`);
+    res.json(r);
   });
 
   // ---- Relations and diplomacy ---------------------------------------------------------------
@@ -493,7 +545,9 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     }
     logEvent(req.lobby.id, req.user.id, 'system', on ? `${req.user.displayName} switched game mode on: turn ${saved.turn}, ${GameData.fmtDate(saved.date)}` : `${req.user.displayName} switched game mode off`);
     broadcastGame(req.lobby.id, saved);
-    res.json({ game: saved });
+    // Earth campaigns can set up the whole world (provinces, cities, resources) as the game starts.
+    const setupError = on && req.body?.setup ? startSetup(req, req.body, true) : null;
+    res.json({ game: saved, setupStarted: !!(on && req.body?.setup && !setupError), setupError });
   });
 
   router.patch('/', requireGm, (req, res) => {
