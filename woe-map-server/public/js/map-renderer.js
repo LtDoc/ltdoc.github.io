@@ -75,6 +75,9 @@ class MapRenderer extends EventTarget {
     this.sceneryLayer = new PIXI.Container();   // buildings, trenches, craters: scale with the map
     this.sceneryLayer.sortableChildren = true;
     this.trenchLayer = new PIXI.Container();    // dug earthworks (ribbon meshes), under drawings and tokens
+    this.railLayer = new PIXI.Container();      // railway track, trains and smoke over cut sections
+    this.railLayer.eventMode = 'none';
+    this.railCutKm = 10;                        // half-length of a cut section (campaign rule, set by map.js)
     this.shapesLayer = new PIXI.Container();
     this.fxLayer = new PIXI.Container();
     this.markerLayer = new PIXI.Container();
@@ -84,7 +87,7 @@ class MapRenderer extends EventTarget {
     this.handleLayer = new PIXI.Container();
     this.unitDots = new PIXI.Graphics();          // zoomed out on the Earth map: one dot per unit instead of its icon
     this.unitDots.eventMode = 'none';
-    this.world.addChild(this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.trenchLayer, this.shapesLayer, this.fxLayer, this.unitDots, this.markerLayer, this.boomLayer, this.overlayLayer, this.handleLayer);
+    this.world.addChild(this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.trenchLayer, this.railLayer, this.shapesLayer, this.fxLayer, this.unitDots, this.markerLayer, this.boomLayer, this.overlayLayer, this.handleLayer);
     app.stage.addChild(this.world);
 
     app.stage.eventMode = 'static';
@@ -123,6 +126,7 @@ class MapRenderer extends EventTarget {
       this.burningFrames = frames;
       this.burningFrameSize = fw;
       for (const v of this.views.values()) v.refreshFire();
+      for (const v of this.shapeViews.values()) if (v.rail) { v.rail.key = null; this._drawShapeView(v); }
       this.invalidate();
     } catch (e) {
       console.warn('Burning sprite sheet not available', e);
@@ -556,6 +560,11 @@ class MapRenderer extends EventTarget {
       this.shapeViews.set(shape.id, v);
     }
     if (shape.kind === 'trench' && !v.trench && window.Trench) v.trench = new Trench.View(this.trenchLayer);
+    if (shape.kind === 'rail' && !v.rail && window.Rail) {
+      v.rail = new Rail.View(this.railLayer, this);
+      // The track tile and cars come from the train sheet; draw again once it has loaded.
+      Rail.load().then(() => { if (this.shapeViews.get(shape.id) === v && v.rail) { v.rail.key = null; this._drawShapeView(v); } });
+    }
     v.shape = shape;
     this._drawShapeView(v);
     if (shape.kind === 'trench') this._refreshTrenchNodes();
@@ -579,6 +588,7 @@ class MapRenderer extends EventTarget {
     this.invalidate();
     const v = this.shapeViews.get(id);
     if (v && v.trench) { v.trench.destroy(); v.trench = null; setTimeout(() => this._refreshTrenchNodes(), 0); }
+    if (v && v.rail) { v.rail.destroy(); v.rail = null; }
     if (!v) return;
     this.shapesLayer.removeChild(v.g, v.label);
     v.g.destroy(); v.label.destroy();
@@ -612,6 +622,21 @@ class MapRenderer extends EventTarget {
       v.label.visible = !!s.label;
       const a = shapeAnchor(s);
       v.label.position.set(a[0], a[1]);
+      v.label.scale.set(1 / sc);
+      return;
+    }
+    if (s.kind === 'rail' && v.rail) {
+      // Track, trains and smoke live in the rail layer; the graphics carry the hit path and the selection ring.
+      v.rail.update(s, sc, (x, y) => this.unitsToPx(x, y, this.railCutKm));
+      const tw = v.rail.halfWidth(sc) * 2;
+      if (selected) { path(); g.stroke({ width: tw + 6 / sc, color: 0xffffff, alpha: 0.5 }); }
+      if (s.adminOnly || (s.visibleTo && s.visibleTo.length)) { path(); g.stroke({ width: 1.5 / sc, color: s.adminOnly ? 0xe67e22 : 0x5dade2, alpha: 0.9 }); }
+      path(); g.stroke({ width: Math.max(tw, 14 / sc), color: 0xffffff, alpha: 0.001 });
+      v.label.text = s.label || '';
+      v.label.visible = !!s.label;
+      // The name sits beside the middle of the line, not at the centre of its box.
+      const cum = Rail.cumulative(pts), mid = Rail.at(pts, cum, cum[cum.length - 1] / 2);
+      v.label.position.set(mid.x, mid.y - tw / 2 - 9 / sc);
       v.label.scale.set(1 / sc);
       return;
     }
@@ -808,7 +833,8 @@ class MapRenderer extends EventTarget {
         if (this.finishDraw()) return;
       }
       this.draw.lastClick = { t, x: e.global.x, y: e.global.y };
-      this.draw.points.push({ x: p.x, y: p.y });
+      const q = this.draw.kind === 'rail' ? this.snapToRail(p.x, p.y) : p;
+      this.draw.points.push({ x: q.x, y: q.y });
     }
     this._redrawMode();
     this._emitMode();
@@ -848,7 +874,7 @@ class MapRenderer extends EventTarget {
     if (!this.mode) return;
     const s = this.scale;
     const m = this.mode === 'draw' ? this.draw : this.measure;
-    const color = this.mode === 'draw' ? (this.draw.kind === 'trench' ? 0xc9b37f : 0xf1c40f) : 0xabe67e;
+    const color = this.mode === 'draw' ? (this.draw.kind === 'trench' ? 0xc9b37f : this.draw.kind === 'rail' ? 0xd0d3d4 : 0xf1c40f) : 0xabe67e;
     const pts = [...m.points];
     if (m.hover && pts.length) pts.push(m.hover);
     if (pts.length >= 2) {
@@ -970,7 +996,39 @@ class MapRenderer extends EventTarget {
     g.visible = true;
     this.invalidate();
   }
-  hideRange() { if (this._rangeG) { this._rangeG.visible = false; this.invalidate(); } }
+  hideRange() {
+    if (this._rangeG) { this._rangeG.visible = false; this.invalidate(); }
+    this.hideRailReach();
+  }
+  /** Highlight the track a dragged unit can still reach by rail: [[x1, y1, x2, y2], …] in world units. */
+  showRailReach(segments) {
+    if (!this._railReachG) { this._railReachG = new PIXI.Graphics(); this._railReachG.eventMode = 'none'; this.overlayLayer.addChild(this._railReachG); }
+    const g = this._railReachG, s = this.scale;
+    g.clear();
+    if (!segments.length) { g.visible = false; return; }
+    const w = (window.Rail ? Rail.screenWidth(s) : 6) + 6;
+    for (const [x1, y1, x2, y2] of segments) g.moveTo(x1, y1).lineTo(x2, y2);
+    g.stroke({ width: w / s, color: 0x2ecc71, alpha: 0.35, cap: 'round', join: 'round' });
+    g.visible = true;
+    this.invalidate();
+  }
+  hideRailReach() { if (this._railReachG && this._railReachG.visible) { this._railReachG.visible = false; this.invalidate(); } }
+  /** Snap a point to the nearest railway (vertex first, then track) within 14 screen px, so new lines join up. */
+  snapToRail(x, y) {
+    const tol = 14 / this.scale;
+    let best = null;
+    for (const v of this.shapeViews.values()) {
+      if (v.shape.kind !== 'rail' || v.shape.id === this.draw.shapeId) continue;
+      for (const [px, py] of v.shape.points) {
+        const d = Math.hypot(px - x, py - y);
+        if (d <= tol && (!best || best.vertex === false || d < best.d)) best = { x: px, y: py, d, vertex: true };
+      }
+      if (best && best.vertex) continue;
+      const p = window.RailNet ? RailNet.project(v.shape.points, x, y) : null;
+      if (p && Math.sqrt(p.d2) <= tol && (!best || Math.sqrt(p.d2) < best.d)) best = { x: p.x, y: p.y, d: Math.sqrt(p.d2), vertex: false };
+    }
+    return best ? { x: Math.round(best.x * 10) / 10, y: Math.round(best.y * 10) / 10 } : { x, y };
+  }
   /** A general's aura: an ellipse (rx, ry in world units, so it follows the Earth's projection) around the hero. */
   showAura(x, y, rx, ry) {
     if (!this._auraG) { this._auraG = new PIXI.Graphics(); this._auraG.eventMode = 'none'; this.overlayLayer.addChild(this._auraG); }
@@ -1005,7 +1063,7 @@ class MapRenderer extends EventTarget {
       if (this.mode && e.button === 0) {
         this._modeClick(e);
         // Trenches can be drawn freehand: keep sampling while the button is held.
-        if (this.mode === 'draw' && this.draw.kind === 'trench') this.draw.freehand = true;
+        if (this.mode === 'draw' && (this.draw.kind === 'trench' || this.draw.kind === 'rail')) this.draw.freehand = true;
         return;
       }
       this._pan = { sx: e.global.x, sy: e.global.y, wx: this.world.x, wy: this.world.y, moved: false, button: e.button };
@@ -1165,6 +1223,16 @@ class MapRenderer extends EventTarget {
     const t = nowMs / 1000;
     const k = 1 - Math.pow(0.001, dt / 700); // movement easing
     let anim = this.fxLayer.children.length > 0 || this.boomLayer.children.length > 0;
+    if (this.railLayer.children.length) {
+      const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
+      const vx0 = tl.x, vy0 = tl.y, vx1 = br.x, vy1 = br.y;
+      for (const v of this.shapeViews.values()) {
+        if (!v.rail) continue;
+        const b = v.rail.bbox;
+        const on = !!b && b.x1 >= vx0 && b.x0 <= vx1 && b.y1 >= vy0 && b.y0 <= vy1;
+        if (v.rail.tick(dt, on)) anim = true;
+      }
+    }
     // Unit icons hide on the Earth map at 100 % zoom and below (dots stand in); tokens off screen are not drawn.
     const hideUnits = this.unitsHidden();
     const wx = this.world.x, wy = this.world.y, sw = this.app.screen.width, sh = this.app.screen.height, M = 140;

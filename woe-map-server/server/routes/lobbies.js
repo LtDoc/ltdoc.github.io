@@ -103,6 +103,7 @@ const heroRules = require('../heroes');
 /** Hero fields only the GM (or the rules) may change: players move and command heroes, they do not rewrite them. */
 const PROTECTED_HERO_FIELDS = ['role', 'stars', 'perception', 'intelligence', 'movement', 'ap', 'nation', 'status', 'postedTo', 'travel', 'capturedBy', 'movedKm', 'apUsed'];
 const game = require('../game');
+const rails = require('../rails');
 const GameData = require('../../public/js/game-data');
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const PALETTE = ['#3498db', '#e74c3c', '#2ecc71', '#9b59b6', '#f1c40f', '#1abc9c', '#e67e22', '#ecf0f1', '#95a5a6', '#d35400'];
@@ -266,6 +267,15 @@ function setShapeNation(req, before, nation) {
   return after;
 }
 
+/** Rewrite a drawing's data (railway cuts and repairs), recording history and broadcasting. */
+function writeShape(req, before, data) {
+  q.updateShape.run(before.kind, before.label, JSON.stringify(before.points), before.color, before.width, before.adminOnly ? 1 : 0,
+    before.visibleTo ? JSON.stringify(before.visibleTo) : null, now(), before.locked ? 1 : 0, JSON.stringify(data), before.id);
+  const after = access.serializeShape(q.shape.get(before.id, req.lobby.id));
+  commitChange(req, 'shape', 'update', before, after);
+  return after;
+}
+
 /**
  * After a committed move: if game mode is on and the unit is a land unit standing on enemy or neutral
  * ground, carve territory (docs/GAME-DESIGN.md §5.2) and flip the places inside. Returns a note or null.
@@ -291,7 +301,7 @@ function afterMove(req, unit) {
 }
 
 // Game layer (turns, treasuries, territories, diplomacy): routes/game.js, sharing this router's lobby middleware.
-router.use('/:id/game', require('./game')({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById, createMarker, writeMarker }));
+router.use('/:id/game', require('./game')({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById, createMarker, writeMarker, writeShape, canEditMarker }));
 
 router.get('/:id', (req, res) => {
   const online = new Set(hub.presence(req.lobby.id).map(u => u.id));
@@ -853,7 +863,7 @@ router.patch('/:id/markers/:mid', (req, res) => {
   }
   // Game mode: players move within their allowance and cannot rewrite their units' stats.
   const g = game.get(req.lobby.id);
-  let clampNote = null;
+  let clampNote = null, railNote = null;
   if (b.data && typeof b.data === 'object' && g.enabled && !isGm && before.type === 'unit') {
     for (const k of game.PROTECTED_UNIT_FIELDS) delete b.data[k];
   }
@@ -871,6 +881,7 @@ router.patch('/:id/markers/:mid', (req, res) => {
     x = mv.x; y = mv.y;
     if (mv.movedKm !== undefined) b.data = { ...(b.data || {}), movedKm: mv.movedKm };
     if (mv.clamped) clampNote = `${before.name} could only move ${Math.round(mv.remaining)} of ${mv.dist} this turn`;
+    if (mv.route) railNote = `${before.name} went by rail (${Math.round(mv.route.railKm)} ${geo.isEarth(req.lobby) ? 'km' : (req.lobby.scale_label || 'units')} of track${mv.clamped ? ', stopped short' : ''})`;
   }
   let iconFile = before.iconFile;
   let iconUrl = iconFile ? null : before.iconUrl;
@@ -889,7 +900,7 @@ router.patch('/:id/markers/:mid', (req, res) => {
   const after = access.serializeMarker(q.marker.get(before.id, req.lobby.id));
   commitChange(req, 'marker', 'update', before, after);
   const captureNote = (x !== before.x || y !== before.y) ? afterMove(req, after) : null;
-  res.json({ marker: after, note: [clampNote, captureNote].filter(Boolean).join(' · ') || null });
+  res.json({ marker: after, note: [railNote, clampNote, captureNote].filter(Boolean).join(' · ') || null });
 });
 
 /** Move several markers at once (group drag). Each move is validated and recorded individually. */
@@ -916,12 +927,18 @@ router.post('/:id/markers/move', (req, res) => {
   let t = 1;
   for (const p of plan) if (p.chk.clamped) t = Math.min(t, p.chk.remaining / p.chk.dist);
   if (t < 1) errors.push(`Formation moved ${Math.round(t * 100)}% of the way: the slowest unit ran out of movement`);
+  let byRail = 0;
   for (const p of plan) {
-    const x = t < 1 ? Math.round((p.before.x + (p.x - p.before.x) * t) * 10) / 10 : p.x;
-    const y = t < 1 ? Math.round((p.before.y + (p.y - p.before.y) * t) * 10) / 10 : p.y;
+    let x = t < 1 ? Math.round((p.before.x + (p.x - p.before.x) * t) * 10) / 10 : p.x;
+    let y = t < 1 ? Math.round((p.before.y + (p.y - p.before.y) * t) * 10) / 10 : p.y;
+    if (p.chk.route) {
+      byRail++;
+      if (t < 1) { const w = rails.walk(req.lobby, p.chk.route.path, p.chk.cost * t); x = Math.round(w.x * 10) / 10; y = Math.round(w.y * 10) / 10; }
+    }
     if (p.chk.movedKm !== undefined) {
-      const used = num(p.before.data.movedKm), dist = geo.distance(req.lobby, p.before.x, p.before.y, x, y);
-      const data = { ...p.before.data, movedKm: Math.round((used + dist) * 10) / 10 };
+      const used = num(p.before.data.movedKm);
+      const spent = p.chk.cost !== undefined ? p.chk.cost * t : geo.distance(req.lobby, p.before.x, p.before.y, x, y);
+      const data = { ...p.before.data, movedKm: Math.round((used + spent) * 10) / 10 };
       q.updateMarker.run(p.before.type, p.before.name, x, y, p.before.iconFile, p.before.iconFile ? null : p.before.iconUrl, p.before.color,
         p.before.adminOnly ? 1 : 0, p.before.visibleTo ? JSON.stringify(p.before.visibleTo) : null, p.before.ownerId, JSON.stringify(data), now(), p.before.locked ? 1 : 0, p.before.id);
     } else q.moveMarker.run(x, y, now(), p.before.id);
@@ -930,6 +947,7 @@ router.post('/:id/markers/move', (req, res) => {
     out.push(after);
   }
   const notes = out.map(m => afterMove(req, m)).filter(Boolean);
+  if (byRail) notes.unshift(`${byRail} unit${byRail === 1 ? '' : 's'} went by rail`);
   res.json({ markers: out, errors, note: notes.join(' · ') || null });
 });
 
@@ -992,8 +1010,19 @@ function canEditShape(req, s) {
   return req.lobbyRole === 'gm' || (s.createdBy === req.user.id && !s.adminOnly);
 }
 
-/** Per-kind extras. Trench: facing (which side is the rear), build state, zigzag flag. */
-function shapeData(kind, raw, before) {
+/**
+ * Per-kind extras. Trench: facing (which side is the rear), build state, zigzag flag.
+ * Rail: cuts [{ id, x, y, turn, by, at }], which only the game routes (sabotage, repair) and the GM change.
+ */
+function shapeData(kind, raw, before, isGm) {
+  if (kind === 'rail') {
+    const prev = Array.isArray(before?.cuts) ? before.cuts : [];
+    const cuts = isGm && raw && Array.isArray(raw.cuts)
+      ? raw.cuts.filter(c => c && Number.isFinite(Number(c.x)) && Number.isFinite(Number(c.y))).slice(0, 200)
+        .map(c => ({ id: clean(c.id, 20) || Math.random().toString(36).slice(2, 10), x: Number(c.x), y: Number(c.y), turn: num(c.turn, 0), by: clean(c.by, 60), at: clean(c.at, 40) }))
+      : prev;
+    return { cuts };
+  }
   if (kind !== 'trench') return null;
   const d = (raw && typeof raw === 'object') ? raw : {}, prev = before || {};
   return {
@@ -1033,8 +1062,9 @@ function loadShape(req, res) {
 router.post('/:id/shapes', (req, res) => {
   const b = req.body || {};
   const isGm = req.lobbyRole === 'gm';
-  const kind = ['line', 'area', 'trench'].includes(b.kind) ? b.kind : null;
-  if (!kind) return res.status(400).json({ error: 'Drawing must be a line, an area or a trench' });
+  const kind = ['line', 'area', 'trench', 'rail'].includes(b.kind) ? b.kind : null;
+  if (!kind) return res.status(400).json({ error: 'Drawing must be a line, an area, a trench or a railway' });
+  if (kind === 'rail' && !isGm && game.get(req.lobby.id).enabled) return res.status(403).json({ error: 'Only the GM lays railways while the game is running' });
   const points = parsePoints(req, kind, b.points);
   if (!points) return res.status(400).json({ error: 'Bad points (need 2+ for a line, 3+ for an area, all on the map)' });
   const label = clean(b.label, 60);
@@ -1042,7 +1072,7 @@ router.post('/:id/shapes', (req, res) => {
   const width = kind === 'trench' ? clamp(num(b.width, 0.5), 0.05, 50) : clamp(num(b.width, 3), 1, 20);
   const adminOnly = isGm && b.adminOnly ? 1 : 0;
   const visibleTo = isGm ? parseVisibleTo(b.visibleTo) : null;
-  const data = shapeData(kind, b.data, null);
+  const data = shapeData(kind, b.data, null, isGm);
   if (data && kind === 'trench') data.nation = trenchNation(req, points);
   const t = now();
   const id = q.insertShape.run(null, req.lobby.id, kind, label, JSON.stringify(points), color, width, adminOnly, visibleTo, req.user.id, t, t, b.locked ? 1 : 0, data ? JSON.stringify(data) : null).lastInsertRowid;
@@ -1057,6 +1087,7 @@ router.patch('/:id/shapes/:sid', (req, res) => {
   if (!canEditShape(req, before)) return res.status(403).json({ error: 'You cannot edit that drawing' });
   const b = req.body || {};
   const isGm = req.lobbyRole === 'gm';
+  if (before.kind === 'rail' && !isGm && game.get(req.lobby.id).enabled) return res.status(403).json({ error: 'Only the GM changes railways while the game is running' });
   const points = b.points !== undefined ? parsePoints(req, before.kind, b.points) : before.points;
   if (!points) return res.status(400).json({ error: 'Bad points' });
   if (before.locked && b.points !== undefined && b.locked !== false) {
@@ -1068,7 +1099,7 @@ router.patch('/:id/shapes/:sid', (req, res) => {
   const adminOnly = isGm && b.adminOnly !== undefined ? (b.adminOnly ? 1 : 0) : (before.adminOnly ? 1 : 0);
   const visibleTo = isGm && b.visibleTo !== undefined ? parseVisibleTo(b.visibleTo) : (before.visibleTo ? JSON.stringify(before.visibleTo) : null);
   const locked = b.locked !== undefined ? (b.locked ? 1 : 0) : (before.locked ? 1 : 0);
-  const data = b.data !== undefined ? shapeData(before.kind, b.data, before.data) : (before.data && Object.keys(before.data).length ? { ...before.data } : null);
+  const data = b.data !== undefined ? shapeData(before.kind, b.data, before.data, isGm) : (before.data && Object.keys(before.data).length ? { ...before.data } : null);
   if (data && before.kind === 'trench') data.nation = trenchNation(req, points);
   q.updateShape.run(before.kind, label, JSON.stringify(points), color, width, adminOnly, visibleTo, now(), locked, data ? JSON.stringify(data) : null, before.id);
   const after = access.serializeShape(q.shape.get(before.id, req.lobby.id));
@@ -1080,6 +1111,7 @@ router.delete('/:id/shapes/:sid', (req, res) => {
   const before = loadShape(req, res);
   if (!before) return;
   if (!canEditShape(req, before)) return res.status(403).json({ error: 'You cannot delete that drawing' });
+  if (before.kind === 'rail' && req.lobbyRole !== 'gm' && game.get(req.lobby.id).enabled) return res.status(403).json({ error: 'Only the GM removes railways while the game is running' });
   q.deleteShape.run(before.id);
   commitChange(req, 'shape', 'delete', before, null);
   res.json({ ok: true });

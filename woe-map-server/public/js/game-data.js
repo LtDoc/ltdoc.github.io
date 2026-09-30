@@ -67,6 +67,12 @@ const GameData = (() => {
     spySecurity: 0,           // heroes: added to the defender's roll when no spy of theirs is near a mission
     spyCounterKm: 150,        // heroes: a nation's spies within this distance contest a foreign mission
     spyStealPerStar: 5,       // heroes: research points a successful theft takes per star
+    railSpeed: 4,             // railways: land units and heroes move this many times faster along open track
+    railCutKm: 10,            // railways: a successful attack closes this much track either side of the hit
+    railDefence: 4,           // railways: added to the line's d20 when attacked (plus its best guard's defend)
+    railGuardKm: 30,          // railways: the holder's land units this close to a section guard it
+    railRepairKm: 30,         // railways: a unit this close to a break can repair it (uses its action)
+    railJoinKm: 5,            // railways: rails whose ends or vertices are this close are joined
   };
 
   // ---- Deadlines ---------------------------------------------------------------------------

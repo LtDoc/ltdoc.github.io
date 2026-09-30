@@ -242,3 +242,8 @@ details.sub > summary .hint { text-transform: none; letter-spacing: 0; }
   #app.nosidebar #sidebar { display: none; }
   #app:not(.nosidebar) #sidebar { display: flex; }
 }
+
+/* Railways: cut sections listed in the railway popup */
+.railcuts { display: grid; gap: 4px; margin: 6px 0 2px; }
+.railcut { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.railcut > span { flex: 1; min-width: 0; }

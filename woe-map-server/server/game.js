@@ -342,7 +342,9 @@ function undoTurn(lobby) {
 
 // ---- Rules applied by the marker routes --------------------------------------------------
 /**
- * Check a unit move against its remaining allowance. Returns { x, y, clamped, movedKm, error }.
+ * Check a unit move against its remaining allowance. Returns { x, y, clamped, movedKm, cost, route, error }.
+ * A land unit or hero takes the railway when walking to the track, riding at settings.railSpeed and walking
+ * off is cheaper than going straight (server/rails.js); `cost` is what the move spends, `route` the rail trip.
  * GMs, disabled game mode and the waive switch pass straight through.
  */
 function checkMove(lobby, g, isGm, marker, x, y) {
@@ -355,9 +357,15 @@ function checkMove(lobby, g, isGm, marker, x, y) {
   const remaining = Math.max(0, allowance - used);
   const unit = geo.isEarth(lobby) ? 'km' : (lobby.scale_label || 'units');
   if (remaining <= 0.01) return { error: `${marker.name} has no movement left this turn (${round(allowance)} ${unit} per turn)` };
-  if (dist <= remaining + 1e-6) return { x, y, clamped: false, movedKm: round(used + dist) };
+  const route = require('./rails').plan(lobby, g.settings, marker, x, y);
+  const cost = route ? route.cost : dist;
+  if (cost <= remaining + 1e-6) return { x, y, clamped: false, movedKm: round(used + cost), cost, route };
+  if (route) {
+    const w = require('./rails').walk(lobby, route.path, remaining);
+    return { x: round(w.x), y: round(w.y), clamped: true, movedKm: round(allowance), remaining, dist: round(cost), cost, route };
+  }
   const t = remaining / dist;
-  return { x: round(marker.x + (x - marker.x) * t), y: round(marker.y + (y - marker.y) * t), clamped: true, movedKm: round(allowance), remaining, dist: round(dist) };
+  return { x: round(marker.x + (x - marker.x) * t), y: round(marker.y + (y - marker.y) * t), clamped: true, movedKm: round(allowance), remaining, dist: round(dist), cost };
 }
 
 /** Attack reach of a unit in campaign units: (range + tech bonus) × kmPerRange. */

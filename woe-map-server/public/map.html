@@ -19,6 +19,7 @@
         <button id="btnDrawLine" class="secondary small" title="Draw a line (L)">〰</button>
         <button id="btnDrawArea" class="secondary small" title="Draw an area (A)">▱</button>
         <button id="btnDrawTrench" class="secondary small" title="Dig a trench: click points or drag freehand (T)">⌇</button>
+        <button id="btnDrawRail" class="secondary small" title="Lay a railway: click points or drag freehand; start or end on other track to join it (R)">🛤</button>
         <button id="btnGrid" class="secondary small" title="Toggle grid (G)">▦</button>
         <button id="btnFit" class="secondary small" title="Fit map to screen (F)">⛶</button>
         <button id="btnNotify" class="secondary small" title="Notifications when something happens while this tab is in the background">🔕</button>
@@ -138,6 +139,9 @@
               <div class="section">Territory</div>
               <div class="grid2"><label>Capture radius <span class="hint">(around an advancing unit)</span><input id="ruleCaptureRadius" type="number" step="any" min="1"></label><label>City district <span class="hint">(around a captured city)</span><input id="ruleCityRadius" type="number" step="any" min="1"></label></div>
               <label class="inline"><input type="checkbox" id="ruleOccupyNeutrals"> Units may occupy neutral ground</label>
+              <div class="section">Railways</div>
+              <div class="grid3"><label>Speed on rails (×)<input id="ruleRailSpeed" type="number" step="any" min="1"></label><label>Cut closes (each side)<input id="ruleRailCut" type="number" step="any" min="1"></label><label>Line's defence<input id="ruleRailDefence" type="number" step="any"></label></div>
+              <div class="grid3"><label>Guards within<input id="ruleRailGuard" type="number" step="any" min="0"></label><label>Repair within<input id="ruleRailRepair" type="number" step="any" min="0"></label><label>Join rails within<input id="ruleRailJoin" type="number" step="any" min="0"></label></div>
               <div class="section">Heroes</div>
               <div class="grid2"><label>General's aura<input id="ruleHeroAura" type="number" step="any" min="0"></label><label>Spies contest missions within<input id="ruleSpyCounter" type="number" step="any" min="0"></label></div>
               <div class="grid2"><label>Research stolen per star<input id="ruleSpySteal" type="number" step="any" min="0"></label><label>Security with no spy nearby <span class="hint">(defender's bonus)</span><input id="ruleSpySecurity" type="number" step="1"></label></div>
@@ -228,7 +232,7 @@
         <label>Label <span class="hint">(optional)</span><input id="shapeLabel" maxlength="60" autocomplete="off" placeholder="Front line, supply route, claimed territory…"></label>
         <div class="grid2">
           <label id="shapeColorWrap">Colour<input id="shapeColor" type="color" value="#f1c40f"></label>
-          <label><span id="shapeWidthLabel">Line width</span><input id="shapeWidth" type="number" min="1" max="80" value="3"></label>
+          <label id="shapeWidthWrap"><span id="shapeWidthLabel">Line width</span><input id="shapeWidth" type="number" min="1" max="80" value="3"></label>
         </div>
         <div id="trenchFields" hidden>
           <div class="grid2">
@@ -238,6 +242,7 @@
           <label class="inline" id="trenchZigWrap"><input type="checkbox" id="trenchZigzag" checked> Add traverses on long straights (fire-trench zigzag)</label>
           <p class="hint">Width is in map pixels (tokens are about 36). The centreline is what units and editing use; drag its points from the popup like any drawing.</p>
         </div>
+        <p id="railFields" class="hint" hidden>Land units and heroes move several times faster along open track (Game tab → Rules → Railways). Rails whose ends touch are joined; start or end a line on other track to branch off it. GM-only railways are plans: nothing runs on them.</p>
         <div id="shapeGmFields">
           <label>Visible to nations <span class="hint">(comma separated, blank = everyone)</span><input id="shapeVisibleTo" list="nationList" autocomplete="off" placeholder="Everyone"></label>
           <label class="inline"><input type="checkbox" id="shapeAdminOnly"> GM only (hidden from players)</label>
@@ -462,6 +467,8 @@
   <script src="/js/earth.js"></script>
   <script src="/js/province-layer.js"></script>
   <script src="/js/trench.js"></script>
+  <script src="/js/railnet.js"></script>
+  <script src="/js/rail.js"></script>
   <script src="/js/map-renderer.js"></script>
   <script src="/js/map.js"></script>
 </body>

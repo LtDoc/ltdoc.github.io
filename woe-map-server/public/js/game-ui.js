@@ -511,6 +511,7 @@ const GameUI = (() => {
     set('#rulePublic', s.publicTreasury); set('#ruleCapturedIdle', s.capturedIdle);
     set('#ruleTrenchRange', s.trenchRangeKm); set('#ruleTrenchDug', s.trenchBonusDug); set('#ruleTrenchReinforced', s.trenchBonusReinforced);
     set('#ruleCaptureRadius', s.captureRadiusKm); set('#ruleCityRadius', s.cityRadiusKm); set('#ruleOccupyNeutrals', s.occupyNeutrals);
+    set('#ruleRailSpeed', s.railSpeed); set('#ruleRailCut', s.railCutKm); set('#ruleRailDefence', s.railDefence); set('#ruleRailGuard', s.railGuardKm); set('#ruleRailRepair', s.railRepairKm); set('#ruleRailJoin', s.railJoinKm);
     set('#ruleHeroAura', s.heroAuraKm); set('#ruleSpyCounter', s.spyCounterKm); set('#ruleSpySteal', s.spyStealPerStar); set('#ruleSpySecurity', s.spySecurity); set('#ruleDiplomats', s.diplomatsRequired);
     set('#ruleCapCapital', s.cityCapacity.capital); set('#ruleCapCity', s.cityCapacity.city); set('#ruleCapVillage', s.cityCapacity.village);
     set('#ruleFactoryRange', s.factoryRangeKm); set('#ruleCoastal', s.coastalKm);
@@ -574,6 +575,7 @@ const GameUI = (() => {
       capturedIdle: $('#ruleCapturedIdle').checked,
       trenchRangeKm: v('#ruleTrenchRange'), trenchBonusDug: v('#ruleTrenchDug'), trenchBonusReinforced: v('#ruleTrenchReinforced'),
       captureRadiusKm: v('#ruleCaptureRadius'), cityRadiusKm: v('#ruleCityRadius'), occupyNeutrals: $('#ruleOccupyNeutrals').checked,
+      railSpeed: v('#ruleRailSpeed'), railCutKm: v('#ruleRailCut'), railDefence: v('#ruleRailDefence'), railGuardKm: v('#ruleRailGuard'), railRepairKm: v('#ruleRailRepair'), railJoinKm: v('#ruleRailJoin'),
       heroAuraKm: v('#ruleHeroAura'), spyCounterKm: v('#ruleSpyCounter'), spyStealPerStar: v('#ruleSpySteal'), spySecurity: v('#ruleSpySecurity'), diplomatsRequired: $('#ruleDiplomats').checked,
       cityCapacity: { capital: v('#ruleCapCapital'), city: v('#ruleCapCity'), village: v('#ruleCapVillage') },
       factoryRangeKm: v('#ruleFactoryRange'), coastalKm: v('#ruleCoastal'), researchLead: v('#ruleResearchLead'),

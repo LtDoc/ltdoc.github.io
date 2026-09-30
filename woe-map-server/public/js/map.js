@@ -30,6 +30,7 @@
   renderer.canDrag = m => canEdit(m) && !m.locked;
   renderer.canEditShape = s => canEditShape(s) && !s.locked;
   renderer.unitsToPx = (x, y, units) => units / (distanceUnits(x, y, x + 1, y) || 1);   // km (or map units) → px, locally
+  Object.defineProperty(renderer, 'railCutKm', { get: () => Number(state.game?.settings?.railCutKm) || 10 });
 
   function canEdit(m) { return state.role === 'gm' || (m.ownerId === me.id && !m.adminOnly); }
   function canEditShape(s) { return state.role === 'gm' || (s.createdBy === me.id && !s.adminOnly); }
@@ -66,6 +67,155 @@
     return best;
   }
 
+  // ---- Railways (docs/RAILWAYS.md) ----------------------------------------------------------------
+  // The browser mirrors the server's network (public/js/railnet.js) for the drag preview and attack targets;
+  // the server decides every move and every cut.
+  const RAIL_LAND = new Set(['Infantry', 'Mounted & mobile', 'Artillery', 'Support']);
+  /** Land units and heroes ride trains; ships and aircraft do not. */
+  function canRide(m) {
+    if (m.type === 'hero') return true;
+    if (m.type !== 'unit') return false;
+    const t = window.UnitTypes?.resolve(m.data?.unitType);
+    return t ? RAIL_LAND.has(t.cat) : true;
+  }
+  function shapeName(s) {
+    return s.label || { area: 'Unnamed area', trench: 'Unnamed trench', rail: 'Unnamed railway' }[s.kind] || 'Unnamed line';
+  }
+  function railOpts() {
+    const g = state.game?.settings || {};
+    const H = state.lobby?.mapHeight || 1;
+    return {
+      dist: distanceUnits,
+      kx: isEarth() ? (y => Math.max(0.05, Math.cos((90 - y / H * 180) * Math.PI / 180))) : (() => 1),
+      joinKm: Number(g.railJoinKm ?? 5), cutKm: Number(g.railCutKm ?? 10), speed: Number(g.railSpeed ?? 4),
+    };
+  }
+  let railCache = null;
+  function railNet() {
+    const rails = [...state.shapes.values()].filter(s => s.kind === 'rail' && !s.adminOnly);
+    const o = railOpts();
+    const key = `${rails.map(r => `${r.id}:${r.updatedAt}`).join(',')}|${o.joinKm}|${o.cutKm}`;
+    if (railCache && railCache.key === key) return railCache.net;
+    const net = RailNet.build(rails.map(r => ({ id: r.id, label: r.label, points: r.points, cuts: r.data?.cuts || [] })), o);
+    railCache = { key, net };
+    return net;
+  }
+  /** Sides that count as friends of a nation: itself and its allies (faction ids). */
+  function friendIds(nation) {
+    const n = String(nation || '').toLowerCase();
+    const mine = (state.factions || []).find(f => f.name.toLowerCase() === n);
+    const ids = new Set(mine ? [mine.id] : []);
+    if (mine) for (const r of state.relations || []) if (r.status === 'alliance' && (r.a === mine.id || r.b === mine.id)) ids.add(r.a === mine.id ? r.b : r.a);
+    return { mine, ids };
+  }
+  /** Track a nation may ride: its own and allies' ground, neutral ground and the sea (as on the server). */
+  function railUsable(nation) {
+    if (!gameOn()) return null;
+    const { ids } = friendIds(nation);
+    return e => { const o = renderer.territoryOwnerAt(e.mx, e.my); return o === null || o === undefined || o === 0 || ids.has(o); };
+  }
+  /** Drag preview: light up the track the unit could still reach this turn. */
+  function showRailReach(lead, remaining) {
+    if (!window.RailNet || remaining <= 0) return;
+    const net = railNet();
+    if (!net.edges.length) return;
+    const segs = RailNet.reach(net, { x: lead.x, y: lead.y }, remaining, { usable: railUsable(lead.data?.nation), speed: railOpts().speed });
+    renderer.showRailReach(segs.map(r => {
+      const e = net.edges[r.edge], A = net.nodes[e.a], B = net.nodes[e.b];
+      return [A.x + (B.x - A.x) * r.from, A.y + (B.y - A.y) * r.from, A.x + (B.x - A.x) * r.to, A.y + (B.y - A.y) * r.to];
+    }));
+  }
+  /** Drawn points → railway centreline: simplified and lightly rounded, ends snapped onto existing track. */
+  function railPath(raw) {
+    const pts = window.Trench ? Trench.processPath(raw, { tol: 2 / renderer.scale, zig: false }) : raw.map(p => [p[0], p[1]]);
+    for (const i of [0, pts.length - 1]) { const q = renderer.snapToRail(pts[i][0], pts[i][1]); pts[i] = [q.x, q.y]; }
+    return pts;
+  }
+  /** The nearest town, for "near Nancy" in popups and target lists. */
+  function nearPlace(x, y) {
+    let best = null, bd = Infinity;
+    for (const m of state.markers.values()) {
+      if (m.type !== 'town') continue;
+      const d = distanceUnits(x, y, m.x, m.y);
+      if (d < bd) { bd = d; best = m; }
+    }
+    if (!best) return '';
+    return bd < 15 ? `at ${best.name}` : `${Math.round(bd)} ${state.lobby?.scaleLabel || 'km'} from ${best.name}`;
+  }
+  /**
+   * Railway sections an attacker can hit: per rail, the nearest open section within reach on enemy ground
+   * (at war), plus the nearest of its own side's track to blow up. Outside game mode, the nearest section.
+   */
+  function railTargetsFor(attacker, reach) {
+    if (!window.RailNet) return [];
+    const net = railNet();
+    if (!net.edges.length) return [];
+    const { mine, ids } = friendIds(attacker.data?.nation);
+    const atWar = id => mine && (state.relations || []).some(r => ((r.a === mine.id && r.b === id) || (r.b === mine.id && r.a === id)) && r.status === 'war');
+    const factionName = id => (state.factions || []).find(f => f.id === id)?.name || '';
+    const best = new Map();   // `${railId}:${own}` -> target
+    for (const e of net.edges) {
+      if (e.cut || e.link) continue;
+      const A = net.nodes[e.a], B = net.nodes[e.b];
+      const p = RailNet.project([[A.x, A.y], [B.x, B.y]], attacker.x, attacker.y, railOpts().kx);
+      const d = distanceUnits(attacker.x, attacker.y, p.x, p.y);
+      if (d > reach + 1e-6) continue;
+      let own = false, holder = '';
+      if (gameOn()) {
+        const o = renderer.territoryOwnerAt(p.x, p.y);
+        if (o && ids.has(o)) own = true;
+        else if (o && atWar(o)) holder = factionName(o);
+        else if (state.role !== 'gm') continue;            // neutral ground, or a power you are not at war with
+        else holder = o ? factionName(o) : '';
+      }
+      const key = `${e.rail}:${own}`;
+      if (!best.has(key) || best.get(key).d > d) best.set(key, { railId: e.rail, x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10, d, own, holder });
+    }
+    return [...best.values()].map(t => ({ ...t, rail: state.shapes.get(t.railId), place: nearPlace(t.x, t.y) }))
+      .filter(t => t.rail).sort((a, b) => (a.own - b.own) || (a.d - b.d));
+  }
+  /** Popup rows for a railway: speed, and each cut with Show / Repair. */
+  function railPopupRows(s) {
+    const g = state.game?.settings || {};
+    const cuts = s.data?.cuts || [];
+    let rows = stat('Traffic', `land units and heroes move ${g.railSpeed ?? 4}× faster on open track${gameOn() ? ' held by their side, an ally or no one' : ''}`);
+    if (s.adminOnly) rows += stat('Status', 'GM only: a plan, no trains run on it for movement');
+    if (!cuts.length) return rows + stat('Track', 'open');
+    rows += `<div class="railcuts">${cuts.map(c => {
+      const who = repairCrew(c);
+      return `<div class="railcut"><span>💥 Cut ${esc(nearPlace(c.x, c.y))}${c.turn ? ` · turn ${esc(c.turn)}` : ''}${c.by ? ` · by ${esc(c.by)}` : ''}</span>
+        <button class="small secondary" data-act="gocut" data-cut="${esc(c.id)}">Show</button>${who ? `<button class="small" data-act="repair" data-cut="${esc(c.id)}" title="${esc(who === true ? 'Repair as GM' : `Send ${who.name} to repair it (uses its action)`)}">🛠 Repair</button>` : ''}</div>`;
+    }).join('')}</div>`;
+    return rows;
+  }
+  /** Who can mend a cut: true for the GM, else the player's nearest unit or hero within the repair range. */
+  function repairCrew(c) {
+    if (state.role === 'gm') return true;
+    const range = Number(state.game?.settings?.railRepairKm ?? 30);
+    let best = null, bd = Infinity;
+    for (const m of state.markers.values()) {
+      if (!['unit', 'hero'].includes(m.type) || !canEdit(m)) continue;
+      const d = distanceUnits(m.x, m.y, c.x, c.y);
+      if (d <= range && d < bd) { bd = d; best = m; }
+    }
+    return best;
+  }
+  async function repairRail(s, cutId) {
+    const c = (s.data?.cuts || []).find(x => x.id === cutId);
+    if (!c) return;
+    const who = repairCrew(c);
+    if (!who) { toast(`No unit of yours within ${state.game?.settings?.railRepairKm ?? 30} ${state.lobby?.scaleLabel || 'km'} of the break`); return; }
+    const d = await api.post(`${base}/game/rail/repair`, { shapeId: s.id, cutId, unitId: who === true ? undefined : who.id });
+    if (d.shape) upsertShape(d.shape);
+    toast(d.event.message);
+    if (!state.events.some(x => x.id === d.event.id)) { state.events.push(d.event); renderLog(true); }
+  }
+  /** Players cannot lay track while the game is running. */
+  function syncRailButton() {
+    const btn = $('#btnDrawRail');
+    if (btn) btn.hidden = gameOn() && state.role !== 'gm';
+  }
+
   renderer.addEventListener('select', e => {
     state.selectedId = e.detail.id; state.selectedIds = e.detail.ids || []; state.selectedShapeId = e.detail.shapeId;
     renderPopup(); highlightList();
@@ -89,6 +239,7 @@
     const lead = state.markers.get(e.detail.id);
     const perPx = distanceUnits(lead.x, lead.y, lead.x + 1, lead.y) || 1;   // local map units per pixel
     renderer.showRange(lead.x, lead.y, remaining / perPx, remaining <= 0.01);
+    if (units.every(canRide)) showRailReach(lead, remaining);
   });
   renderer.addEventListener('dragend', async e => {
     const { id, x, y, moves } = e.detail;
@@ -137,12 +288,13 @@
     $('#btnDrawLine').classList.toggle('active', !!d && d.kind === 'line');
     $('#btnDrawArea').classList.toggle('active', !!d && d.kind === 'area');
     $('#btnDrawTrench').classList.toggle('active', !!d && d.kind === 'trench');
+    $('#btnDrawRail').classList.toggle('active', !!d && d.kind === 'rail');
     if (!d) { if (renderer.mode !== 'measure') hideModeHud(); return; }
     showModeHud(false);
     const need = d.kind === 'area' ? 3 : 2;
-    const what = d.kind === 'area' ? 'an area' : d.kind === 'trench' ? 'a trench' : 'a line';
+    const what = d.kind === 'area' ? 'an area' : d.kind === 'trench' ? 'a trench' : d.kind === 'rail' ? 'a railway' : 'a line';
     $('#modeText').textContent = d.points < need
-      ? `Drawing ${what}: ${d.kind === 'trench' ? 'click points or drag freehand' : `click ${need - d.points} more point${need - d.points === 1 ? '' : 's'}`}`
+      ? `Drawing ${what}: ${d.kind === 'trench' || d.kind === 'rail' ? `click points or drag freehand${d.kind === 'rail' ? '; clicks near other track join it' : ''}` : `click ${need - d.points} more point${need - d.points === 1 ? '' : 's'}`}`
       : `${d.points} points · double-click, Enter or Done to finish${d.kind === 'trench' ? ' (the line is smoothed and traversed when you do)' : ''}`;
   });
   renderer.addEventListener('drawend', async e => {
@@ -158,12 +310,16 @@
           const wPx = Math.max(renderer.unitsToPx(p0[0], p0[1], prev.width || 0.5), 10 / renderer.scale);
           const tail = Trench.processPath([p0, ...points.slice(n)], { tol: 2 / renderer.scale, width: wPx, zig: prev.data?.zigzag !== false });
           points = [...prev.points, ...tail.slice(1)];
+        } else if (prev && prev.kind === 'rail') {
+          const n = prev.points.length;
+          points = [...prev.points, ...railPath([prev.points[n - 1], ...points.slice(n)]).slice(1)];
         }
         const d = await api.patch(`${base}/shapes/${e.detail.shapeId}`, { points });
         upsertShape(d.shape); renderer.selectShape(d.shape.id);
       } catch (err) { toast(err.message); }
       return;
     }
+    if (e.detail.kind === 'rail') { openShapeModal(null, { kind: 'rail', points: railPath(e.detail.points) }); return; }
     if (e.detail.kind === 'trench') {
       // Keep the raw samples so the modal can re-process them with or without traverses.
       openShapeModal(null, { kind: 'trench', raw: e.detail.points, points: Trench.processPath(e.detail.points, { tol: 2 / renderer.scale, width: 10 / renderer.scale, zig: true }) });
@@ -633,7 +789,7 @@
         }
         case 'members': await loadMembers(); break;
         case 'factions': await loadFactions(); await loadMembers(); await loadMarkers(); if (gameOn()) GameUI.load().catch(() => {}); break;
-        case 'game': GameUI.onGame(msg.game); break;
+        case 'game': GameUI.onGame(msg.game); syncRailButton(); break;
         case 'turn': GameUI.onTurn(msg); break;
         case 'faction': GameUI.onFaction(msg); break;
         case 'territory': renderer.setTerritories(msg.territories, !!msg.replace); GameUI.onTerritories(); break;
@@ -996,7 +1152,7 @@
       html += `<div class="section">Drawings <span class="hint">(${shapes.length})</span>${lockLinks('shape', shapes)}${state.role === 'gm' && shapes.length > 1 ? ` · <a href="#" data-delall="1" title="Delete every drawing you can see (e.g. imported borders you no longer need)">delete all</a>` : ''}</div><ul class="list">${shapes.map(s => `
         <li class="clickable ${s.id === state.selectedShapeId ? 'selected' : ''}" data-shape="${s.id}">
           <span class="dot" style="background:${esc(s.color)}"></span>
-          <span class="grow">${esc(s.label || (s.kind === 'area' ? 'Unnamed area' : s.kind === 'trench' ? 'Unnamed trench' : 'Unnamed line'))} <span class="hint">${s.kind === 'trench' ? (s.data?.state || 'dug') + (s.data?.nation ? ' · ' + esc(s.data.nation) : '') : s.kind + ' · ' + s.points.length + ' pts'}</span></span>
+          <span class="grow">${esc(shapeName(s))} <span class="hint">${s.kind === 'trench' ? (s.data?.state || 'dug') + (s.data?.nation ? ' · ' + esc(s.data.nation) : '') : s.kind === 'rail' ? `railway · ${fmtNum(pathUnits(s.points))} ${esc(state.lobby?.scaleLabel || '')}${(s.data?.cuts || []).length ? ` · ${s.data.cuts.length} cut` : ''}` : s.kind + ' · ' + s.points.length + ' pts'}</span></span>
           ${visBadge(s)}
         </li>`).join('')}</ul>`;
     }
@@ -1044,7 +1200,7 @@
     if (!m && !s) { el.style.display = 'none'; return; }
     el.innerHTML = m ? popupHtml(m) : shapePopupHtml(s);
     el.style.display = 'block';
-    el.querySelectorAll('[data-act]').forEach(b => b.onclick = () => (m ? popupAction(b.dataset.act, m) : shapeAction(b.dataset.act, s)));
+    el.querySelectorAll('[data-act]').forEach(b => b.onclick = () => (m ? popupAction(b.dataset.act, m) : shapeAction(b.dataset.act, s, b)));
     positionPopup();
   }
 
@@ -1216,7 +1372,8 @@
 
   function shapePopupHtml(s) {
     const creator = s.createdBy && state.members.find(x => x.userId === s.createdBy);
-    let body = stat('Kind', s.kind === 'area' ? 'Area' : s.kind === 'trench' ? 'Trench' : 'Line') + stat('Points', s.points.length);
+    let body = stat('Kind', s.kind === 'area' ? 'Area' : s.kind === 'trench' ? 'Trench' : s.kind === 'rail' ? 'Railway' : 'Line') + (s.kind === 'rail' ? '' : stat('Points', s.points.length));
+    if (s.kind === 'rail') body += railPopupRows(s);
     if (s.kind === 'trench') {
       body += stat('State', { plan: 'planned', dug: 'dug', reinforced: 'reinforced' }[s.data?.state] || 'dug') + stat('Width', `${s.width} ${state.lobby?.scaleLabel || ''}`) + nationStat(s.data?.nation);
       const g = state.game?.settings, st = s.data?.state || 'dug';
@@ -1233,13 +1390,13 @@
     let actions = '';
     if (canEditShape(s)) actions += `<button class="small" data-act="edit">Edit</button>`;
     if (canEditShape(s)) actions += `<button class="small secondary" data-act="lock">${s.locked ? '🔓 Unlock' : '🔒 Lock'}</button>`;
-    if (canEditShape(s) && !s.locked && s.kind !== 'area') actions += `<button class="small secondary" data-act="continue" title="Keep adding points at the end">${s.kind === 'trench' ? 'Extend' : 'Continue'}</button>`;
+    if (canEditShape(s) && !s.locked && s.kind !== 'area') actions += `<button class="small secondary" data-act="continue" title="Keep adding points at the end">${s.kind === 'trench' || s.kind === 'rail' ? 'Extend' : 'Continue'}</button>`;
     if (canEditShape(s)) actions += `<button class="small secondary" data-act="move" title="Drag the whole drawing to a new place">Move</button>`;
     actions += `<button class="small secondary" data-act="history">History</button>`;
     if (canEditShape(s)) actions += `<button class="small danger" data-act="del">Delete</button>`;
     const hint = canEditShape(s) && !s.locked ? `<p class="hint" style="margin:6px 0 0">Drag a point to move it · grab the line to add a point · right-click (or Alt-click) a point to remove it · Move button or Shift-drag to move everything</p>`
       : (s.locked ? '<p class="hint" style="margin:6px 0 0">Locked: clicks on the map pass through it. Unlock to edit.</p>' : '');
-    return `<h3><span class="dot" style="background:${esc(s.color)}"></span>${esc(s.label || (s.kind === 'area' ? 'Unnamed area' : s.kind === 'trench' ? 'Unnamed trench' : 'Unnamed line'))} <span class="badge">Drawing</span>${visBadge(s)}</h3>${body}${hint}<div class="actions">${actions}</div>`;
+    return `<h3><span class="dot" style="background:${esc(s.kind === 'rail' ? '#8d8a86' : s.color)}"></span>${esc(shapeName(s))} <span class="badge">${s.kind === 'rail' ? 'Railway' : 'Drawing'}</span>${visBadge(s)}</h3>${body}${hint}<div class="actions">${actions}</div>`;
   }
 
   async function popupAction(act, m) {
@@ -1261,11 +1418,13 @@
     } catch (err) { toast(err.message); }
   }
 
-  async function shapeAction(act, s) {
+  async function shapeAction(act, s, btn) {
     try {
       if (act === 'edit') openShapeModal(s);
+      else if (act === 'gocut') { const c = (s.data?.cuts || []).find(x => x.id === btn?.dataset.cut); if (c) renderer.centerOn(c.x, c.y); }
+      else if (act === 'repair') await repairRail(s, btn?.dataset.cut);
       else if (act === 'lock') { const d = await api.patch(`${base}/shapes/${s.id}`, { locked: !s.locked }); upsertShape(d.shape); }
-      else if (act === 'continue') { renderer.startDraw(s.kind === 'trench' ? 'trench' : 'line', s.points, s.id); toast('Click to add points at the end; double-click, Enter or Done to finish'); }
+      else if (act === 'continue') { renderer.startDraw(['trench', 'rail'].includes(s.kind) ? s.kind : 'line', s.points, s.id); toast('Click to add points at the end; double-click, Enter or Done to finish'); }
       else if (act === 'move') { renderer.armMove(s.id); toast('Now drag the drawing to move it'); }
       else if (act === 'history') showHistoryFor('shape', s.id);
       else if (act === 'del') {
@@ -1759,13 +1918,15 @@
     state.editingShapeId = shape ? shape.id : null;
     state.pendingShape = pending || null;
     const kind = shape ? shape.kind : pending.kind;
-    const trench = kind === 'trench';
-    $('#shapeModalTitle').textContent = shape ? (trench ? 'Edit trench' : 'Edit drawing') : `New ${kind === 'area' ? 'area' : trench ? 'trench' : 'line'}`;
+    const trench = kind === 'trench', rail = kind === 'rail';
+    $('#shapeModalTitle').textContent = shape ? (trench ? 'Edit trench' : rail ? 'Edit railway' : 'Edit drawing') : `New ${kind === 'area' ? 'area' : trench ? 'trench' : rail ? 'railway' : 'line'}`;
     $('#shapeLabel').value = shape ? shape.label : '';
     $('#shapeColor').value = shape ? shape.color : (state.member?.color || '#f1c40f');
     $('#shapeWidth').value = shape ? shape.width : (trench ? 0.5 : 3);
     $('#shapeWidth').step = trench ? 'any' : '1'; $('#shapeWidth').min = trench ? '0.05' : '1';
-    $('#shapeColorWrap').hidden = trench;
+    $('#shapeColorWrap').hidden = trench || rail;
+    $('#shapeWidthWrap').hidden = rail;
+    $('#railFields').hidden = !rail;
     $('#shapeWidthLabel').textContent = trench ? `Trench width (${state.lobby?.scaleLabel || 'map units'})` : 'Line width';
     $('#trenchFields').hidden = !trench;
     $('#trenchZigWrap').hidden = !trench || !!shape;                 // traverses are applied when the trench is first dug
@@ -1836,16 +1997,39 @@
     const targets = [...state.markers.values()]
       .filter(m => m.type === 'unit' && m.id !== attacker.id && !(mine && String(m.data?.nation || '').toLowerCase() === mine) && !allied(m))
       .map(m => ({ m, d: distanceUnits(attacker.x, attacker.y, m.x, m.y) })).filter(t => t.d <= reach + 1e-6).sort((a, b) => a.d - b.d);
-    if (!targets.length) { toast(limited ? `No enemy units within ${attacker.name}'s reach (${fmtNum(reach)} ${unitLabel})` : 'No enemy units to attack'); return; }
+    const railTargets = railTargetsFor(attacker, reach);
+    if (!targets.length && !railTargets.length) { toast(limited ? `No enemy units or railways within ${attacker.name}'s reach (${fmtNum(reach)} ${unitLabel})` : 'No enemy units to attack'); return; }
     $('#combatIntro').textContent = `${attacker.name} (attack ${attacker.data?.attack ?? 0}, strength ${attacker.data?.strength ?? 100}%${limited ? `, reach ${fmtNum(reach)} ${unitLabel}` : ''})`;
-    $('#combatTarget').innerHTML = targets.map(({ m, d }) =>
+    const unitOpts = targets.map(({ m, d }) =>
       `<option value="${m.id}">${esc(m.name)} — ${esc(m.data?.nation || 'Unaligned')}, defend ${m.data?.defend ?? 0}, strength ${m.data?.strength ?? 100}% (${fmtNum(d)} ${esc(state.lobby?.scaleLabel || '')} away)</option>`).join('');
+    const railOpts = railTargets.map(t => `<option value="rail:${t.rail.id}:${t.x}:${t.y}">${t.own ? 'Blow up' : 'Cut'} ${esc(shapeName(t.rail))} ${esc(t.place)}${t.holder ? ` — ${esc(t.holder)}` : ''} (${fmtNum(t.d)} ${esc(state.lobby?.scaleLabel || '')} away)</option>`).join('');
+    $('#combatTarget').innerHTML = (unitOpts && railOpts) ? `<optgroup label="Units">${unitOpts}</optgroup><optgroup label="Railways">${railOpts}</optgroup>` : (unitOpts || railOpts);
     const c = state.lobby?.settings?.combat || { die: 20, baseLoss: 10, marginMult: 2, winnerLoss: 5 };
-    $('#combatRule').textContent = `Each side rolls d${c.die} and adds attack or defend. Loser loses ${c.baseLoss}% + ${c.marginMult}% per point of margin; winner loses ${c.winnerLoss}%.`;
+    const unitRule = `Each side rolls d${c.die} and adds attack or defend. Loser loses ${c.baseLoss}% + ${c.marginMult}% per point of margin; winner loses ${c.winnerLoss}%.`;
+    const gs = state.game?.settings || {}, u = state.lobby?.scaleLabel || 'km';
+    const railRule = own => own
+      ? `Your own side's track: blown up without a roll. It closes ${fmtNum((gs.railCutKm ?? 10) * 2)} ${u} of line until repaired.`
+      : `d20 + attack against d20 + the line's defence (${gs.railDefence ?? 4}) + the defend of its best guard within ${gs.railGuardKm ?? 30} ${u}. Success closes ${fmtNum((gs.railCutKm ?? 10) * 2)} ${u} of track until repaired; no one loses strength.`;
+    const syncRule = () => {
+      const v = $('#combatTarget').value;
+      $('#combatRule').textContent = v.startsWith('rail:') ? railRule($('#combatTarget').selectedOptions[0]?.textContent.startsWith('Blow up')) : unitRule;
+    };
+    $('#combatTarget').onchange = syncRule;
+    syncRule();
     $('#combatForm').onsubmit = async e => {
       e.preventDefault();
       try {
-        const d = await api.post(`${base}/combat`, { attackerId: attacker.id, defenderId: Number($('#combatTarget').value) });
+        const val = $('#combatTarget').value;
+        if (val.startsWith('rail:')) {
+          const [, sid, x, y] = val.split(':');
+          const r = await api.post(`${base}/game/rail/cut`, { unitId: attacker.id, shapeId: Number(sid), x: Number(x), y: Number(y) });
+          closeModals();
+          toast(r.event.message, 6000);
+          if (r.shape) upsertShape(r.shape);
+          if (!state.events.some(x => x.id === r.event.id)) { state.events.push(r.event); renderLog(true); }
+          return;
+        }
+        const d = await api.post(`${base}/combat`, { attackerId: attacker.id, defenderId: Number(val) });
         closeModals();
         toast(d.event.message, 6000);
         if (!state.events.some(x => x.id === d.event.id)) { state.events.push(d.event); renderLog(true); }
@@ -2063,6 +2247,7 @@
   $('#btnDrawLine').onclick = () => (renderer.mode === 'draw' && renderer.draw.kind === 'line') ? renderer.cancelMode() : renderer.startDraw('line');
   $('#btnDrawArea').onclick = () => (renderer.mode === 'draw' && renderer.draw.kind === 'area') ? renderer.cancelMode() : renderer.startDraw('area');
   $('#btnDrawTrench').onclick = () => (renderer.mode === 'draw' && renderer.draw.kind === 'trench') ? renderer.cancelMode() : renderer.startDraw('trench');
+  $('#btnDrawRail').onclick = () => (renderer.mode === 'draw' && renderer.draw.kind === 'rail') ? renderer.cancelMode() : renderer.startDraw('rail');
   $('#btnModeUndo').onclick = () => renderer.modeUndo();
   $('#btnModeClear').onclick = () => renderer.modeClear();
   $('#btnModeDone').onclick = () => { if (!renderer.finishDraw()) toast('Add more points first'); };
@@ -2088,6 +2273,7 @@
     if (e.key === 'l' || e.key === 'L') $('#btnDrawLine').click();
     if (e.key === 'a' || e.key === 'A') $('#btnDrawArea').click();
     if (e.key === 't' || e.key === 'T') $('#btnDrawTrench').click();
+    if ((e.key === 'r' || e.key === 'R') && !$('#btnDrawRail').hidden) $('#btnDrawRail').click();
     if ((e.key === 'z' || e.key === 'Z') && renderer.mode) renderer.modeUndo();
     if (e.key === 'Delete') {
       if ((state.selectedIds || []).length > 1) {
@@ -2111,6 +2297,7 @@
     await loadFactions();
     GameUI.init({ state, renderer, base, $, $$, flagImg, loadMarkers, loadTerritories, loadProvinces, removeBorderDrawings, armBrush, armFactory, notify, isGm: () => state.role === 'gm' });
     await GameUI.load().catch(err => console.warn('game state', err));
+    syncRailButton();
     await loadTerritories();
     loadProvinces();
     await loadMarkers();

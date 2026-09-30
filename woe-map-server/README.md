@@ -505,6 +505,16 @@ sharpest spy nearby rolls d20 + perception against the agent's d20 + intelligenc
 off the map. The GM creates heroes from the Add tab and assigns each an owner. Full rules and numbers:
 `docs/HEROES.md`.
 
+### Railways
+
+The GM lays railways with the 🛤 tool (R): click points or drag freehand; lines that start or end on other track
+join it. The track is drawn with the pixel-art tile from the train sheet, and trains run back and forth along
+every open stretch. In game mode land units and heroes ride any open track held by their side, an ally or no one
+at 4× their normal pace (dragging a unit highlights the track it can still reach). A unit's **Attack…** list also
+offers railway sections in reach: d20 + attack against d20 + the line's defence and its best guard; a success
+closes 20 km of line, marked with smoke, until the GM or a nearby unit of the holder repairs it. Full rules:
+`docs/RAILWAYS.md`.
+
 ### Dice and combat
 
 Type `/roll 2d6+3 optional note` (or `/r d20`) in the chat, or use the 🎲 button. Rolls happen on the server with

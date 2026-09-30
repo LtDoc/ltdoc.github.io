@@ -18,7 +18,7 @@ const research = require('../research');
 const UnitTypes = require('../../public/js/units');
 const geo = require('../geo');
 
-module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById, createMarker, writeMarker }) {
+module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById, createMarker, writeMarker, writeShape, canEditMarker }) {
   const router = express.Router({ mergeParams: true });
 
   function requireGm(req, res, next) {
@@ -579,6 +579,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     if (b.settings && typeof b.settings === 'object') {
       const s = b.settings, out = {};
       const numIn = (k, lo, hi) => { if (s[k] !== undefined) out[k] = clamp(num(s[k], g.settings[k]), lo, hi); };
+      numIn('railSpeed', 1, 50); numIn('railCutKm', 1, 500); numIn('railDefence', -10, 50); numIn('railGuardKm', 0, 1000); numIn('railRepairKm', 0, 1000); numIn('railJoinKm', 0, 200);
       numIn('heroAuraKm', 0, 5000); numIn('spySecurity', -10, 30); numIn('spyCounterKm', 0, 5000); numIn('spyStealPerStar', 0, 1000);
       numIn('kmPerMove', 1, 100000); numIn('kmPerRange', 1, 100000); numIn('captureRadiusKm', 1, 5000); numIn('cityRadiusKm', 1, 5000);
       numIn('researchLead', 0, 50); numIn('baseMoney', -1000, 100000); numIn('baseRp', -1000, 100000); numIn('baseManpower', -1000, 100000);
@@ -896,6 +897,126 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     }
     return res.status(400).json({ error: 'Unknown order' });
   });
+
+  // ---- Railways: sabotage and repair (docs/RAILWAYS.md) -------------------------------------------------
+  const rails = require('../rails');
+  const crypto = require('node:crypto');
+  const unitsLabel = req => geo.isEarth(req.lobby) ? 'km' : (req.lobby.scale_label || 'units');
+  function railTarget(req, res) {
+    const viewer = { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '' };
+    const rail = shapeById(req, Number(req.body?.shapeId));
+    if (!rail || rail.kind !== 'rail' || !access.canSee(rail, viewer)) { res.status(404).json({ error: 'No such railway' }); return null; }
+    return rail;
+  }
+  /** Who holds the ground under a point: { id, name } (id 0 = neutral), or null without territories / at sea. */
+  function holderAt(req, x, y) {
+    const lookup = territory.ownerLookup(req.lobby);
+    if (!lookup) return null;
+    const id = lookup(x, y);
+    if (id === null || id === undefined) return null;
+    if (id === territory.NEUTRAL) return { id: 0, name: '' };
+    const f = game.q.faction.get(id, req.lobby.id);
+    return f ? { id: f.id, name: f.name } : null;
+  }
+  const railName = r => r.label ? `the ${r.label} railway` : 'a railway';
+
+  /** Cut a section of railway with a unit: d20 + attack against d20 + the line's defence and its best guard. */
+  router.post('/rail/cut', (req, res) => {
+    const g = game.get(req.lobby.id);
+    const gm = req.lobbyRole === 'gm';
+    const rail = railTarget(req, res);
+    if (!rail) return;
+    const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
+    const viewer = { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '' };
+    const unit = markers.find(m => m.id === Number(req.body?.unitId));
+    if (!unit || !access.canSee(unit, viewer) || unit.type !== 'unit') return res.status(404).json({ error: 'Pick one of your units' });
+    if (!canEditMarker(req, unit)) return res.status(403).json({ error: 'You can only attack with units you control' });
+    if (num(unit.data?.strength, 100) <= 0) return res.status(400).json({ error: `${unit.name} has no strength left` });
+    const at = rails.nearestOn(req.lobby, rail, num(req.body?.x, unit.x), num(req.body?.y, unit.y));
+    if (!at) return res.status(400).json({ error: 'That railway has no track' });
+    if (rails.cutAt(req.lobby, g.settings, rail, at.x, at.y)) return res.status(409).json({ error: 'That section is already cut' });
+    const apError = game.checkAttack(g, gm, unit);
+    if (apError) return res.status(409).json({ error: apError });
+    const u = unitsLabel(req);
+    const reach = game.attackRange(req.lobby, g, unit);
+    const dist = geo.distance(req.lobby, unit.x, unit.y, at.x, at.y);
+    if (g.enabled && !gm && !g.settings.waiveMovement && dist > reach + 1e-6) return res.status(409).json({ error: `That section is ${Math.round(dist)} ${u} away; ${unit.name} reaches ${Math.round(reach)} ${u}` });
+
+    // Whose line is it? Your own (or an ally's) is simply blown up; an enemy's must be fought for.
+    const holder = holderAt(req, at.x, at.y);
+    const friend = friendsOf(req, unit.data?.nation);
+    const own = !!(holder && holder.id && friend(holder.name));
+    if (!gm && g.enabled && holder && !own) {
+      const mine = factionNamed(req, unit.data?.nation);
+      if (!holder.id) return res.status(409).json({ error: 'That section runs through neutral ground' });
+      if (!mine || game.relationStatus(req.lobby.id, mine.id, holder.id) !== 'war') return res.status(409).json({ error: `${unit.data?.nation || 'Your side'} is not at war with ${holder.name}` });
+    }
+    const place = placeName(req, markers, at.x, at.y);
+    let text, success = true, rolls = null;
+    if (own) {
+      text = `💥 ${unit.name} blew up ${railName(rail)} ${place}`;
+    } else {
+      const bonus = research.statBonus(game.factionEffects(req.lobby.id, unit.data?.nation), UnitTypes.resolve(unit.data?.unitType)).attack;
+      const gen = heroRules.generalFor(req.lobby, g.settings, markers, unit);
+      const atk = num(unit.data?.attack) + bonus + (gen ? gen.bonus : 0);
+      // The holder's (or its allies') strongest land unit within the guard radius defends the line.
+      const guardOf = holder && holder.id ? friendsOf(req, holder.name) : null;
+      const guards = guardOf ? markers.filter(m => territory.isLandUnit(m) && num(m.data?.strength, 100) > 0 && guardOf(m.data?.nation) &&
+        geo.distance(req.lobby, m.x, m.y, at.x, at.y) <= num(g.settings.railGuardKm, 30)) : [];
+      const guard = guards.sort((a, b) => num(b.data?.defend) - num(a.data?.defend))[0] || null;
+      const def = num(g.settings.railDefence, 4) + (guard ? num(guard.data?.defend) : 0);
+      const aRoll = crypto.randomInt(1, 21), dRoll = crypto.randomInt(1, 21);
+      success = aRoll + atk > dRoll + def;
+      rolls = { aRoll, dRoll, atk, def, guard: guard ? guard.name : null };
+      const notes = [bonus ? `+${bonus} tech` : '', gen ? `+${gen.bonus} ${gen.hero.name}` : '', guard ? `guarded by ${guard.name}` : ''].filter(Boolean);
+      text = `💥 ${unit.name} attacked ${railName(rail)} ${place}: ${aRoll}+${atk}=${aRoll + atk} vs ${dRoll}+${def}=${dRoll + def}${notes.length ? ` (${notes.join(', ')})` : ''} → ` +
+        (success ? `the line is cut (${Math.round(num(g.settings.railCutKm, 10) * 2)} ${u} of track)` : 'the line holds');
+    }
+    if (g.enabled) writeMarker(req, unit, { data: { apUsed: num(unit.data?.apUsed) + 1 } });
+    let after = rail;
+    if (success) {
+      const cut = { id: crypto.randomBytes(4).toString('hex'), x: Math.round(at.x * 10) / 10, y: Math.round(at.y * 10) / 10, turn: g.turn, by: unit.data?.nation || '', at: new Date().toISOString() };
+      after = writeShape(req, rail, { ...(rail.data || {}), cuts: [...(rail.data?.cuts || []), cut] });
+    }
+    const hidden = !!(unit.adminOnly || unit.visibleTo);
+    const event = logEvent(req.lobby.id, req.user.id, 'combat', text, { railId: rail.id, unitId: unit.id, success, rolls, x: at.x, y: at.y },
+      hidden ? (ws => ws.lobbyRole === 'gm' || ws.user.id === req.user.id) : null);
+    res.status(201).json({ event, success, shape: after });
+  });
+
+  /** Repair a cut: the GM, or a unit of the side holding that ground within railRepairKm (uses its action). */
+  router.post('/rail/repair', (req, res) => {
+    const g = game.get(req.lobby.id);
+    const gm = req.lobbyRole === 'gm';
+    const rail = railTarget(req, res);
+    if (!rail) return;
+    const cut = (rail.data?.cuts || []).find(c => c.id === String(req.body?.cutId || ''));
+    if (!cut) return res.status(404).json({ error: 'That section is not cut' });
+    const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
+    const place = placeName(req, markers, cut.x, cut.y);
+    let who = 'The GM';
+    if (!gm || req.body?.unitId) {
+      const viewer = { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '' };
+      const unit = markers.find(m => m.id === Number(req.body?.unitId));
+      if (!unit || !access.canSee(unit, viewer) || !['unit', 'hero'].includes(unit.type)) return res.status(404).json({ error: 'Pick one of your units near the break' });
+      if (!canEditMarker(req, unit)) return res.status(403).json({ error: 'You can only repair with units you control' });
+      const u = unitsLabel(req), range = num(g.settings.railRepairKm, 30);
+      const dist = geo.distance(req.lobby, unit.x, unit.y, cut.x, cut.y);
+      if (!gm && dist > range + 1e-6) return res.status(409).json({ error: `${unit.name} is ${Math.round(dist)} ${u} from the break; repair crews work within ${range} ${u}` });
+      const holder = holderAt(req, cut.x, cut.y);
+      if (!gm && holder && holder.id && !friendsOf(req, unit.data?.nation)(holder.name)) return res.status(409).json({ error: `${holder.name} holds that ground` });
+      if (g.enabled && !gm) {
+        const ap = Math.max(1, num(unit.data?.ap, 1));
+        if (num(unit.data?.apUsed) >= ap) return res.status(409).json({ error: `${unit.name} has used its action points this turn` });
+        writeMarker(req, unit, { data: { apUsed: num(unit.data?.apUsed) + 1 } });
+      }
+      who = unit.name;
+    }
+    const after = writeShape(req, rail, { ...(rail.data || {}), cuts: (rail.data?.cuts || []).filter(c => c.id !== cut.id) });
+    const event = logEvent(req.lobby.id, req.user.id, 'system', `🛠 ${who} repaired ${railName(rail)} ${place}`, { railId: rail.id, cutId: cut.id });
+    res.json({ event, shape: after });
+  });
+
 
   return router;
 };
