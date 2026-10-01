@@ -1210,7 +1210,8 @@ class MapRenderer extends EventTarget {
           const h = Math.max(30, Math.min(160, distPx * 0.35)) / s;                // arc height (up the screen)
           this.shellsInFlight.push({ x0: mx, y0: my, x1: bx, y1: by, t0: nowMs, dur, h });
           this._gunFlash(mx, my, ux, uy);
-          this.explode(bx, by, 80 + Math.random() * 60, dur, this.shellFrames);
+          if (this._isWater(bx, by, b)) this.splash(bx, by, 80 + Math.random() * 50, dur);
+          else this.explode(bx, by, 80 + Math.random() * 60, dur, this.shellFrames);
           e.nextShell = nowMs + 900 + Math.random() * 1600;
         }
       }
@@ -1318,6 +1319,58 @@ class MapRenderer extends EventTarget {
     }
     this.invalidate();
     return this.shellsInFlight.length > 0;
+  }
+  /** Is a point at sea? Provinces cover all land on the Earth map in game mode; otherwise the server's hint. */
+  _isWater(x, y, b) {
+    if (this.provinceLayer && this.provinceLayer.size) return !this.provinceAt(x, y);
+    return !!(b && b.sea);
+  }
+  /**
+   * A shell landing in water, drawn (no sprite sheet): a white column that leaps up and collapses, spray thrown
+   * outwards, a darker patch where the water churned and two foam rings spreading on the surface. ~1.2 s.
+   */
+  splash(x, y, screenSize = 80, delayMs = 0) {
+    this.invalidate();
+    const g = new PIXI.Graphics();
+    g.eventMode = 'none';
+    g.position.set(x, y);
+    g.splashInfo = { size: screenSize, start: performance.now() + delayMs, dur: 1200, seed: Math.random() * 1000 };
+    g.life = delayMs + 1300;
+    g.visible = false;
+    this.boomLayer.addChild(g);
+    return true;
+  }
+  _drawSplash(g, nowMs) {
+    const sp = g.splashInfo, p = (nowMs - sp.start) / sp.dur;
+    g.clear();
+    if (p < 0 || p > 1) { g.visible = false; return; }
+    g.visible = true;
+    g.scale.set(1 / this.scale);
+    const u = sp.size / 100;                                  // drawn in screen px, scaled to the map
+    // Churned water and foam rings on the surface (flattened: seen from above at an angle).
+    g.ellipse(0, 0, (14 + 30 * p) * u, (6 + 12 * p) * u).fill({ color: 0x9bd0e6, alpha: 0.35 * (1 - p) });
+    for (const [lag, amp] of [[0, 1], [0.22, 0.7]]) {
+      const q = (p - lag) / (1 - lag);
+      if (q <= 0) continue;
+      const rx = (10 + 52 * q) * u * amp, ry = rx * 0.38;
+      g.ellipse(0, 0, rx, ry).stroke({ width: Math.max(0.5, 3.2 * u * (1 - q)), color: 0xffffff, alpha: 0.85 * (1 - q) });
+    }
+    // The column: up fast, down slower, widening as it falls.
+    if (p < 0.7) {
+      const c = p / 0.7, hgt = 62 * u * Math.sin(Math.PI * Math.pow(c, 0.7)), wid = (7 + 6 * c) * u;
+      g.ellipse(0, -hgt / 2, wid, hgt / 2 + 2 * u).fill({ color: 0xd6eef8, alpha: 0.9 * (1 - c * 0.6) });
+      g.ellipse(0, -hgt * 0.55, wid * 0.55, hgt * 0.4).fill({ color: 0xffffff, alpha: 0.95 * (1 - c * 0.6) });
+      g.circle(0, -hgt, wid * 0.9).fill({ color: 0xffffff, alpha: 0.85 * (1 - c) });   // crown of spray
+    }
+    // Spray: droplets on ballistic paths, stable per splash.
+    for (let i = 0; i < 14; i++) {
+      const k = hash01(sp.seed, i), k2 = hash01(sp.seed + 3, i);
+      const ang = (i / 14) * Math.PI * 2 + k;
+      const vx = Math.cos(ang) * (18 + 26 * k2), vy = 40 + 45 * k;
+      const px = vx * p * u, py = (-(vy * p) + 85 * p * p) * u + Math.sin(ang) * 6 * p * u;
+      if (py > 4 * u) continue;                                // back in the water
+      g.circle(px, py, (1.2 + 1.3 * k2) * u).fill({ color: 0xf2fbff, alpha: 0.9 * (1 - p) });
+    }
   }
   /** A short flash at the guns, pointing at the target. */
   _gunFlash(x, y, ux, uy) {
@@ -1696,6 +1749,7 @@ class MapRenderer extends EventTarget {
     for (const layer of [this.fxLayer, this.boomLayer]) {
       for (const fx of [...layer.children]) {
         fx.life -= dt;
+        if (fx.splashInfo) { this._drawSplash(fx, nowMs); if (fx.life <= 0) { layer.removeChild(fx); fx.destroy(); } continue; }
         if (fx.screenSize) { fx.scale.set(fx.screenSize / (fx.frameSize || this.explosionFrameSize) * inv); }
         else if (fx.pulse) { const p = 1 - fx.life / 700; fx.scale.set((1 + p * 3) * inv); fx.alpha = 1 - p; }
         else if (fx.flash) { fx.scale.set(inv); fx.alpha = Math.max(0, fx.life / 220); }

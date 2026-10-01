@@ -557,10 +557,17 @@ that has been destroyed or removed stops firing. Drawn (no sprites), visible fro
 around it every second or two. Each shell leaves the guns with a flash and climbs a slow arc (1–2.4 s, a bright
 shell with a fading trail over a faint dotted trajectory) to where it lands, so the line of fire is clear even
 when the battery's counter hides its muzzle; shells and flashes draw above the tokens. Each bombardment also leaves
-**4–5 craters** around the target, picked from the crater sheet (`rob assets/tile-B-04.png`, atlas `misc-04`;
+**4–5 craters** around the target (on land only: shells that fall in the sea leave none), picked from the crater sheet (`rob assets/tile-B-04.png`, atlas `misc-04`;
 plain, dark and scorched), 1.2–2.3 map px across and shown from 400 % zoom. Craters are static sprites stored in
 the `craters` table and stay for **ten turns** (End turn removes the old ones; outside game mode, a day). Both follow the units if
-they move and sleep when off screen. Outside game mode, where there are no turns, they last five minutes.
+they move and sleep when off screen. Shells that land in water raise a **splash** instead of an earth burst (drawn by
+the renderer: a white column that leaps and collapses, thrown spray, a churned patch and two foam rings); with
+provinces each landing point is tested, otherwise the server says whether the target is at sea.
+
+**Ships stay at sea.** A player's ship may only move to water or a coastal spot (within about 10–15 km of the
+sea, for harbours), and its straight course may not cross land ("go round by sea"); the GM is exempt. New ships
+are launched on the nearest water to their shipyard. The test uses a cached land raster (2 map px per cell)
+built from the bundled Natural Earth land in about 40 ms (`territory.landMask`). Outside game mode, where there are no turns, they last five minutes.
 
 The sheets are `public/assets/explosion.png` (hits: one row of 8 frames of 128 px), `public/assets/shellburst.png`
 (shelling: one row of 7 frames of 128 px) and `public/assets/burning.webp` (8×8 frames of 128 px); any sheet of

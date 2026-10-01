@@ -437,6 +437,11 @@ function undoTurn(lobby) {
  * GMs, disabled game mode and the waive switch pass straight through.
  */
 function checkMove(lobby, g, isGm, marker, x, y) {
+  // Ships stay at sea (or in harbour) for players in any mode; the GM can still place them anywhere.
+  if (!isGm && marker.type === 'unit' && UnitTypes.resolve(marker.data?.unitType)?.cat === 'Naval') {
+    const err = require('./territory').shipCourseError(lobby, marker.x, marker.y, x, y);
+    if (err) return { error: `${marker.name}: ${err}` };
+  }
   if (!g.enabled || isGm || g.settings.waiveMovement || !['unit', 'hero'].includes(marker.type)) return { x, y, clamped: false };
   const dist = geo.distance(lobby, marker.x, marker.y, x, y);
   if (dist < 1e-6) return { x, y, clamped: false };

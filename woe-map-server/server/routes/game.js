@@ -771,7 +771,9 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       const t = UnitTypes.LIST.find(u => u.id === item.typeId);
       if (!t) throw new Error('unknown type');
       const n = (spawnIndex.get(item.siteId) || 0); spawnIndex.set(item.siteId, n + 1);
-      const p = site ? production.spawnPoint(req.lobby, site, n) : { x: item.x || 0, y: item.y || 0 };
+      let p = site ? production.spawnPoint(req.lobby, site, n) : { x: item.x || 0, y: item.y || 0 };
+      // New ships are launched on the nearest water, not on the shipyard's town.
+      if (t.cat === 'Naval') p = territory.nearestWater(req.lobby, p.x, p.y, 120) || p;
       const d = UnitTypes.defaults(t, g0.settings.unitStats) || {};
       return createMarker(req, { type: 'unit', autoName: true, x: p.x, y: p.y, color: faction.color, ownerId: owner, data: { nation: faction.name, unitType: t.name, ...d, strength: 100 } }, true);
     };

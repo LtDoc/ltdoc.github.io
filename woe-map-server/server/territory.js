@@ -187,6 +187,93 @@ function isCoastal(lobby, x, y, km = 30) {
   return ring.some(p => !isLand(lobby, p[0], p[1]));
 }
 
+// ---- Land raster (fast land / sea tests for ships, craters and spawn points) ------------------------
+const MASK_CELL = 2;   // map px per cell (about 10 km on the Earth map)
+/**
+ * A cached raster of the Earth's land at MASK_CELL resolution, filled by scanline (even-odd over every ring).
+ * Returns { W, H, cell, data } with data[i] = 1 on land, or null for image maps (which have no sea).
+ */
+function landMask(lobby) {
+  if (!geo.isEarth(lobby)) return null;
+  const key = `mask:${lobby.map_width}x${lobby.map_height}`;
+  if (cache.has(key)) return cache.get(key);
+  const W = Math.ceil(lobby.map_width / MASK_CELL), H = Math.ceil(lobby.map_height / MASK_CELL);
+  const data = new Uint8Array(W * H);
+  // Bucket every edge by the rows it crosses, then fill between crossings row by row.
+  const rows = Array.from({ length: H }, () => []);
+  for (const l of landFor(lobby)) for (const ring of l.poly) {
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [x1, y1] = ring[j], [x2, y2] = ring[i];
+      if (y1 === y2) continue;
+      const lo = Math.min(y1, y2), hi = Math.max(y1, y2);
+      const r0 = Math.max(0, Math.ceil(lo / MASK_CELL - 0.5)), r1 = Math.min(H - 1, Math.floor(hi / MASK_CELL - 0.5));
+      for (let r = r0; r <= r1; r++) {
+        const yc = (r + 0.5) * MASK_CELL;
+        if (yc < lo || yc >= hi) continue;
+        rows[r].push(x1 + (yc - y1) * (x2 - x1) / (y2 - y1));
+      }
+    }
+  }
+  for (let r = 0; r < H; r++) {
+    const xs = rows[r].sort((a, b) => a - b);
+    for (let k = 0; k + 1 < xs.length; k += 2) {
+      const c0 = Math.max(0, Math.ceil(xs[k] / MASK_CELL - 0.5)), c1 = Math.min(W - 1, Math.floor(xs[k + 1] / MASK_CELL - 0.5));
+      for (let c = c0; c <= c1; c++) data[r * W + c] = 1;
+    }
+  }
+  const mask = { W, H, cell: MASK_CELL, data };
+  cache.set(key, mask);
+  return mask;
+}
+/** Fast land test from the raster (image maps: always land). */
+function landAt(lobby, x, y) {
+  const m = landMask(lobby);
+  if (!m) return true;
+  const c = Math.floor(x / m.cell), r = Math.floor(y / m.cell);
+  if (c < 0 || r < 0 || c >= m.W || r >= m.H) return false;
+  return m.data[r * m.W + c] === 1;
+}
+/** Is there water within `cells` raster cells of (x, y)? (a harbour, a coast) */
+function nearWater(lobby, x, y, cells = 2) {
+  const m = landMask(lobby);
+  if (!m) return true;
+  const c0 = Math.floor(x / m.cell), r0 = Math.floor(y / m.cell);
+  for (let r = r0 - cells; r <= r0 + cells; r++) for (let c = c0 - cells; c <= c0 + cells; c++) {
+    if (r < 0 || c < 0 || r >= m.H || c >= m.W || m.data[r * m.W + c] === 0) return true;
+  }
+  return false;
+}
+/**
+ * Where a ship may go: open water or a coastal spot (within about 15 km of water, for harbours). Checks the
+ * destination and samples the straight course for any stretch inland. Returns an error string or null.
+ */
+function shipCourseError(lobby, x0, y0, x1, y1) {
+  const m = landMask(lobby);
+  if (!m) return null;
+  const ok = (x, y) => !landAt(lobby, x, y) || nearWater(lobby, x, y, 1);
+  if (!ok(x1, y1)) return 'Ships cannot sail onto land: pick a spot at sea or on the coast';
+  const steps = Math.ceil(Math.hypot(x1 - x0, y1 - y0) / m.cell);
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    if (!ok(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)) return 'Ships cannot sail over land: go round by sea';
+  }
+  return null;
+}
+/** The nearest water point to (x, y) within `maxPx` (searching outwards), or null. For launching new ships. */
+function nearestWater(lobby, x, y, maxPx = 80) {
+  const m = landMask(lobby);
+  if (!m) return { x, y };
+  if (!landAt(lobby, x, y)) return { x, y };
+  for (let rad = m.cell; rad <= maxPx; rad += m.cell) {
+    const n = Math.max(8, Math.round(rad * 0.8));
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * Math.PI * 2, px = x + Math.cos(a) * rad, py = y + Math.sin(a) * rad;
+      if (!landAt(lobby, px, py)) return { x: Math.round(px * 10) / 10, y: Math.round(py * 10) / 10 };
+    }
+  }
+  return null;
+}
+
 /** Clip a multipolygon to land on the Earth map (image maps have no sea). */
 function landClip(lobby, multi) {
   if (!geo.isEarth(lobby)) return multi;
@@ -425,5 +512,5 @@ function capture(lobby, g, unit, factions, markers, relation) {
   return { held: false, changed, owners, flips, cities: cities.map(c => c.name), owner, mine };
 }
 
-module.exports = { NEUTRAL, all, write, clear, carve, circle, landClip, ownerAt, seedFromYear, assignArea, brush, ownershipChanges, capture, isLandUnit, earthYears, clean,
+module.exports = { landMask, landAt, nearWater, shipCourseError, nearestWater, NEUTRAL, all, write, clear, carve, circle, landClip, ownerAt, seedFromYear, assignArea, brush, ownershipChanges, capture, isLandUnit, earthYears, clean,
   trenchOwner, trenchOwnershipChanges, trenchCover, distanceToPath, isLand, isCoastal, landFor, loadGz, world, bboxOf, pointInMulti, overlaps, ownerLookup };
