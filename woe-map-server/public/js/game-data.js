@@ -68,6 +68,15 @@ const GameData = (() => {
     spySecurity: 0,           // heroes: added to the defender's roll when no spy of theirs is near a mission
     spyCounterKm: 150,        // heroes: a nation's spies within this distance contest a foreign mission
     spyStealPerStar: 5,       // heroes: research points a successful theft takes per star
+    supplyEnabled: true,      // supply (docs/UNITS.md): land units are supplied or cut off, decided at End turn
+    supplyTownKm: 30,         // supply: land units this close to a friendly town are supplied directly (garrison)
+    supplyLinkKm: 150,        // supply: a Supply Column this close to a friendly town, railhead or linked column is linked
+    supplyRangeKm: 80,        // supply: a linked Supply Column supplies land units this close
+    hospitalKm: 40,           // support: field hospitals heal friendly units this close at End turn…
+    hospitalHeal: 10,         // …by this much strength (%)
+    hqKm: 40, hqBonus: 1,     // support: headquarters add attack and defend to friendly units this close
+    engineerKm: 20, engineerDefend: 1,   // support: engineers, pioneers and sappers add defend to units this close
+    signalsKm: 60, signalsArtillery: 1,  // support: signals add attack to friendly artillery this close (spotting)
     railSpeed: 4,             // railways: land units and heroes move this many times faster along open track
     railCutKm: 10,            // railways: a successful attack closes this much track either side of the hit
     railDefence: 4,           // railways: added to the line's d20 when attacked (plus its best guard's defend)

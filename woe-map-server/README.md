@@ -410,6 +410,17 @@ design is in `docs/GAME-DESIGN.md`.
   of small random deposits on land so remote factions have something to work with. Everything is an ordinary
   resource marker afterwards.
 
+### Supply, support units and matchups (game mode)
+
+Land units are **supplied or cut off**, worked out at End turn: towns supply units within 30 km, and **Supply
+Columns** linked to a friendly town, railhead or another linked column (within 150 km) supply units within 80 km.
+A cut-off unit (red badge) cannot move or attack and takes double losses when beaten. **Field hospitals** heal
+units around them each turn, **HQs** add attack and defend, **engineers** add defend and **signals** help
+artillery. **Matchups** add strengths and weaknesses to attacks: cavalry is weak against entrenched troops and
+machine guns but strong against artillery, tanks break wire and machine guns, anti-aircraft hits aircraft,
+destroyers hunt submarines, and so on; the attack dialog shows the modifier for each target. Details, all the
+numbers and the full table: `docs/UNITS.md`.
+
 ### Long-term growth (game mode)
 
 Nations can grow their income without cutting their army, slowly. From **Nation → Production → Development**

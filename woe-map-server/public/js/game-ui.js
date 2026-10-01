@@ -19,6 +19,10 @@ const GameUI = (() => {
     $('#btnGameToggle').onclick = toggleGame;
     $('#btnEndTurn').onclick = endTurn;
     $('#btnUndoTurn').onclick = undoTurn;
+    $('#btnSupplyNow').onclick = async () => {
+      try { const r = await api.post(`${ctx.base}/game/supply/recompute`, {}); toast(`Supply: ${r.supplied} supplied, ${r.unsupplied} cut off`); await ctx.loadMarkers(); }
+      catch (err) { toast(err.message); }
+    };
     $('#btnEditTreasuries').onclick = openTreasuryEditor;
     $('#turnForm').onsubmit = saveTurn;
     $('#rulesForm').onsubmit = saveRules;
@@ -391,7 +395,7 @@ const GameUI = (() => {
   function refresh() {
     const { $, state, renderer } = ctx;
     const game = g();
-    renderer.setGameRules(game ? { enabled: game.enabled, kmPerMove: game.settings.kmPerMove, turn: game.turn } : null);
+    renderer.setGameRules(game ? { enabled: game.enabled, kmPerMove: game.settings.kmPerMove, turn: game.turn, supply: game.settings.supplyEnabled !== false } : null);
     const on = !!(game && game.enabled);
     $('#sidebar .tabs [data-tab="nation"]').hidden = !on;
     $('#sidebar .tabs [data-tab="game"]').hidden = !ctx.isGm();
@@ -559,6 +563,9 @@ const GameUI = (() => {
     set('#rulePublic', s.publicTreasury); set('#ruleCapturedIdle', s.capturedIdle);
     set('#ruleTrenchRange', s.trenchRangeKm); set('#ruleTrenchDug', s.trenchBonusDug); set('#ruleTrenchReinforced', s.trenchBonusReinforced);
     set('#ruleCaptureRadius', s.captureRadiusKm); set('#ruleCityRadius', s.cityRadiusKm); set('#ruleOccupyNeutrals', s.occupyNeutrals);
+    set('#ruleSupplyOn', s.supplyEnabled !== false); set('#ruleSupplyTown', s.supplyTownKm); set('#ruleSupplyLink', s.supplyLinkKm); set('#ruleSupplyRange', s.supplyRangeKm);
+    set('#ruleHospitalKm', s.hospitalKm); set('#ruleHospitalHeal', s.hospitalHeal); set('#ruleHqKm', s.hqKm); set('#ruleHqBonus', s.hqBonus);
+    set('#ruleEngKm', s.engineerKm); set('#ruleEngDefend', s.engineerDefend); set('#ruleSigKm', s.signalsKm); set('#ruleSigArt', s.signalsArtillery);
     set('#ruleRailSpeed', s.railSpeed); set('#ruleRailCut', s.railCutKm); set('#ruleRailDefence', s.railDefence); set('#ruleRailGuard', s.railGuardKm); set('#ruleRailRepair', s.railRepairKm); set('#ruleRailJoin', s.railJoinKm);
     set('#ruleHeroAura', s.heroAuraKm); set('#ruleSpyCounter', s.spyCounterKm); set('#ruleSpySteal', s.spyStealPerStar); set('#ruleSpySecurity', s.spySecurity); set('#ruleDiplomats', s.diplomatsRequired);
     set('#ruleCapCapital', s.cityCapacity.capital); set('#ruleCapCity', s.cityCapacity.city); set('#ruleCapVillage', s.cityCapacity.village);
@@ -624,6 +631,9 @@ const GameUI = (() => {
       capturedIdle: $('#ruleCapturedIdle').checked,
       trenchRangeKm: v('#ruleTrenchRange'), trenchBonusDug: v('#ruleTrenchDug'), trenchBonusReinforced: v('#ruleTrenchReinforced'),
       captureRadiusKm: v('#ruleCaptureRadius'), cityRadiusKm: v('#ruleCityRadius'), occupyNeutrals: $('#ruleOccupyNeutrals').checked,
+      supplyEnabled: $('#ruleSupplyOn').checked, supplyTownKm: v('#ruleSupplyTown'), supplyLinkKm: v('#ruleSupplyLink'), supplyRangeKm: v('#ruleSupplyRange'),
+      hospitalKm: v('#ruleHospitalKm'), hospitalHeal: v('#ruleHospitalHeal'), hqKm: v('#ruleHqKm'), hqBonus: v('#ruleHqBonus'),
+      engineerKm: v('#ruleEngKm'), engineerDefend: v('#ruleEngDefend'), signalsKm: v('#ruleSigKm'), signalsArtillery: v('#ruleSigArt'),
       railSpeed: v('#ruleRailSpeed'), railCutKm: v('#ruleRailCut'), railDefence: v('#ruleRailDefence'), railGuardKm: v('#ruleRailGuard'), railRepairKm: v('#ruleRailRepair'), railJoinKm: v('#ruleRailJoin'),
       heroAuraKm: v('#ruleHeroAura'), spyCounterKm: v('#ruleSpyCounter'), spyStealPerStar: v('#ruleSpySteal'), spySecurity: v('#ruleSpySecurity'), diplomatsRequired: $('#ruleDiplomats').checked,
       cityCapacity: { capital: v('#ruleCapCapital'), city: v('#ruleCapCity'), village: v('#ruleCapVillage') },

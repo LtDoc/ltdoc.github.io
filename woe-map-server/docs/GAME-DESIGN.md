@@ -23,7 +23,7 @@ Principles that shaped every choice below:
 - **Keep the numbers small and legible.** Resources in whole units per turn, unit costs in the tens, research
   in single-digit turns. Players should be able to do the arithmetic in their head.
 
-Automatic fog of war is proposed separately in `docs/FOG-OF-WAR.md` (29 Sep 2026). Heroes (generals, diplomats and spies) are described in `docs/HEROES.md`. Railways (drawn track, 4× movement, sabotage and repair) are described in `docs/RAILWAYS.md` (30 Sep 2026). Chat, the notification centre, trades between nations, GM pings and click-to-move with trails are described in `docs/COMMS.md` (30 Sep 2026). Long-term growth (factory upgrades, town development, the Economy research branch) is described in `docs/ECONOMY.md` (30 Sep 2026).
+Automatic fog of war is proposed separately in `docs/FOG-OF-WAR.md` (29 Sep 2026). Heroes (generals, diplomats and spies) are described in `docs/HEROES.md`. Railways (drawn track, 4× movement, sabotage and repair) are described in `docs/RAILWAYS.md` (30 Sep 2026). Chat, the notification centre, trades between nations, GM pings and click-to-move with trails are described in `docs/COMMS.md` (30 Sep 2026). Long-term growth (factory upgrades, town development, the Economy research branch) is described in `docs/ECONOMY.md` (30 Sep 2026). Supply, support units and unit matchups are described in `docs/UNITS.md` (30 Sep 2026).
 
 Non-goals for this design: AI opponents, supply lines, terrain and weather modifiers, naval pathfinding,
 trade routes as map objects. Each could be a later layer.

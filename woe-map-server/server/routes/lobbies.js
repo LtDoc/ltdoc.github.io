@@ -99,6 +99,7 @@ const q = {
 
 const MARKER_TYPES = ['unit', 'town', 'poi', 'player', 'scenery', 'resource', 'factory', 'hero'];
 const Heroes = require('../../public/js/heroes');
+const Matchups = require('../../public/js/matchups');
 const heroRules = require('../heroes');
 /** Hero fields only the GM (or the rules) may change: players move and command heroes, they do not rewrite them. */
 const PROTECTED_HERO_FIELDS = ['role', 'stars', 'perception', 'intelligence', 'movement', 'ap', 'nation', 'status', 'postedTo', 'travel', 'capturedBy', 'movedKm', 'apUsed', 'trail'];
@@ -763,6 +764,7 @@ function sanitizeData(type, data) {
       strength: clamp(num(d.strength, 100), 0, 100),
       movedKm: Math.max(0, num(d.movedKm)), apUsed: Math.max(0, num(d.apUsed)),   // game mode: used this turn
     });
+    if (d.supplied === false || d.supplied === true) out.supplied = d.supplied;   // set at End turn (docs/UNITS.md)
     if (Array.isArray(d.trail)) out.trail = cleanTrail(d.trail);
   } else if (type === 'resource') {
     out.kind = GameData.byKey[d.kind] ? d.kind : 'grain';
@@ -1429,12 +1431,22 @@ router.post('/:id/combat', (req, res) => {
   // Generals: the best general of each side within the aura adds to attack and defend.
   const allMarkers = q.markers.all(req.lobby.id).map(access.serializeMarker);
   const genA = heroRules.generalFor(req.lobby, g.settings, allMarkers, a), genD = heroRules.generalFor(req.lobby, g.settings, allMarkers, d);
-  const atk = num(a.data.attack) + bonusA.attack + (genA ? genA.bonus : 0), def = num(d.data.defend) + bonusD.defend + (cover ? cover.bonus : 0) + (genD ? genD.bonus : 0);
+  // Support units around each side (HQ, engineers, signals) and the matchup of the two types (docs/UNITS.md).
+  const supplyRules = require('../supply');
+  const friendsOf = supplyRules.friendsResolver(req.lobby);
+  const supA = g.enabled ? supplyRules.supportBonus(req.lobby, g.settings, allMarkers, a, friendsOf) : { attack: 0, defend: 0, notes: [] };
+  const supD = g.enabled ? supplyRules.supportBonus(req.lobby, g.settings, allMarkers, d, friendsOf) : { attack: 0, defend: 0, notes: [] };
+  const typeA = UnitTypes.resolve(a.data?.unitType), typeD = UnitTypes.resolve(d.data?.unitType);
+  const match = Matchups.matchup(typeA, typeD, { entrenched: !!cover });
+  const atk = num(a.data.attack) + bonusA.attack + (genA ? genA.bonus : 0) + supA.attack + match.mod;
+  const def = num(d.data.defend) + bonusD.defend + (cover ? cover.bonus : 0) + (genD ? genD.bonus : 0) + supD.defend;
+  // Cut off from supply, the defender breaks more easily: a successful attack does double damage.
+  const cutOffD = g.enabled && g.settings.supplyEnabled !== false && d.data?.supplied === false;
   const aRoll = crypto.randomInt(1, cfg.die + 1), dRoll = crypto.randomInt(1, cfg.die + 1);
   const aTotal = aRoll + atk, dTotal = dRoll + def;
   const margin = aTotal - dTotal;
   let aLoss, dLoss, outcome;
-  if (margin > 0) { dLoss = cfg.baseLoss + margin * cfg.marginMult; aLoss = cfg.winnerLoss; outcome = 'attacker'; }
+  if (margin > 0) { dLoss = (cfg.baseLoss + margin * cfg.marginMult) * (cutOffD ? 2 : 1); aLoss = cfg.winnerLoss; outcome = 'attacker'; }
   else if (margin < 0) { aLoss = cfg.baseLoss - margin * cfg.marginMult; dLoss = cfg.winnerLoss; outcome = 'defender'; }
   else { aLoss = dLoss = Math.ceil(cfg.baseLoss / 2); outcome = 'tie'; }
   aLoss = Math.round(aLoss); dLoss = Math.round(dLoss);
@@ -1461,6 +1473,9 @@ router.post('/:id/combat', (req, res) => {
   const fmt = (m, l) => `${m.name} ${l.loss ? `loses ${l.loss}% (${l.from}→${l.to}${l.to === 0 ? ', destroyed' : ''})` : 'is unharmed'}`;
   const notes = [bonusA.attack ? `attacker +${bonusA.attack} tech` : '', genA ? `attacker +${genA.bonus} ${genA.hero.name}` : '',
     bonusD.defend ? `defender +${bonusD.defend} tech` : '', genD ? `defender +${genD.bonus} ${genD.hero.name}` : '', cover ? `+${cover.bonus} trench cover` : '',
+    ...supA.notes.map(n => `attacker ${n}`), ...supD.notes.filter(n => !/spotting/.test(n)).map(n => `defender ${n}`), ...(supD.defendNotes || []).map(n => `defender ${n}`),
+    ...match.notes.map(n => `${n.mod > 0 ? '+' : ''}${n.mod} ${n.text}`),
+    cutOffD ? `${d.name} is out of supply${outcome === 'attacker' ? ': double losses' : ''}` : '',
     sparedA ? 'guns out of reach of the reply' : ''].filter(Boolean);
   const text = `⚔ ${a.name} attacked ${d.name}: ${aRoll}+${atk}=${aTotal} vs ${dRoll}+${def}=${dTotal}${notes.length ? ` (${notes.join(', ')})` : ''} → ` +
     (outcome === 'tie' ? 'stalemate. ' : outcome === 'attacker' ? 'attack succeeds. ' : 'attack repelled. ') +

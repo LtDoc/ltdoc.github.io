@@ -247,6 +247,40 @@
     $('#btnPing').hidden = state.role !== 'gm';
   }
 
+  // ---- Supply, support units and matchups (docs/UNITS.md) ----------------------------------------------
+  const supplyOn = () => gameOn() && state.game?.settings?.supplyEnabled !== false;
+  /** Cut off from supply (decided at End turn): cannot move or attack, double losses when beaten. */
+  function cutOff(m) { return !!m && m.type === 'unit' && supplyOn() && m.data?.supplied === false; }
+  const ENGINEER_IDS = ['engineers', 'pioneers', 'sappers'];
+  /** What a support unit does for those around it, with its reach in km (null for other units). */
+  function supportRole(m) {
+    const s = state.game?.settings || {}, id = window.UnitTypes?.resolve(m.data?.unitType)?.id, u = state.lobby?.scaleLabel || 'km';
+    if (id === 'supply') return { km: Number(s.supplyRangeKm ?? 80), text: `supplies friendly land units within ${s.supplyRangeKm ?? 80} ${u} when linked (within ${s.supplyLinkKm ?? 150} ${u} of a friendly town, railhead or linked column)` };
+    if (id === 'medical') return { km: Number(s.hospitalKm ?? 40), text: `heals friendly units within ${s.hospitalKm ?? 40} ${u} by ${s.hospitalHeal ?? 10}% each turn` };
+    if (id === 'hq') return { km: Number(s.hqKm ?? 40), text: `+${s.hqBonus ?? 1} attack and defend to friendly units within ${s.hqKm ?? 40} ${u}` };
+    if (ENGINEER_IDS.includes(id)) return { km: Number(s.engineerKm ?? 20), text: `+${s.engineerDefend ?? 1} defend to friendly units within ${s.engineerKm ?? 20} ${u}` };
+    if (id === 'signals') return { km: Number(s.signalsKm ?? 60), text: `+${s.signalsArtillery ?? 1} attack to friendly artillery within ${s.signalsKm ?? 60} ${u}` };
+    return null;
+  }
+  /** Popup rows: supply status, support role, and what the type is strong and weak against. */
+  function unitDoctrineRows(m) {
+    let rows = '';
+    const t = window.UnitTypes?.resolve(m.data?.unitType);
+    const land = !t || ['Infantry', 'Mounted & mobile', 'Artillery', 'Support'].includes(t.cat);
+    if (supplyOn() && land) {
+      rows += stat('Supply', m.data?.supplied === false ? 'OUT OF SUPPLY: cannot move or attack; double losses when beaten' : (m.data?.supplied === true ? 'supplied' : 'not yet worked out (End turn decides)'));
+    }
+    const role = supportRole(m);
+    if (role && gameOn()) rows += stat('Support', role.text + (m.data?.supplied === false ? ' (not while cut off)' : ''));
+    if (window.Matchups && t) {
+      const d = Matchups.describe(t);
+      if (d.strong.length || d.weak.length) {
+        rows += `<details class="sub matchups"><summary>Strengths and weaknesses</summary>${d.strong.map(x => `<div class="hint good">${esc(x)}</div>`).join('')}${d.weak.map(x => `<div class="hint bad">${esc(x)}</div>`).join('')}</details>`;
+      }
+    }
+    return rows;
+  }
+
   // ---- Click to move (game mode) ------------------------------------------------------------------
   // Select a unit or hero to see how far it can still go; click inside the ring (or on track it can reach)
   // to send it there. A selected group moves together, keeping its shape. The GM can still drag tokens.
@@ -257,6 +291,7 @@
   }
   renderer.dragAllowed = m => !(rulesOn() && MOVERS.includes(m.type)) || state.role === 'gm';
   function remainingFor(m) {
+    if (cutOff(m)) return 0;
     const km = Number(state.game?.settings?.kmPerMove) || 50;
     return Math.max(0, (Number(m.data?.movement) || 0) * km - (Number(m.data?.movedKm) || 0));
   }
@@ -289,6 +324,7 @@
   renderer.onMapClick = (x, y) => {
     if (state.placing || renderer.mode) return false;
     const ms = movers();
+    if (ms) { const c = ms.list.find(cutOff); if (c) { toast(`${c.name} is out of supply and cannot move until a Supply Column reaches it`); return false; } }
     if (!ms || !insideReach(ms, x, y)) return false;           // outside the ring: an ordinary click (deselect)
     if (ms.list.length === 1) commitMove({ id: ms.lead.id, x, y });
     else commitMove({ id: ms.lead.id, moves: ms.list.map(m => ({ id: m.id, x: m.x + (x - ms.lead.x), y: m.y + (y - ms.lead.y) })) });
@@ -1468,7 +1504,11 @@
     if (m && m.type === 'hero' && m.data?.role === 'general' && heroReady(m)) {
       const [rx, ry] = kmToWorld(m.x, m.y, Number(heroSettings().heroAuraKm ?? 60));
       renderer.showAura(m.x, m.y, rx, ry);
-    } else renderer.hideAura();
+      return;
+    }
+    const role = m && m.type === 'unit' && gameOn() ? supportRole(m) : null;
+    if (role && role.km > 0) { const [rx, ry] = kmToWorld(m.x, m.y, role.km); renderer.showAura(m.x, m.y, rx, ry); }
+    else renderer.hideAura();
   }
   function armHero() {
     if (state.placing?.hero) { disarmPlacing(); return; }
@@ -1501,6 +1541,7 @@
       if (cover) body += stat('Cover', `+${cover.bonus} defend (${esc(cover.trench.label || 'trench')})`);
       const gen = generalFor(m);
       if (gen) body += stat('General', `+${gen.bonus} attack and defend (${gen.hero.name})`);
+      body += unitDoctrineRows(m);
       if (d.abilities?.length) body += `<div class="stat"><span class="muted">Abilities</span></div><ul style="margin:2px 0 4px 16px;padding:0;font-size:12px">${d.abilities.map(a => `<li>${esc(a)}</li>`).join('')}</ul>`;
     } else if (m.type === 'town') {
       body += stat('Size', d.size) + nationStat(d.nation);
@@ -2142,6 +2183,13 @@
 
   // ---- Combat -------------------------------------------------------------------------------------------
   function openCombat(attacker) {
+    if (cutOff(attacker) && state.role !== 'gm') { toast(`${attacker.name} is out of supply and cannot attack`); return; }
+    const typeA = window.UnitTypes?.resolve(attacker.data?.unitType);
+    const matchText = m => {
+      if (!window.Matchups) return '';
+      const r = Matchups.matchup(typeA, window.UnitTypes?.resolve(m.data?.unitType), { entrenched: !!trenchCoverFor(m) });
+      return r.notes.length ? ` · ${r.mod > 0 ? '+' : ''}${r.mod} (${r.notes.map(n => n.text).join('; ')})` : '';
+    };
     // Only the other side's units: never the attacker's own nation, and never an ally while the game is on.
     const mine = String(attacker.data?.nation || '').toLowerCase();
     const myFaction = mine ? (state.factions || []).find(f => f.name.toLowerCase() === mine) : null;
@@ -2163,7 +2211,7 @@
     if (!targets.length && !railTargets.length) { toast(limited ? `No enemy units or railways within ${attacker.name}'s reach (${fmtNum(reach)} ${unitLabel})` : 'No enemy units to attack'); return; }
     $('#combatIntro').textContent = `${attacker.name} (attack ${attacker.data?.attack ?? 0}, strength ${attacker.data?.strength ?? 100}%${limited ? `, reach ${fmtNum(reach)} ${unitLabel}` : ''})`;
     const unitOpts = targets.map(({ m, d }) =>
-      `<option value="${m.id}">${esc(m.name)} — ${esc(m.data?.nation || 'Unaligned')}, defend ${m.data?.defend ?? 0}, strength ${m.data?.strength ?? 100}% (${fmtNum(d)} ${esc(state.lobby?.scaleLabel || '')} away)</option>`).join('');
+      `<option value="${m.id}">${esc(m.name)} — ${esc(m.data?.nation || 'Unaligned')}, defend ${m.data?.defend ?? 0}, strength ${m.data?.strength ?? 100}%${cutOff(m) ? ', out of supply' : ''} (${fmtNum(d)} ${esc(state.lobby?.scaleLabel || '')} away)${esc(matchText(m))}</option>`).join('');
     const railOpts = railTargets.map(t => `<option value="rail:${t.rail.id}:${t.x}:${t.y}">${t.own ? 'Blow up' : 'Cut'} ${esc(shapeName(t.rail))} ${esc(t.place)}${t.holder ? ` — ${esc(t.holder)}` : ''} (${fmtNum(t.d)} ${esc(state.lobby?.scaleLabel || '')} away)</option>`).join('');
     $('#combatTarget').innerHTML = (unitOpts && railOpts) ? `<optgroup label="Units">${unitOpts}</optgroup><optgroup label="Railways">${railOpts}</optgroup>` : (unitOpts || railOpts);
     const c = state.lobby?.settings?.combat || { die: 20, baseLoss: 10, marginMult: 2, winnerLoss: 5 };

@@ -31,6 +31,7 @@ const q = {
   resetUnits: db.prepare(`UPDATE markers SET data = json_remove(json_set(data, '$.movedKm', 0, '$.apUsed', 0), '$.trail'), updated_at = ? WHERE lobby_id = ? AND type IN ('unit', 'hero')`),
   clearReveals: db.prepare(`UPDATE markers SET data = json_remove(data, '$.revealTo'), updated_at = ? WHERE lobby_id = ? AND json_extract(data, '$.revealTo') IS NOT NULL`),
   setStrength: db.prepare(`UPDATE markers SET data = json_set(data, '$.strength', ?), updated_at = ? WHERE id = ?`),
+  setSupplied: db.prepare(`UPDATE markers SET data = json_set(data, '$.supplied', json(?)), updated_at = ? WHERE id = ?`),
   relations: db.prepare('SELECT * FROM relations WHERE lobby_id = ?'),
   relation: db.prepare('SELECT * FROM relations WHERE lobby_id = ? AND a = ? AND b = ?'),
   setRelation: db.prepare(`INSERT INTO relations (lobby_id, a, b, status, since_turn) VALUES (?, ?, ?, ?, ?)
@@ -378,6 +379,16 @@ function endTurn(lobby, hooks = {}) {
       const s = summaries.find(x => x.faction.id === hit.faction.id);
       if (s) s.data.shortages.push({ resource: hit.resource, units: hit.units });
     }
+    // Field hospitals heal damaged friendly units around them (docs/UNITS.md).
+    const supply = require('./supply');
+    for (const h of supply.healing(lobby, g.settings, markers)) {
+      q.setStrength.run(h.to, now(), h.unit.id);
+      h.unit.data.strength = h.to;
+      const s = summaries.find(x => x.faction.name.toLowerCase() === String(h.unit.data?.nation || '').toLowerCase());
+      if (s) (s.data.healed = s.data.healed || []).push({ name: h.unit.name, from: h.from, to: h.to, hospital: h.hospital.name });
+    }
+    // Supply for the coming turn, from where everything stands now (new units included).
+    if (g.settings.supplyEnabled !== false) applySupply(lobby, g.settings, summaries);
     q.resetUnits.run(now(), lobby.id);
     q.clearBattles.run(lobby.id, g.turn);   // gunfire and shelling last for the turn they happened in
     q.clearReveals.run(now(), lobby.id);   // spies' recon lasts until the end of the turn
@@ -389,11 +400,38 @@ function endTurn(lobby, hooks = {}) {
     save(g);
     // One report per faction, kept for the last 60 turns, for the turn report modal.
     for (const s of summaries) {
+      if (s.data.healed?.length) s.text += `, field hospitals restored ${s.data.healed.length} unit${s.data.healed.length === 1 ? '' : 's'}`;
+      if (s.data.unsupplied?.length) s.text += `, ${s.data.unsupplied.length} unit${s.data.unsupplied.length === 1 ? '' : 's'} out of supply (${s.data.unsupplied.slice(0, 6).join(', ')}${s.data.unsupplied.length > 6 ? ', …' : ''})`;
       q.insertReport.run(lobby.id, ended.turn, s.faction.id, JSON.stringify({ ...s.data, turn: ended.turn, date: ended.date, nextDate: g.date, text: s.text }), now());
     }
     q.pruneReports.run(lobby.id, ended.turn - 60);
   });
   return { game: get(lobby.id), summaries, shortages: strengthHits };
+}
+
+/**
+ * Work out supply for every land unit and store it on the marker (data.supplied), writing only changes.
+ * Optional `summaries` get each faction's list of cut-off units. Returns { supplied, unsupplied, changed }.
+ */
+function applySupply(lobby, settings, summaries) {
+  const markers = q.markers.all(lobby.id).map(access.serializeMarker);
+  const result = require('./supply').compute(lobby, settings, markers);
+  let supplied = 0, unsupplied = 0;
+  const changed = [];
+  for (const m of markers) {
+    const r = result.get(m.id);
+    if (!r) continue;
+    if (r.supplied) supplied++; else unsupplied++;
+    if ((m.data?.supplied !== false) !== r.supplied || m.data?.supplied === undefined) {
+      q.setSupplied.run(JSON.stringify(r.supplied), now(), m.id);
+      changed.push(m.id);
+    }
+    if (!r.supplied && summaries) {
+      const s = summaries.find(x => x.faction.name.toLowerCase() === String(m.data?.nation || '').toLowerCase());
+      if (s) (s.data.unsupplied = s.data.unsupplied || []).push(m.name);
+    }
+  }
+  return { supplied, unsupplied, changed };
 }
 
 /** Turn reports of one ended turn (the latest when turn is omitted): [{ turn, factionId, data }]. */
@@ -443,6 +481,7 @@ function checkMove(lobby, g, isGm, marker, x, y) {
     if (err) return { error: `${marker.name}: ${err}` };
   }
   if (!g.enabled || isGm || g.settings.waiveMovement || !['unit', 'hero'].includes(marker.type)) return { x, y, clamped: false };
+  if (marker.type === 'unit' && marker.data?.supplied === false && g.settings.supplyEnabled !== false) return { error: `${marker.name} is out of supply and cannot move until a Supply Column reaches it` };
   const dist = geo.distance(lobby, marker.x, marker.y, x, y);
   if (dist < 1e-6) return { x, y, clamped: false };
   const bonus = research.statBonus(factionEffects(lobby.id, marker.data?.nation), UnitTypes.resolve(marker.data?.unitType)).movement;
@@ -479,6 +518,7 @@ function checkRange(lobby, g, isGm, attacker, defender) {
 /** Whether a unit may attack this turn; returns an error string or null. */
 function checkAttack(g, isGm, marker) {
   if (!g.enabled || isGm) return null;
+  if (marker.data?.supplied === false && g.settings.supplyEnabled !== false) return `${marker.name} is out of supply and cannot attack`;
   const ap = num(marker.data.ap);
   if (ap <= 0) return `${marker.name} has no action points and cannot attack`;
   if (num(marker.data.apUsed) >= ap) return `${marker.name} has used its action points this turn`;
@@ -486,11 +526,11 @@ function checkAttack(g, isGm, marker) {
 }
 
 /** Fields a player may not change on their own unit while the game is running. */
-const PROTECTED_UNIT_FIELDS = ['attack', 'defend', 'ap', 'range', 'movement', 'strength', 'unitType', 'nation', 'movedKm', 'apUsed', 'trail'];
+const PROTECTED_UNIT_FIELDS = ['attack', 'defend', 'ap', 'range', 'movement', 'strength', 'unitType', 'nation', 'movedKm', 'apUsed', 'trail', 'supplied'];
 
 module.exports = {
   get, save, serializeGame, ensureState, serializeState, writeState, factionStates, incomeFor, endTurn, undoTurn, reports,
-  checkMove, checkAttack, checkRange, attackRange, PROTECTED_UNIT_FIELDS, emptyResources, q,
+  checkMove, checkAttack, checkRange, attackRange, PROTECTED_UNIT_FIELDS, emptyResources, q, applySupply,
   relationStatus, setRelation, relations, diplomacy, serializeDiplomacy, factionEffects,
   TRADE_KEYS, trades, serializeTrade, exchange, shortOf, goodsText, goodName, cancelTradesBetween,
 };

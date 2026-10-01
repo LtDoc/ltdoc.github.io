@@ -2113,6 +2113,7 @@ class MarkerView {
   _refreshMovedDot() {
     const rules = this.r.gameRules, m = this.marker;
     this._refreshCaptured(rules);
+    this._refreshSupply(rules);
     const moved = rules && rules.enabled && m.type === 'unit' ? Number(m.data?.movedKm) || 0 : 0;
     if (!moved) { if (this.movedDot) { this.movedDot.visible = false; } return; }
     if (!this.movedDot) { this.movedDot = new PIXI.Graphics(); this.movedDot.eventMode = 'none'; this.root.addChild(this.movedDot); }
@@ -2120,6 +2121,20 @@ class MarkerView {
     const spent = moved >= allowance - 0.01;
     this.movedDot.clear().circle(this.w / 2 - 1, -this.h / 2 + 3, 4).fill(spent ? 0xe74c3c : 0xf1c40f).stroke({ width: 1.2, color: 0x1e2b1a });
     this.movedDot.visible = true;
+  }
+
+  /** Game mode: a land unit cut off from supply carries a red no-entry badge and is dimmed a little. */
+  _refreshSupply(rules) {
+    const m = this.marker;
+    const cut = !!(rules && rules.enabled && rules.supply && m.type === 'unit' && m.data?.supplied === false);
+    if (this.body) this.body.alpha = cut ? 0.72 : 1;
+    if (!cut) { if (this.supplyBadge) this.supplyBadge.visible = false; return; }
+    if (!this.supplyBadge) { this.supplyBadge = new PIXI.Graphics(); this.supplyBadge.eventMode = 'none'; this.root.addChild(this.supplyBadge); }
+    const x = -this.w / 2 + 2, y = -this.h / 2 + 3;
+    this.supplyBadge.clear().circle(x, y, 5.5).fill(0xc0392b).stroke({ width: 1.3, color: 0x1e1e1e })
+      .rect(x - 3.2, y - 1, 6.4, 2).fill(0xffffff);
+    this.supplyBadge.visible = true;
+    this.r.invalidate();
   }
 
   /** Game mode: a place that changed hands this turn pulses a ring in its new owner's colour until the turn ends. */

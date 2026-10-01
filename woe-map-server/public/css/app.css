@@ -307,3 +307,8 @@ details.sub > summary .hint { text-transform: none; letter-spacing: 0; }
 .goods { display: grid; gap: 4px; margin: 4px 0; }
 .goodrow { display: grid; grid-template-columns: 1fr 90px auto; gap: 6px; align-items: center; }
 .goodrow select, .goodrow input { margin: 0; }
+
+/* Unit popup: strengths and weaknesses (docs/UNITS.md) */
+details.matchups { margin: 4px 0; }
+details.matchups .good { color: #82e0aa; }
+details.matchups .bad { color: #f5b7b1; }

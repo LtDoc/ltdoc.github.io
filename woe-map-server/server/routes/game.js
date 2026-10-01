@@ -683,7 +683,18 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     broadcastGame(req.lobby.id, saved);
     // Earth campaigns can set up the whole world (provinces, cities, resources) as the game starts.
     const setupError = on && req.body?.setup ? startSetup(req, req.body, true) : null;
+    // Everyone starts the game with supply worked out (End turn keeps it up to date).
+    if (on && saved.settings.supplyEnabled !== false) { const r = game.applySupply(req.lobby, saved.settings); if (r.changed.length) hub.broadcast(req.lobby.id, { type: 'reload', what: 'markers' }); }
     res.json({ game: saved, setupStarted: !!(on && req.body?.setup && !setupError), setupError });
+  });
+
+  /** GM: work out supply now (after setting up or moving many units), instead of waiting for End turn. */
+  router.post('/supply/recompute', requireGm, (req, res) => {
+    const g = game.get(req.lobby.id);
+    const r = game.applySupply(req.lobby, g.settings);
+    if (r.changed.length) hub.broadcast(req.lobby.id, { type: 'reload', what: 'markers' });
+    logEvent(req.lobby.id, req.user.id, 'system', `Supply recalculated: ${r.supplied} unit${r.supplied === 1 ? '' : 's'} supplied, ${r.unsupplied} cut off`);
+    res.json(r);
   });
 
   router.patch('/', requireGm, (req, res) => {
@@ -701,6 +712,8 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     if (b.settings && typeof b.settings === 'object') {
       const s = b.settings, out = {};
       const numIn = (k, lo, hi) => { if (s[k] !== undefined) out[k] = clamp(num(s[k], g.settings[k]), lo, hi); };
+      numIn('supplyTownKm', 0, 2000); numIn('supplyLinkKm', 0, 5000); numIn('supplyRangeKm', 0, 2000); numIn('hospitalKm', 0, 1000); numIn('hospitalHeal', 0, 100);
+      numIn('hqKm', 0, 1000); numIn('hqBonus', 0, 10); numIn('engineerKm', 0, 1000); numIn('engineerDefend', 0, 10); numIn('signalsKm', 0, 1000); numIn('signalsArtillery', 0, 10);
       numIn('railSpeed', 1, 50); numIn('railCutKm', 1, 500); numIn('railDefence', -10, 50); numIn('railGuardKm', 0, 1000); numIn('railRepairKm', 0, 1000); numIn('railJoinKm', 0, 200);
       numIn('heroAuraKm', 0, 5000); numIn('spySecurity', -10, 30); numIn('spyCounterKm', 0, 5000); numIn('spyStealPerStar', 0, 1000);
       numIn('kmPerMove', 1, 100000); numIn('kmPerRange', 1, 100000); numIn('captureRadiusKm', 1, 5000); numIn('cityRadiusKm', 1, 5000);
@@ -728,7 +741,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
         }
         out.unitCosts = cur;
       }
-      for (const k of ['waiveMovement', 'occupyNeutrals', 'upkeep', 'publicTreasury', 'capturedIdle', 'diplomatsRequired']) if (s[k] !== undefined) out[k] = !!s[k];
+      for (const k of ['waiveMovement', 'occupyNeutrals', 'upkeep', 'publicTreasury', 'capturedIdle', 'diplomatsRequired', 'supplyEnabled']) if (s[k] !== undefined) out[k] = !!s[k];
       for (const grp of ['cityIncome', 'factoryIncome', 'townDevIncome', 'startStock']) {
         if (s[grp] && typeof s[grp] === 'object') {
           out[grp] = {};
