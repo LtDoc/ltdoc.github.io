@@ -1366,6 +1366,8 @@
     $('#facId').value = f ? f.id : '';
     $('#facName').value = f ? f.name : '';
     $('#facColor').value = f ? f.color : PALETTE[state.factions.length % PALETTE.length];
+    $('#facUniform').value = f?.uniform || '';
+    $('#facUniform').options[0].textContent = `Automatic (${window.Skirmish ? window.Skirmish.uniformFor(f ? f.name : '', '') : 'from the name'})`;
     $('#facFlagAsset').value = f ? (f.flagAsset || '') : '';
     $('#facFlagFile').value = '';
     $('#facDelete').hidden = !f;
@@ -1397,7 +1399,7 @@
     e.preventDefault();
     const id = $('#facId').value;
     const file = $('#facFlagFile').files[0];
-    const body = { name: $('#facName').value, color: $('#facColor').value };
+    const body = { name: $('#facName').value, color: $('#facColor').value, uniform: $('#facUniform').value };
     const asset = $('#facFlagAsset').value;
     if (asset) body.flagAsset = asset;
     else if (!file && ($('#facFlagNone').dataset.cleared === '1' || !id)) body.flagAsset = null;

@@ -90,6 +90,15 @@ each rule that applied. "Entrenched" means the defender has trench cover.
 | Destroyers | submarines, torpedo boats | +3 |
 | Capital ships | destroyers, torpedo boats | −1 |
 
+## Riflemen in a firefight
+
+While an infantry unit (any type in the Infantry category: line infantry, conscripts, marines, machine-gunners…)
+is in a gunfire battle this turn, a squad of 8 soldiers holds its firing line on the map from 800 % zoom. Living
+soldiers = strength ÷ 12.5, rounded up (100 % → 8, 74 % → 6, 50 % → 4, 0 → none); the rest lie dead along the
+line. Uniforms: grey, beige or green per faction (chosen on the faction, else from its name), and the armoured
+assault kit for stormtroopers. Purely visual: nothing here changes combat. Code: `public/js/skirmish.js`, wired in
+by `MapRenderer._tickBattles`; atlas built by `scripts/build-soldiers.js`.
+
 ## Campaign rules
 
 Supply on/off · a place feeds a column within: capital (600 km), city (400 km), village (200 km) · column supplies

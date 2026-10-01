@@ -591,7 +591,17 @@ with muzzle flashes on each shot, a haze of powder smoke and dust where rounds l
 heading it was fired on while sections of the line sweep their aim along the enemy front, fire in bursts and
 lulls at their own cadence, and every 7–11 s loose a volley together; tracer speed, length and colour vary
 shot to shot. The defender's line fires back with about two thirds as many rifles and its own pattern; a side
-that has been destroyed or removed stops firing. Drawn (no sprites), visible from 800 % zoom.
+that has been destroyed or removed stops firing. Visible from 800 % zoom.
+**Riflemen** man an **infantry** unit's firing line (60 px ahead of its token): a squad of eight small soldiers
+that run out from the unit when the fight starts, aim at the enemy with a flash at each shot, and now and then
+get up and run along the line to a new spot. Each 12.5 % of strength lost leaves one dead on the line, falling one
+after another when a blow lands (at 50 %: four firing, four fallen); healing brings them back. Every nation's
+infantry wears one uniform: grey, beige (khaki) or green (olive), set on the faction (👥 People → faction →
+*Infantry uniform*) or, left on *Automatic*, guessed from its name so the 1914 sides stand apart (the Central
+Powers in grey; Britain, France and Belgium in khaki; Russia, Italy and the Americas in olive). Assault
+regiments (stormtroopers) wear the armoured kit whatever their nation. The figures come from
+`public/assets/soldiers.png`, cut from the soldier sheet by `node scripts/build-soldiers.js "rob assets/soldier+sprites.png"`
+(`public/js/skirmish.js`).
 **Artillery** (and ships) **shell** the target instead: bursts from `public/assets/shellburst.png` land at random
 around it every second or two. Each shell leaves the guns with a flash and climbs a slow arc (1–2.4 s, a bright
 shell with a fading trail over a faint dotted trajectory) to where it lands, so the line of fire is clear even

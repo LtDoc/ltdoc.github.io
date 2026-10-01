@@ -63,6 +63,7 @@ const q = {
   faction: db.prepare('SELECT * FROM factions WHERE id = ? AND lobby_id = ?'),
   insertFaction: db.prepare('INSERT INTO factions (lobby_id, name, color, flag_file, flag_asset, created_at) VALUES (?, ?, ?, ?, ?, ?)'),
   updateFaction: db.prepare('UPDATE factions SET name = ?, color = ?, flag_file = ?, flag_asset = ? WHERE id = ?'),
+  setFactionUniform: db.prepare('UPDATE factions SET uniform = ? WHERE id = ?'),
   deleteFaction: db.prepare('DELETE FROM factions WHERE id = ?'),
   factionFiles: db.prepare('SELECT flag_file FROM factions WHERE lobby_id = ? AND flag_file IS NOT NULL'),
   renameMemberNation: db.prepare('UPDATE lobby_members SET nation = ? WHERE lobby_id = ? AND nation = ? COLLATE NOCASE'),
@@ -652,6 +653,9 @@ router.get('/:id/factions', (req, res) => {
   res.json({ factions: q.factions.all(req.lobby.id).map(access.serializeFaction) });
 });
 
+/** Infantry uniforms for the battle figures ('' = chosen from the faction's name, public/js/skirmish.js). */
+const UNIFORMS = ['grey', 'beige', 'green'];
+
 function factionFlagAsset(v) {
   if (v === undefined) return undefined;
   if (v === null || v === '') return null;
@@ -669,6 +673,7 @@ router.post('/:id/factions', requireGm, (req, res) => {
   let id;
   try { id = q.insertFaction.run(req.lobby.id, name, color, null, asset || null, now()).lastInsertRowid; }
   catch (e) { if (/UNIQUE/.test(String(e.message))) return res.status(409).json({ error: 'A faction with that name already exists' }); throw e; }
+  if (UNIFORMS.includes(b.uniform)) q.setFactionUniform.run(b.uniform, id);
   hub.broadcast(req.lobby.id, { type: 'factions' });
   res.status(201).json({ faction: access.serializeFaction(q.faction.get(id, req.lobby.id)) });
 });
@@ -701,6 +706,7 @@ router.patch('/:id/factions/:fid', requireGm, (req, res) => {
   }
   try { q.updateFaction.run(name, color, flagFile, flagAsset, row.id); }
   catch (e) { if (/UNIQUE/.test(String(e.message))) return res.status(409).json({ error: 'A faction with that name already exists' }); throw e; }
+  if (b.uniform !== undefined) q.setFactionUniform.run(UNIFORMS.includes(b.uniform) ? b.uniform : '', row.id);
   if (name !== row.name) renameNation(req.lobby.id, row.name, name);
   hub.refreshRoles(req.lobby.id);
   hub.broadcast(req.lobby.id, { type: 'factions' });

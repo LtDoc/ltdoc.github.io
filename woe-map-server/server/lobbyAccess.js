@@ -146,6 +146,7 @@ function serializeFaction(row) {
     id: row.id, name: row.name, color: row.color,
     flagUrl: row.flag_file ? `/uploads/${row.flag_file}` : (row.flag_asset ? `/flags/${encodeURIComponent(row.flag_asset)}` : null),
     flagAsset: row.flag_asset || null,
+    uniform: row.uniform || '',
   };
 }
 

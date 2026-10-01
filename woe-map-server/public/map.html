@@ -372,6 +372,9 @@
         <div class="grid2">
           <label>Name<input id="facName" maxlength="60" required autocomplete="off" placeholder="e.g. German Empire"></label>
           <label>Colour <span class="hint">(default for its units)</span><input id="facColor" type="color" value="#3498db"></label>
+          <label>Infantry uniform <span class="hint">(riflemen in battles)</span><select id="facUniform">
+            <option value="">Automatic (from the name)</option><option value="grey">Grey</option><option value="beige">Beige (khaki)</option><option value="green">Green (olive)</option>
+          </select></label>
         </div>
         <div class="section">Flag</div>
         <div class="row" style="align-items:flex-start">
@@ -709,6 +712,7 @@
   <script src="/js/rail.js"></script>
   <script src="/js/comms.js"></script>
   <script src="/js/matchups.js"></script>
+  <script src="/js/skirmish.js"></script>
   <script src="/js/map-renderer.js"></script>
   <script src="/js/map.js"></script>
 </body>

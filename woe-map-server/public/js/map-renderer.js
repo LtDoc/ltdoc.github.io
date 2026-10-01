@@ -116,7 +116,8 @@ class MapRenderer extends EventTarget {
     this.handleLayer = new PIXI.Container();
     this.unitDots = new PIXI.Graphics();          // zoomed out on the Earth map: one dot per unit instead of its icon
     this.unitDots.eventMode = 'none';
-    this.world.addChild(this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.craterLayer, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.gunG, this.unitDots, this.markerLayer, this.boomLayer, this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
+    this.skirmish = window.Skirmish ? new window.Skirmish(this) : null;   // riflemen on infantry firing lines (skirmish.js)
+    this.world.addChild(...[this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.craterLayer, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.skirmish?.layer, this.gunG, this.unitDots].filter(Boolean), this.markerLayer, this.boomLayer, this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
     app.stage.addChild(this.world, this.pingArrows);
 
     app.stage.eventMode = 'static';
@@ -448,6 +449,9 @@ class MapRenderer extends EventTarget {
       this.views.set(marker.id, v);
       this._layerFor(marker).addChild(v.root);
     } else {
+      // A unit that just lost strength: its riflemen fall on screen rather than appearing already dead.
+      const was = Number(v.marker?.data?.strength ?? 100), now = Number(marker.data?.strength ?? 100);
+      if (marker.type === 'unit' && now < was) v.strengthDrop = { from: was, at: performance.now() };
       v.update(marker);
       const layer = this._layerFor(marker);
       if (v.root.parent !== layer) { v.root.parent?.removeChild(v.root); layer.addChild(v.root); }
@@ -984,6 +988,7 @@ class MapRenderer extends EventTarget {
   /** Faction colours and names for territory fills; call before setTerritories and whenever factions change. */
   setFactionInfo(list) {
     this.factionInfo = new Map(list.map(f => [f.id, { color: parseInt(String(f.color || '#888888').slice(1), 16) || 0x888888, name: f.name }]));
+    this.skirmish?.setFactions(list);
     for (const v of this.territoryViews.values()) this._drawTerritory(v);
     if (this.provinceLayer) this.provinceLayer.setFactionInfo(list);
   }
@@ -1245,7 +1250,8 @@ class MapRenderer extends EventTarget {
     const g = this.gunG, s = this.scale;
     g.clear();
     this._drawShells(nowMs);
-    if (!this.battles.size) return false;
+    const sk = this.skirmish, fronts = new Map(), keep = new Set();
+    if (!this.battles.size) { if (sk && sk.squads.size) sk.clear(); return false; }
     let anim = false;
     const t = nowMs / 1000;
     const gunZoom = s >= 8;
@@ -1259,13 +1265,27 @@ class MapRenderer extends EventTarget {
       const ux = (dx - ax) / L, uy = (dy - ay) / L, nx = -uy, ny = ux;
       const margin = 60 / s;
       if (b.kind === 'gunfire') {
+        keep.add(b.attackerId); keep.add(b.defenderId);
         if (!gunZoom || !(onScreen(ax, ay, margin * 3) || onScreen(dx, dy, margin * 3) || onScreen((ax + dx) / 2, (ay + dy) / 2, L / 2 + margin))) continue;
         anim = true;
         // The attacker's line opens fire; the defender's line answers, a little lighter, while it still stands.
         const live = id => { const v = this.views.get(id); return !v || (!v.dying && Number(v.marker.data?.strength ?? 100) > 0); };
         const aStands = !!this.views.get(b.attackerId) && live(b.attackerId), dStands = !!this.views.get(b.defenderId) && live(b.defenderId);
-        if (aStands) this._drawLineFire(g, ax, ay, dx, dy, e.seed, 1, t, s);
-        if (dStands) this._drawLineFire(g, dx, dy, ax, ay, e.seed + 7.77, 0.65, t, s);
+        // Infantry fights from a firing line a little ahead of its token, manned by a squad of riflemen.
+        const Av = this.views.get(b.attackerId), Dv = this.views.get(b.defenderId);
+        const squadA = !!sk && window.Skirmish.isInfantry(Av?.marker), squadD = !!sk && window.Skirmish.isInfantry(Dv?.marker);
+        const LINE = 60, pA = squadA ? LINE : 14, pD = squadD ? LINE : 14;
+        if (aStands) this._drawLineFire(g, ax, ay, dx, dy, e.seed, 1, t, s, pA, squadD ? LINE : 10);
+        if (dStands) this._drawLineFire(g, dx, dy, ax, ay, e.seed + 7.77, 0.65, t, s, pD, squadA ? LINE : 10);
+        const addFront = (id, view, x0, y0, x1, y1, px, otherPx) => {
+          if ((fronts.get(id)?.battleId ?? -1) > b.id) return;   // the unit's latest fight sets its line
+          const l = Math.hypot(x1 - x0, y1 - y0), r0 = Math.min(l * 0.3, px / s), r1 = Math.min(l * 0.3, otherPx / s);
+          const fux = (x1 - x0) / l, fuy = (y1 - y0) / l;
+          fronts.set(id, { battleId: b.id, view, cx: x0 + fux * r0, cy: y0 + fuy * r0, ux: fux, uy: fuy,
+            front: Math.max(80, Math.min(190, (l - r0 - r1) * s * 0.9)) / s, backPx: r0 * s, createdAt: b.createdAt });
+        };
+        if (squadA) addFront(b.attackerId, Av, ax, ay, dx, dy, pA, squadD ? LINE : 10);
+        if (squadD) addFront(b.defenderId, Dv, dx, dy, ax, ay, pD, squadA ? LINE : 10);
       } else {
         // Shelling: visible when the guns or the target are on screen (above 150 %). Each shell leaves the guns
         // with a flash, climbs a slow arc toward where it will land (so players can see where fire comes from),
@@ -1288,13 +1308,14 @@ class MapRenderer extends EventTarget {
         }
       }
     }
+    if (sk && sk.frame(fronts, keep, nowMs, s, g)) anim = true;
     return anim;
   }
   /**
    * One side's fire in a firefight, from (ax, ay) at (dx, dy). `intensity` (0..1) thins the line (return fire
    * is lighter than the attack); `seed` keeps each side's pattern its own.
    */
-  _drawLineFire(g, ax, ay, dx, dy, seed, intensity, t, s) {
+  _drawLineFire(g, ax, ay, dx, dy, seed, intensity, t, s, ownPx = 14, targetPx = 10) {
     const L = Math.hypot(dx - ax, dy - ay);
     if (L < 1e-6) return;
     const ux = (dx - ax) / L, uy = (dy - ay) / L, nx = -uy, ny = ux;
@@ -1302,10 +1323,10 @@ class MapRenderer extends EventTarget {
     // Every round is a shot fired at a moment in the past, so it keeps the heading it was fired on while the
     // sections of the line sweep their aim along the enemy's front, fire in bursts and lulls, and now and
     // then loose a volley together. Sizes are on screen so it reads at any zoom.
-    const r0 = Math.min(L * 0.25, 14 / s), r1 = Math.min(L * 0.25, 10 / s);
+    const r0 = Math.min(L * 0.3, ownPx / s), r1 = Math.min(L * 0.3, targetPx / s);   // own firing line, where rounds land
     const sx = ax + ux * r0, sy = ay + uy * r0, ex = dx - ux * r1, ey = dy - uy * r1;
     const span = Math.max(1e-6, Math.hypot(ex - sx, ey - sy));
-    const front = Math.max(70, Math.min(190, span * s * 0.9)) / s;      // own firing line (world units)
+    const front = Math.max(ownPx > 14 ? 80 : 70, Math.min(190, span * s * 0.9)) / s;      // own firing line (world units)
     const enemyFront = front * 0.75;
     const rifles = Math.max(6, Math.round(Math.max(10, Math.min(28, Math.round(front * s / 7))) * intensity));
     const sections = Math.max(2, Math.round(rifles / 7));
@@ -1706,7 +1727,7 @@ class MapRenderer extends EventTarget {
     const k = 1 - Math.pow(0.001, dt / 700); // movement easing
     let anim = this.fxLayer.children.length > 0 || this.boomLayer.children.length > 0;
     if (this._tickPings(nowMs)) anim = true;
-    if (this.battles.size || this.shellsInFlight.length) {
+    if (this.battles.size || this.shellsInFlight.length || this.skirmish?.squads.size) {
       const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
       if (this._tickBattles(nowMs, tl.x, tl.y, br.x, br.y)) anim = true;
       if (this.shellsInFlight.length) anim = true;
