@@ -26,6 +26,7 @@ const q = {
   updateState: db.prepare(`UPDATE faction_state SET resources = ?, money = ?, manpower = ?, rp = ?, techs = ?, research = ?,
     production = ?, mods = ?, updated_at = ? WHERE faction_id = ?`),
   markers: db.prepare('SELECT * FROM markers WHERE lobby_id = ?'),
+  clearBattles: db.prepare('DELETE FROM battles WHERE lobby_id = ? AND turn <= ?'),
   resetUnits: db.prepare(`UPDATE markers SET data = json_remove(json_set(data, '$.movedKm', 0, '$.apUsed', 0), '$.trail'), updated_at = ? WHERE lobby_id = ? AND type IN ('unit', 'hero')`),
   clearReveals: db.prepare(`UPDATE markers SET data = json_remove(data, '$.revealTo'), updated_at = ? WHERE lobby_id = ? AND json_extract(data, '$.revealTo') IS NOT NULL`),
   setStrength: db.prepare(`UPDATE markers SET data = json_set(data, '$.strength', ?), updated_at = ? WHERE id = ?`),
@@ -377,6 +378,7 @@ function endTurn(lobby, hooks = {}) {
       if (s) s.data.shortages.push({ resource: hit.resource, units: hit.units });
     }
     q.resetUnits.run(now(), lobby.id);
+    q.clearBattles.run(lobby.id, g.turn);   // gunfire and shelling last for the turn they happened in
     q.clearReveals.run(now(), lobby.id);   // spies' recon lasts until the end of the turn
     const ended = { turn: g.turn, date: g.date };
     g.turn += 1;

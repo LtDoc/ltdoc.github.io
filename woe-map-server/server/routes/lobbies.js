@@ -1365,6 +1365,22 @@ router.post('/:id/chat', (req, res) => {
   res.status(201).json({ event: logEvent(req.lobby.id, req.user.id, 'chat', message) });
 });
 
+// ---- Battle effects (gunfire, shelling) --------------------------------------------------------
+const qb = {
+  insert: db.prepare('INSERT INTO battles (lobby_id, turn, attacker_id, defender_id, kind, ax, ay, dx, dy, hidden, user_id, until_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+  one: db.prepare('SELECT * FROM battles WHERE id = ?'),
+  all: db.prepare('SELECT * FROM battles WHERE lobby_id = ? AND turn >= ? AND (until_ms IS NULL OR until_ms > ?) ORDER BY id DESC LIMIT 300'),
+};
+function serializeBattle(b) {
+  return { id: b.id, turn: b.turn, attackerId: b.attacker_id, defenderId: b.defender_id, kind: b.kind, ax: b.ax, ay: b.ay, dx: b.dx, dy: b.dy, until: b.until_ms, createdAt: b.created_at };
+}
+/** This turn's battles the viewer may see (hidden ones: the GM and the attacking player). */
+router.get('/:id/battles', (req, res) => {
+  const g = game.get(req.lobby.id);
+  const gm = req.lobbyRole === 'gm';
+  res.json({ battles: qb.all.all(req.lobby.id, g.turn, Date.now()).filter(b => gm || !b.hidden || b.user_id === req.user.id).map(serializeBattle) });
+});
+
 router.post('/:id/combat', (req, res) => {
   const v = viewerOf(req);
   const rows = [Number(req.body?.attackerId), Number(req.body?.defenderId)].map(id => q.marker.get(id, req.lobby.id));
@@ -1407,6 +1423,10 @@ router.post('/:id/combat', (req, res) => {
   else if (margin < 0) { aLoss = cfg.baseLoss - margin * cfg.marginMult; dLoss = cfg.winnerLoss; outcome = 'defender'; }
   else { aLoss = dLoss = Math.ceil(cfg.baseLoss / 2); outcome = 'tie'; }
   aLoss = Math.round(aLoss); dLoss = Math.round(dLoss);
+  // Artillery fires from range: a repelled or drawn bombardment costs the guns nothing.
+  const artilleryA = UnitTypes.resolve(a.data?.unitType)?.cat === 'Artillery';
+  const sparedA = artilleryA && outcome !== 'attacker' && aLoss > 0;
+  if (sparedA) aLoss = 0;
 
   const losses = {};
   const apply = (m, loss) => {
@@ -1425,7 +1445,8 @@ router.post('/:id/combat', (req, res) => {
 
   const fmt = (m, l) => `${m.name} ${l.loss ? `loses ${l.loss}% (${l.from}→${l.to}${l.to === 0 ? ', destroyed' : ''})` : 'is unharmed'}`;
   const notes = [bonusA.attack ? `attacker +${bonusA.attack} tech` : '', genA ? `attacker +${genA.bonus} ${genA.hero.name}` : '',
-    bonusD.defend ? `defender +${bonusD.defend} tech` : '', genD ? `defender +${genD.bonus} ${genD.hero.name}` : '', cover ? `+${cover.bonus} trench cover` : ''].filter(Boolean);
+    bonusD.defend ? `defender +${bonusD.defend} tech` : '', genD ? `defender +${genD.bonus} ${genD.hero.name}` : '', cover ? `+${cover.bonus} trench cover` : '',
+    sparedA ? 'guns out of reach of the reply' : ''].filter(Boolean);
   const text = `⚔ ${a.name} attacked ${d.name}: ${aRoll}+${atk}=${aTotal} vs ${dRoll}+${def}=${dTotal}${notes.length ? ` (${notes.join(', ')})` : ''} → ` +
     (outcome === 'tie' ? 'stalemate. ' : outcome === 'attacker' ? 'attack succeeds. ' : 'attack repelled. ') +
     `${fmt(d, losses[d.id])}; ${fmt(a, losses[a.id])}`;
@@ -1433,6 +1454,11 @@ router.post('/:id/combat', (req, res) => {
   const data = { attackerId: a.id, defenderId: d.id, aRoll, dRoll, aTotal, dTotal, margin, outcome, losses, hidden };
   const event = logEvent(req.lobby.id, req.user.id, 'combat', text, data,
     hidden ? (ws => ws.lobbyRole === 'gm' || ws.user.id === req.user.id) : null);
+  // The fight stays on the map for the rest of the turn: gunfire between the two, or shells around the target.
+  const catA = UnitTypes.resolve(a.data?.unitType)?.cat;
+  const kind = catA === 'Artillery' || catA === 'Naval' ? 'shells' : 'gunfire';
+  const bid = qb.insert.run(req.lobby.id, g.turn, a.id, d.id, kind, a.x, a.y, d.x, d.y, hidden ? 1 : 0, req.user.id, g.enabled ? null : Date.now() + 5 * 60000, now()).lastInsertRowid;
+  hub.broadcast(req.lobby.id, { type: 'battle', battle: serializeBattle(qb.one.get(bid)) }, hidden ? (ws => ws.lobbyRole === 'gm' || ws.user.id === req.user.id) : null);
   res.status(201).json({ event });
 });
 

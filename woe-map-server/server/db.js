@@ -235,6 +235,22 @@ CREATE TABLE IF NOT EXISTS techs (
   UNIQUE (lobby_id, key)
 );
 
+-- Battle effects on the map (gunfire, shelling) for the rest of the turn; End turn clears them.
+CREATE TABLE IF NOT EXISTS battles (
+  id          INTEGER PRIMARY KEY,
+  lobby_id    INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  turn        INTEGER NOT NULL,
+  attacker_id INTEGER NOT NULL,
+  defender_id INTEGER NOT NULL,
+  kind        TEXT NOT NULL,                       -- gunfire | shells
+  ax REAL NOT NULL, ay REAL NOT NULL, dx REAL NOT NULL, dy REAL NOT NULL,   -- where both stood (if one is removed)
+  hidden      INTEGER NOT NULL DEFAULT 0,          -- like the combat log line: GM and the attacker's player only
+  user_id     INTEGER,
+  until_ms    INTEGER,                             -- outside game mode there are no turns: effects expire
+  created_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_battles_lobby ON battles(lobby_id, turn);
+
 -- Bundled tech additions already merged into a campaign's tree (server/research.js PATCHES).
 CREATE TABLE IF NOT EXISTS tree_patches (
   lobby_id   INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,

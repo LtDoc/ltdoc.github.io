@@ -15,6 +15,13 @@
  * dragend {id,x,y}, zoom {scale}, measure {px,points}|null, drawprogress {kind,points}|null,
  * drawend {kind,points}, frame.
  */
+/** Slice a sprite sheet laid out as one row of square frames. */
+function rowFrames(tex) {
+  const fw = tex.height, n = Math.max(1, Math.round(tex.width / fw)), out = [];
+  for (let i = 0; i < n; i++) out.push(new PIXI.Texture({ source: tex.source, frame: new PIXI.Rectangle(i * fw, 0, fw, tex.height) }));
+  return out;
+}
+
 class MapRenderer extends EventTarget {
   constructor(container) {
     super();
@@ -91,11 +98,14 @@ class MapRenderer extends EventTarget {
     this.markerLayer = new PIXI.Container();
     this.markerLayer.sortableChildren = true;
     this.boomLayer = new PIXI.Container();     // explosions, above the markers
+    this.gunG = new PIXI.Graphics();             // this turn's gunfire (tracers, muzzle flashes, impacts), under the tokens
+    this.gunG.eventMode = 'none';
+    this.battles = new Map();                    // id -> { battle, nextShell }
     this.overlayLayer = new PIXI.Container();
     this.handleLayer = new PIXI.Container();
     this.unitDots = new PIXI.Graphics();          // zoomed out on the Earth map: one dot per unit instead of its icon
     this.unitDots.eventMode = 'none';
-    this.world.addChild(this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.unitDots, this.markerLayer, this.boomLayer, this.overlayLayer, this.pingLayer, this.handleLayer);
+    this.world.addChild(this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.gunG, this.unitDots, this.markerLayer, this.boomLayer, this.overlayLayer, this.pingLayer, this.handleLayer);
     app.stage.addChild(this.world, this.pingArrows);
 
     app.stage.eventMode = 'static';
@@ -117,6 +127,7 @@ class MapRenderer extends EventTarget {
     const type = app.renderer.type;
     this.rendererType = type === PIXI.RendererType.WEBGPU ? 'webgpu' : (type === PIXI.RendererType.WEBGL ? 'webgl' : 'canvas');
     this._loadExplosion();
+    this._loadShellBurst();
     this._loadBurning();
   }
 
@@ -144,36 +155,39 @@ class MapRenderer extends EventTarget {
   /** Slice the 4×4 explosion sprite sheet into animation frames (loaded in the background). */
   async _loadExplosion() {
     try {
-      const tex = await PIXI.Assets.load({ src: '/assets/explosion.png', loadParser: 'loadTextures' });
-      const cols = 4, rows = 4, fw = tex.width / cols, fh = tex.height / rows;
-      const frames = [];
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          frames.push(new PIXI.Texture({ source: tex.source, frame: new PIXI.Rectangle(c * fw, r * fh, fw, fh) }));
-        }
-      }
-      this.explosionFrames = frames;
-      this.explosionFrameSize = fw;
+      const tex = await PIXI.Assets.load({ src: '/assets/explosion.png?v=2', loadParser: 'loadTextures' });
+      this.explosionFrames = rowFrames(tex);   // 8 frames of 128 px in one row
+      this.explosionFrameSize = tex.height;
     } catch (e) {
       console.warn('Explosion sprite sheet not available; using the drawn burst instead', e);
     }
   }
 
-  /** Play an explosion at a world position with a given on-screen size in px. */
-  explode(x, y, screenSize = 72, delayMs = 0) {
+  /** Shell bursts for artillery fire (one row of square frames). */
+  async _loadShellBurst() {
+    try {
+      const tex = await PIXI.Assets.load({ src: '/assets/shellburst.png?v=1', loadParser: 'loadTextures' });
+      this.shellFrames = rowFrames(tex);
+    } catch (e) { console.warn('Shell burst sprite sheet not available', e); }
+  }
+
+  /** Play an explosion at a world position with a given on-screen size in px. `frames` defaults to the explosion sheet. */
+  explode(x, y, screenSize = 72, delayMs = 0, frames = null) {
     this.invalidate();
-    if (!this.explosionFrames) return false;
-    const sp = new PIXI.AnimatedSprite(this.explosionFrames);
+    frames = frames || this.explosionFrames;
+    if (!frames) return false;
+    const sp = new PIXI.AnimatedSprite(frames);
     sp.anchor.set(0.5);
     sp.loop = false;
-    sp.animationSpeed = 0.42;                 // ~16 frames in about 0.65 s at 60 fps
+    sp.animationSpeed = frames.length <= 8 ? 0.2 : 0.42;   // about 0.6 s whatever the sheet
     sp.position.set(x, y + 2);
-    sp.rotation = Math.random() * Math.PI * 2;
+    sp.rotation = frames === this.explosionFrames ? Math.random() * Math.PI * 2 : 0;   // shell bursts stay upright
     sp.screenSize = screenSize;
     sp.life = 4000;                           // safety net; onComplete ends it
     sp.onComplete = () => { sp.life = 0; };
     sp.visible = delayMs === 0;
-    sp.scale.set(screenSize / this.explosionFrameSize / this.scale);
+    sp.frameSize = frames[0].frame.height;
+    sp.scale.set(screenSize / sp.frameSize / this.scale);
     this.boomLayer.addChild(sp);
     if (delayMs > 0) setTimeout(() => { if (!sp.destroyed) { sp.visible = true; sp.play(); this.invalidate(); } }, delayMs);
     else sp.play();
@@ -1093,6 +1107,95 @@ class MapRenderer extends EventTarget {
   /** Coalesce trail redraws (many marker updates arrive together after End turn or a group move). */
   queueTrails() { if (!this._trailTimer) this._trailTimer = setTimeout(() => this.redrawTrails(), 30); }
 
+  // ---- Battles (this turn's gunfire and shelling) ---------------------------------------------
+  /** Replace the battles shown (from GET /battles). */
+  setBattles(list) { this.battles.clear(); for (const b of list || []) this.addBattle(b); this.invalidate(); }
+  addBattle(b) {
+    if (b.until && b.until <= Date.now()) return;
+    this.battles.set(b.id, { battle: b, nextShell: performance.now() + Math.random() * 400, seed: (b.id * 9301 + 49297) % 233280 });
+    this.invalidate();
+  }
+  /** Where each side is now (live token if still on the map, else where it stood). */
+  _battleEnds(b) {
+    const A = this.views.get(b.attackerId), D = this.views.get(b.defenderId);
+    return { ax: A && !A.dying ? A.x : b.ax, ay: A && !A.dying ? A.y : b.ay, dx: D && !D.dying ? D.x : b.dx, dy: D && !D.dying ? D.y : b.dy };
+  }
+  /**
+   * Animate battles. Gunfire (from 800 % zoom): tracers stream from the attacker to the target, with muzzle
+   * flashes at the firing line and dust where rounds land. Shelling: bursts from the shell sheet land at random
+   * around the target, each after a flash at the guns. Returns true while anything on screen animates.
+   */
+  _tickBattles(nowMs, vx0, vy0, vx1, vy1) {
+    const g = this.gunG, s = this.scale;
+    g.clear();
+    if (!this.battles.size) return false;
+    let anim = false;
+    const t = nowMs / 1000;
+    const gunZoom = s >= 8;
+    const onScreen = (x, y, m) => x > vx0 - m && x < vx1 + m && y > vy0 - m && y < vy1 + m;
+    for (const [id, e] of this.battles) {
+      const b = e.battle;
+      if (b.until && b.until <= Date.now()) { this.battles.delete(id); continue; }
+      const { ax, ay, dx, dy } = this._battleEnds(b);
+      const L = Math.hypot(dx - ax, dy - ay);
+      if (L < 1e-6) continue;
+      const ux = (dx - ax) / L, uy = (dy - ay) / L, nx = -uy, ny = ux;
+      const margin = 60 / s;
+      if (b.kind === 'gunfire') {
+        if (!gunZoom || !(onScreen(ax, ay, margin) || onScreen(dx, dy, margin) || onScreen((ax + dx) / 2, (ay + dy) / 2, L / 2))) continue;
+        anim = true;
+        // Fire leaves the attacker's line a little ahead of its token and stops short of the target.
+        const r0 = Math.min(L * 0.3, 16 / s), r1 = Math.min(L * 0.3, 12 / s);
+        const sx = ax + ux * r0, sy = ay + uy * r0, ex = dx - ux * r1, ey = dy - uy * r1;
+        const span = Math.max(1e-6, Math.hypot(ex - sx, ey - sy));
+        const n = Math.max(4, Math.min(16, Math.round(span * s / 28)));
+        const speed = 420 / s;                                   // world units per second (screen-constant)
+        const seg = 13 / s, w = 2 / s;
+        for (let i = 0; i < n; i++) {
+          const k = (e.seed + i * 7919) % 1000 / 1000;          // stable per tracer
+          const lat = (k - 0.5) * 14 / s;                        // spread along the firing line
+          const p = ((t * speed / span) + i / n + k * 0.37) % 1;
+          const px = sx + (ex - sx) * p + nx * lat * (1 - p * 0.6), py = sy + (ey - sy) * p + ny * lat * (1 - p * 0.6);
+          g.moveTo(px, py).lineTo(px + ux * seg, py + uy * seg).stroke({ width: w * 2.6, color: 0xffb347, alpha: 0.25 });   // glow
+          g.moveTo(px, py).lineTo(px + ux * seg, py + uy * seg).stroke({ width: w, color: 0xfff0a0, alpha: 0.95 });
+          // Muzzle flash at the firing line, flickering.
+          if (Math.sin(t * 23 + i * 2.1) > 0.55) {
+            const mx = sx + nx * lat, my = sy + ny * lat, f = 4 / s;
+            g.poly([mx + ux * f * 1.8, my + uy * f * 1.8, mx + nx * f * 0.6, my + ny * f * 0.6, mx - nx * f * 0.6, my - ny * f * 0.6]).fill({ color: 0xfff3b0, alpha: 0.95 });
+          }
+          // Dust where the rounds land.
+          const q = (t * 1.7 + k) % 1;
+          if (q < 0.5) {
+            const ix = ex + nx * lat * 0.5 + ux * (q * 3 / s), iy = ey + ny * lat * 0.5 + uy * (q * 3 / s);
+            g.circle(ix, iy, (1.5 + q * 5) / s).fill({ color: 0xd8d2c4, alpha: 0.55 * (1 - q * 2) });
+          }
+        }
+      } else {
+        // Shelling: visible wherever the target token is (above 100 %), bursts at random around it.
+        if (s < 1.5 || !onScreen(dx, dy, margin)) continue;
+        anim = true;
+        if (nowMs >= e.nextShell && this.shellFrames) {
+          const a = Math.random() * Math.PI * 2, r = (14 + Math.random() * 40) / s;
+          const bx = dx + Math.cos(a) * r, by = dy + Math.sin(a) * r * 0.75;
+          const delay = onScreen(ax, ay, margin) && s >= 4 ? 280 : 0;
+          if (delay) this._gunFlash(ax + ux * 12 / s, ay + uy * 12 / s, ux, uy);
+          this.explode(bx, by, 80 + Math.random() * 60, delay, this.shellFrames);
+          e.nextShell = nowMs + 700 + Math.random() * 1500;
+        }
+      }
+    }
+    return anim;
+  }
+  /** A short flash at the guns, pointing at the target. */
+  _gunFlash(x, y, ux, uy) {
+    const g = new PIXI.Graphics(), nx = -uy, ny = ux, f = 10;
+    g.poly([ux * f * 2.2, uy * f * 2.2, nx * f * 0.7, ny * f * 0.7, -ux * f * 0.3, -uy * f * 0.3, -nx * f * 0.7, -ny * f * 0.7]).fill({ color: 0xfff1a8, alpha: 0.95 });
+    g.circle(ux * f * 0.6, uy * f * 0.6, f * 0.55).fill({ color: 0xffffff, alpha: 0.9 });
+    g.position.set(x, y); g.scale.set(1 / this.scale);
+    g.life = 160; g.flash = true;
+    this.fxLayer.addChild(g);
+  }
+
   // ---- GM pings -----------------------------------------------------------------------
   /** Show a ping until ping.until: a pin with pulsing rings, plus an arrow at the screen edge when it is off screen. */
   addPing(ping) {
@@ -1342,6 +1445,10 @@ class MapRenderer extends EventTarget {
     const k = 1 - Math.pow(0.001, dt / 700); // movement easing
     let anim = this.fxLayer.children.length > 0 || this.boomLayer.children.length > 0;
     if (this._tickPings(nowMs)) anim = true;
+    if (this.battles.size) {
+      const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
+      if (this._tickBattles(nowMs, tl.x, tl.y, br.x, br.y)) anim = true;
+    }
     if (this.railLayer.children.length) {
       const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
       const vx0 = tl.x, vy0 = tl.y, vx1 = br.x, vy1 = br.y;
@@ -1455,8 +1562,9 @@ class MapRenderer extends EventTarget {
     for (const layer of [this.fxLayer, this.boomLayer]) {
       for (const fx of [...layer.children]) {
         fx.life -= dt;
-        if (fx.screenSize) { fx.scale.set(fx.screenSize / this.explosionFrameSize * inv); }
+        if (fx.screenSize) { fx.scale.set(fx.screenSize / (fx.frameSize || this.explosionFrameSize) * inv); }
         else if (fx.pulse) { const p = 1 - fx.life / 700; fx.scale.set((1 + p * 3) * inv); fx.alpha = 1 - p; }
+        else if (fx.flash) { fx.scale.set(inv); fx.alpha = Math.max(0, fx.life / 160); }
         else fx.alpha = Math.min(1, fx.life / 900);
         if (fx.life <= 0) { layer.removeChild(fx); fx.destroy(); }
       }

@@ -539,8 +539,22 @@ extra per point* of strength, the winner loses the *winner's loss*, ties cost bo
 sprite plays over them (bigger, with two follow-up blasts, when a unit is destroyed), and the strength changes
 are ordinary history entries, so a bad fight can be reverted. A unit at zero strength is greyed out and burns
 with a looping fire-and-smoke sprite until a GM deletes it or restores its strength (an edit or a revert both
-work). The sheets are `public/assets/explosion.png` (4×4 frames of 64 px) and `public/assets/burning.webp`
-(8×8 frames of 128 px); swap in any sheet with the same layout to restyle them.
+work).
+
+**Artillery** firing from range takes no losses when its attack is repelled or ends in a stalemate (the log
+notes "guns out of reach of the reply"); it still takes the winner's loss when it wins.
+
+**Battles stay on the map for the turn.** Every attack is recorded until End turn (`battles` table,
+`GET /api/lobbies/:id/battles`, WebSocket `battle`; hidden fights only for the GM and the attacking player).
+Infantry and other direct-fire attackers show **gunfire**: tracers streaming from the attacker to its target,
+muzzle flashes along the firing line and dust where rounds land, drawn (no sprites) and visible from 800 % zoom.
+**Artillery** (and ships) **shell** the target instead: bursts from `public/assets/shellburst.png` land at random
+around it every second or two, each after a flash at the guns pointing at the target. Both follow the units if
+they move and sleep when off screen. Outside game mode, where there are no turns, they last five minutes.
+
+The sheets are `public/assets/explosion.png` (hits: one row of 8 frames of 128 px), `public/assets/shellburst.png`
+(shelling: one row of 7 frames of 128 px) and `public/assets/burning.webp` (8×8 frames of 128 px); any sheet of
+square frames in one row can replace the first two.
 
 ### Chat, notifications, trades and pings
 
