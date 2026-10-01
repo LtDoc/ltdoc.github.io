@@ -145,6 +145,13 @@ Every marker and drawing has two visibility controls, set by the GM:
 The server applies these rules to the initial load, every WebSocket push, live drag previews, history entries and
 combat reports, so a restricted item never reaches a browser that may not show it.
 
+**View as player (GM).** The 👁 button in the top bar lets a GM use a tab as one nation's player: they see only
+what that player sees (the same markers, treasuries, diplomacy, trades and log) and play by the player rules (moves
+limited by movement and supply, attacks by action points and range, no GM panels or End turn). They command that
+nation's units and heroes, not everything they created. The tab shows a gold frame and "Viewing as …"; 👁 → *Game
+master view* switches back. It is per tab (`?as=<faction id>` in the address), so another tab can stay in the GM
+view. Details: `docs/UI.md`.
+
 ### Marker types
 
 - **Quick add (GM)**: the ➕ Place panel opens on a faction picker and a grid of every unit type drawn as a counter in
@@ -617,7 +624,8 @@ at the map.
 
 ### Real-time protocol
 
-Clients open `/ws` (authenticated by the session cookie) and send `{type:'join', lobbyId}`. The server pushes
+Clients open `/ws` (authenticated by the session cookie) and send `{type:'join', lobbyId}` (plus `viewAs`, a
+faction id, for a GM viewing as a player; REST calls carry it as the `X-View-As` header). The server pushes
 `marker` and `shape` (upsert/delete, filtered per viewer), `drag` (live preview while someone drags), `history`,
 `presence`, `event` (chat/system/roll/combat/announce), `members`, `lobby` (settings/map changed), `role`, `kicked`,
 `chatChannel` and `chatMessage` (private chats, members only), `tradesChanged`, `ping`.

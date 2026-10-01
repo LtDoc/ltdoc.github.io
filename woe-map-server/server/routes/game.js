@@ -947,7 +947,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const g = game.get(req.lobby.id);
     const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
     const hero = markers.find(m => m.id === Number(req.params.mid));
-    const viewer = { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '' };
+    const viewer = { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '', viewAs: req.viewAs?.id || null };
     if (!hero || hero.type !== 'hero' || !access.canSee(hero, viewer)) return res.status(404).json({ error: 'No such hero' });
     const gm = req.lobbyRole === 'gm', action = req.params.action, d = hero.data;
     const place = placeName(req, markers, hero.x, hero.y);
@@ -963,7 +963,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       return res.json({ ok: true, message: `${hero.name} is sent home` });
     }
 
-    if (!gm && hero.ownerId !== req.user.id) return res.status(403).json({ error: `Only the GM or ${hero.name}'s owner can give orders` });
+    if (!gm && !canEditMarker(req, hero)) return res.status(403).json({ error: `Only the GM or ${hero.name}'s owner can give orders` });
     if (d.status === 'captured') return res.status(409).json({ error: `${hero.name} has been captured` });
     if (d.status === 'travelling') return res.status(409).json({ error: `${hero.name} is travelling and arrives at the end of the turn` });
     const need = { recon: 'spy', steal: 'spy', hunt: 'spy', send: 'diplomat', recall: 'diplomat' }[action];
@@ -1076,7 +1076,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
   const crypto = require('node:crypto');
   const unitsLabel = req => geo.isEarth(req.lobby) ? 'km' : (req.lobby.scale_label || 'units');
   function railTarget(req, res) {
-    const viewer = { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '' };
+    const viewer = { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '', viewAs: req.viewAs?.id || null };
     const rail = shapeById(req, Number(req.body?.shapeId));
     if (!rail || rail.kind !== 'rail' || !access.canSee(rail, viewer)) { res.status(404).json({ error: 'No such railway' }); return null; }
     return rail;
@@ -1100,7 +1100,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const rail = railTarget(req, res);
     if (!rail) return;
     const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
-    const viewer = { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '' };
+    const viewer = { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '', viewAs: req.viewAs?.id || null };
     const unit = markers.find(m => m.id === Number(req.body?.unitId));
     if (!unit || !access.canSee(unit, viewer) || unit.type !== 'unit') return res.status(404).json({ error: 'Pick one of your units' });
     if (!canEditMarker(req, unit)) return res.status(403).json({ error: 'You can only attack with units you control' });
@@ -1169,7 +1169,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const place = placeName(req, markers, cut.x, cut.y);
     let who = 'The GM';
     if (!gm || req.body?.unitId) {
-      const viewer = { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '' };
+      const viewer = { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '', viewAs: req.viewAs?.id || null };
       const unit = markers.find(m => m.id === Number(req.body?.unitId));
       if (!unit || !access.canSee(unit, viewer) || !['unit', 'hero'].includes(unit.type)) return res.status(404).json({ error: 'Pick one of your units near the break' });
       if (!canEditMarker(req, unit)) return res.status(403).json({ error: 'You can only repair with units you control' });

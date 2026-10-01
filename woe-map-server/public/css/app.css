@@ -76,6 +76,23 @@ p { margin: 8px 0; }
 #presence .avatar.gm { border-color: var(--accent2); }
 .topactions { display: flex; gap: 4px; }
 .topactions button { font-size: 14px; padding: 4px 8px; }
+/* View as player (GM): the switch, its nation menu, and a gold frame round the map while it is on. */
+#viewAsWrap { position: relative; }
+#btnViewAs.viewing { background: var(--gold); color: #1a1206; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+#btnViewAs .flag { height: 14px; border-radius: 2px; }
+#viewAsMenu { position: absolute; top: calc(100% + 8px); right: 0; width: 300px; max-height: 70vh; overflow: auto; z-index: 20; padding-bottom: 4px;
+  background: var(--panel); border: 1px solid #46617a; border-radius: var(--radius); box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+#viewAsMenu .vhead { padding: 8px 12px; border-bottom: 1px solid #3d566e; font-size: 12px; color: var(--muted); }
+#viewAsMenu .vhead strong { display: block; color: var(--text); font-size: 13px; margin-bottom: 2px; }
+#viewAsMenu .vitem { display: flex; width: 100%; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 0; background: transparent; text-align: left; font-size: 13px; }
+#viewAsMenu .vitem:hover { background: var(--panel2); }
+#viewAsMenu .vitem.on { box-shadow: inset 3px 0 0 var(--gold); background: rgba(212,168,75,.1); }
+#viewAsMenu .vitem .flag { height: 14px; width: 21px; object-fit: cover; border-radius: 2px; }
+#viewAsMenu .vitem .vdot { width: 21px; height: 14px; border-radius: 2px; flex: none; }
+#viewAsMenu .vitem .hint { font-size: 11px; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#app.viewas #stagewrap::after { content: ''; position: absolute; inset: 0; border: 3px solid var(--gold); pointer-events: none; z-index: 6; }
+#app.viewas #stagewrap::before { content: attr(data-viewas); position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 6; pointer-events: none;
+  background: var(--gold); color: #1a1206; font-size: 12px; font-weight: 700; padding: 3px 12px; border-radius: 0 0 8px 8px; white-space: nowrap; top: 0; }
 
 /* Main menu rail */
 #rail { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 6px 4px;
@@ -510,6 +527,8 @@ details.matchups .bad { color: #f5b7b1; }
 }
 /* Phones (after the notification and chat rules they override) */
 @media (max-width: 760px) {
+  #btnViewAs .vname { display: none; }
+  #viewAsMenu { position: fixed; top: 52px; right: 8px; }
   #notifWrap { position: static; transform: none; flex: none; }
   #notifPanel { position: fixed; top: 52px; left: 50%; }
   #chatDock { bottom: 66px; right: 8px; }

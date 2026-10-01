@@ -13,7 +13,11 @@ function send(ws, msg) {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
 }
 
-function viewer(ws) { return { role: ws.lobbyRole, userId: ws.user.id, nation: ws.nation || '' }; }
+function viewer(ws) { return { role: ws.lobbyRole, userId: ws.user.id, nation: ws.nation || '', viewAs: ws.viewAs || null }; }
+/** Take on a viewer: a GM viewing as a nation is a player of it on this socket (presence still shows the GM). */
+function applyViewer(ws, v) {
+  ws.lobbyRole = v.role; ws.nation = v.nation; ws.viewAs = v.viewAs || null; ws.realRole = v.realRole || v.role;
+}
 
 function presence(lobbyId) {
   const set = rooms.get(Number(lobbyId));
@@ -21,7 +25,7 @@ function presence(lobbyId) {
   if (set) {
     for (const ws of set) {
       if (!seen.has(ws.user.id)) {
-        seen.set(ws.user.id, { id: ws.user.id, displayName: ws.user.displayName, role: ws.lobbyRole });
+        seen.set(ws.user.id, { id: ws.user.id, displayName: ws.user.displayName, role: ws.realRole || ws.lobbyRole });
       }
     }
   }
@@ -72,19 +76,19 @@ function leaveRoom(ws) {
   const set = rooms.get(ws.lobbyId);
   if (set) { set.delete(ws); if (set.size === 0) rooms.delete(ws.lobbyId); }
   const old = ws.lobbyId;
-  ws.lobbyId = null; ws.lobbyRole = null; ws.nation = '';
+  ws.lobbyId = null; ws.lobbyRole = null; ws.nation = ''; ws.viewAs = null; ws.realRole = null;
   broadcastPresence(old);
 }
 
-function joinRoom(ws, lobbyId) {
+function joinRoom(ws, lobbyId, viewAs) {
   const lobby = access.getLobby(lobbyId);
-  const v = access.viewerFor(lobby, ws.user);
+  const v = lobby && access.viewerFor(lobby, ws.user, viewAs);
   if (!lobby || !v) { send(ws, { type: 'error', error: 'Not a member of that campaign' }); return; }
   leaveRoom(ws);
-  ws.lobbyId = lobby.id; ws.lobbyRole = v.role; ws.nation = v.nation;
+  ws.lobbyId = lobby.id; applyViewer(ws, v);
   if (!rooms.has(lobby.id)) rooms.set(lobby.id, new Set());
   rooms.get(lobby.id).add(ws);
-  send(ws, { type: 'joined', lobbyId: lobby.id, role: v.role, users: presence(lobby.id) });
+  send(ws, { type: 'joined', lobbyId: lobby.id, role: v.role, viewAs: v.viewAs || null, users: presence(lobby.id) });
   broadcastPresence(lobby.id);
 }
 
@@ -93,7 +97,7 @@ function handleMessage(ws, raw) {
   try { msg = JSON.parse(raw); } catch { return; }
   if (!msg || typeof msg !== 'object') return;
   switch (msg.type) {
-    case 'join': return joinRoom(ws, Number(msg.lobbyId));
+    case 'join': return joinRoom(ws, Number(msg.lobbyId), msg.viewAs);
     case 'leave': return leaveRoom(ws);
     case 'ping': return send(ws, { type: 'pong', t: msg.t });
     case 'drag': {
@@ -104,7 +108,7 @@ function handleMessage(ws, raw) {
       const row = selectMarker.get(id, ws.lobbyId);
       if (!row) return;
       const m = access.serializeMarker(row);
-      if (ws.lobbyRole !== 'gm' && (m.ownerId !== ws.user.id || m.adminOnly)) return;
+      if (!access.canControl(m, viewer(ws))) return;
       broadcast(ws.lobbyId, { type: 'drag', id, x, y, userId: ws.user.id },
         other => other !== ws && access.canSee(m, viewer(other)));
       return;
@@ -156,11 +160,11 @@ function refreshRoles(lobbyId) {
   if (!set) return;
   const lobby = access.getLobby(lobbyId);
   for (const ws of [...set]) {
-    const v = access.viewerFor(lobby, ws.user);
+    const v = access.viewerFor(lobby, ws.user, ws.viewAs);
     if (!v) { leaveRoom(ws); send(ws, { type: 'kicked', lobbyId: Number(lobbyId) }); continue; }
-    const changed = v.role !== ws.lobbyRole || v.nation !== ws.nation;
-    ws.lobbyRole = v.role; ws.nation = v.nation;
-    if (changed) send(ws, { type: 'role', role: v.role, nation: v.nation });
+    const changed = v.role !== ws.lobbyRole || v.nation !== ws.nation || (v.viewAs || null) !== ws.viewAs;
+    applyViewer(ws, v);
+    if (changed) send(ws, { type: 'role', role: v.role, nation: v.nation, viewAs: v.viewAs || null });
   }
   broadcastPresence(Number(lobbyId));
 }

@@ -120,7 +120,7 @@ function clean(s, max) { return String(s ?? '').trim().slice(0, max); }
 function num(v, fallback = 0) { const n = Number(v); return Number.isFinite(n) ? n : fallback; }
 function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
 
-function viewerOf(req) { return { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '' }; }
+function viewerOf(req) { return { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '', viewAs: req.viewAs?.id || null }; }
 
 /** Accepts an array or comma-separated string of nation names; returns a JSON string or null. */
 function parseVisibleTo(v) {
@@ -243,6 +243,12 @@ router.param('id', (req, res, next, id) => {
   const role = access.getRole(lobby, req.user);
   if (!role) return res.status(403).json({ error: 'You are not a member of this campaign' });
   req.lobby = lobby; req.lobbyRole = role; req.member = access.getMember(lobby.id, req.user.id);
+  // "View as player": a GM's page sends X-View-As (a faction id) and is then served as that nation's player.
+  const as = access.viewAsFaction(lobby, role, req.get('x-view-as'));
+  if (as) {
+    req.viewAs = as; req.lobbyRole = 'player';
+    req.member = { ...(req.member || { lobby_id: lobby.id, user_id: req.user.id, color: as.color, joined_at: 0 }), role: 'player', nation: as.name };
+  }
   next();
 });
 
@@ -337,7 +343,10 @@ router.get('/:id', (req, res) => {
     members,
     you: {
       id: req.user.id, displayName: req.user.displayName, role: req.lobbyRole,
-      member: members.find(m => m.userId === req.user.id) || null,
+      member: req.viewAs ? { ...(members.find(m => m.userId === req.user.id) || { userId: req.user.id, displayName: req.user.displayName, color: req.viewAs.color }), role: 'player', nation: req.viewAs.name }
+        : members.find(m => m.userId === req.user.id) || null,
+      realRole: req.viewAs ? 'gm' : req.lobbyRole,
+      viewAs: req.viewAs ? access.serializeFaction(req.viewAs) : null,
     },
   });
 });
@@ -753,10 +762,7 @@ router.get('/:id/markers', (req, res) => {
   res.json({ markers: q.markers.all(req.lobby.id).map(access.serializeMarker).filter(m => access.canSee(m, v)) });
 });
 
-function canEditMarker(req, m) {
-  if (req.lobbyRole === 'gm') return true;
-  return m.ownerId === req.user.id && !m.adminOnly;
-}
+function canEditMarker(req, m) { return access.canControl(m, viewerOf(req)); }
 
 /** A trail: up to 120 [x, y] points. */
 function cleanTrail(raw) {

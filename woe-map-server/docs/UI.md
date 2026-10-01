@@ -24,7 +24,7 @@ Markup in `public/map.html`, layout in `public/css/app.css` ("Map app layout"), 
 - **← / campaign name / ready bar** (left). The ready bar shows each player nation's flag with a green ✓ once
   its player is done for the turn (`docs/COMMS.md`).
 - **🔔 notifications** (centre): diplomacy, wars and trades, with answers inline.
-- **People online, 🔊 alerts, ⚙ settings** (right; ⚙ for the GM).
+- **People online, 👁 view as player, 🔊 alerts, ⚙ settings** (right; 👁 and ⚙ for the GM).
 
 ## Nation bar (game mode)
 
@@ -72,6 +72,24 @@ on a left-click. × or `Esc` closes it.
 Turn number, date and the deadline countdown. The GM's button is **End turn** (it pulses once every nation is
 ready); a player's is **Ready up** / **✓ Ready**, the same switch as their flag in the ready bar. Underneath:
 how many nations are ready. 💬 Chat sits beside it.
+
+## View as player (👁, GM)
+
+The 👁 button opens a list of the nations (with who plays each) and *Game master view*. Picking a nation reloads the
+tab as that nation's player:
+
+- **What they see.** The server answers every request as that player (`X-View-As: <faction id>` on REST calls,
+  `viewAs` in the socket's join), so GM-only markers, items visible to other nations, other treasuries, other
+  nations' diplomacy and trades, and private log lines are filtered out exactly as for the real player.
+- **What they can do.** Player rules apply: movement allowance and supply, action points and range for attacks,
+  ships kept at sea, no 👑 GM panel, ⚖ Rules, ⚙ or End turn (Ready up instead). They command the nation's units and
+  heroes (by the unit's nation, not by who created it); other nations' units are refused.
+- **How it looks.** The 👁 button turns gold with the nation's flag and name, a gold frame runs round the map, and a
+  "Viewing as …" tag sits at its top. People online still show them as GM.
+
+It is per tab (`?as=<faction id>` in the address), so a GM can keep one tab as GM and another as a nation; opening
+the campaign from the list starts in the GM view. `access.viewAsFaction`, `viewerFor` and `canControl` in
+`server/lobbyAccess.js` hold the rules; `renderViewAs` in `public/js/map.js` the button.
 
 ## Settings window (⚙, or ⚖ Rules)
 

@@ -8,6 +8,15 @@
   const $ = s => document.querySelector(s);
   const $$ = s => [...document.querySelectorAll(s)];
   const base = `/api/lobbies/${lobbyId}`;
+  // "View as player" (docs/UI.md): a GM can use this tab as one nation's player (?as=<faction id>). The server
+  // then answers every request as that player, so the map, panels and rules are exactly theirs; other tabs stay GM.
+  const viewAsParam = Number(new URLSearchParams(location.search).get('as')) || null;
+  if (viewAsParam) api.headers['X-View-As'] = String(viewAsParam);
+  function setViewAs(fid) {
+    const u = new URL(location.href);
+    if (fid) u.searchParams.set('as', fid); else u.searchParams.delete('as');
+    location.replace(u.href);
+  }
 
   const TYPE_LABEL = { unit: 'Unit', town: 'Town', poi: 'POI', player: 'Player', scenery: 'Scenery', resource: 'Resource', factory: 'Factory', hero: 'Hero' };
   const Atlas = window.SpriteAtlas;
@@ -33,7 +42,13 @@
   renderer.unitsToPx = (x, y, units) => units / (distanceUnits(x, y, x + 1, y) || 1);   // km (or map units) → px, locally
   Object.defineProperty(renderer, 'railCutKm', { get: () => Number(state.game?.settings?.railCutKm) || 10 });
 
-  function canEdit(m) { return state.role === 'gm' || (m.ownerId === me.id && !m.adminOnly); }
+  /** Mirrors the server's access.canControl: viewing as a nation, a GM commands that nation's units and heroes. */
+  function canEdit(m) {
+    if (state.role === 'gm') return true;
+    if (m.adminOnly) return false;
+    if (state.viewAs && (m.type === 'unit' || m.type === 'hero')) return String(m.data?.nation || '').trim().toLowerCase() === state.viewAs.name.trim().toLowerCase();
+    return m.ownerId === me.id;
+  }
   function canEditShape(s) { return state.role === 'gm' || (s.createdBy === me.id && !s.adminOnly); }
   function round1(n) { return Math.round(n * 10) / 10; }
   function colorNum(hex) { return parseInt(String(hex || '#3498db').slice(1), 16) || 0x3498db; }
@@ -643,6 +658,11 @@
   async function loadLobby() {
     const d = await api.get(base);
     state.lobby = d.lobby; state.members = d.members; state.role = d.you.role; state.member = d.you.member;
+    state.realRole = d.you.realRole || d.you.role; state.viewAs = d.you.viewAs || null;
+    if (viewAsParam && !state.viewAs) {   // not a GM, or that nation is gone: back to the normal view
+      delete api.headers['X-View-As'];
+      const u = new URL(location.href); u.searchParams.delete('as'); history.replaceState(null, '', u.href);
+    }
     applyLobby();
     renderMembers();
     await applyMap();
@@ -664,6 +684,7 @@
     $('#shapeGmFields').hidden = !gm;
     renderer.setTokenScale(l.settings?.tokenScale || 1);
     renderer.setTokenMode(l.settings?.tokenMode || 'map');
+    renderViewAs();
     renderAddForm();
     renderNationList();
   }
@@ -923,7 +944,7 @@
     const ws = new WebSocket(`${proto}://${location.host}/ws`);
     state.ws = ws;
     let hadJoined = false;
-    ws.onopen = () => { ws.send(JSON.stringify({ type: 'join', lobbyId })); };
+    ws.onopen = () => { ws.send(JSON.stringify({ type: 'join', lobbyId, viewAs: state.viewAs?.id || undefined })); };
     ws.onmessage = async ev => {
       let msg; try { msg = JSON.parse(ev.data); } catch { return; }
       switch (msg.type) {
@@ -999,7 +1020,8 @@
           if ($('#settingsModal').classList.contains('open')) openSettings();
           break;
         }
-        case 'role': state.role = msg.role; await loadLobby(); await loadMarkers(); await loadShapes(); await loadHistory(); GameUI.load().catch(() => {}); toast(`You are now a ${msg.role === 'gm' ? 'game master' : 'player'}${msg.nation ? ` of ${msg.nation}` : ''}`); break;
+        case 'role': if (state.viewAs && !msg.viewAs) { setViewAs(null); break; }   // demoted, or the nation was deleted
+          state.role = msg.role; await loadLobby(); await loadMarkers(); await loadShapes(); await loadHistory(); GameUI.load().catch(() => {}); toast(`You are now a ${msg.role === 'gm' ? 'game master' : 'player'}${msg.nation ? ` of ${msg.nation}` : ''}`); break;
         case 'kicked': alert('You are no longer part of this campaign.'); location.replace('/lobbies.html'); break;
         case 'error': toast(msg.error); break;
         default: break;
@@ -1054,6 +1076,45 @@
     if (notifyPref.enabled) { beep(); toast('You will hear a chime (and see a desktop notification if allowed) when things happen while this tab is in the background.'); }
   };
   renderNotifyButton();
+
+  // ---- View as player (GM) -----------------------------------------------------------------
+  /** The 👁 switch in the top bar: plain for the GM, gold with the nation's flag and name while viewing as it. */
+  function renderViewAs() {
+    const v = state.viewAs, btn = $('#btnViewAs');
+    $('#viewAsWrap').hidden = state.realRole !== 'gm';
+    $('#app').classList.toggle('viewas', !!v);
+    btn.classList.toggle('viewing', !!v);
+    btn.innerHTML = v ? `👁 ${v.flagUrl ? `<img class="flag" src="${esc(v.flagUrl)}" alt="">` : ''}<span class="vname">${esc(v.name)}</span>` : '👁';
+    btn.title = v ? `Viewing as ${v.name}'s player: you see what they see and have only their powers. Click to go back to the GM view or pick another nation.`
+      : 'View as a player: use the map as one nation\'s player, to check what it can see or to play it without GM powers';
+    $('#stagewrap').dataset.viewas = v ? `👁 Viewing as ${v.name} · player powers only` : '';
+  }
+  function renderViewAsMenu() {
+    const cur = state.viewAs?.id || null;
+    const players = f => state.members.filter(m => m.role !== 'gm' && String(m.nation || '').trim().toLowerCase() === f.name.trim().toLowerCase()).map(m => m.displayName);
+    const item = (fid, icon, name, hint) => `<button type="button" class="vitem ${fid === cur ? 'on' : ''}" data-fid="${fid || ''}">${icon}<span class="grow">${esc(name)}</span>${hint ? `<span class="hint" title="${esc(hint)}">${esc(hint)}</span>` : ''}</button>`;
+    $('#viewAsMenu').innerHTML = `<div class="vhead"><strong>View as a player</strong>See the map, panels and log as that nation's player and play with only its powers: moves, attacks and orders follow the rules. This tab only.</div>`
+      + item(null, '👑', 'Game master view', '')
+      + (state.factions.length ? state.factions.map(f => {
+        const p = players(f);
+        return item(f.id, f.flagUrl ? `<img class="flag" src="${esc(f.flagUrl)}" alt="">` : `<span class="vdot" style="background:${esc(f.color)}"></span>`, f.name, p.length ? p.join(', ') : 'no player');
+      }).join('') : '<p class="hint" style="padding:6px 12px;margin:0">No factions yet: create them on the 👥 People panel.</p>');
+  }
+  $('#btnViewAs').onclick = e => {
+    e.stopPropagation();
+    const menu = $('#viewAsMenu');
+    if (menu.hidden) renderViewAsMenu();
+    menu.hidden = !menu.hidden;
+  };
+  $('#viewAsMenu').addEventListener('click', e => {
+    e.stopPropagation();
+    const b = e.target.closest('.vitem');
+    if (!b) return;
+    const fid = Number(b.dataset.fid) || null;
+    if (fid === (state.viewAs?.id || null)) { $('#viewAsMenu').hidden = true; return; }
+    setViewAs(fid);
+  });
+  document.addEventListener('click', () => { $('#viewAsMenu').hidden = true; });
 
   // ---- Ready-up bar ----------------------------------------------------------------------
   /** Nations that have a player: each shows its flag, with a green check once its player is done for the turn. */
@@ -2637,6 +2698,7 @@
     loadPings();
     loadBattles();
     connectWs();
+    if (state.viewAs) toast(`Viewing as ${state.viewAs.name}: you see what its player sees and have only their powers. 👁 to switch back.`, 6000);
   } catch (err) {
     if (err.status === 403 || err.status === 404) { alert(err.message); location.replace('/lobbies.html'); }
     else toast(err.message);

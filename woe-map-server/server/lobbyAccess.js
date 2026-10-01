@@ -3,6 +3,7 @@ const { db } = require('./db');
 
 const selectLobby = db.prepare('SELECT * FROM lobbies WHERE id = ?');
 const selectMember = db.prepare('SELECT * FROM lobby_members WHERE lobby_id = ? AND user_id = ?');
+const selectFaction = db.prepare('SELECT * FROM factions WHERE id = ? AND lobby_id = ?');
 const selectMembers = db.prepare(`
   SELECT m.user_id, m.role, m.nation, m.color, m.joined_at, u.username, u.display_name
   FROM lobby_members m JOIN users u ON u.id = m.user_id
@@ -20,12 +21,40 @@ function getRole(lobby, user) {
   return m ? m.role : null;
 }
 
-/** A "viewer" bundles what visibility rules need: role, user id and nation. */
-function viewerFor(lobby, user) {
+/**
+ * "View as player" (docs/UI.md): a GM may use the campaign as one nation's player, seeing what it sees and
+ * held to its rules. Returns that faction when `fid` names one of this lobby's and the role really is GM.
+ */
+function viewAsFaction(lobby, role, fid) {
+  if (role !== 'gm' || !fid || !Number.isFinite(Number(fid))) return null;
+  return selectFaction.get(Number(fid), lobby.id) || null;
+}
+
+/**
+ * A "viewer" bundles what visibility rules need: role, user id and nation.
+ * Viewing as a nation, a GM is a player of it (`viewAs` its faction id, `realRole` still 'gm').
+ */
+function viewerFor(lobby, user, viewAs) {
   const role = getRole(lobby, user);
   if (!role) return null;
+  const f = viewAsFaction(lobby, role, viewAs);
+  if (f) return { role: 'player', realRole: 'gm', userId: user.id, nation: f.name, viewAs: f.id };
   const m = getMember(lobby.id, user.id);
   return { role, userId: user.id, nation: m ? m.nation : '' };
+}
+
+const sameNation = (a, b) => !!String(b || '').trim() && String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+
+/**
+ * May this viewer move, edit or give orders to a marker? GMs anything; players what they own.
+ * A GM viewing as a nation commands that nation's units and heroes instead of everything they created.
+ */
+function canControl(m, viewer) {
+  if (!m || !viewer) return false;
+  if (viewer.role === 'gm') return true;
+  if (m.adminOnly) return false;
+  if (viewer.viewAs && (m.type === 'unit' || m.type === 'hero')) return sameNation(m.data?.nation, viewer.nation);
+  return m.ownerId === viewer.userId;
 }
 
 /**
@@ -37,9 +66,11 @@ function canSee(obj, viewer) {
   if (!obj || !viewer) return false;
   if (viewer.role === 'gm') return true;
   if (obj.adminOnly) return false;
-  const mine = obj.ownerId === viewer.userId || obj.createdBy === viewer.userId;
-  if (mine) return true;
   const n = String(viewer.nation || '').trim().toLowerCase();
+  // A GM viewing as a nation sees what that nation's player would: its own things, not everything the GM made.
+  const mine = viewer.viewAs ? sameNation(obj.data?.nation, n)
+    : obj.ownerId === viewer.userId || obj.createdBy === viewer.userId;
+  if (mine) return true;
   const listed = list => !!n && Array.isArray(list) && list.some(v => String(v).trim().toLowerCase() === n);
   // A spy's recon reveals what it saw to the spy's nation until the end of the turn.
   if (listed(obj.data?.revealTo)) return true;
@@ -140,6 +171,6 @@ function serializeShape(row) {
 function safeJson(s) { try { return JSON.parse(s || '{}'); } catch { return {}; } }
 
 module.exports = {
-  getLobby, getMember, getMembers, getRole, viewerFor, canSee, DEFAULT_COMBAT,
+  getLobby, getMember, getMembers, getRole, viewerFor, viewAsFaction, canSee, canControl, DEFAULT_COMBAT,
   serializeLobby, serializeMember, serializeMarker, serializeShape, serializeFaction, safeJson,
 };

@@ -1,8 +1,9 @@
 'use strict';
 
 const api = {
+  headers: {},   // sent with every request (the map page's X-View-As)
   async request(method, url, body) {
-    const init = { method, headers: {}, credentials: 'same-origin' };
+    const init = { method, headers: { ...api.headers }, credentials: 'same-origin' };
     if (body instanceof FormData) init.body = body;
     else if (body !== undefined) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(body); }
     const res = await fetch(url, init);
