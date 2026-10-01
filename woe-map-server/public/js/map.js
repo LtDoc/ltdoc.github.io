@@ -20,6 +20,7 @@
     game: null, gameFactions: [], myFactionId: null, canUndo: false, placing: null,
   };
   const gameOn = () => !!state.game?.enabled;
+  let panelHinted = false;   // the "right-click for the panel" tip shows once per visit
 
   // ---- Renderer -------------------------------------------------------------------
   const renderer = new MapRenderer($('#stage'));
@@ -303,10 +304,16 @@
   }
 
   renderer.addEventListener('select', e => {
+    if (e.detail.id !== state.panelFor) state.panelFor = null;   // the panel belongs to the token it was opened on
     state.selectedId = e.detail.id; state.selectedIds = e.detail.ids || []; state.selectedShapeId = e.detail.shapeId;
+    const sel = e.detail.id != null ? state.markers.get(e.detail.id) : null;
+    if (sel && PANEL_ON_RIGHT.includes(sel.type) && state.panelFor !== sel.id && !panelHinted) {
+      panelHinted = true;
+      toast('Right-click a unit to open its panel', 2600);
+    }
     renderPopup(); highlightList();
     updateMoveRange();
-    if (state.selectedIds.length > 1) toast(`${state.selectedIds.length} tokens selected: drag any of them to move the group`, 1800);
+    if (state.selectedIds.length > 1) toast(`${state.selectedIds.length} tokens selected: ${rulesOn() ? 'click inside the ring to move them together' : 'drag any of them to move the group'}`, 1800);
   });
   renderer.addEventListener('mode', e => {
     $('#btnSelect').classList.toggle('active', e.detail.mode === 'select');
@@ -536,7 +543,7 @@
         });
         upsertMarker(r.marker);
         disarmPlacing();
-        renderer.select(r.marker.id);
+        openPanel(r.marker.id);
         toast(`Placed ${r.marker.name}: upload a portrait from Edit`);
       } catch (err) { toast(err.message); }
       return;
@@ -1279,7 +1286,7 @@
       const m = state.markers.get(Number(li.dataset.marker));
       if (!m) return;
       renderer.centerOn(m.x, m.y, Math.max(renderer.scale, 1));
-      renderer.select(m.id);
+      openPanel(m.id);
     });
     $('#markerLists').querySelectorAll('li[data-shape]').forEach(li => li.onclick = () => {
       const s = state.shapes.get(Number(li.dataset.shape));
@@ -1297,12 +1304,24 @@
   }
 
   // ---- Popup ---------------------------------------------------------------------------
+  /**
+   * Units and heroes open their panel only on right-click (or from the sidebar lists): a left-click selects
+   * them to move without the panel getting in the way. Everything else opens on a left-click as before.
+   */
+  const PANEL_ON_RIGHT = ['unit', 'hero'];
+  function openPanel(id) {
+    state.panelFor = id;
+    if (state.selectedId !== id || (state.selectedIds || []).length > 1) renderer.select(id);
+    else renderPopup();
+  }
+  renderer.addEventListener('markercontext', e => openPanel(e.detail.id));
   function renderPopup() {
     const el = $('#popup');
     const m = state.selectedId != null ? state.markers.get(state.selectedId) : null;
     const s = state.selectedShapeId != null ? state.shapes.get(state.selectedShapeId) : null;
     syncAura(m);
     if (!m && !s) { el.style.display = 'none'; return; }
+    if (m && PANEL_ON_RIGHT.includes(m.type) && state.panelFor !== m.id) { el.style.display = 'none'; return; }
     el.innerHTML = m ? popupHtml(m) : shapePopupHtml(s);
     el.style.display = 'block';
     el.querySelectorAll('[data-act]').forEach(b => b.onclick = () => (m ? popupAction(b.dataset.act, m) : shapeAction(b.dataset.act, s, b)));
@@ -2403,7 +2422,7 @@
   try {
     await loadLobby();
     await loadFactions();
-    GameUI.init({ state, renderer, base, $, $$, flagImg, loadMarkers, loadTerritories, loadProvinces, removeBorderDrawings, armBrush, armFactory, notify, isGm: () => state.role === 'gm' });
+    GameUI.init({ state, renderer, base, $, $$, flagImg, openPanel, loadMarkers, loadTerritories, loadProvinces, removeBorderDrawings, armBrush, armFactory, notify, isGm: () => state.role === 'gm' });
     await GameUI.load().catch(err => console.warn('game state', err));
     syncRailButton();
     await loadTerritories();

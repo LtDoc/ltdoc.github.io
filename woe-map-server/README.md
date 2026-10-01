@@ -561,7 +561,7 @@ All persistent changes go through the REST API, which validates, records history
 `Z` undo last point · `Enter` finish drawing · right-click a vertex to remove it ·
 Shift-drag a selected drawing to move it · `G` grid · `F` fit ·
 `Esc` cancel/close · `Delete` delete selected marker or drawing (if allowed) · wheel to zoom · drag empty map to pan ·
-drag a marker to move it (if allowed; in game mode click a unit, then click inside its ring) · `R` railway ·
+drag a marker to move it (if allowed; in game mode click a unit, then click inside its ring) · right-click a unit or hero for its panel · `R` railway ·
 `P` ping (GM).
 
 ## How it is put together

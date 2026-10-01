@@ -48,7 +48,7 @@ const GameUI = (() => {
     });
     document.addEventListener('click', e => {
       const h = e.target.closest('[data-herofind]');
-      if (h) { const m = ctx.state.markers.get(Number(h.dataset.herofind)); if (m) { ctx.renderer.centerOn(m.x, m.y, Math.max(ctx.renderer.scale, 1.5)); ctx.renderer.select(m.id); } return; }
+      if (h) { const m = ctx.state.markers.get(Number(h.dataset.herofind)); if (m) { ctx.renderer.centerOn(m.x, m.y, Math.max(ctx.renderer.scale, 1.5)); ctx.openPanel ? ctx.openPanel(m.id) : ctx.renderer.select(m.id); } return; }
       const r = e.target.closest('[data-report]');
       if (r) openReports(Number(r.dataset.report) || undefined, Number(r.dataset.faction) || undefined);
     });

@@ -1284,6 +1284,12 @@ class MapRenderer extends EventTarget {
   }
 
   _startMarkerPointer(view, e) {
+    // Right-click: the app opens the token's panel (units and heroes only show it this way).
+    if (e.button === 2 && (!this.mode || this.mode === 'select')) {
+      e.stopPropagation();
+      this.dispatchEvent(new CustomEvent('markercontext', { detail: { id: view.id } }));
+      return;
+    }
     if (e.button !== 0) return;
     if (this.mode && this.mode !== 'select') { this._modeClick(e); e.stopPropagation(); return; }
     e.stopPropagation();
