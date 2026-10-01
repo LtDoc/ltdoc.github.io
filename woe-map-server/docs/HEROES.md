@@ -10,9 +10,9 @@ A hero is a marker of type **Hero**. Its token is the portrait (the marker's ico
 golden ring with a band of light running round it, the star rating beneath and a small role badge. Without a
 portrait it shows the hero's initials. Selecting a hero opens its card: the same portrait in an animated golden
 ring, role, title, stars, perception and intelligence, what the role does, where it is posted or travelling,
-and the orders it can take. The Nation tab lists each nation's heroes; click one to find it.
+and the orders it can take. The 🏛 Nation panel lists each nation's heroes; click one to find it.
 
-The GM creates heroes from the Add tab (role, stars, name, then click the map) or as a custom marker, uploads
+The GM creates heroes from the ➕ Place panel (role, stars, name, then click the map) or as a custom marker, uploads
 the portrait from Edit, and gives a hero an **owner**: the player who commands it. Players move and command their
 heroes but cannot change their role, stars or stats.
 
@@ -69,7 +69,7 @@ the rolls. The GM can release a captured spy by editing it.
 Example odds: a ★★★★★ hunter (perception 10) catches a ★★ spy (intelligence 4) about 74 % of the time; a
 ★★★ thief (intelligence 6) facing no defending spy gets away about 77 % of the time.
 
-## Campaign rules (Game tab → Rules → Heroes)
+## Campaign rules (⚖ Rules → Heroes)
 
 General's aura (60 km) · spies contest missions within (150 km) · research stolen per star (5) · security with
 no spy nearby (0) · peace offers and alliance proposals need a diplomat (on).

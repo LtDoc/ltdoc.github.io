@@ -66,7 +66,7 @@ by France") with **Show** and, when you can, **🛠 Repair**:
 - A player sends their nearest unit or hero within **Repair within** (30 km) of the break; the ground must be
   theirs, an ally's or no one's, and it uses that unit's action for the turn.
 
-## Campaign rules (Game tab → Rules → Railways)
+## Campaign rules (⚖ Rules → Railways)
 
 Speed on rails (4×) · cut closes (10 km each side) · line's defence (4) · guards within (30 km) · repair within
 (30 km) · join rails within (5 km).

@@ -45,6 +45,11 @@ const GameUI = (() => {
     $('#btnGenResources').onclick = generateResources;
     $('#buildFilter').oninput = renderBuildList;
     $('#btnTurnReports').onclick = () => openReports();
+    // GM panel sub-pages: Turn, Nations, World.
+    $$('#gmTabs [data-gm]').forEach(b => b.onclick = () => {
+      $$('#gmTabs [data-gm]').forEach(x => x.classList.toggle('on', x === b));
+      $$('[data-gmpage]').forEach(p => { p.hidden = p.dataset.gmpage !== b.dataset.gm; });
+    });
     // Deadline quick-set: N days from now at the same time of day, or none.
     $$('[data-deadline]').forEach(b => b.onclick = () => {
       const days = Number(b.dataset.deadline);
@@ -126,7 +131,7 @@ const GameUI = (() => {
     const me = e.faction.id;
     const actor = ctx.isGm() || ctx.state.myFactionId === me;
     const others = (ctx.state.gameFactions || []).filter(x => x.faction.id !== me);
-    if (!others.length) return '';
+    if (!others.length) return '<p class="hint">No other nations yet.</p>';
     const from = ctx.isGm() ? ` data-from="${me}"` : '';
     const rows = others.map(x => {
       const st = relStatus(me, x.faction.id), open = openBetween(me, x.faction.id);
@@ -151,7 +156,7 @@ const GameUI = (() => {
       const text = incoming ? `${esc(factionName(d.from))}: ${KIND_LABEL[d.kind]}${d.status === 'pending' ? ' (with the GM)' : ''}` : `To ${esc(factionName(d.to))}: ${KIND_LABEL[d.kind]}, ${d.status === 'pending' ? 'awaiting the GM' : 'awaiting their answer'}`;
       return `<div class="diplo"><span class="grow">${text}</span>${act}</div>`;
     }).join('');
-    return `<div class="section">Diplomacy</div>${rows}${items ? `<div class="section">Open proposals</div>${items}` : ''}`;
+    return `<div class="box"><h4>Relations</h4>${rows}</div>${items ? `<div class="box"><h4>Open proposals</h4>${items}</div>` : ''}`;
   }
 
   async function proposeDiplomacy(kind, to, from) {
@@ -257,23 +262,31 @@ const GameUI = (() => {
     renderNation();
     ResearchUI.load(e.faction.id);
   }
+  /** The Production panel: every site with its build slots and queue, factories under way, then long-term projects. */
   function productionHtml(e) {
-    if (!prod || prod.factionId !== e.faction.id) return `<div class="section">Production</div><p class="hint">Loading…</p>`;
+    if (!prod || prod.factionId !== e.faction.id) return `<p class="hint">Loading…</p>`;
     const actor = ctx.isGm() || ctx.state.myFactionId === e.faction.id;
+    const left = n => `${n} turn${n === 1 ? '' : 's'}`;
+    let used = 0, total = 0;
     const sites = prod.sites.map(s => {
+      used += s.queue.length; total += s.capacity;
       const q = s.queue.map(item => {
         const t = UnitTypes.LIST.find(x => x.id === item.typeId);
-        return `<div class="diplo"><span class="grow">${esc(t ? t.unit : item.typeId)} <span class="hint">${item.turnsLeft} turn${item.turnsLeft === 1 ? '' : 's'} left</span></span>${actor ? `<button class="small secondary" data-cancelbuild="${item.id}" title="Cancel and refund">×</button>` : ''}</div>`;
+        return `<div class="qitem"><span class="grow">${esc(t ? t.unit : item.typeId)}</span><span class="hint">${left(item.turnsLeft)}</span>${actor ? `<button class="small secondary" data-cancelbuild="${item.id}" title="Cancel and refund">×</button>` : ''}</div>`;
       }).join('');
       const free = s.capacity - s.queue.length;
-      return `<div class="site"><div class="diplo"><span class="grow"><b>${esc(s.name)}</b> <span class="hint">${s.kind}${s.kind === 'factory' ? ` level ${s.industry}` : ''} · ${s.queue.length}/${s.capacity} building${s.coastal ? ' · port' : ''}</span></span>${actor && free > 0 ? `<button class="small" data-openbuild="${s.id}">Build…</button>` : ''}</div>${q}</div>`;
+      const pips = `<span class="pips" title="${s.queue.length} of ${s.capacity} build slots in use">${'<i class="on"></i>'.repeat(s.queue.length)}${'<i></i>'.repeat(Math.max(0, free))}</span>`;
+      return `<div class="site${free > 0 ? '' : ' full'}"><div class="sitehead"><span class="grow"><b>${esc(s.name)}</b> <span class="hint">${s.kind}${s.kind === 'factory' ? ` ${s.industry}` : ''}${s.coastal ? ' · ⚓ port' : ''}</span></span>${pips}${actor && free > 0 ? `<button class="small" data-openbuild="${s.id}">Build…</button>` : ''}</div>${q}</div>`;
     }).join('');
-    const factories = prod.factoryBuilds.map(item => `<div class="diplo"><span class="grow">Factory near ${esc(item.siteName || '')} <span class="hint">${item.turnsLeft} turn${item.turnsLeft === 1 ? '' : 's'} left</span></span>${actor ? `<button class="small secondary" data-cancelbuild="${item.id}" title="Cancel and refund">×</button>` : ''}</div>`).join('');
+    const factories = prod.factoryBuilds.map(item => `<div class="qitem"><span class="grow">🏭 Factory near ${esc(item.siteName || '')}</span><span class="hint">${left(item.turnsLeft)}</span>${actor ? `<button class="small secondary" data-cancelbuild="${item.id}" title="Cancel and refund">×</button>` : ''}</div>`).join('');
     const fc = prod.costs.factory;
-    return `<div class="section">Production</div>
-      ${sites.length ? sites : '<p class="hint">No cities or factories. Production needs a city, a capital or a factory in your colours.</p>'}
-      ${factories}
-      ${actor ? `<p><button class="small secondary" data-buildfactory="1" title="${esc(GameData.costLabel(fc))}">Build a factory…</button> <span class="hint">within ${g().settings.factoryRangeKm} ${ctx.state.lobby?.scaleLabel || 'km'} of your city or town</span></p>` : ''}
+    return `<div class="box"><h4>Build sites <span class="hint">${used}/${total} slots in use</span></h4>
+        ${sites.length ? sites : '<p class="hint">No cities or factories. Production needs a city, a capital or a factory in your colours.</p>'}
+      </div>
+      <div class="box"><h4>New factories</h4>
+        ${factories}
+        ${actor ? `<p class="toolrow"><button class="small" data-buildfactory="1" title="${esc(GameData.costLabel(fc))}">🏭 Build a factory…</button><span class="hint">${esc(GameData.costLabel(fc))} · within ${g().settings.factoryRangeKm} ${ctx.state.lobby?.scaleLabel || 'km'} of your city or town</span></p>` : (factories ? '' : '<p class="hint">None under way.</p>')}
+      </div>
       ${developmentHtml(actor)}`;
   }
   /** What the next level of a project brings, from the campaign's rules. */
@@ -302,8 +315,8 @@ const GameUI = (() => {
       if (st.manpower < p.cost.manpower) short.push('manpower');
       return `<div class="diplo"><span class="grow">${head}<br><span class="hint">Level ${p.level + 1}: ${esc(projectGain(p))} · ${esc(GameData.costLabel(p.cost))}</span>${short.length ? `<br><span class="hint" style="color:#ff9f80">short of ${esc(short.join(', '))}</span>` : ''}</span>${actor ? `<button class="small" data-project="${p.project}" data-site="${p.id}" ${short.length ? 'disabled' : ''}>${p.project === 'upgradeFactory' ? 'Upgrade' : 'Develop'}</button>` : ''}</div>`;
     }).join('');
-    return `<details class="sub devlist" ${running ? 'open' : ''}><summary>Development <span class="hint">(${running ? `${running} under way · ` : ''}long-term growth)</span></summary>
-      <p class="hint">Slow projects that pay back over many turns: each factory level adds income and a build slot; each town level adds income, and every second one a build slot. One project per site; each step costs more and takes longer than the last.</p>${rows}</details>`;
+    return `<div class="box devlist"><h4>Development <span class="hint">${running ? `${running} under way · ` : ''}long-term growth</span></h4>
+      <p class="hint">Slow projects that pay back over many turns: each factory level adds income and a build slot; each town level adds income, and every second one a build slot. One project per site; each step costs more and takes longer than the last.</p>${rows}</div>`;
   }
   /** The project row for a site (for the map popup), when the production view is loaded. */
   function projectInfo(siteId) { return (prod?.projects || []).find(p => p.id === siteId) || null; }
@@ -398,23 +411,30 @@ const GameUI = (() => {
     const { $, state, renderer } = ctx;
     const game = g();
     renderer.setGameRules(game ? { enabled: game.enabled, kmPerMove: game.settings.kmPerMove, turn: game.turn, supply: game.settings.supplyEnabled !== false } : null);
-    const on = !!(game && game.enabled);
-    $('#sidebar .tabs [data-tab="nation"]').hidden = !on;
-    $('#sidebar .tabs [data-tab="game"]').hidden = !ctx.isGm();
-    $('#turnLabel').hidden = !on;
+    const on = !!(game && game.enabled), gm = ctx.isGm();
+    // Main menu: the nation screens exist in game mode; the GM screens for the GM only.
+    for (const sel of ['#rail [data-tab="nation"]', '#rail [data-tab="production"]', '#rail [data-tab="diplomacy"]', '#railResearch', '#railSplit']) $(sel).hidden = !on;
+    $('#rail [data-tab="game"]').hidden = !gm;
+    $('#railRules').hidden = !gm;
+    $('#turnWidget').hidden = !on;
+    $('#btnEndTurn').hidden = !gm;
+    $('#btnReadyTurn').hidden = gm || !state.myFactionId;
+    if (ctx.onRail) ctx.onRail();
     updateHud();
     renderNation(); renderGameTab();
   }
-  /** Turn HUD: turn, date and the deadline as a live countdown when it is a date. */
+  /** Turn widget (bottom right): turn, date and the deadline as a live countdown when it is a date. */
   function updateHud() {
     const { $, state } = ctx;
     const game = g();
     if (!game || !game.enabled) return;
     const dl = GameData.deadlineInfo(game.deadline);
+    $('#twTurn').textContent = `Turn ${game.turn}`;
+    $('#twDate').textContent = GameData.fmtDate(game.date);
     const el = $('#turnLabel');
-    el.textContent = `Turn ${game.turn} · ${GameData.fmtDate(game.date)}${dl ? ' · ' + dl.text : ''}`;
+    el.textContent = dl ? dl.text : '';
     el.classList.toggle('overdue', !!(dl && dl.overdue));
-    el.title = `${GameData.TURN_STEPS[game.turnStep] || game.turnStep}ly turns. Movement: ${game.settings.kmPerMove} ${state.lobby?.scaleLabel || 'km'} per movement point.${dl && dl.at ? ' ' + dl.title + '.' : ''}`;
+    $('#turnWidget').title = `${GameData.TURN_STEPS[game.turnStep] || game.turnStep}ly turns. Movement: ${game.settings.kmPerMove} ${state.lobby?.scaleLabel || 'km'} per movement point.${dl && dl.at ? ' ' + dl.title + '.' : ''}`;
   }
 
   // ---- Nation tab -----------------------------------------------------------------------
@@ -433,25 +453,39 @@ const GameUI = (() => {
     return list.find(x => x.faction.id === state.myFactionId) || null;
   }
 
+  /** Every nation screen at once: the nation bar, and the Nation, Production and Diplomacy panels. */
   function renderNation() {
     const { $, state } = ctx;
-    const el = $('#nationPanel');
+    const el = $('#nationPanel'), prodEl = $('#prodPanel'), diploEl = $('#diploPanel');
     const game = g();
-    if (!game || !game.enabled) { el.innerHTML = '<p class="hint">Game mode is off.</p>'; return; }
-    const e = myEntry();
-    if (!e) {
-      el.innerHTML = `<p class="hint">${ctx.isGm() ? 'No factions yet. Create factions on the Members tab (or seed them from 1914).' : 'You are not assigned to a faction yet. Ask the GM to set your faction on the Members tab.'}</p>`;
+    $('#gmDiplo').hidden = !(ctx.isGm() && game && game.enabled);
+    if (!game || !game.enabled) {
+      for (const x of [el, prodEl, diploEl]) x.innerHTML = '<p class="hint">Game mode is off.</p>';
+      renderNationBar(null);
       return;
     }
-    if (!e.visible || !e.state) { el.innerHTML = `<h3>${ctx.flagImg(e.faction.name)} ${esc(e.faction.name)}</h3><p class="hint">This faction's treasury is private.</p>`; return; }
+    const e = myEntry();
+    renderNationBar(e);
+    if (!e) {
+      const msg = `<p class="hint">${ctx.isGm() ? 'No factions yet. Create factions on the 👥 People panel (or seed them from history).' : 'You are not assigned to a faction yet. Ask the GM to set your faction on the 👥 People panel.'}</p>`;
+      for (const x of [el, prodEl, diploEl]) x.innerHTML = msg;
+      return;
+    }
+    diploEl.innerHTML = diplomacyHtml(e) + `<div class="box"><h4>Trade</h4><p class="toolrow"><button type="button" class="small" data-opentrade="1">＋ Offer a trade…</button></p><p class="hint">Resources, money, manpower or research, once or every turn. Offers and running trades are listed under 🔔 at the top.</p></div>`;
+    if (!e.visible || !e.state) {
+      el.innerHTML = `<div class="box"><h4>${ctx.flagImg(e.faction.name)} ${esc(e.faction.name)}</h4><p class="hint">This faction's treasury is private.</p></div>`;
+      prodEl.innerHTML = '<p class="hint">This faction\'s production is private.</p>';
+      return;
+    }
     const s = e.state, inc = e.income || { resources: {}, upkeep: {}, money: 0, rp: 0, manpower: 0, notes: [] };
-    const rows = GameData.RESOURCES.map(r => {
+    const tiles = GameData.RESOURCES.map(r => {
       const delta = (inc.resources[r.key] || 0) - (inc.upkeep[r.key] || 0);
       const ic = r.icon ? `<img class="resicon" src="/icons/${r.icon}" alt="">` : `<span class="reskey" style="background:${r.color}"></span>`;
-      return `<tr><td>${ic}${r.name}</td><td class="num">${fmt(s.resources[r.key] || 0)}</td><td class="num ${delta > 0 ? 'up' : delta < 0 ? 'down' : ''}">${delta ? signed(delta) : ''}</td></tr>`;
+      return `<div class="restile${(s.resources[r.key] || 0) <= 0 ? ' empty' : ''}">${ic}<span class="grow">${r.name}</span><b>${fmt(s.resources[r.key] || 0)}</b><span class="delta ${delta > 0 ? 'up' : delta < 0 ? 'down' : ''}">${delta ? signed(delta) : ''}</span></div>`;
     }).join('');
     const units = [...state.markers.values()].filter(m => m.type === 'unit' && String(m.data?.nation || '').toLowerCase() === e.faction.name.toLowerCase());
     const cats = {};
+    let cut = 0;
     for (const u of units) {
       const t = window.UnitTypes ? UnitTypes.resolve(u.data?.unitType) : null;
       const cat = t ? t.cat : 'Other';
@@ -459,6 +493,7 @@ const GameUI = (() => {
       cats[cat].n++;
       if (Number(u.data?.movedKm) > 0) cats[cat].moved++;
       if (Number(u.data?.apUsed) > 0) cats[cat].spent++;
+      if (u.data?.supplied === false && Number(u.data?.strength ?? 100) > 0) cut++;
     }
     const lastTurn = [...state.events].reverse().find(ev => ev.kind === 'turn' && String(ev.data?.faction || '').toLowerCase() === e.faction.name.toLowerCase());
     const hasReport = (state.reports?.reports || []).some(r => r.factionId === e.faction.id);
@@ -467,34 +502,66 @@ const GameUI = (() => {
     const flipped = [...state.markers.values()].filter(m => ['town', 'resource', 'factory'].includes(m.type) && Number(m.data?.capturedTurn) === game.turn);
     const took = flipped.filter(m => String(m.data.nation || '').toLowerCase() === me);
     const lost = flipped.filter(m => String(m.data.capturedFrom || '').toLowerCase() === me);
-    const capturedHtml = took.length || lost.length ? `<div class="section">This turn</div>
+    const capturedHtml = took.length || lost.length ? `<div class="box"><h4>This turn</h4>
       ${took.length ? `<p class="captured up">⚑ Took ${took.map(m => `<b>${esc(m.name)}</b>`).join(', ')}${game.settings.capturedIdle ? ' <span class="hint">(no yield until next turn)</span>' : ''}</p>` : ''}
-      ${lost.length ? `<p class="captured down">⚑ Lost ${lost.map(m => `<b>${esc(m.name)}</b> to ${esc(m.data.nation || 'no one')}`).join(', ')}</p>` : ''}` : '';
-    // Public treasuries: players see every nation side by side (the GM has the Game tab for this).
+      ${lost.length ? `<p class="captured down">⚑ Lost ${lost.map(m => `<b>${esc(m.name)}</b> to ${esc(m.data.nation || 'no one')}`).join(', ')}</p>` : ''}</div>` : '';
+    // Public treasuries: players see every nation side by side (the GM has the GM panel for this).
     const others = !ctx.isGm() && game.settings.publicTreasury ? (state.gameFactions || []).filter(x => x.visible && x.state) : [];
-    const othersHtml = others.length > 1 ? `<div class="section">All nations <span class="hint">(treasuries are public)</span></div>
+    const othersHtml = others.length > 1 ? `<div class="box"><h4>All nations <span class="hint">treasuries are public</span></h4>
       <table class="treasury"><thead><tr><th>Faction</th><th class="num">Money</th><th class="num">Men</th><th class="num">RP</th><th class="num">Units</th></tr></thead><tbody>${
         others.map(x => `<tr${x.faction.id === e.faction.id ? ' class="me"' : ''}><td>${ctx.flagImg(x.faction.name)} ${esc(x.faction.name)}</td><td class="num">${fmt(x.state.money)}</td><td class="num">${fmt(x.state.manpower)}</td><td class="num">${fmt(x.state.rp)}</td><td class="num">${x.unitCount}</td></tr>`).join('')
-      }</tbody></table>` : '';
+      }</tbody></table></div>` : '';
     el.innerHTML = `
-      <h3 class="nationhead">${ctx.flagImg(e.faction.name)} ${esc(e.faction.name)} <span class="hint">turn ${game.turn} · ${GameData.fmtDate(game.date)}</span></h3>
-      <div class="pools">
-        <div><span class="hint"><img class="resicon" src="/icons/cash.png" alt="">Money</span><b>${fmt(s.money)}</b><span class="delta ${inc.money >= 0 ? 'up' : 'down'}">${signed(inc.money)}</span></div>
-        <div><span class="hint">Manpower</span><b>${fmt(s.manpower)}</b><span class="delta up">${signed(inc.manpower)}</span></div>
-        <div><span class="hint"><img class="resicon" src="/icons/paper_roll.png" alt="">Research</span><b>${fmt(s.rp)}</b><span class="delta up">${signed(inc.rp)}</span></div>
+      <div class="box nationcard">
+        <div class="nationhead">${ctx.flagImg(e.faction.name, true)} <span class="grow">${esc(e.faction.name)}</span><span class="hint">Turn ${game.turn} · ${GameData.fmtDate(game.date)}</span></div>
+        <div class="pools">
+          <div><span class="hint"><img class="resicon" src="/icons/cash.png" alt="">Money</span><b>${fmt(s.money)}</b><span class="delta ${inc.money >= 0 ? 'up' : 'down'}">${signed(inc.money)} a turn</span></div>
+          <div><span class="hint">👥 Manpower</span><b>${fmt(s.manpower)}</b><span class="delta up">${signed(inc.manpower)} a turn</span></div>
+          <div><span class="hint"><img class="resicon" src="/icons/paper_roll.png" alt="">Research</span><b>${fmt(s.rp)}</b><span class="delta up">${signed(inc.rp)} a turn</span></div>
+        </div>
       </div>
-      <div class="section">Stockpiles <span class="hint">(change per turn)</span></div>
-      <table class="treasury"><tbody>${rows}</tbody></table>
-      ${inc.notes && inc.notes.length ? `<details class="sub"><summary>Where it comes from</summary><ul class="hintlist">${inc.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul></details>` : ''}
+      <div class="box"><h4>Stockpiles <span class="hint">change per turn</span></h4>
+        <div class="restiles">${tiles}</div>
+        ${inc.notes && inc.notes.length ? `<details class="sub"><summary>Where it comes from</summary><ul class="hintlist">${inc.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul></details>` : ''}
+      </div>
       ${capturedHtml}
-      <div class="section">Forces <span class="hint">(${units.length})</span></div>
-      ${Object.keys(cats).length ? `<table class="treasury"><tbody>${Object.entries(cats).map(([c, v]) => `<tr><td>${esc(c)}</td><td class="num">${v.n}</td><td class="hint">${v.moved ? `${v.moved} moved` : ''}${v.spent ? `${v.moved ? ', ' : ''}${v.spent} attacked` : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="hint">No units on the map.</p>'}
-      ${heroesHtml(e)}
-      ${ResearchUI.sectionHtml(e)}
-      ${productionHtml(e)}
-      ${diplomacyHtml(e)}
+      <div class="box"><h4>Forces <span class="hint">${units.length} unit${units.length === 1 ? '' : 's'}${cut ? ` · <span style="color:#ff9f80">${cut} out of supply</span>` : ''}</span></h4>
+        ${Object.keys(cats).length ? `<table class="treasury"><tbody>${Object.entries(cats).map(([c, v]) => `<tr><td>${esc(c)}</td><td class="num">${v.n}</td><td class="hint">${v.moved ? `${v.moved} moved` : ''}${v.spent ? `${v.moved ? ', ' : ''}${v.spent} attacked` : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="hint">No units on the map.</p>'}
+        ${heroesHtml(e)}
+      </div>
+      <div class="box">${ResearchUI.sectionHtml(e)}</div>
       ${othersHtml}
-      ${lastTurn || hasReport ? `<div class="section">Last turn</div>${lastTurn ? `<p class="hint">${esc(lastTurn.message)}</p>` : ''}${hasReport ? `<p><button class="small secondary" data-report="${state.reports.turn}" data-faction="${e.faction.id}">Turn report…</button></p>` : ''}` : ''}`;
+      ${lastTurn || hasReport ? `<div class="box"><h4>Last turn</h4>${lastTurn ? `<p class="hint">${esc(lastTurn.message)}</p>` : ''}${hasReport ? `<p><button class="small secondary" data-report="${state.reports.turn}" data-faction="${e.faction.id}">📋 Turn report…</button></p>` : ''}</div>` : ''}`;
+    prodEl.innerHTML = productionHtml(e);
+  }
+
+  /** The nation bar above the map: flag and name (a faction picker for the GM), money, manpower, research and stockpiles. */
+  function renderNationBar(e) {
+    const { $ } = ctx;
+    const game = g();
+    const bar = $('#nationbar');
+    const wasHidden = bar.hidden;
+    bar.hidden = !(game && game.enabled && e);
+    if (wasHidden !== bar.hidden && ctx.onLayout) ctx.onLayout();
+    if (bar.hidden) return;
+    const gm = ctx.isGm();
+    $('#nbFlag').innerHTML = ctx.flagImg(e.faction.name) || `<span class="dot" style="background:${esc(e.faction.color)}"></span>`;
+    $('#nbName').hidden = gm;
+    $('#nbName').textContent = e.faction.name;
+    if (!e.visible || !e.state) { $('#nbRes').innerHTML = '<span class="hint">Treasury private</span>'; return; }
+    const s = e.state, inc = e.income || { resources: {}, upkeep: {}, money: 0, rp: 0, manpower: 0 };
+    const d = n => n ? `<small class="${n > 0 ? 'up' : 'down'}">${signed(n)}</small>` : '';
+    const chip = (key, icon, name, value, delta, main) => `<button type="button" class="nbr${main ? ' main' : ''}${value <= 0 && !main ? ' short' : ''}" data-nb="${key}" title="${esc(name)}: ${fmt(value)}${delta ? ` (${signed(delta)} a turn)` : ''}">${icon}<b>${fmt(value)}</b>${d(delta)}</button>`;
+    const img = f => `<img src="/icons/${f}" alt="">`;
+    let html = chip('money', img('cash.png'), 'Money', s.money, inc.money, true)
+      + chip('manpower', '<span>👥</span>', 'Manpower', s.manpower, inc.manpower, true)
+      + chip('rp', img('paper_roll.png'), 'Research points', s.rp, inc.rp, true)
+      + '<span class="nb-sep"></span>';
+    for (const r of GameData.RESOURCES) {
+      const delta = (inc.resources[r.key] || 0) - (inc.upkeep[r.key] || 0);
+      html += chip(r.key, r.icon ? img(r.icon) : `<span class="reskey" style="background:${r.color}"></span>`, r.name, s.resources[r.key] || 0, delta, false);
+    }
+    $('#nbRes').innerHTML = html;
   }
 
   /** The faction's heroes as small cards; click one to find it on the map. */
@@ -526,9 +593,12 @@ const GameUI = (() => {
     if (!on && document.activeElement !== $('#gameSetupWorld')) $('#gameSetupWorld').checked = !(ctx.renderer.provinces && ctx.renderer.provinces.length);
     $('#gameSetupHint').textContent = (state.factions || []).length
       ? 'Cuts provinces from the map\'s historical year, gives each faction its states, and adds the major cities and resource regions. Takes a minute or two.'
-      : 'No factions yet: seed them from history on the People tab first, or provinces start neutral. Takes a minute or two.';
+      : 'No factions yet: seed them from history on the 👥 People panel first, or provinces start neutral. Takes a minute or two.';
     $('#gameOnBlock').hidden = !on;
-    $('#gameOffHint').hidden = on;
+    $('#gameOffBlock').hidden = on;
+    // One switch: in the off block before the game starts, at the foot of the Turn page once it runs.
+    const slot = on ? $('#gameToggleSlot') : $('#gameTogglePark');
+    if ($('#btnGameToggle').parentElement !== slot) slot.appendChild($('#btnGameToggle'));
     if (on) {
       $('#turnInfo').textContent = `Turn ${game.turn} · ${GameData.fmtDate(game.date)}`;
       if (document.activeElement !== $('#turnStep')) $('#turnStep').value = game.turnStep;
@@ -544,7 +614,7 @@ const GameUI = (() => {
       // Diplomacy queue and relation setter.
       const pending = (state.diplomacy || []).filter(d => d.status === 'pending');
       $('#diploQueue').innerHTML = pending.length ? pending.map(d => `<div class="diplo"><span class="grow">${esc(factionName(d.from))} → ${esc(factionName(d.to))}: ${KIND_LABEL[d.kind]}${d.note ? ` <span class="hint">${esc(d.note)}</span>` : ''}</span><button class="small" data-diplo="approve:${d.id}">Approve</button><button class="small secondary" data-diplo="block:${d.id}">Block</button></div>`).join('')
-        : '<p class="hint">No proposals waiting for you. Players queue declarations and offers from their Nation tab.</p>';
+        : '<p class="hint">No proposals waiting for you. Players queue declarations and offers from their 🤝 Diplomacy panel.</p>';
       const opts = list.map(x => `<option value="${x.faction.id}">${esc(x.faction.name)}</option>`).join('');
       for (const id of ['#relA', '#relB', '#terrAssignFaction', '#terrBrushFaction']) {
         const sel = $(id), cur = sel.value;

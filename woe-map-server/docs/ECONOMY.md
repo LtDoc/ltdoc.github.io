@@ -14,7 +14,7 @@ merge). Techs: `defaults/techtree-ww1.json`, branch "Economy".
 
 ## Projects
 
-Started from the Nation tab (**Production → Development**, a collapsible list of every factory and town the
+Started from the 🏭 Production panel (**Development**, a list of every factory and town the
 nation holds, running projects first) or from a town's or factory's popup (**🏗 Develop** / **⬆ Upgrade**).
 
 - They are paid up front like a build and complete at End turn; cancelling refunds them.
@@ -47,7 +47,7 @@ On money alone a step pays back in 25–70 turns; the extra build slot is the ot
 
 Each level also adds 1 to the town's industry (aircraft need industry 2). A village developed to level 2
 gains a build slot and so becomes a production site. On money alone a step pays back in about 20–75 turns.
-The per-level income is a campaign rule (Game tab → Rules → Town development: money, RP, manpower per level).
+The per-level income is a campaign rule (⚖ Rules → Economy → Town development: money, RP, manpower per level).
 
 ## The Economy branch
 

@@ -8,7 +8,7 @@ pings in `server/routes/lobbies.js`, trades in `server/routes/game.js` and `serv
 
 **💬 Chat** opens a window with tabs:
 
-- **OOC**: everyone's out-of-character chat. It is the same chat as the Log tab, so `/roll 2d6+3` works here too.
+- **OOC**: everyone's out-of-character chat. It is the same chat as the 📜 Log panel, so `/roll 2d6+3` works here too.
 - **GM**: announcements. Everyone reads them, only the GM writes; each one also pops up as a toast and appears
   in the Log in orange.
 - **🔒 Private chats**: **＋** starts one with any members (players or the GM), with an optional name ("Entente
@@ -33,7 +33,7 @@ something new arrives. Answer directly from the list:
 | A declaration of war, peace offer or alliance proposal awaiting approval | GM | Approve · Block |
 | A peace offer or alliance proposal sent to you | that nation (and the GM) | Accept · Decline |
 | Your own pending proposal | the proposer | Withdraw |
-| A war declared (including a war the GM sets on the Game tab), peace made, alliance formed | everyone for wars; the two sides otherwise | dismiss |
+| A war declared (including a war the GM sets on the Diplomacy panel), peace made, alliance formed | everyone for wars; the two sides otherwise | dismiss |
 | A trade offered to you | that nation (the GM can answer for it) | Accept · Decline |
 | Your own trade offer | the proposer | Withdraw |
 | A running recurring trade | both sides, GM | Cancel |
@@ -90,8 +90,8 @@ API: `POST /api/lobbies/:id/pings` (GM), `GET /pings`; WebSocket `ping`.
   it there; it stays selected so you can move it again. A right-click outside the ring says how far it can
   still go. A selected group (box or Shift-click) moves together to the point, keeping its shape, limited by its
   slowest member. Right-click and drag still pans the map; left-click on empty map deselects.
-- **Panels open on right-click.** Right-click a unit or hero (or pick it from the sidebar list or the Nation
-  tab) to open its panel. Other markers open on a left-click as before.
+- **Panels open on right-click.** Right-click a unit or hero (or pick it from the 🗺 Map panel list or the
+  Nation panel) to open its panel. Other markers open on a left-click as before.
 - Players no longer drag units or heroes while the game is running; the GM still can, to place things anywhere.
   Towns, resources and other markers drag as before, and outside game mode (or with movement limits waived)
   everything drags as it used to.

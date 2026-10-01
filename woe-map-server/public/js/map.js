@@ -438,7 +438,6 @@
     updateMoveRange();
   }
   renderer.addEventListener('zoom', e => { $('#zoomLabel').textContent = Math.round(e.detail.scale * 100) + '%'; });
-  renderer.addEventListener('frame', positionPopup);
   renderer.addEventListener('measure', e => {
     const d = e.detail;
     $('#btnMeasure').classList.toggle('active', !!d);
@@ -659,7 +658,7 @@
     $('#emptyMapText').textContent = gm ? 'Upload a map image in the campaign settings to get started.' : 'The game master has not uploaded a map for this campaign yet.';
     $('#joinCodeBlock').hidden = !gm;
     if (gm) {
-      $('#joinCodeBlock').innerHTML = `<div class="section">Join code</div><p><span class="code">${esc(l.joinCode)}</span> <button class="small secondary" id="btnCopyCode">Copy</button></p><p class="hint">Players enter this on the campaigns page.</p>`;
+      $('#joinCodeBlock').innerHTML = `<h4>Join code</h4><p><span class="code">${esc(l.joinCode)}</span> <button class="small secondary" id="btnCopyCode">Copy</button></p><p class="hint">Players enter this on the campaigns page.</p>`;
       $('#btnCopyCode').onclick = () => navigator.clipboard.writeText(l.joinCode).then(() => toast('Join code copied'));
     }
     $('#shapeGmFields').hidden = !gm;
@@ -1064,11 +1063,20 @@
     const players = new Set((state.members || []).filter(m => m.role !== 'gm' && m.nation).map(m => m.nation.trim().toLowerCase()));
     const list = gameOn() ? (state.factions || []).filter(f => players.has(f.name.toLowerCase())) : [];
     bar.hidden = !list.length;
-    if (!list.length) { bar.innerHTML = ''; allReadyWas = null; return; }
     const gm = state.role === 'gm';
     const mine = gm ? null : factionByName(state.member?.nation);
     const ready = new Map((state.ready || []).map(r => [r.factionId, r]));
-    const done = list.filter(f => ready.has(f.id)).length, all = done === list.length;
+    const done = list.filter(f => ready.has(f.id)).length, all = !!list.length && done === list.length;
+    // The turn widget (bottom right) repeats it: a Ready button for players, the count under End turn.
+    const sub = $('#twSub'), rb = $('#btnReadyTurn'), meReady = !!mine && ready.has(mine.id);
+    sub.textContent = list.length ? (all ? 'Everyone is ready' : `${done}/${list.length} nations ready`) : '';
+    sub.classList.toggle('all', all);
+    $('#turnWidget').classList.toggle('allready', all);
+    rb.textContent = meReady ? '✓ Ready' : 'Ready up';
+    rb.classList.toggle('done', meReady);
+    rb.title = meReady ? 'You are marked ready. Click to take it back' : 'Tell the GM you have finished this turn';
+    rb.dataset.fid = mine ? mine.id : '';
+    if (!list.length) { bar.innerHTML = ''; allReadyWas = null; return; }
     const clock = ms => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const who = id => state.members.find(m => m.userId === id)?.displayName;
     // Your own nation comes first.
@@ -1087,15 +1095,17 @@
     }
     allReadyWas = all;
   }
-  $('#readyBar').addEventListener('click', async e => {
-    const chip = e.target.closest('.rchip.can');
-    if (!chip) return;
-    const fid = Number(chip.dataset.fid), on = !chip.classList.contains('ready');
+  async function setReady(fid, on) {
     try {
       const d = await api.post(`${base}/game/ready`, { ready: on, factionId: state.role === 'gm' ? fid : undefined });
       if (d.turn === state.game?.turn) { state.ready = d.ready; renderReady(); }
     } catch (err) { toast(err.message); }
+  }
+  $('#readyBar').addEventListener('click', e => {
+    const chip = e.target.closest('.rchip.can');
+    if (chip) setReady(Number(chip.dataset.fid), !chip.classList.contains('ready'));
   });
+  $('#btnReadyTurn').onclick = e => setReady(Number(e.currentTarget.dataset.fid), !e.currentTarget.classList.contains('done'));
 
   // ---- Presence / members ---------------------------------------------------------------
   function initials(name) { return String(name || '?').trim().split(/\s+/).map(p => p[0]).join('').slice(0, 2).toUpperCase(); }
@@ -1447,25 +1457,10 @@
     syncAura(m);
     if (!m && !s) { el.style.display = 'none'; return; }
     if (m && PANEL_ON_RIGHT.includes(m.type) && state.panelFor !== m.id) { el.style.display = 'none'; return; }
-    el.innerHTML = m ? popupHtml(m) : shapePopupHtml(s);
+    el.innerHTML = `<button type="button" class="cardclose" title="Close (Esc)">×</button>${m ? popupHtml(m) : shapePopupHtml(s)}`;
+    el.querySelector('.cardclose').onclick = () => renderer.select(null);
     el.style.display = 'block';
     el.querySelectorAll('[data-act]').forEach(b => b.onclick = () => (m ? popupAction(b.dataset.act, m) : shapeAction(b.dataset.act, s, b)));
-    positionPopup();
-  }
-
-  function positionPopup() {
-    const el = $('#popup');
-    if (el.style.display !== 'block') return;
-    const p = state.selectedId != null ? renderer.markerScreenPos(state.selectedId) : renderer.shapeScreenPos(state.selectedShapeId);
-    if (!p) return;
-    const stage = $('#stage');
-    const W = stage.clientWidth, H = stage.clientHeight, w = el.offsetWidth, h = el.offsetHeight;
-    let x = p.x + 22, y = p.y - 24;
-    if (x + w > W - 8) x = p.x - w - 22;
-    if (x < 8) x = 8;
-    if (y + h > H - 8) y = H - 8 - h;
-    if (y < 8) y = 8;
-    el.style.left = x + 'px'; el.style.top = y + 'px';
   }
 
   const stat = (k, v) => (v !== undefined && v !== null && v !== '') ? `<div class="stat"><span class="muted">${k}</span><span>${esc(v)}</span></div>` : '';
@@ -2390,13 +2385,23 @@
   }
   function showHistoryFor(entity, entityId) {
     historyFilter = { entity, entityId };
-    $$('#sidebar .tabs button').find(b => b.dataset.tab === 'history').click();
-    $('#app').classList.remove('nosidebar');
+    showPanel('history');
     renderHistory();
   }
 
   // ---- Settings (GM) -----------------------------------------------------------------------
-  function openSettings() {
+  /** Settings window pages (left nav): campaign pages, then one page per group of game rules. */
+  function showSetPage(page) {
+    if (!$(`#setNav [data-page="${page}"]`)) page = 'general';
+    state.setPage = page;
+    $$('#setNav [data-page]').forEach(b => b.classList.toggle('on', b.dataset.page === page));
+    $$('.setpages section[data-page]').forEach(p => { p.hidden = p.dataset.page !== page; });
+    $('#rulesSave').hidden = !page.startsWith('r-');
+    $('#rulesOffHint').hidden = !page.startsWith('r-') || gameOn();
+  }
+  $$('#setNav [data-page]').forEach(b => b.onclick = () => showSetPage(b.dataset.page));
+  function openSettings(page) {
+    showSetPage(typeof page === 'string' ? page : (state.setPage || 'general'));
     const l = state.lobby;
     $('#setName').value = l.name; $('#setUpp').value = l.unitsPerPx; $('#setScaleLabel').value = l.scaleLabel;
     const c = l.settings?.combat || {};
@@ -2524,12 +2529,36 @@
   }
 
   // ---- Toolbar / tabs / keys -----------------------------------------------------------------
-  $$('#sidebar .tabs button').forEach(b => b.onclick = () => {
-    $$('#sidebar .tabs button').forEach(x => x.classList.toggle('active', x === b));
-    $$('#sidebar .panel').forEach(p => p.classList.toggle('active', p.dataset.panel === b.dataset.tab));
-    if (b.dataset.tab === 'log') { const el = $('#logList'); el.scrollTop = el.scrollHeight; }
+  // Main menu rail (docs/UI.md): each button opens its panel over the map; the same button (or ×, or Esc) closes it.
+  const PANELS = {
+    nation: ['🏛', 'Nation'], production: ['🏭', 'Production'], diplomacy: ['🤝', 'Diplomacy'], markers: ['🗺', 'Map'],
+    add: ['➕', 'Place tokens'], members: ['👥', 'People'], log: ['📜', 'Log'], history: ['🕘', 'History'], game: ['👑', 'Game master'],
+  };
+  function showPanel(tab) {
+    state.panel = tab && PANELS[tab] ? tab : null;
+    $('#sidebar').hidden = !state.panel;
+    $('#app').classList.toggle('panel-open', !!state.panel);
+    $$('#rail [data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === state.panel));
+    if (!state.panel) return;
+    $$('#sidebar .panel').forEach(p => p.classList.toggle('active', p.dataset.panel === state.panel));
+    $('#panelIcon').textContent = PANELS[state.panel][0];
+    $('#panelTitle').textContent = PANELS[state.panel][1];
+    if (state.panel === 'log') { const el = $('#logList'); el.scrollTop = el.scrollHeight; }
+  }
+  /** A panel whose rail button was just hidden (game mode off, role changed) closes. */
+  function syncRail() {
+    if (state.panel && $(`#rail [data-tab="${state.panel}"]`)?.hidden) showPanel(null);
+  }
+  $$('#rail [data-tab]').forEach(b => b.onclick = () => showPanel(state.panel === b.dataset.tab ? null : b.dataset.tab));
+  $('#panelClose').onclick = () => showPanel(null);
+  $('#railRules').onclick = () => openSettings('r-move');
+  // The nation bar opens the Nation panel; the Diplomacy panel's trade button opens the trade dialog.
+  document.addEventListener('click', e => {
+    if (e.target.closest('#nbRes [data-nb]')) { if (state.panel !== 'nation') showPanel('nation'); return; }
+    if (e.target.closest('[data-opentrade]')) $('#notifTrade').click();
   });
-  $('#btnSidebar').onclick = () => { $('#app').classList.toggle('nosidebar'); setTimeout(() => renderer.app.resize(), 50); };
+  // The map fills whatever space is left: keep the renderer the size of the stage.
+  new ResizeObserver(() => renderer.app.resize()).observe($('#stage'));
   $('#btnFit').onclick = () => renderer.fit();
   $('#btnZoomIn').onclick = () => renderer.zoomBy(1.3);
   $('#btnZoomOut').onclick = () => renderer.zoomBy(1 / 1.3);
@@ -2546,7 +2575,6 @@
   $('#btnModeDone').onclick = () => { if (!renderer.finishDraw()) toast('Add more points first'); };
   $('#btnModeCancel').onclick = () => { if (renderer.mode) renderer.cancelMode(); else disarmPlacing(); };
   $('#searchInput').oninput = renderMarkerLists;
-  if (window.innerWidth < 800) $('#app').classList.add('nosidebar');
 
   document.addEventListener('keydown', e => {
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
@@ -2554,8 +2582,14 @@
       if ($$('.modal.open').length) { closeModals(); return; }
       if (renderer.mode) { renderer.cancelMode(); return; }
       if (state.placing) { disarmPlacing(); return; }
+      if (state.selectedId == null && state.selectedShapeId == null && !(state.selectedIds || []).length && state.panel) { showPanel(null); return; }
       renderer.select(null);
       return;
+    }
+    // 1–9 and 0 open the main menu (only buttons the viewer has).
+    if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && /^[0-9]$/.test(e.key)) {
+      const b = $(`#rail [data-key="${e.key}"]`);
+      if (b && !b.hidden) { b.click(); return; }
     }
     if (e.key === 'Enter' && renderer.mode === 'draw' && !typing) { e.preventDefault(); renderer.finishDraw(); return; }
     if (typing) return;
@@ -2589,7 +2623,7 @@
   try {
     await loadLobby();
     await loadFactions();
-    GameUI.init({ state, renderer, base, $, $$, flagImg, openPanel, loadMarkers, loadTerritories, loadProvinces, removeBorderDrawings, armBrush, armFactory, notify, renderReady, isGm: () => state.role === 'gm' });
+    GameUI.init({ state, renderer, base, $, $$, flagImg, openPanel, loadMarkers, loadTerritories, loadProvinces, removeBorderDrawings, armBrush, armFactory, notify, renderReady, onRail: syncRail, onLayout: () => renderer.app.resize(), isGm: () => state.role === 'gm' });
     await GameUI.load().catch(err => console.warn('game state', err));
     syncRailButton();
     await loadTerritories();

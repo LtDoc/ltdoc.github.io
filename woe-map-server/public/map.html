@@ -8,9 +8,9 @@
 </head>
 <body>
   <div id="app">
+    <!-- Top bar: campaign and ready-up (left), notifications (centre), people online and settings (right). -->
     <header id="topbar">
       <a class="back" href="/lobbies.html" title="Back to campaigns">←</a>
-      <button id="btnSidebar" class="secondary small" title="Toggle sidebar">☰</button>
       <div id="titleWrap">
         <h1 id="lobbyName">Loading…</h1>
         <div id="readyBar" hidden></div>
@@ -23,217 +23,245 @@
         </div>
       </div>
       <div id="presence" title="Online now"></div>
-      <div class="toolgroup">
-        <button id="btnSelect" class="secondary small" title="Select several tokens: drag a box (S). Shift-drag on the map does the same anytime">⬚</button>
-        <button id="btnMeasure" class="secondary small" title="Measure distance (M)">📏</button>
-        <button id="btnDrawLine" class="secondary small" title="Draw a line (L)">〰</button>
-        <button id="btnDrawArea" class="secondary small" title="Draw an area (A)">▱</button>
-        <button id="btnDrawTrench" class="secondary small" title="Dig a trench: click points or drag freehand (T)">⌇</button>
-        <button id="btnDrawRail" class="secondary small" title="Lay a railway: click points or drag freehand; start or end on other track to join it (R)">🛤</button>
-        <button id="btnPing" class="secondary small" title="Ping a spot on the map for everyone for a minute (P)" hidden>📍</button>
-        <button id="btnGrid" class="secondary small" title="Toggle grid (G)">▦</button>
-        <button id="btnFit" class="secondary small" title="Fit map to screen (F)">⛶</button>
+      <div class="topactions">
         <button id="btnNotify" class="secondary small" title="Sound and desktop alerts when something happens while this tab is in the background">🔇</button>
-        <button id="btnSettings" class="secondary small" title="Campaign settings" hidden>⚙</button>
+        <button id="btnSettings" class="secondary small" title="Campaign settings and game rules" hidden>⚙</button>
       </div>
     </header>
 
-    <aside id="sidebar">
-      <div class="tabs">
-        <button data-tab="markers" class="active" title="Markers and drawings">Map</button>
-        <button data-tab="add">Add</button>
-        <button data-tab="nation" hidden title="Your faction: treasury, income and forces">Nation</button>
-        <button data-tab="game" hidden title="Game master: turns, factions and rules">Game</button>
-        <button data-tab="members" title="Factions and members">People</button>
-        <button data-tab="log">Log</button>
-        <button data-tab="history">History</button>
-      </div>
-      <div class="panel" data-panel="nation">
-        <select id="nationFaction" hidden title="View any faction (GM)"></select>
-        <div id="nationPanel"></div>
-      </div>
-      <div class="panel" data-panel="game">
-        <div class="section">Game mode</div>
-        <p class="hint" id="gameOffHint">Turns, treasuries, movement limits and action points. Off, the campaign is a plain map tracker.</p>
-        <div id="gameStartWrap" class="grid2">
-          <label>Start date<input id="gameStartDate" type="date" value="1914-07-28"></label>
-          <label class="inline" style="margin-top:22px"><input type="checkbox" id="gameResetTurn" checked> Reset to turn 1</label>
-        </div>
-        <div id="gameSetupWrap" hidden>
-          <label class="inline"><input type="checkbox" id="gameSetupWorld" checked> Set up the world: provinces, major cities and resources</label>
-          <p class="hint" id="gameSetupHint">Takes a minute or two; progress shows in the Territory section.</p>
-        </div>
-        <p><button id="btnGameToggle" class="small">Switch game mode on</button></p>
-        <div id="gameOnBlock" hidden>
-          <div class="section">Turn</div>
-          <p><b id="turnInfo"></b></p>
-          <p class="row"><button id="btnEndTurn" class="danger">End turn</button><button id="btnUndoTurn" class="small secondary" title="Restore treasuries and the calendar from before the last end of turn">Undo last turn</button><button id="btnTurnReports" class="small secondary" title="What every faction gained last turn">Reports…</button></p>
-          <form id="turnForm">
-            <div class="grid2">
-              <label>Turn length<select id="turnStep"><option value="week">1 week</option><option value="fortnight">2 weeks</option><option value="month">1 month</option><option value="season">1 season</option></select></label>
-              <label>Deadline <span class="hint">(countdown on the HUD)</span><input id="turnDeadline" type="datetime-local"></label>
-            </div>
-            <p class="row deadline-quick"><span class="hint">Deadline in</span><button type="button" class="small secondary" data-deadline="1">1 day</button><button type="button" class="small secondary" data-deadline="3">3 days</button><button type="button" class="small secondary" data-deadline="7">7 days</button><button type="button" class="small secondary" data-deadline="0">none</button><span class="hint">Players are reminded 24 h before and when it passes.</span></p>
-            <div class="grid2">
-              <label>Game date<input id="turnDate" type="date"></label>
-              <label>Turn number<input id="turnNumber" type="number" min="1" step="1"></label>
-            </div>
-            <button type="submit" class="small">Save</button>
-          </form>
-          <div class="section">Factions</div>
-          <div id="factionTable"></div>
-          <p><button id="btnEditTreasuries" class="small secondary">Edit treasuries…</button></p>
-          <div class="section">Diplomacy</div>
-          <div id="diploQueue"></div>
-          <form id="relationForm" class="row" style="flex-wrap:wrap;gap:4px;margin-top:6px">
-            <select id="relA" style="width:auto;margin:0;padding:4px 6px"></select>
-            <select id="relStatus" style="width:auto;margin:0;padding:4px 6px"><option value="war">at war with</option><option value="peace">at peace with</option><option value="alliance">allied with</option></select>
-            <select id="relB" style="width:auto;margin:0;padding:4px 6px"></select>
-            <button type="submit" class="small secondary">Set</button>
-          </form>
-          <div id="relationList" class="hint"></div>
-          <div class="section">Production</div>
-          <p class="row" style="flex-wrap:wrap;gap:4px"><button type="button" id="btnCosts" class="small secondary">Unit costs…</button>
-            <span id="earthSeedRow" class="row" style="gap:4px;flex-wrap:wrap"><button type="button" id="btnSeedCities" class="small secondary" title="Add the major cities of 1914 as towns (capitals and cities), owned by the faction whose territory they sit in">Add major cities</button>
-            <button type="button" id="btnGenResources" class="small secondary" title="Place the historical resource regions as nodes, owned by the territory they sit in">Generate resources</button>
-            <label class="inline" style="margin:0" title="Also scatter this many small random deposits on land">+ fill <input id="genFill" type="number" min="0" max="400" value="0" style="width:56px;margin:0;padding:3px 6px"></label></span></p>
-          <div class="section">Territory</div>
-          <div id="territoryTools">
-            <div class="row" style="flex-wrap:wrap;gap:4px" id="territoryEarthRow">
-              <select id="terrYear" style="width:auto;margin:0;padding:4px 6px"></select>
-              <button type="button" id="btnWorldSetup" class="small" title="Cut provinces for that year, give each faction its states, then add the major cities and the historical resource regions (anything already on the map is kept)">Set up the world</button>
-              <button type="button" id="btnProvGen" class="small secondary" title="Cut the land into provinces that follow that year's borders and the coast, then give each faction the states that carry its name">Cut provinces only</button>
-              <label class="inline" style="margin:0" title="Rough size of a province"><input id="provSize" type="number" min="40" max="400" step="10" value="100" style="width:56px;margin:0;padding:3px 6px"> km</label>
-              <button type="button" id="btnTerrSeed" class="small secondary" title="Give each faction the provinces (or, without provinces, the states) of that year that carry its name; the rest becomes neutral">Assign borders of that year</button>
-              <span id="provProgress" class="hint" hidden></span>
-            </div>
-            <div class="row" style="flex-wrap:wrap;gap:4px;margin-top:6px">
-              <span class="hint">Selected drawing →</span>
-              <select id="terrAssignFaction" style="width:auto;margin:0;padding:4px 6px"></select>
-              <button type="button" id="btnTerrAssign" class="small secondary" title="Select an area drawing on the map first">Assign</button>
-            </div>
-            <div class="row" style="flex-wrap:wrap;gap:4px;margin-top:6px">
-              <span class="hint">Brush</span>
-              <select id="terrBrushFaction" style="width:auto;margin:0;padding:4px 6px"></select>
-              <input id="terrBrushKm" type="number" min="1" max="5000" value="60" style="width:64px;margin:0;padding:4px 6px" title="Radius in km">
-              <button type="button" id="btnTerrBrush" class="small secondary">Paint…</button>
-              <button type="button" id="btnTerrPick" class="small secondary" title="Click single provinces to hand them to the chosen faction">Pick provinces…</button>
-            </div>
-            <p style="margin-top:8px"><button type="button" id="btnTerrClear" class="small danger">Clear territories and provinces</button></p>
-            <p class="hint">Land units take provinces as they advance into enemy or neutral ground; naval and air units never do. Nodes, factories and towns follow the ground they stand on.</p>
-          </div>
-          <details class="sub"><summary>Rules</summary>
-            <form id="rulesForm">
-              <div class="grid2">
-                <label>Distance per movement point <span class="hint">(km / map units per turn)</span><input id="ruleKmPerMove" type="number" step="any" min="1"></label>
-                <label>Attack reach per range point <span class="hint">(infantry 1, cavalry 2, artillery 3)</span><input id="ruleKmPerRange" type="number" step="any" min="1"></label>
-              </div>
-              <label class="inline"><input type="checkbox" id="ruleWaive"> Waive movement and range limits</label>
-              <div class="grid3">
-                <label>Base money / turn<input id="ruleBaseMoney" type="number" step="any"></label>
-                <label>Base RP / turn<input id="ruleBaseRp" type="number" step="any"></label>
-                <label>Base manpower<input id="ruleBaseManpower" type="number" step="any"></label>
-              </div>
-              <div class="section">City income per turn (money · RP · manpower)</div>
-              <div class="grid3"><label>Capital<input id="rule_capital_money" type="number" step="any"></label><label>&nbsp;<input id="rule_capital_rp" type="number" step="any"></label><label>&nbsp;<input id="rule_capital_manpower" type="number" step="any"></label></div>
-              <div class="grid3"><label>City<input id="rule_city_money" type="number" step="any"></label><label>&nbsp;<input id="rule_city_rp" type="number" step="any"></label><label>&nbsp;<input id="rule_city_manpower" type="number" step="any"></label></div>
-              <div class="grid3"><label>Village<input id="rule_village_money" type="number" step="any"></label><label>&nbsp;<input id="rule_village_rp" type="number" step="any"></label><label>&nbsp;<input id="rule_village_manpower" type="number" step="any"></label></div>
-              <div class="grid2"><label>Factory money / level<input id="ruleFactoryMoney" type="number" step="any"></label><label>Factory RP / level<input id="ruleFactoryRp" type="number" step="any"></label></div>
-              <div class="grid3"><label>Town development: money / level<input id="ruleDevMoney" type="number" step="any"></label><label>RP / level<input id="ruleDevRp" type="number" step="any"></label><label>Manpower / level<input id="ruleDevManpower" type="number" step="any"></label></div>
-              <div class="section">Upkeep</div>
-              <label class="inline"><input type="checkbox" id="ruleUpkeep"> Units cost upkeep each turn</label>
-              <div class="grid2"><label>Grain per unit<input id="ruleUpkeepGrain" type="number" step="any" min="0"></label><label>Oil per vehicle / aircraft / ship<input id="ruleUpkeepOil" type="number" step="any" min="0"></label></div>
-              <div class="section">Production</div>
-              <div class="grid3"><label>Capital builds<input id="ruleCapCapital" type="number" min="0" max="20" step="1"></label><label>City builds<input id="ruleCapCity" type="number" min="0" max="20" step="1"></label><label>Village builds<input id="ruleCapVillage" type="number" min="0" max="20" step="1"></label></div>
-              <div class="grid2"><label>Factory range from a city/town<input id="ruleFactoryRange" type="number" step="any" min="1"></label><label>Coastal city: sea within<input id="ruleCoastal" type="number" step="any" min="1"></label></div>
-              <div class="section">Research</div>
-              <div class="grid2"><label>Research lead <span class="hint">(years ahead of the date)</span><input id="ruleResearchLead" type="number" step="1" min="0"></label><label>Start year <span class="hint">(techs of this year or earlier are free)</span><input id="ruleStartYear" type="number" step="1"></label></div>
-              <div class="section">Territory</div>
-              <div class="grid2"><label>Capture radius <span class="hint">(around an advancing unit)</span><input id="ruleCaptureRadius" type="number" step="any" min="1"></label><label>City district <span class="hint">(around a captured city)</span><input id="ruleCityRadius" type="number" step="any" min="1"></label></div>
-              <label class="inline"><input type="checkbox" id="ruleOccupyNeutrals"> Units may occupy neutral ground</label>
-              <div class="section">Supply and support</div>
-              <label class="inline"><input type="checkbox" id="ruleSupplyOn"> Land units need supply (kept up to date as units move); cut-off units cannot move or attack, take double losses, and wear away at End turn</label>
-              <p class="hint">A place feeds a Supply Column within (by size):</p>
-              <div class="grid3"><label>Capital<input id="ruleLinkCapital" type="number" step="any" min="0"></label><label>City<input id="ruleLinkCity" type="number" step="any" min="0"></label><label>Village<input id="ruleLinkVillage" type="number" step="any" min="0"></label></div>
-              <div class="grid3"><label>Column supplies within<input id="ruleSupplyRange" type="number" step="any" min="0"></label><label>Railhead / column chain<input id="ruleSupplyLink" type="number" step="any" min="0"></label><label>Garrison within a place<input id="ruleSupplyTown" type="number" step="any" min="0"></label></div>
-              <div class="grid2"><label>Convoy feeds columns within<input id="ruleConvoyLink" type="number" step="any" min="0"></label><label>Convoy supplies units within<input id="ruleConvoyRange" type="number" step="any" min="0"></label></div>
-              <div class="grid2"><label>Attrition (% of strength a turn, from the 2nd turn cut off)<input id="ruleAttrition" type="number" step="any" min="0" max="100"></label><label>Surrenders below (%)<input id="ruleDisband" type="number" step="any" min="0" max="100"></label></div>
-              <div class="grid3"><label>Hospital heals within<input id="ruleHospitalKm" type="number" step="any" min="0"></label><label>Heals (% a turn)<input id="ruleHospitalHeal" type="number" step="any" min="0"></label><label>HQ within / bonus<span class="row"><input id="ruleHqKm" type="number" step="any" min="0"><input id="ruleHqBonus" type="number" step="any" min="0"></span></label></div>
-              <div class="grid2"><label>Engineers within / +defend<span class="row"><input id="ruleEngKm" type="number" step="any" min="0"><input id="ruleEngDefend" type="number" step="any" min="0"></span></label><label>Signals within / +artillery attack<span class="row"><input id="ruleSigKm" type="number" step="any" min="0"><input id="ruleSigArt" type="number" step="any" min="0"></span></label></div>
-              <p><button type="button" class="small secondary" id="btnSupplyNow" title="Work out every land unit's supply again (it normally updates by itself whenever units, places or railways change)">Recalculate supply now</button></p>
-              <div class="section">Railways</div>
-              <div class="grid3"><label>Speed on rails (×)<input id="ruleRailSpeed" type="number" step="any" min="1"></label><label>Cut closes (each side)<input id="ruleRailCut" type="number" step="any" min="1"></label><label>Line's defence<input id="ruleRailDefence" type="number" step="any"></label></div>
-              <div class="grid3"><label>Guards within<input id="ruleRailGuard" type="number" step="any" min="0"></label><label>Repair within<input id="ruleRailRepair" type="number" step="any" min="0"></label><label>Join rails within<input id="ruleRailJoin" type="number" step="any" min="0"></label></div>
-              <div class="section">Heroes</div>
-              <div class="grid2"><label>General's aura<input id="ruleHeroAura" type="number" step="any" min="0"></label><label>Spies contest missions within<input id="ruleSpyCounter" type="number" step="any" min="0"></label></div>
-              <div class="grid2"><label>Research stolen per star<input id="ruleSpySteal" type="number" step="any" min="0"></label><label>Security with no spy nearby <span class="hint">(defender's bonus)</span><input id="ruleSpySecurity" type="number" step="1"></label></div>
-              <label class="inline"><input type="checkbox" id="ruleDiplomats"> Peace offers and alliance proposals need a diplomat posted to the other nation</label>
-              <div class="section">Trenches</div>
-              <div class="grid3"><label>Cover range<input id="ruleTrenchRange" type="number" step="any" min="0"></label><label>Dug: +defend<input id="ruleTrenchDug" type="number" step="any" min="0"></label><label>Reinforced: +defend<input id="ruleTrenchReinforced" type="number" step="any" min="0"></label></div>
-              <div class="section">Starting stockpiles <span class="hint">(new factions)</span></div>
-              <div class="grid3"><label>Each resource<input id="ruleStartRes" type="number" step="any"></label><label>Money<input id="ruleStartMoney" type="number" step="any"></label><label>Manpower<input id="ruleStartMp" type="number" step="any"></label></div>
-              <label class="inline"><input type="checkbox" id="rulePublic"> Treasuries are public (players see every faction)</label>
-              <label class="inline"><input type="checkbox" id="ruleCapturedIdle"> Captured places yield nothing the turn they change hands</label>
-              <button type="submit" class="small">Save rules</button>
-            </form>
-          </details>
-        </div>
-      </div>
-      <div class="panel active" data-panel="markers">
-        <input id="searchInput" placeholder="Search markers and drawings…" autocomplete="off">
-        <div id="markerLists"></div>
-      </div>
-      <div class="panel" data-panel="add">
-        <form id="addForm"></form>
-      </div>
-      <div class="panel" data-panel="members">
-        <div id="joinCodeBlock" hidden></div>
-        <div class="section">Factions <span style="float:right;margin-top:-4px"><button id="btnSeedFactions" class="small secondary" hidden title="Create factions from the powers of a historical year">Seed from history…</button> <button id="btnAddFaction" class="small" hidden>+ Add</button></span></div>
-        <ul id="factionsList" class="list"></ul>
-        <p class="hint" id="factionsHint">Factions give units and players a flag. Members are assigned to a faction from their row below.</p>
-        <div class="section">Members</div>
-        <ul id="membersList" class="list"></ul>
-        <p><button id="btnLeave" class="danger small">Leave campaign</button></p>
-      </div>
-      <div class="panel" data-panel="log">
-        <div id="logList" class="log"></div>
-        <form id="chatForm" class="row" style="margin-top:8px">
-          <input id="chatInput" placeholder="Say something, or /roll 2d6+3" maxlength="500" autocomplete="off">
-          <button type="button" id="btnRoll" class="small secondary" title="Roll dice">🎲</button>
-          <button type="submit" class="small">Send</button>
-        </form>
-      </div>
-      <div class="panel" data-panel="history">
-        <p class="hint">Every change to markers and drawings. GMs can revert any entry; players can revert their own.</p>
-        <div id="historyList" class="log"></div>
-      </div>
-    </aside>
+    <!-- Main menu (left rail): each button opens a panel over the map; click it again to close. Keys 1–0. -->
+    <nav id="rail" aria-label="Main menu">
+      <button data-tab="nation" data-key="1" hidden title="Nation: treasury, stockpiles, forces and last turn (1)"><i>🏛</i><span>Nation</span></button>
+      <button data-tab="production" data-key="2" hidden title="Production: build units, factories and develop towns (2)"><i>🏭</i><span>Production</span></button>
+      <button data-opentree="1" data-key="3" id="railResearch" hidden title="Research: the tech tree (3)"><i>🔬</i><span>Research</span></button>
+      <button data-tab="diplomacy" data-key="4" hidden title="Diplomacy: war, peace, alliances and trades (4)"><i>🤝</i><span>Diplomacy</span></button>
+      <hr id="railSplit" hidden>
+      <button data-tab="markers" data-key="5" title="Units, places and drawings on the map, with search (5)"><i>🗺</i><span>Map</span></button>
+      <button data-tab="add" data-key="6" title="Place new units, towns and other tokens (6)"><i>➕</i><span>Place</span></button>
+      <button data-tab="members" data-key="7" title="Factions and members (7)"><i>👥</i><span>People</span></button>
+      <button data-tab="log" data-key="8" title="Log of everything that happens, dice rolls (8)"><i>📜</i><span>Log</span></button>
+      <button data-tab="history" data-key="9" title="History of changes, with undo (9)"><i>🕘</i><span>History</span></button>
+      <div class="railgap"></div>
+      <button data-tab="game" data-key="0" hidden title="Game master: turns, factions and the world (0)"><i>👑</i><span>GM</span></button>
+      <button id="railRules" hidden title="Game rules and campaign settings"><i>⚖</i><span>Rules</span></button>
+    </nav>
 
-    <main id="stage">
-      <div id="hud">
-        <button id="btnZoomIn" class="small" title="Zoom in">+</button>
-        <button id="btnZoomOut" class="small" title="Zoom out">−</button>
-        <span id="zoomLabel" class="badge">100%</span>
-        <span id="turnLabel" class="badge turn" hidden></span>
-        <span id="provinceLabel" class="badge province" hidden></span>
-        <span id="rendererLabel" class="badge" title="Renderer"></span>
-      </div>
-      <div id="modeHud">
-        <span id="modeText">Click points on the map</span>
-        <button id="btnModeUndo" class="small secondary">Undo</button>
-        <button id="btnModeClear" class="small secondary">Clear</button>
-        <button id="btnModeDone" class="small">Done</button>
-        <button id="btnModeCancel" class="small secondary">Cancel</button>
-      </div>
-      <div id="emptyMap">
-        <div class="card">
-          <h3>No map image yet</h3>
-          <p class="muted" id="emptyMapText">The game master has not uploaded a map for this campaign.</p>
-          <button id="btnEmptyUpload" class="small" hidden>Upload a map</button>
+    <section id="main">
+      <!-- Nation bar (game mode): the viewed nation and its resources, HoI style. -->
+      <div id="nationbar" hidden>
+        <div class="nb-nation">
+          <span id="nbFlag"></span>
+          <select id="nationFaction" hidden title="View any faction (GM)"></select>
+          <b id="nbName"></b>
         </div>
+        <div id="nbRes" class="nb-res"></div>
       </div>
-      <div id="popup"></div>
-    </main>
+
+      <div id="stagewrap">
+        <main id="stage">
+          <!-- Map tools (bottom left) -->
+          <div id="hud">
+            <div class="hudgroup">
+              <button id="btnZoomOut" class="small" title="Zoom out">−</button>
+              <span id="zoomLabel" class="badge">100%</span>
+              <button id="btnZoomIn" class="small" title="Zoom in">+</button>
+              <button id="btnFit" class="small" title="Fit map to screen (F)">⛶</button>
+            </div>
+            <div class="hudgroup toolgroup">
+              <button id="btnSelect" class="small" title="Select several tokens: drag a box (S). Shift-drag on the map does the same anytime">⬚</button>
+              <button id="btnMeasure" class="small" title="Measure distance (M)">📏</button>
+              <button id="btnDrawLine" class="small" title="Draw a line (L)">〰</button>
+              <button id="btnDrawArea" class="small" title="Draw an area (A)">▱</button>
+              <button id="btnDrawTrench" class="small" title="Dig a trench: click points or drag freehand (T)">⌇</button>
+              <button id="btnDrawRail" class="small" title="Lay a railway: click points or drag freehand; start or end on other track to join it (R)">🛤</button>
+              <button id="btnPing" class="small" title="Ping a spot on the map for everyone for a minute (P)" hidden>📍</button>
+              <button id="btnGrid" class="small" title="Toggle grid (G)">▦</button>
+            </div>
+            <span id="provinceLabel" class="badge province" hidden></span>
+            <span id="rendererLabel" class="badge" title="Renderer"></span>
+          </div>
+          <div id="modeHud">
+            <span id="modeText">Click points on the map</span>
+            <button id="btnModeUndo" class="small secondary">Undo</button>
+            <button id="btnModeClear" class="small secondary">Clear</button>
+            <button id="btnModeDone" class="small">Done</button>
+            <button id="btnModeCancel" class="small secondary">Cancel</button>
+          </div>
+          <div id="emptyMap">
+            <div class="card">
+              <h3>No map image yet</h3>
+              <p class="muted" id="emptyMapText">The game master has not uploaded a map for this campaign.</p>
+              <button id="btnEmptyUpload" class="small" hidden>Upload a map</button>
+            </div>
+          </div>
+          <!-- Selection card: the panel of the selected unit, place or drawing (bottom left, above the tools). -->
+          <div id="popup"></div>
+        </main>
+
+        <!-- Panels opened from the rail -->
+        <aside id="sidebar" hidden>
+          <header class="panelhead"><i id="panelIcon"></i><h2 id="panelTitle"></h2><button id="panelClose" type="button" title="Close (Esc)">×</button></header>
+
+          <div class="panel" data-panel="nation"><div id="nationPanel"></div></div>
+          <div class="panel" data-panel="production"><div id="prodPanel"></div></div>
+          <div class="panel" data-panel="diplomacy">
+            <div id="diploPanel"></div>
+            <div id="gmDiplo" class="box" hidden>
+              <h4>Game master</h4>
+              <div class="sub">Waiting for your approval</div>
+              <div id="diploQueue"></div>
+              <div class="sub">Set relations directly</div>
+              <form id="relationForm" class="toolrow">
+                <select id="relA"></select>
+                <select id="relStatus"><option value="war">at war with</option><option value="peace">at peace with</option><option value="alliance">allied with</option></select>
+                <select id="relB"></select>
+                <button type="submit" class="small">Set</button>
+              </form>
+              <div id="relationList" class="hint"></div>
+            </div>
+          </div>
+
+          <div class="panel" data-panel="game">
+            <div id="gameOffBlock">
+              <div class="box">
+                <h4>Game mode</h4>
+                <p class="hint" id="gameOffHint">Turns, treasuries, movement limits and action points. Off, the campaign is a plain map tracker.</p>
+                <div id="gameStartWrap" class="grid2">
+                  <label>Start date<input id="gameStartDate" type="date" value="1914-07-28"></label>
+                  <label class="inline" style="margin-top:22px"><input type="checkbox" id="gameResetTurn" checked> Reset to turn 1</label>
+                </div>
+                <div id="gameSetupWrap" hidden>
+                  <label class="inline"><input type="checkbox" id="gameSetupWorld" checked> Set up the world: provinces, major cities and resources</label>
+                  <p class="hint" id="gameSetupHint">Takes a minute or two; progress shows in the World section.</p>
+                </div>
+                <p id="gameTogglePark"><button id="btnGameToggle" class="small">Switch game mode on</button></p>
+              </div>
+            </div>
+            <div id="gameOnBlock" hidden>
+              <div class="subtabs" id="gmTabs">
+                <button type="button" data-gm="turn" class="on">Turn</button>
+                <button type="button" data-gm="nations">Nations</button>
+                <button type="button" data-gm="world">World</button>
+              </div>
+
+              <div data-gmpage="turn">
+                <div class="box">
+                  <h4><b id="turnInfo"></b></h4>
+                  <p class="toolrow"><button id="btnUndoTurn" class="small secondary" title="Restore treasuries and the calendar from before the last end of turn">↶ Undo last turn</button><button id="btnTurnReports" class="small secondary" title="What every faction gained last turn">📋 Turn reports…</button></p>
+                  <p class="hint">End the turn with the button at the bottom right of the map.</p>
+                </div>
+                <form id="turnForm" class="box">
+                  <h4>Calendar and deadline</h4>
+                  <div class="grid2">
+                    <label>Turn length<select id="turnStep"><option value="week">1 week</option><option value="fortnight">2 weeks</option><option value="month">1 month</option><option value="season">1 season</option></select></label>
+                    <label>Deadline<input id="turnDeadline" type="datetime-local"></label>
+                  </div>
+                  <p class="toolrow deadline-quick"><span class="hint">Deadline in</span><button type="button" class="small secondary" data-deadline="1">1 day</button><button type="button" class="small secondary" data-deadline="3">3 days</button><button type="button" class="small secondary" data-deadline="7">7 days</button><button type="button" class="small secondary" data-deadline="0">none</button></p>
+                  <p class="hint">The countdown shows by the turn button. Players are reminded 24 h before and when it passes.</p>
+                  <div class="grid2">
+                    <label>Game date<input id="turnDate" type="date"></label>
+                    <label>Turn number<input id="turnNumber" type="number" min="1" step="1"></label>
+                  </div>
+                  <button type="submit" class="small">Save</button>
+                </form>
+                <div class="box">
+                  <h4>Game mode</h4>
+                  <p class="hint">Switching off keeps treasuries and pauses turns; nothing is deleted.</p>
+                  <div id="gameToggleSlot"></div>
+                </div>
+              </div>
+
+              <div data-gmpage="nations" hidden>
+                <div class="box">
+                  <h4>Treasuries</h4>
+                  <div id="factionTable"></div>
+                  <p class="toolrow"><button id="btnEditTreasuries" class="small secondary">Edit treasuries…</button><button type="button" id="btnCosts" class="small secondary">Unit costs…</button></p>
+                </div>
+                <p class="hint">Diplomacy approvals and relations are on the 🤝 Diplomacy panel. Factions and members are on 👥 People.</p>
+              </div>
+
+              <div data-gmpage="world" hidden>
+                <div class="box" id="territoryTools">
+                  <h4>Territory</h4>
+                  <div id="territoryEarthRow">
+                    <div class="toolrow">
+                      <label class="tight">Year<select id="terrYear"></select></label>
+                      <label class="tight" title="Rough size of a province">Province size (km)<input id="provSize" type="number" min="40" max="400" step="10" value="100"></label>
+                    </div>
+                    <div class="toolrow">
+                      <button type="button" id="btnWorldSetup" class="small" title="Cut provinces for that year, give each faction its states, then add the major cities and the historical resource regions (anything already on the map is kept)">Set up the world</button>
+                      <button type="button" id="btnProvGen" class="small secondary" title="Cut the land into provinces that follow that year's borders and the coast, then give each faction the states that carry its name">Cut provinces only</button>
+                      <button type="button" id="btnTerrSeed" class="small secondary" title="Give each faction the provinces (or, without provinces, the states) of that year that carry its name; the rest becomes neutral">Assign that year's borders</button>
+                    </div>
+                    <span id="provProgress" class="hint" hidden></span>
+                  </div>
+                  <div class="sub">Hand ground to a faction</div>
+                  <div class="toolrow">
+                    <label class="tight">Faction<select id="terrBrushFaction"></select></label>
+                    <label class="tight" title="Brush radius">Brush (km)<input id="terrBrushKm" type="number" min="1" max="5000" value="60"></label>
+                  </div>
+                  <div class="toolrow">
+                    <button type="button" id="btnTerrBrush" class="small secondary">🖌 Paint…</button>
+                    <button type="button" id="btnTerrPick" class="small secondary" title="Click single provinces to hand them to the chosen faction">Pick provinces…</button>
+                  </div>
+                  <div class="toolrow">
+                    <label class="tight">Selected area drawing →<select id="terrAssignFaction"></select></label>
+                    <button type="button" id="btnTerrAssign" class="small secondary" title="Select an area drawing on the map first">Assign</button>
+                  </div>
+                  <p class="hint">Land units take provinces as they advance into enemy or neutral ground; naval and air units never do. Nodes, factories and towns follow the ground they stand on.</p>
+                  <p><button type="button" id="btnTerrClear" class="small danger">Clear territories and provinces</button></p>
+                </div>
+                <div class="box" id="earthSeedRow">
+                  <h4>Cities and resources</h4>
+                  <div class="toolrow">
+                    <button type="button" id="btnSeedCities" class="small secondary" title="Add the major cities of 1914 as towns (capitals and cities), owned by the faction whose territory they sit in">Add major cities</button>
+                    <button type="button" id="btnGenResources" class="small secondary" title="Place the historical resource regions as nodes, owned by the territory they sit in">Generate resources</button>
+                    <label class="tight" title="Also scatter this many small random deposits on land">+ random deposits<input id="genFill" type="number" min="0" max="400" value="0"></label>
+                  </div>
+                </div>
+                <div class="box">
+                  <h4>Supply</h4>
+                  <p class="toolrow"><button type="button" class="small secondary" id="btnSupplyNow" title="Work out every land unit's supply again (it normally updates by itself whenever units, places or railways change)">Recalculate supply now</button></p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" data-panel="markers">
+            <input id="searchInput" placeholder="Search markers and drawings…" autocomplete="off">
+            <div id="markerLists"></div>
+          </div>
+          <div class="panel" data-panel="add">
+            <form id="addForm"></form>
+          </div>
+          <div class="panel" data-panel="members">
+            <div id="joinCodeBlock" class="box" hidden></div>
+            <div class="box">
+              <h4>Factions <span class="headbtns"><button id="btnSeedFactions" class="small secondary" hidden title="Create factions from the powers of a historical year">Seed from history…</button><button id="btnAddFaction" class="small" hidden>＋ Add</button></span></h4>
+              <ul id="factionsList" class="list"></ul>
+              <p class="hint" id="factionsHint">Factions give units and players a flag. Members are assigned to a faction from their row below.</p>
+            </div>
+            <div class="box">
+              <h4>Members</h4>
+              <ul id="membersList" class="list"></ul>
+            </div>
+            <p><button id="btnLeave" class="danger small">Leave campaign</button></p>
+          </div>
+          <div class="panel panel-fill" data-panel="log">
+            <div id="logList" class="log"></div>
+            <form id="chatForm" class="row" style="margin-top:8px">
+              <input id="chatInput" placeholder="Say something, or /roll 2d6+3" maxlength="500" autocomplete="off">
+              <button type="button" id="btnRoll" class="small secondary" title="Roll dice">🎲</button>
+              <button type="submit" class="small">Send</button>
+            </form>
+          </div>
+          <div class="panel" data-panel="history">
+            <p class="hint">Every change to markers and drawings. GMs can revert any entry; players can revert their own.</p>
+            <div id="historyList" class="log"></div>
+          </div>
+        </aside>
+      </div>
+    </section>
   </div>
 
   <datalist id="nationList"></datalist>
@@ -264,7 +292,7 @@
           <label class="inline" id="trenchZigWrap"><input type="checkbox" id="trenchZigzag" checked> Add traverses on long straights (fire-trench zigzag)</label>
           <p class="hint">Width is in map pixels (tokens are about 36). The centreline is what units and editing use; drag its points from the popup like any drawing.</p>
         </div>
-        <p id="railFields" class="hint" hidden>Land units and heroes move several times faster along open track (Game tab → Rules → Railways). Rails whose ends touch are joined; start or end a line on other track to branch off it. GM-only railways are plans: nothing runs on them.</p>
+        <p id="railFields" class="hint" hidden>Land units and heroes move several times faster along open track (⚖ Rules → Railways). Rails whose ends touch are joined; start or end a line on other track to branch off it. GM-only railways are plans: nothing runs on them.</p>
         <div id="shapeGmFields">
           <label>Visible to nations <span class="hint">(comma separated, blank = everyone)</span><input id="shapeVisibleTo" list="nationList" autocomplete="off" placeholder="Everyone"></label>
           <label class="inline"><input type="checkbox" id="shapeAdminOnly"> GM only (hidden from players)</label>
@@ -414,7 +442,20 @@
       <form id="chatSend"><input id="chatMsg" maxlength="1000" autocomplete="off"><button type="submit" class="small">Send</button></form>
       <p id="chatReadOnly" class="hint" hidden>Only the GM posts here. Use OOC or a private chat to reply.</p>
     </section>
-    <button id="chatToggle" type="button" title="Chat: OOC, GM announcements and private chats">💬 Chat<span id="chatBadge" hidden></span></button>
+    <div class="dockrow">
+      <button id="chatToggle" type="button" title="Chat: OOC, GM announcements and private chats">💬 Chat<span id="chatBadge" hidden></span></button>
+      <!-- Turn (Civ style): date and deadline, End turn for the GM, Ready up for players. -->
+      <div id="turnWidget" hidden>
+        <div class="tw-info">
+          <b id="twTurn"></b>
+          <span id="twDate"></span>
+          <span id="turnLabel" class="tw-deadline"></span>
+        </div>
+        <button id="btnEndTurn" type="button" class="tw-main" hidden title="Pay income, reset movement and advance the calendar">End turn</button>
+        <button id="btnReadyTurn" type="button" class="tw-main ready-btn" hidden title="Tell the GM you have finished this turn">Ready up</button>
+        <span id="twSub" class="tw-sub"></span>
+      </div>
+    </div>
   </div>
 
   <div id="tradeModal" class="modal">
@@ -457,66 +498,190 @@
   </div>
 
   <div id="settingsModal" class="modal">
-    <div class="card">
+    <div class="card xwide setcard">
       <button class="close" data-close>×</button>
       <h2>Campaign settings <span class="hint" style="font-weight:400;font-size:11px" title="The git commit this server is running; + means uncommitted changes">build __WOE_BUILD__</span></h2>
-      <form id="settingsForm">
-        <label>Name<input id="setName" maxlength="60" required></label>
-        <div class="grid2">
-          <label>Map units per pixel<input id="setUpp" type="number" step="any" min="0.000001" required></label>
-          <label>Unit label<input id="setScaleLabel" maxlength="12" placeholder="km"></label>
+      <div class="setlayout">
+        <nav class="setnav" id="setNav">
+          <div class="navhead">Campaign</div>
+          <button type="button" data-page="general" class="on">General</button>
+          <button type="button" data-page="combat">Combat</button>
+          <button type="button" data-page="map">Map</button>
+          <div class="navhead">Game rules</div>
+          <button type="button" data-page="r-move">Movement</button>
+          <button type="button" data-page="r-economy">Economy</button>
+          <button type="button" data-page="r-production">Production</button>
+          <button type="button" data-page="r-research">Research</button>
+          <button type="button" data-page="r-territory">Territory</button>
+          <button type="button" data-page="r-supply">Supply &amp; support</button>
+          <button type="button" data-page="r-rail">Railways</button>
+          <button type="button" data-page="r-heroes">Heroes</button>
+          <button type="button" data-page="r-trench">Trenches</button>
+        </nav>
+        <div class="setpages">
+          <form id="settingsForm">
+            <section data-page="general">
+              <h3>General</h3>
+              <label>Name<input id="setName" maxlength="60" required></label>
+              <div class="grid2">
+                <label>Map units per pixel<input id="setUpp" type="number" step="any" min="0.000001" required></label>
+                <label>Unit label<input id="setScaleLabel" maxlength="12" placeholder="km"></label>
+              </div>
+              <p class="hint">Used by the measure tool. Example: if 100 px on your map is 25 km, enter 0.25 and "km".</p>
+              <div class="grid2">
+                <label>Token sizing<select id="setTokenMode"><option value="map">Scale with the map (shrink when zoomed out)</option><option value="screen">Fixed size on screen</option></select></label>
+                <label>Token size <span class="hint">(1 = normal, 2 = double)</span><input id="setTokenScale" type="number" step="any" min="0.5" max="3" value="1"></label>
+              </div>
+              <button type="submit">Save</button>
+            </section>
+            <section data-page="combat" hidden>
+              <h3>Combat</h3>
+              <div class="grid2">
+                <label>Die size (d?)<input id="setDie" type="number" min="2" max="100" value="20"></label>
+                <label>Base strength loss %<input id="setBaseLoss" type="number" min="0" max="100" value="10"></label>
+                <label>Extra loss per margin point<input id="setMarginMult" type="number" min="0" max="20" step="any" value="2"></label>
+                <label>Winner's loss %<input id="setWinnerLoss" type="number" min="0" max="100" value="5"></label>
+              </div>
+              <p class="hint">Each side rolls the die and adds attack or defend. The loser loses base + margin × extra; the winner loses the winner's loss. Ties cost both half the base.</p>
+              <p><button type="button" class="secondary small" id="btnUnitStats">Unit stats table…</button> <span class="hint">Default attack / defend / AP / range / movement per unit type, with +/- steppers.</span></p>
+              <button type="submit">Save</button>
+            </section>
+          </form>
+          <section data-page="general">
+            <div class="section">Join code</div>
+            <p><span class="code" id="setJoinCode"></span> <button id="btnRotateCode" class="small secondary">New code</button></p>
+            <div class="section">Danger zone</div>
+            <button id="btnDeleteLobby" class="danger">Delete campaign</button>
+          </section>
+          <section data-page="map" hidden>
+            <h3>Map</h3>
+            <p class="hint" id="mapInfo"></p>
+            <div class="section">Upload an image</div>
+            <form id="mapForm" class="row">
+              <input type="file" id="mapFile" accept="image/png,image/jpeg,image/webp,image/gif" required>
+              <button type="submit" class="secondary">Upload image</button>
+            </form>
+            <p class="hint">Large images are shrunk in your browser to at most 8192 px on the longest side and re-encoded before upload, so phones are not sent 40 MB files.</p>
+            <div class="section">Or use the Earth</div>
+            <form id="earthForm">
+              <div class="grid2">
+                <label>Style<select id="earthStyle"><option value="atlas">Atlas (blue &amp; green)</option><option value="parchment">Parchment</option><option value="dark">Dark</option></select></label>
+                <label>Detail (map width in px)<select id="earthWidth"><option value="4096">4096 (fast)</option><option value="8192" selected>8192</option><option value="16384">16384</option><option value="32768">32768 (fine placement)</option></select></label>
+              </div>
+              <label>Borders<select id="earthBorders"><option value="none">None</option><option value="modern">Present day</option></select></label>
+              <div class="grid2">
+                <label class="inline"><input type="checkbox" id="earthTint" checked> Tint each power's territory</label>
+                <label class="inline"><input type="checkbox" id="earthLabels" checked> Country names when zoomed in</label>
+                <label class="inline"><input type="checkbox" id="earthRivers" checked> Rivers</label>
+                <label class="inline"><input type="checkbox" id="earthLakes" checked> Lakes</label>
+                <label class="inline"><input type="checkbox" id="earthGraticule"> Latitude / longitude grid</label>
+              </div>
+              <button type="submit" class="secondary">Use Earth map</button>
+              <p class="hint">Vector coastlines, lakes and rivers from Natural Earth (1:50m, public domain), drawn in WebGL so they stay sharp at any zoom. Replaces any uploaded image. The measure tool then reports true great-circle kilometres.</p>
+            </form>
+            <div id="importBordersBlock" hidden>
+              <div class="section">Editable borders</div>
+              <p class="hint">Turn a year's borders into locked area drawings, one per country, so you can reshape them like any drawing (unlock, then grab the line). Countries are simplified to at most 300 points each.</p>
+              <div class="toolrow">
+                <button type="button" id="btnImportBordersView" class="small secondary">Import countries in the current view</button>
+                <button type="button" id="btnImportBordersAll" class="small secondary">Import the whole world</button>
+              </div>
+              <label class="inline"><input type="checkbox" id="importHideLayer" checked> Hide the built-in border layer afterwards</label>
+            </div>
+          </section>
+
+          <form id="rulesForm">
+            <p class="hint rules-off" id="rulesOffHint" hidden>Game mode is off: these rules take effect once the GM switches it on (👑 GM panel).</p>
+            <section data-page="r-move" hidden>
+              <h3>Movement</h3>
+              <div class="grid2">
+                <label>Distance per movement point <span class="hint">(km / map units per turn)</span><input id="ruleKmPerMove" type="number" step="any" min="1"></label>
+                <label>Attack reach per range point <span class="hint">(infantry 1, cavalry 2, artillery 3)</span><input id="ruleKmPerRange" type="number" step="any" min="1"></label>
+              </div>
+              <label class="inline"><input type="checkbox" id="ruleWaive"> Waive movement and range limits</label>
+            </section>
+            <section data-page="r-economy" hidden>
+              <h3>Economy</h3>
+              <div class="grid3">
+                <label>Base money / turn<input id="ruleBaseMoney" type="number" step="any"></label>
+                <label>Base RP / turn<input id="ruleBaseRp" type="number" step="any"></label>
+                <label>Base manpower<input id="ruleBaseManpower" type="number" step="any"></label>
+              </div>
+              <div class="section">City income per turn</div>
+              <table class="ruletable">
+                <thead><tr><th></th><th>Money</th><th>RP</th><th>Manpower</th></tr></thead>
+                <tbody>
+                  <tr><th>Capital</th><td><input id="rule_capital_money" type="number" step="any"></td><td><input id="rule_capital_rp" type="number" step="any"></td><td><input id="rule_capital_manpower" type="number" step="any"></td></tr>
+                  <tr><th>City</th><td><input id="rule_city_money" type="number" step="any"></td><td><input id="rule_city_rp" type="number" step="any"></td><td><input id="rule_city_manpower" type="number" step="any"></td></tr>
+                  <tr><th>Village</th><td><input id="rule_village_money" type="number" step="any"></td><td><input id="rule_village_rp" type="number" step="any"></td><td><input id="rule_village_manpower" type="number" step="any"></td></tr>
+                  <tr><th>Town development <span class="hint">(per level)</span></th><td><input id="ruleDevMoney" type="number" step="any"></td><td><input id="ruleDevRp" type="number" step="any"></td><td><input id="ruleDevManpower" type="number" step="any"></td></tr>
+                  <tr><th>Factory <span class="hint">(per level)</span></th><td><input id="ruleFactoryMoney" type="number" step="any"></td><td><input id="ruleFactoryRp" type="number" step="any"></td><td></td></tr>
+                </tbody>
+              </table>
+              <div class="section">Upkeep</div>
+              <label class="inline"><input type="checkbox" id="ruleUpkeep"> Units cost upkeep each turn</label>
+              <div class="grid2"><label>Grain per unit<input id="ruleUpkeepGrain" type="number" step="any" min="0"></label><label>Oil per vehicle / aircraft / ship<input id="ruleUpkeepOil" type="number" step="any" min="0"></label></div>
+              <div class="section">Starting stockpiles <span class="hint">(new factions)</span></div>
+              <div class="grid3"><label>Each resource<input id="ruleStartRes" type="number" step="any"></label><label>Money<input id="ruleStartMoney" type="number" step="any"></label><label>Manpower<input id="ruleStartMp" type="number" step="any"></label></div>
+              <label class="inline"><input type="checkbox" id="rulePublic"> Treasuries are public (players see every faction)</label>
+              <label class="inline"><input type="checkbox" id="ruleCapturedIdle"> Captured places yield nothing the turn they change hands</label>
+            </section>
+            <section data-page="r-production" hidden>
+              <h3>Production</h3>
+              <div class="grid3"><label>Capital builds at once<input id="ruleCapCapital" type="number" min="0" max="20" step="1"></label><label>City builds<input id="ruleCapCity" type="number" min="0" max="20" step="1"></label><label>Village builds<input id="ruleCapVillage" type="number" min="0" max="20" step="1"></label></div>
+              <div class="grid2"><label>Factory range from a city/town<input id="ruleFactoryRange" type="number" step="any" min="1"></label><label>Coastal city: sea within<input id="ruleCoastal" type="number" step="any" min="1"></label></div>
+              <p class="hint">Unit costs and build times: 👑 GM panel → Nations → Unit costs.</p>
+            </section>
+            <section data-page="r-research" hidden>
+              <h3>Research</h3>
+              <div class="grid2"><label>Research lead <span class="hint">(years ahead of the date)</span><input id="ruleResearchLead" type="number" step="1" min="0"></label><label>Start year <span class="hint">(techs of this year or earlier are free)</span><input id="ruleStartYear" type="number" step="1"></label></div>
+              <p class="hint">Edit the tree itself from 🔬 Research → Edit tree.</p>
+            </section>
+            <section data-page="r-territory" hidden>
+              <h3>Territory</h3>
+              <div class="grid2"><label>Capture radius <span class="hint">(around an advancing unit)</span><input id="ruleCaptureRadius" type="number" step="any" min="1"></label><label>City district <span class="hint">(around a captured city)</span><input id="ruleCityRadius" type="number" step="any" min="1"></label></div>
+              <label class="inline"><input type="checkbox" id="ruleOccupyNeutrals"> Units may occupy neutral ground</label>
+            </section>
+            <section data-page="r-supply" hidden>
+              <h3>Supply &amp; support</h3>
+              <label class="inline"><input type="checkbox" id="ruleSupplyOn"> Land units need supply (kept up to date as units move); cut-off units cannot move or attack, take double losses, and wear away at End turn</label>
+              <div class="section">A place feeds a Supply Column within (by size)</div>
+              <div class="grid3"><label>Capital<input id="ruleLinkCapital" type="number" step="any" min="0"></label><label>City<input id="ruleLinkCity" type="number" step="any" min="0"></label><label>Village<input id="ruleLinkVillage" type="number" step="any" min="0"></label></div>
+              <div class="section">Columns, railheads and convoys</div>
+              <div class="grid3"><label>Column supplies within<input id="ruleSupplyRange" type="number" step="any" min="0"></label><label>Railhead / column chain<input id="ruleSupplyLink" type="number" step="any" min="0"></label><label>Garrison within a place<input id="ruleSupplyTown" type="number" step="any" min="0"></label></div>
+              <div class="grid2"><label>Convoy feeds columns within<input id="ruleConvoyLink" type="number" step="any" min="0"></label><label>Convoy supplies units within<input id="ruleConvoyRange" type="number" step="any" min="0"></label></div>
+              <div class="section">Cut-off units</div>
+              <div class="grid2"><label>Attrition (% of strength a turn, from the 2nd turn cut off)<input id="ruleAttrition" type="number" step="any" min="0" max="100"></label><label>Surrenders below (%)<input id="ruleDisband" type="number" step="any" min="0" max="100"></label></div>
+              <div class="section">Support units</div>
+              <table class="ruletable">
+                <thead><tr><th></th><th>Within</th><th>Effect</th></tr></thead>
+                <tbody>
+                  <tr><th>Field hospital <span class="hint">(heals % a turn)</span></th><td><input id="ruleHospitalKm" type="number" step="any" min="0"></td><td><input id="ruleHospitalHeal" type="number" step="any" min="0"></td></tr>
+                  <tr><th>HQ <span class="hint">(+attack and defend)</span></th><td><input id="ruleHqKm" type="number" step="any" min="0"></td><td><input id="ruleHqBonus" type="number" step="any" min="0"></td></tr>
+                  <tr><th>Engineers <span class="hint">(+defend)</span></th><td><input id="ruleEngKm" type="number" step="any" min="0"></td><td><input id="ruleEngDefend" type="number" step="any" min="0"></td></tr>
+                  <tr><th>Signals <span class="hint">(+artillery attack)</span></th><td><input id="ruleSigKm" type="number" step="any" min="0"></td><td><input id="ruleSigArt" type="number" step="any" min="0"></td></tr>
+                </tbody>
+              </table>
+            </section>
+            <section data-page="r-rail" hidden>
+              <h3>Railways</h3>
+              <div class="grid3"><label>Speed on rails (×)<input id="ruleRailSpeed" type="number" step="any" min="1"></label><label>Cut closes (each side)<input id="ruleRailCut" type="number" step="any" min="1"></label><label>Line's defence<input id="ruleRailDefence" type="number" step="any"></label></div>
+              <div class="grid3"><label>Guards within<input id="ruleRailGuard" type="number" step="any" min="0"></label><label>Repair within<input id="ruleRailRepair" type="number" step="any" min="0"></label><label>Join rails within<input id="ruleRailJoin" type="number" step="any" min="0"></label></div>
+            </section>
+            <section data-page="r-heroes" hidden>
+              <h3>Heroes</h3>
+              <div class="grid2"><label>General's aura<input id="ruleHeroAura" type="number" step="any" min="0"></label><label>Spies contest missions within<input id="ruleSpyCounter" type="number" step="any" min="0"></label></div>
+              <div class="grid2"><label>Research stolen per star<input id="ruleSpySteal" type="number" step="any" min="0"></label><label>Security with no spy nearby <span class="hint">(defender's bonus)</span><input id="ruleSpySecurity" type="number" step="1"></label></div>
+              <label class="inline"><input type="checkbox" id="ruleDiplomats"> Peace offers and alliance proposals need a diplomat posted to the other nation</label>
+            </section>
+            <section data-page="r-trench" hidden>
+              <h3>Trenches</h3>
+              <div class="grid3"><label>Cover range<input id="ruleTrenchRange" type="number" step="any" min="0"></label><label>Dug: +defend<input id="ruleTrenchDug" type="number" step="any" min="0"></label><label>Reinforced: +defend<input id="ruleTrenchReinforced" type="number" step="any" min="0"></label></div>
+            </section>
+            <div class="rulesave" id="rulesSave" hidden><button type="submit">Save rules</button><span class="hint">Saves every rules page at once.</span></div>
+          </form>
         </div>
-        <p class="hint">Used by the measure tool. Example: if 100 px on your map is 25 km, enter 0.25 and "km".</p>
-        <div class="grid2">
-          <label>Token sizing<select id="setTokenMode"><option value="map">Scale with the map (shrink when zoomed out)</option><option value="screen">Fixed size on screen</option></select></label>
-          <label>Token size <span class="hint">(1 = normal, 2 = double)</span><input id="setTokenScale" type="number" step="any" min="0.5" max="3" value="1"></label>
-        </div>
-        <div class="section">Combat</div>
-        <div class="grid2">
-          <label>Die size (d?)<input id="setDie" type="number" min="2" max="100" value="20"></label>
-          <label>Base strength loss %<input id="setBaseLoss" type="number" min="0" max="100" value="10"></label>
-          <label>Extra loss per margin point<input id="setMarginMult" type="number" min="0" max="20" step="any" value="2"></label>
-          <label>Winner's loss %<input id="setWinnerLoss" type="number" min="0" max="100" value="5"></label>
-        </div>
-        <p class="hint">Each side rolls the die and adds attack or defend. The loser loses base + margin × extra; the winner loses the winner's loss. Ties cost both half the base.</p>
-        <p><button type="button" class="secondary small" id="btnUnitStats">Unit stats table…</button> <span class="hint">Default attack / defend / AP / range / movement per unit type, with +/- steppers.</span></p>
-        <button type="submit">Save</button>
-      </form>
-      <div class="section">Map</div>
-      <p class="hint" id="mapInfo"></p>
-      <form id="mapForm" class="row">
-        <input type="file" id="mapFile" accept="image/png,image/jpeg,image/webp,image/gif" required>
-        <button type="submit" class="secondary">Upload image</button>
-      </form>
-      <p class="hint">Large images are shrunk in your browser to at most 8192 px on the longest side and re-encoded before upload, so phones are not sent 40 MB files.</p>
-      <div class="section">Or use the Earth</div>
-      <form id="earthForm">
-        <div class="grid2">
-          <label>Style<select id="earthStyle"><option value="atlas">Atlas (blue &amp; green)</option><option value="parchment">Parchment</option><option value="dark">Dark</option></select></label>
-          <label>Detail (map width in px)<select id="earthWidth"><option value="4096">4096 (fast)</option><option value="8192" selected>8192</option><option value="16384">16384</option><option value="32768">32768 (fine placement)</option></select></label>
-        </div>
-        <label>Borders<select id="earthBorders"><option value="none">None</option><option value="modern">Present day</option></select></label>
-        <label class="inline"><input type="checkbox" id="earthTint" checked> Tint each power's territory (historical borders)</label>
-        <label class="inline"><input type="checkbox" id="earthLabels" checked> Country names when zoomed in (historical borders)</label>
-        <label class="inline"><input type="checkbox" id="earthRivers" checked> Rivers</label>
-        <label class="inline"><input type="checkbox" id="earthLakes" checked> Lakes</label>
-        <label class="inline"><input type="checkbox" id="earthGraticule"> Latitude / longitude grid</label>
-        <button type="submit" class="secondary">Use Earth map</button>
-        <p class="hint">Vector coastlines, lakes and rivers from Natural Earth (1:50m, public domain), drawn in WebGL so they stay sharp at any zoom. Replaces any uploaded image. The measure tool then reports true great-circle kilometres.</p>
-      </form>
-      <div id="importBordersBlock" hidden>
-        <div class="section">Editable borders</div>
-        <p class="hint">Turn a year's borders into locked area drawings, one per country, so you can reshape them like any drawing (unlock, then grab the line). Countries are simplified to at most 300 points each.</p>
-        <div class="row">
-          <button type="button" id="btnImportBordersView" class="small secondary">Import countries in the current view</button>
-          <button type="button" id="btnImportBordersAll" class="small secondary">Import the whole world</button>
-        </div>
-        <label class="inline"><input type="checkbox" id="importHideLayer" checked> Hide the built-in border layer afterwards</label>
       </div>
-      <div class="section">Join code</div>
-      <p><span class="code" id="setJoinCode"></span> <button id="btnRotateCode" class="small secondary">New code</button></p>
-      <div class="section">Danger zone</div>
-      <button id="btnDeleteLobby" class="danger">Delete campaign</button>
     </div>
   </div>
 

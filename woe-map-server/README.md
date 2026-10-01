@@ -110,9 +110,18 @@ next to it) and copy `backups\uploads\*` back into `data\uploads\`.
 
 ## Features
 
+### The screen
+The map fills the screen. A menu down the left (keys `1`–`0`) opens panels over it: 🏛 Nation, 🏭 Production,
+🔬 Research and 🤝 Diplomacy in game mode, then 🗺 Map (every marker, with search), ➕ Place, 👥 People, 📜 Log and
+🕘 History, and for the GM 👑 GM (turn, nations, world) and ⚖ Rules. In game mode a nation bar above the map shows
+the nation's money, manpower, research and stockpiles with their change per turn, and the turn button (End turn
+for the GM, Ready up for players) sits bottom right beside 💬 Chat. Map tools are bottom left; the selected
+unit's or place's card docks above them. Every setting and game rule is in one window (⚙). Details:
+`docs/UI.md`.
+
 ### Factions and flags
 
-A GM defines factions from the Members tab: a name, a colour and a flag, chosen from the bundled set in
+A GM defines factions from the 👥 People panel: a name, a colour and a flag, chosen from the bundled set in
 `public/flags/` (drop more image files in that folder and they appear) or uploaded (PNG, JPEG, WebP or GIF, 5 MB
 max). Members are assigned to a faction from their row, and units and towns pick one in their form (a custom
 free-text nation is still allowed). Every token then shows a small flag above it: units and towns use their own
@@ -131,14 +140,14 @@ Every marker and drawing has two visibility controls, set by the GM:
 
 - **GM only** hides it from all players.
 - **Visible to nations** limits it to players whose membership nation is listed (the GM sets each
-  member's nation from the Members tab). The owner of a marker always sees it.
+  member's nation from the 👥 People panel). The owner of a marker always sees it.
 
 The server applies these rules to the initial load, every WebSocket push, live drag previews, history entries and
 combat reports, so a restricted item never reaches a browser that may not show it.
 
 ### Marker types
 
-- **Quick add (GM)**: the Add tab opens on a faction picker and a grid of every unit type drawn as a counter in
+- **Quick add (GM)**: the ➕ Place panel opens on a faction picker and a grid of every unit type drawn as a counter in
   that faction's colour. Click a type, then click the map wherever you want the unit; keep clicking to drop
   more, press Esc (or Cancel on the HUD, or click the type again) to stop. While placing, existing tokens and
   drawings ignore clicks, so a unit can be dropped right next to (or on top of) another one; the same holds for
@@ -224,8 +233,8 @@ players.
 - **Locking:** every token and drawing has a lock. A locked item lets clicks and drags pass straight through it,
   so borders, areas, trenches and towns no longer get in the way of moving units. Towns, POIs and scenery are
   locked when placed; units and players are not. Lock or unlock from the popup, from the Locked checkbox in the
-  form, or with the "lock all / unlock all" links on the Towns, Scenery and Drawings sections of the sidebar. A
-  locked item can still be selected from the sidebar list to reach its popup. The server refuses to move or
+  form, or with the "lock all / unlock all" links on the Towns, Scenery and Drawings sections of the 🗺 Map panel. A
+  locked item can still be selected from the Map panel list to reach its popup. The server refuses to move or
   reshape a locked item unless the same request unlocks it.
 
 ### Drawings
@@ -261,7 +270,7 @@ Trenches also play: a trench **belongs to the faction whose territory most of it
 the **cover range** (20 km) of a dug or reinforced trench of its own faction (or of an unowned trench) adds the
 trench's **cover bonus** to its defend roll: +2 dug, +4 reinforced, planned trenches give nothing. The combat
 log shows the bonus, the unit's popup shows the cover it currently enjoys, and the range and bonuses are
-campaign rules on the Game tab. An enemy's trench never shelters you.
+campaign rules (⚖ Rules → Trenches). An enemy's trench never shelters you.
 
 Rendering (`public/js/trench.js`) is a triangulated ribbon, not a line: each centreline point becomes a
 left/right vertex pair at ±half-width (slightly varied along the path) on a mitred normal, sharp corners are
@@ -291,7 +300,7 @@ so colonies are tinted to match their empire and labelled "Nigeria (United Kingd
 Country names appear once a state is large enough on screen. Tinting and labels can each be switched off. The
 data's border precision varies by region; it is a good game map, not a legal atlas.
 
-**Seeding factions from history.** The Members tab has **Seed from history…**: pick a year, and every sovereign
+**Seeding factions from history.** The 👥 People panel has **Seed from history…**: pick a year, and every sovereign
 power of that year is listed with a suggested colour and, where a bundled flag's name matches (British Empire,
 German Empire, Austro-Hungarian Empire, Russia, Italy, United States, Canada, Mexico …), its flag. Tick the ones
 you want and they become factions; existing names are skipped. Add your own flags to `public/flags/` named after
@@ -322,13 +331,13 @@ tab (pick a start date; the 1914 scenario uses 28 July 1914) and the campaign ga
 movement limits and action points. Switching it off pauses all of that and keeps the treasuries. The full
 design is in `docs/GAME-DESIGN.md`.
 
-- **Turns.** Weekly by default (fortnight, month and season are options). The HUD shows the turn, the game
-  date and the deadline. Everyone acts during the turn; the GM presses **End turn**, which
+- **Turns.** Weekly by default (fortnight, month and season are options). The turn widget (bottom right) shows the turn,
+  the game date and the deadline. Everyone acts during the turn; the GM presses **End turn** there, which
   pays income, resets every unit's movement and action points, advances the date and posts a private turn
   summary to each faction (and the GM). **Undo last turn** restores treasuries and the calendar from a
   snapshot taken before the resolution (the last five are kept); units stay where they are.
-- **Deadlines.** The GM picks a real-world date and time on the Game tab (or "1 day / 3 days / 7 days" from
-  now). The HUD counts down ("ends in 46h 12m", red once it has passed), the campaign log gets a reminder
+- **Deadlines.** The GM picks a real-world date and time on the 👑 GM panel's Turn page (or "1 day / 3 days / 7 days" from
+  now). The turn widget counts down ("ends in 46h 12m", red once it has passed), the campaign log gets a reminder
   24 hours before and another when the deadline passes (with a chime and desktop notification for anyone
   who has them on), and nothing is forced: the turn still ends only when the GM presses End turn, which also
   clears the deadline.
@@ -337,7 +346,7 @@ design is in `docs/GAME-DESIGN.md`.
   (and from or to whom), builds completed, builds lost with a captured site, what is still in production,
   research completed and the active project's progress, and any shortage. The report opens for every
   player (their own) and the GM (every faction, in tabs) as soon as the turn ends, and can be reopened from
-  the Nation tab's **Turn report…** button or the Game tab's **Reports…**, with arrows to earlier turns
+  the 🏛 Nation panel's **Turn report…** button or the GM panel's **Turn reports…**, with arrows to earlier turns
   (the last 60 are kept). Undoing a turn removes its reports.
 - **Captured this turn.** A resource node, factory or town that changes hands is stamped with the turn and
   its previous owner. On the map it pulses a ring in its new owner's colour until the turn ends, the Nation
@@ -353,9 +362,9 @@ design is in `docs/GAME-DESIGN.md`.
   The **Nation** tab shows each faction its stockpiles with the change it will receive, where the change
   comes from, its forces by category with how many have moved or attacked, and its last turn summary. The
   GM can view any faction from the same tab; players see only their own unless the GM makes treasuries
-  public, in which case the Nation tab adds an **All nations** table (money, manpower, RP, units) and
+  public, in which case the 🏛 Nation panel adds an **All nations** table (money, manpower, RP, units) and
   players can read every faction's turn report.
-- **Resource nodes** are markers (Add tab: pick the resource and yield, choose the faction, click the map)
+- **Resource nodes** are markers (➕ Place panel: pick the resource and yield, choose the faction, click the map)
   drawn with the bundled painted icons in `public/icons/` inside a ring in the owner's colour; the ring
   colour and the owner follow the faction. **Factories** are markers with an industry level 1–5. Both are
   locked by default like towns. Ownership by territory arrives in phase 2; until then the GM sets it.
@@ -375,7 +384,7 @@ still can).
   Players cannot edit their units' stats, type or faction while game mode is on.
 - **Upkeep** is built in but off: when enabled every unit costs grain per turn and vehicles, aircraft and
   ships cost oil; a faction that runs out has its three strongest units lose 10 % strength.
-- **Rules** (Game tab): distance per movement point, waive limits, base money/RP/manpower, city and factory
+- **Rules** (⚖ Rules window): distance per movement point, waive limits, base money/RP/manpower, city and factory
   income rates, upkeep, starting stockpiles, public treasuries, the capture radius and city district (30 km
   and 75 km by default, so a single unit takes about one province and a city its immediate neighbours),
   whether units may occupy neutral ground, and whether captured places yield nothing the turn they change hands.
@@ -385,17 +394,17 @@ still can).
 - **Costs.** Every unit type has a cost in resources, money and manpower and a build time in turns
   (`GameData.DEFAULT_COSTS`): an Infantry Regiment is 10 grain, 5 cotton, 20 money and 3 manpower in one
   turn; a Tank Battalion 15 iron, 10 coal, 5 oil, 5 rubber, 80 money and 2 manpower in two; a Battleship
-  40 iron, 30 coal, 10 copper and 200 money in six. The GM's **Unit costs…** table (Game tab) changes any of
+  40 iron, 30 coal, 10 copper and 200 money in six. The GM's **Unit costs…** table (👑 GM panel → Nations) changes any of
   it per campaign with +/- steppers; only differences are stored.
 - **Sites.** A faction builds at the cities and capitals in its colours (capacity: capital 3, city 2
   parallel builds; villages build nothing) and at its factories (capacity = industry level). Ships need a
   **coastal** city (sea within 30 km on the Earth map); aircraft need a site of industry 2 or more. Cost is
   paid when a build is queued and refunded if it is cancelled. **End turn** advances every build; finished
   units appear beside their site with the usual numbered name and the faction's stats, owned by the
-  faction's player. The Nation tab lists every site with its queue, a **Build…** picker that shows each
+  faction's player. The 🏭 Production panel lists every site with its queue, a **Build…** picker that shows each
   type's cost and why it cannot be built if it cannot, and a cancel button per item.
 - **Factories.** A player may **build a factory** within 50 km of one of their cities or towns (never a
-  village) on their own or neutral ground: press the button on the Nation tab, click the map, and two turns
+  village) on their own or neutral ground: press the button on the 🏭 Production panel, click the map, and two turns
   later a level-1 factory stands there (15 iron, 10 timber, 80 money, 2 manpower). The GM can place or
   upgrade factories directly.
 - **Major cities (Earth).** **Add major cities** places about 270 towns of the 1914 world with the names of
@@ -445,7 +454,7 @@ Details and numbers: `docs/ECONOMY.md`.
   with every tech dated on or before the campaign's **start year** (1914 for the scenario), so nations begin
   with rifles, machine guns, field artillery, dreadnoughts and balloons but no tanks, gas or fighters.
 - **Researching.** Research points come in each turn (base allowance, cities, factories, modifiers). From
-  the Nation tab's **Open tech tree**, a player starts one project at a time and can queue up to five more;
+  the 🔬 Research button on the menu, a player starts one project at a time and can queue up to five more;
   at End turn the faction's banked RP flows into the active project, it unlocks when paid for, its effects
   apply, and the next queued project starts (if its money can be paid). A tech can be researched only when
   its prerequisites are known and its year is within the **research lead** (1 year) of the game date, so
@@ -461,18 +470,18 @@ Details and numbers: `docs/ECONOMY.md`.
   (medical services) and `flag` marks a rule for later. The combat log shows tech bonuses on either side.
 - **GM.** From the same tree the GM can **Unlock** or **Lock** any tech for any faction, **edit** any tech
   (key, branch, year, costs, prerequisites, effects as JSON, description), add new ones, delete, or
-  **reset to the default tree**. Research lead and start year are rules on the Game tab.
+  **reset to the default tree**. Research lead and start year are rules (⚖ Rules → Research).
 
 ### Territory and war (game mode)
 
 - **Setting up a new Earth campaign.** Pick the Earth map (with the year's borders if you like), seed the
-  factions from history on the People tab, then switch game mode on with **Set up the world** ticked (the
+  factions from history on the 👥 People panel, then switch game mode on with **Set up the world** ticked (the
   default when there are no provinces yet). In one background job of a minute or two the server cuts the
   provinces for the map's year, gives each faction its states, and adds the major cities and the historical
-  resource regions; progress shows in the Game tab's Territory section. **Set up the world** on that section
+  resource regions; progress shows on the 👑 GM panel's World page. **Set up the world** on that section
   runs the same job later, keeping any cities and resources already on the map, and **Cut provinces only**
   redoes just the provinces.
-- **Provinces (Earth map).** **Cut provinces only** (Game tab → Territory; pick the year and a size, 100 km by
+- **Provinces (Earth map).** **Cut provinces only** (👑 GM panel → World; pick the year and a size, 100 km by
   default; the year defaults to the one the Earth map shows) slices the land into provinces that follow that year's state borders and the coastline: one
   around every major city plus a jittered grid inside each state, every cell clipped to the coast and cut
   along the border, fragments merged into their neighbour. The whole world is about 15,000 provinces and
@@ -513,10 +522,10 @@ Details and numbers: `docs/ECONOMY.md`.
   other. Units at zero strength do not capture. Territory is never given back automatically: the line stays
   until someone advances the other way.
 - **Relations and diplomacy.** Every pair of factions is at peace, at war or allied. A player queues a
-  **declaration of war**, a **peace offer** or an **alliance proposal** from the Nation tab (the GM can do it
+  **declaration of war**, a **peace offer** or an **alliance proposal** from the 🤝 Diplomacy panel (the GM can do it
   for any faction). Declarations and offers wait for the GM: **Approve** puts a declaration into effect at
   once, or passes an offer to the other faction, whose player (or the GM) then **accepts** or **declines**;
-  **Block** stops it. The Game tab also sets any relation directly. Everything is logged; war declarations
+  **Block** stops it. The GM also sets any relation directly at the foot of the 🤝 Diplomacy panel. Everything is logged; war declarations
   are announced campaign-wide.
 - **Undo last turn** also restores territories and relations from the snapshot.
 
@@ -529,7 +538,7 @@ peace offer or alliance proposal can go to it; the host can expel them and war s
 seen only by their own nation; they reconnoitre an area (a report, and hidden units revealed until the end of
 the turn), steal research points, or hunt enemy spies. Missions on hostile ground are contested: the defender's
 sharpest spy nearby rolls d20 + perception against the agent's d20 + intelligence, and a caught spy is taken
-off the map. The GM creates heroes from the Add tab and assigns each an owner. Full rules and numbers:
+off the map. The GM creates heroes from the ➕ Place panel and assigns each an owner. Full rules and numbers:
 `docs/HEROES.md`.
 
 ### Railways
@@ -622,7 +631,8 @@ Shift-drag a selected drawing to move it · `G` grid · `F` fit ·
 `Esc` cancel/close · `Delete` delete selected marker or drawing (if allowed) · wheel to zoom · drag empty map to pan ·
 drag a marker to move it (if allowed; in game mode left-click a unit to select it, then right-click the map inside
 its ring to move it there) · right-click a unit or hero for its panel · `R` railway ·
-`P` ping (GM).
+`P` ping (GM) · `1`–`9`, `0` open the menu panels (Nation, Production, Research, Diplomacy, Map, Place, People,
+Log, History, GM) · `Esc` with nothing selected closes the open panel.
 
 ## How it is put together
 
@@ -648,7 +658,7 @@ public/
   js/units.js     WW1 unit catalogue, default stats and the drawn NATO-style counter symbols
   js/naming.js    ordinal styles by faction keyword and the next-free-number rule (shared with the server)
   js/game-data.js the ten resources, default rules and calendar helpers (shared with the server)
-  js/game-ui.js   turn HUD, Nation tab, GM Game tab and the treasury editor
+  js/game-ui.js   turn widget, nation bar, Nation / Production / Diplomacy and GM panels, treasury editor
   icons/          painted resource and goods icons used by nodes, factories and the treasury
 server/game.js    game rows, faction treasuries, income, End turn / undo, movement and action-point rules
 server/routes/game.js  /api/lobbies/:id/game routes
@@ -661,7 +671,7 @@ defaults/techtree-ww1.json  the default WW1 research tree
   js/cost-editor.js  GM table of production costs
   js/research-ui.js  research section, tech tree modal and the GM tech editor
   sprites/        pixel-art sheets and atlas.json (generated)
-  js/map.js       app logic: REST + WebSocket sync, sidebar, forms, popups, history, combat, notifications
+  js/map.js       app logic: REST + WebSocket sync, menu rail and panels, forms, popups, history, combat, notifications
   earth/          land, lakes, rivers, borders (gzipped JSON, public domain)
 scripts/
   create-admin.js, import-firebase.js, backup.js, cleanup-uploads.js, prepare-earth.js, extract-sprites.js,
@@ -681,7 +691,7 @@ redrawing the whole scene 145 times a second and kept a CPU core busy for a stat
 With many units: tokens off screen are not drawn or animated, and on the Earth map at 100 % zoom and below
 unit icons are replaced by one small dot per unit in its faction's colour (a single shape, redrawn only when
 units or the zoom change); a unit's icon, textures and flag are only built the first time it is shown. The
-sidebar list and the Nation tab are rebuilt at most once per frame however many markers change, so loading a
+Map panel list and the nation panels are rebuilt at most once per frame however many markers change, so loading a
 campaign or moving a formation no longer rebuilds them once per marker (with 1,300 markers that alone froze the
 page for about 17 s). Provinces are drawn as two meshes built once (fills and borders) and recoloured in place
 when owners change: see `public/js/province-layer.js`.

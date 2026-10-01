@@ -2,7 +2,7 @@
 
 Built 30 Sep 2026. Shared matchup table: `public/js/matchups.js`. Supply and support rules: `server/supply.js`;
 End-turn hooks and movement/attack checks: `server/game.js`; combat: `server/routes/lobbies.js` (`POST /combat`).
-All distances and bonuses are campaign rules (Game tab → Rules → Supply and support).
+All distances and bonuses are campaign rules (⚖ Rules → Supply & support).
 
 ## Supply
 
