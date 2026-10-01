@@ -230,12 +230,16 @@ function requireGm(req, res, next) {
 }
 
 // ---- Game layer hooks ----------------------------------------------------------------------------
-/** Change a marker's faction (territory ownership), recording history and broadcasting like any edit. */
-function setMarkerNation(req, before, nation) {
+/**
+ * Change a marker's faction (territory ownership), recording history and broadcasting like any edit.
+ * `captured` is true only when a unit took the place (afterMove): game mode then
+ * remembers the turn it changed hands (turn reports, the "captured this turn" flash, no yield that turn).
+ * Setup, the GM's border tools and End turn's settling just reassign owners: those places keep producing.
+ */
+function setMarkerNation(req, before, nation, captured = false) {
   const data = { ...before.data, nation };
-  // Game mode remembers when a place changed hands (turn reports, the "captured this turn" flash, idle yield).
   const g = game.get(req.lobby.id);
-  if (g.enabled && String(before.data?.nation || '') !== String(nation || '')) { data.capturedTurn = g.turn; data.capturedFrom = String(before.data?.nation || ''); }
+  if (captured && g.enabled && String(before.data?.nation || '') !== String(nation || '')) { data.capturedTurn = g.turn; data.capturedFrom = String(before.data?.nation || ''); }
   q.updateMarker.run(before.type, before.name, before.x, before.y, before.iconFile, before.iconFile ? null : before.iconUrl, before.color,
     before.adminOnly ? 1 : 0, before.visibleTo ? JSON.stringify(before.visibleTo) : null, before.ownerId, JSON.stringify(data), now(), before.locked ? 1 : 0, before.id);
   const after = access.serializeMarker(q.marker.get(before.id, req.lobby.id));
@@ -291,7 +295,7 @@ function afterMove(req, unit) {
   catch (e) { console.warn('capture failed', e); return null; }
   if (!r) return null;
   if (r.held) return `${unit.name} faces enemy troops: the front holds`;
-  for (const f of r.flips) setMarkerNation(req, f.marker, f.nation);
+  for (const f of r.flips) setMarkerNation(req, f.marker, f.nation, true);
   if (r.changed.length) hub.broadcast(req.lobby.id, { type: 'territory', territories: r.changed });
   if (r.owners && r.owners.length) hub.broadcast(req.lobby.id, { type: 'provinceOwners', owners: r.owners });
   const ownerName = r.owner === territory.NEUTRAL ? 'neutral' : (factions.find(f => f.id === r.owner)?.name || 'enemy');
