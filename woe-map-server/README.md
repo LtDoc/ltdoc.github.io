@@ -546,10 +546,15 @@ notes "guns out of reach of the reply"); it still takes the winner's loss when i
 
 **Battles stay on the map for the turn.** Every attack is recorded until End turn (`battles` table,
 `GET /api/lobbies/:id/battles`, WebSocket `battle`; hidden fights only for the GM and the attacking player).
-Infantry and other direct-fire attackers show **gunfire**: tracers streaming from the attacker to its target,
-muzzle flashes along the firing line and dust where rounds land, drawn (no sprites) and visible from 800 % zoom.
+Infantry and other direct-fire attackers show **gunfire**: a regiment's firing line (a ragged front of riflemen
+as wide as the gap between the units, 70–190 px on screen) sending tracers at points along the enemy's front,
+with muzzle flashes rippling along the line, a haze of powder smoke and dust where rounds land; drawn (no
+sprites) and visible from 800 % zoom.
 **Artillery** (and ships) **shell** the target instead: bursts from `public/assets/shellburst.png` land at random
-around it every second or two, each after a flash at the guns pointing at the target. Both follow the units if
+around it every second or two, each after a flash at the guns pointing at the target. Each bombardment also leaves
+**4–5 craters** around the target, picked from the crater sheet (`rob assets/tile-B-04.png`, atlas `misc-04`;
+plain, dark and scorched), 1.2–2.3 map px across and shown from 400 % zoom. Craters are static sprites stored in
+the `craters` table and stay for **ten turns** (End turn removes the old ones; outside game mode, a day). Both follow the units if
 they move and sleep when off screen. Outside game mode, where there are no turns, they last five minutes.
 
 The sheets are `public/assets/explosion.png` (hits: one row of 8 frames of 128 px), `public/assets/shellburst.png`

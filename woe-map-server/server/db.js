@@ -251,6 +251,23 @@ CREATE TABLE IF NOT EXISTS battles (
 );
 CREATE INDEX IF NOT EXISTS idx_battles_lobby ON battles(lobby_id, turn);
 
+-- Shell craters left by bombardments (sprites from the crater sheet); they last ten turns.
+CREATE TABLE IF NOT EXISTS craters (
+  id           INTEGER PRIMARY KEY,
+  lobby_id     INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  x REAL NOT NULL, y REAL NOT NULL,
+  size         REAL NOT NULL,                      -- width in map px
+  rotation     REAL NOT NULL DEFAULT 0,
+  sprite       INTEGER NOT NULL,                   -- index on the crater sheet (sprite:misc-04:<n>)
+  turn         INTEGER NOT NULL,
+  expires_turn INTEGER NOT NULL,                   -- removed when the game reaches this turn
+  until_ms     INTEGER,                            -- outside game mode: removed after this time
+  hidden       INTEGER NOT NULL DEFAULT 0,
+  user_id      INTEGER,
+  created_at   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_craters_lobby ON craters(lobby_id, expires_turn);
+
 -- Bundled tech additions already merged into a campaign's tree (server/research.js PATCHES).
 CREATE TABLE IF NOT EXISTS tree_patches (
   lobby_id   INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,

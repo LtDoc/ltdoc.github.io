@@ -320,9 +320,9 @@
     $('#modeText').textContent = 'Ping: click a spot on the map; everyone sees it for a minute. Esc to cancel.';
     $('#btnPing').classList.add('active');
   }
-  /** This turn's gunfire and shelling (End turn clears them on the server). */
+  /** This turn's gunfire and shelling, and craters from the last ten turns (End turn clears old ones on the server). */
   async function loadBattles() {
-    try { renderer.setBattles((await api.get(`${base}/battles`)).battles); } catch { /* none */ }
+    try { const d = await api.get(`${base}/battles`); renderer.setBattles(d.battles); renderer.setCraters(d.craters || []); } catch { /* none */ }
   }
   async function loadPings() {
     try { for (const p of (await api.get(`${base}/pings`)).pings) showPing(p, true); } catch { /* none */ }
@@ -941,6 +941,7 @@
         case 'chatMessage': Comms.onChatMessage(msg.message); break;
         case 'ping': showPing(msg.ping); break;
         case 'battle': renderer.addBattle(msg.battle); break;
+        case 'craters': renderer.addCraters(msg.craters); break;
         case 'reload': if (msg.what === 'markers') await loadMarkers(); break;
         case 'lobby': {
           state.lobby = { ...msg.lobby, joinCode: msg.lobby.joinCode ?? state.lobby?.joinCode, yourRole: state.role };

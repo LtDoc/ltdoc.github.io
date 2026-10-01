@@ -1370,7 +1370,15 @@ const qb = {
   insert: db.prepare('INSERT INTO battles (lobby_id, turn, attacker_id, defender_id, kind, ax, ay, dx, dy, hidden, user_id, until_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
   one: db.prepare('SELECT * FROM battles WHERE id = ?'),
   all: db.prepare('SELECT * FROM battles WHERE lobby_id = ? AND turn >= ? AND (until_ms IS NULL OR until_ms > ?) ORDER BY id DESC LIMIT 300'),
+  insertCrater: db.prepare('INSERT INTO craters (lobby_id, x, y, size, rotation, sprite, turn, expires_turn, until_ms, hidden, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+  crater: db.prepare('SELECT * FROM craters WHERE id = ?'),
+  craters: db.prepare('SELECT * FROM craters WHERE lobby_id = ? AND expires_turn > ? AND (until_ms IS NULL OR until_ms > ?) ORDER BY id LIMIT 3000'),
 };
+/** Crater sprites on the crater sheet (rob assets/tile-B-04.png → sprite atlas misc-04): plain, dark and scorched. */
+const CRATER_SPRITES = [0, 3, 6, 22, 36, 40, 60, 72, 75, 95, 96, 98, 108, 117, 119, 127, 134, 135, 138, 139];
+function serializeCrater(c) {
+  return { id: c.id, x: c.x, y: c.y, size: c.size, rotation: c.rotation, sprite: `sprite:misc-04:${c.sprite}`, turn: c.turn, expiresTurn: c.expires_turn, until: c.until_ms };
+}
 function serializeBattle(b) {
   return { id: b.id, turn: b.turn, attackerId: b.attacker_id, defenderId: b.defender_id, kind: b.kind, ax: b.ax, ay: b.ay, dx: b.dx, dy: b.dy, until: b.until_ms, createdAt: b.created_at };
 }
@@ -1378,7 +1386,11 @@ function serializeBattle(b) {
 router.get('/:id/battles', (req, res) => {
   const g = game.get(req.lobby.id);
   const gm = req.lobbyRole === 'gm';
-  res.json({ battles: qb.all.all(req.lobby.id, g.turn, Date.now()).filter(b => gm || !b.hidden || b.user_id === req.user.id).map(serializeBattle) });
+  const mine = b => gm || !b.hidden || b.user_id === req.user.id;
+  res.json({
+    battles: qb.all.all(req.lobby.id, g.turn, Date.now()).filter(mine).map(serializeBattle),
+    craters: qb.craters.all(req.lobby.id, g.turn, Date.now()).filter(mine).map(serializeCrater),
+  });
 });
 
 router.post('/:id/combat', (req, res) => {
@@ -1458,7 +1470,22 @@ router.post('/:id/combat', (req, res) => {
   const catA = UnitTypes.resolve(a.data?.unitType)?.cat;
   const kind = catA === 'Artillery' || catA === 'Naval' ? 'shells' : 'gunfire';
   const bid = qb.insert.run(req.lobby.id, g.turn, a.id, d.id, kind, a.x, a.y, d.x, d.y, hidden ? 1 : 0, req.user.id, g.enabled ? null : Date.now() + 5 * 60000, now()).lastInsertRowid;
-  hub.broadcast(req.lobby.id, { type: 'battle', battle: serializeBattle(qb.one.get(bid)) }, hidden ? (ws => ws.lobbyRole === 'gm' || ws.user.id === req.user.id) : null);
+  const audience = hidden ? (ws => ws.lobbyRole === 'gm' || ws.user.id === req.user.id) : null;
+  hub.broadcast(req.lobby.id, { type: 'battle', battle: serializeBattle(qb.one.get(bid)) }, audience);
+  // A bombardment leaves four or five craters around the target, for ten turns.
+  if (kind === 'shells') {
+    const made = [];
+    const n = 4 + crypto.randomInt(0, 2);
+    for (let i = 0; i < n; i++) {
+      const ang = Math.random() * Math.PI * 2, r = 0.8 + Math.random() * 3.4;
+      const sprite = CRATER_SPRITES[crypto.randomInt(0, CRATER_SPRITES.length)];
+      const cid = qb.insertCrater.run(req.lobby.id, Math.round((d.x + Math.cos(ang) * r) * 10) / 10, Math.round((d.y + Math.sin(ang) * r * 0.8) * 10) / 10,
+        Math.round((1.2 + Math.random() * 1.1) * 100) / 100, Math.round(Math.random() * 360), sprite, g.turn, g.turn + 10,
+        g.enabled ? null : Date.now() + 24 * 3600000, hidden ? 1 : 0, req.user.id, now()).lastInsertRowid;
+      made.push(serializeCrater(qb.crater.get(cid)));
+    }
+    hub.broadcast(req.lobby.id, { type: 'craters', craters: made }, audience);
+  }
   res.status(201).json({ event });
 });
 

@@ -27,6 +27,7 @@ const q = {
     production = ?, mods = ?, updated_at = ? WHERE faction_id = ?`),
   markers: db.prepare('SELECT * FROM markers WHERE lobby_id = ?'),
   clearBattles: db.prepare('DELETE FROM battles WHERE lobby_id = ? AND turn <= ?'),
+  clearCraters: db.prepare('DELETE FROM craters WHERE lobby_id = ? AND expires_turn <= ?'),
   resetUnits: db.prepare(`UPDATE markers SET data = json_remove(json_set(data, '$.movedKm', 0, '$.apUsed', 0), '$.trail'), updated_at = ? WHERE lobby_id = ? AND type IN ('unit', 'hero')`),
   clearReveals: db.prepare(`UPDATE markers SET data = json_remove(data, '$.revealTo'), updated_at = ? WHERE lobby_id = ? AND json_extract(data, '$.revealTo') IS NOT NULL`),
   setStrength: db.prepare(`UPDATE markers SET data = json_set(data, '$.strength', ?), updated_at = ? WHERE id = ?`),
@@ -383,6 +384,7 @@ function endTurn(lobby, hooks = {}) {
     const ended = { turn: g.turn, date: g.date };
     g.turn += 1;
     g.date = GameData.stepDate(g.date, g.turnStep);
+    q.clearCraters.run(lobby.id, g.turn);   // shell craters fade after ten turns
     g.deadline = '';
     save(g);
     // One report per faction, kept for the last 60 turns, for the turn report modal.

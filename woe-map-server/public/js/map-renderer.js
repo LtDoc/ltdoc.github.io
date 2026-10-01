@@ -81,6 +81,9 @@ class MapRenderer extends EventTarget {
     this.factionInfo = new Map();                // factionId -> { color, name }
     this.sceneryLayer = new PIXI.Container();   // buildings, trenches, craters: scale with the map
     this.sceneryLayer.sortableChildren = true;
+    this.craterLayer = new PIXI.Container();    // shell craters (static sprites, ten turns), under trenches and tokens
+    this.craterLayer.eventMode = 'none';
+    this.craters = new Map();                    // id -> sprite
     this.trenchLayer = new PIXI.Container();    // dug earthworks (ribbon meshes), under drawings and tokens
     this.railLayer = new PIXI.Container();      // railway track, trains and smoke over cut sections
     this.railLayer.eventMode = 'none';
@@ -105,7 +108,7 @@ class MapRenderer extends EventTarget {
     this.handleLayer = new PIXI.Container();
     this.unitDots = new PIXI.Graphics();          // zoomed out on the Earth map: one dot per unit instead of its icon
     this.unitDots.eventMode = 'none';
-    this.world.addChild(this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.gunG, this.unitDots, this.markerLayer, this.boomLayer, this.overlayLayer, this.pingLayer, this.handleLayer);
+    this.world.addChild(this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.craterLayer, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.gunG, this.unitDots, this.markerLayer, this.boomLayer, this.overlayLayer, this.pingLayer, this.handleLayer);
     app.stage.addChild(this.world, this.pingArrows);
 
     app.stage.eventMode = 'static';
@@ -399,6 +402,7 @@ class MapRenderer extends EventTarget {
     if (this.provinceLayer) this.provinceLayer.setZoom(this.scale);
     if (this._aura) this._drawAura();
     if (this.persistTrails) this.queueTrails();
+    this._syncCraterZoom();
     if (this._range) { const r = this._range; this.showRange(r.x, r.y, r.radius, r.exhausted, r.ry); }
     if (this.earth) {
       clearTimeout(this._earthTimer);
@@ -446,6 +450,7 @@ class MapRenderer extends EventTarget {
     this.invalidate();
     this._dotsDirty = true;
     if (this.persistTrails) this.queueTrails();
+    this._syncCraterZoom();
     const v = this.views.get(id);
     if (v) {
       v.dying = true;
@@ -1108,6 +1113,36 @@ class MapRenderer extends EventTarget {
   queueTrails() { if (!this._trailTimer) this._trailTimer = setTimeout(() => this.redrawTrails(), 30); }
 
   // ---- Battles (this turn's gunfire and shelling) ---------------------------------------------
+  // ---- Shell craters -----------------------------------------------------------------------------
+  /** Replace all craters (from GET /battles). */
+  setCraters(list) {
+    for (const sp of this.craters.values()) sp.destroy();
+    this.craters.clear();
+    this.craterLayer.removeChildren();
+    this.addCraters(list);
+  }
+  /** Add craters: single static sprites in map units, drawn under trenches, drawings and tokens. */
+  addCraters(list) {
+    for (const c of list || []) {
+      if (this.craters.has(c.id) || (c.until && c.until <= Date.now())) continue;
+      const sp = new PIXI.Sprite(PIXI.Texture.EMPTY);
+      sp.anchor.set(0.5); sp.position.set(c.x, c.y); sp.rotation = (Number(c.rotation) || 0) * Math.PI / 180;
+      sp.eventMode = 'none'; sp.alpha = 0.95; sp.craterSize = Number(c.size) || 1.5;
+      this.craters.set(c.id, sp);
+      this.craterLayer.addChild(sp);
+      if (window.SpriteAtlas) window.SpriteAtlas.texture(c.sprite).then(tex => {
+        if (sp.destroyed || !tex) return;
+        sp.texture = tex;
+        sp.scale.set(sp.craterSize / Math.max(tex.width, tex.height));
+        this.invalidate();
+      }).catch(() => {});
+    }
+    this._syncCraterZoom();
+    this.invalidate();
+  }
+  /** Craters are a few map px across: hide them while they would be specks. */
+  _syncCraterZoom() { this.craterLayer.visible = this.scale >= 4; }
+
   /** Replace the battles shown (from GET /battles). */
   setBattles(list) { this.battles.clear(); for (const b of list || []) this.addBattle(b); this.invalidate(); }
   addBattle(b) {
@@ -1142,33 +1177,43 @@ class MapRenderer extends EventTarget {
       const ux = (dx - ax) / L, uy = (dy - ay) / L, nx = -uy, ny = ux;
       const margin = 60 / s;
       if (b.kind === 'gunfire') {
-        if (!gunZoom || !(onScreen(ax, ay, margin) || onScreen(dx, dy, margin) || onScreen((ax + dx) / 2, (ay + dy) / 2, L / 2))) continue;
+        if (!gunZoom || !(onScreen(ax, ay, margin * 3) || onScreen(dx, dy, margin * 3) || onScreen((ax + dx) / 2, (ay + dy) / 2, L / 2 + margin))) continue;
         anim = true;
-        // Fire leaves the attacker's line a little ahead of its token and stops short of the target.
-        const r0 = Math.min(L * 0.3, 16 / s), r1 = Math.min(L * 0.3, 12 / s);
+        // A regiment engaging along a line: riflemen spread across a front perpendicular to the line of fire,
+        // each sending rounds at a point along the enemy's front. Fronts are sized on screen so they read at any zoom.
+        const r0 = Math.min(L * 0.25, 14 / s), r1 = Math.min(L * 0.25, 10 / s);
         const sx = ax + ux * r0, sy = ay + uy * r0, ex = dx - ux * r1, ey = dy - uy * r1;
         const span = Math.max(1e-6, Math.hypot(ex - sx, ey - sy));
-        const n = Math.max(4, Math.min(16, Math.round(span * s / 28)));
-        const speed = 420 / s;                                   // world units per second (screen-constant)
-        const seg = 13 / s, w = 2 / s;
-        for (let i = 0; i < n; i++) {
-          const k = (e.seed + i * 7919) % 1000 / 1000;          // stable per tracer
-          const lat = (k - 0.5) * 14 / s;                        // spread along the firing line
-          const p = ((t * speed / span) + i / n + k * 0.37) % 1;
-          const px = sx + (ex - sx) * p + nx * lat * (1 - p * 0.6), py = sy + (ey - sy) * p + ny * lat * (1 - p * 0.6);
-          g.moveTo(px, py).lineTo(px + ux * seg, py + uy * seg).stroke({ width: w * 2.6, color: 0xffb347, alpha: 0.25 });   // glow
-          g.moveTo(px, py).lineTo(px + ux * seg, py + uy * seg).stroke({ width: w, color: 0xfff0a0, alpha: 0.95 });
-          // Muzzle flash at the firing line, flickering.
-          if (Math.sin(t * 23 + i * 2.1) > 0.55) {
-            const mx = sx + nx * lat, my = sy + ny * lat, f = 4 / s;
-            g.poly([mx + ux * f * 1.8, my + uy * f * 1.8, mx + nx * f * 0.6, my + ny * f * 0.6, mx - nx * f * 0.6, my - ny * f * 0.6]).fill({ color: 0xfff3b0, alpha: 0.95 });
+        const front = Math.max(70, Math.min(190, span * s * 0.9)) / s;      // own firing line (world units)
+        const enemyFront = front * 0.75;
+        const rifles = Math.max(10, Math.min(28, Math.round(front * s / 7)));
+        const speed = 460 / s;                                              // world units per second (screen-constant)
+        const seg = 12 / s, w = 1.8 / s;
+        // The firing line itself: a faint haze of powder smoke along the front.
+        g.moveTo(sx - nx * front / 2, sy - ny * front / 2).lineTo(sx + nx * front / 2, sy + ny * front / 2).stroke({ width: 7 / s, color: 0xe8e4da, alpha: 0.12, cap: 'round' });
+        for (let i = 0; i < rifles; i++) {
+          const k = (e.seed + i * 7919) % 1000 / 1000, k2 = (e.seed * 3 + i * 104729) % 1000 / 1000;   // stable per rifle
+          const o = ((i + 0.5) / rifles - 0.5) * front + (k - 0.5) * front / rifles;   // place on our front
+          const oT = (o / front) * enemyFront + (k2 - 0.5) * enemyFront * 0.35;        // aim on their front
+          const fx = sx + nx * o - ux * k2 * 4 / s, fy = sy + ny * o - uy * k2 * 4 / s; // ragged line
+          const tx = ex + nx * oT, ty = ey + ny * oT;
+          const dxl = tx - fx, dyl = ty - fy, ll = Math.max(1e-6, Math.hypot(dxl, dyl)), vx = dxl / ll, vy = dyl / ll;
+          // Each rifle fires in bursts: one or two rounds in flight at a time.
+          for (let r = 0; r < 2; r++) {
+            const p = ((t * speed / ll) + k * 3.1 + r * 0.5) % 1;
+            if (r === 1 && k2 < 0.45) continue;
+            const px = fx + dxl * p, py = fy + dyl * p;
+            g.moveTo(px, py).lineTo(px + vx * seg, py + vy * seg).stroke({ width: w * 2.6, color: 0xffb347, alpha: 0.22 });   // glow
+            g.moveTo(px, py).lineTo(px + vx * seg, py + vy * seg).stroke({ width: w, color: 0xfff0a0, alpha: 0.95 });
           }
-          // Dust where the rounds land.
-          const q = (t * 1.7 + k) % 1;
-          if (q < 0.5) {
-            const ix = ex + nx * lat * 0.5 + ux * (q * 3 / s), iy = ey + ny * lat * 0.5 + uy * (q * 3 / s);
-            g.circle(ix, iy, (1.5 + q * 5) / s).fill({ color: 0xd8d2c4, alpha: 0.55 * (1 - q * 2) });
+          // Muzzle flashes ripple along the line.
+          if (Math.sin(t * 19 + i * 2.7 + k * 6) > 0.7) {
+            const f = 3.6 / s;
+            g.poly([fx + vx * f * 2, fy + vy * f * 2, fx + nx * f * 0.6, fy + ny * f * 0.6, fx - nx * f * 0.6, fy - ny * f * 0.6]).fill({ color: 0xfff3b0, alpha: 0.95 });
           }
+          // Dust kicked up along the enemy's front.
+          const q = (t * 1.5 + k * 1.7) % 1;
+          if (q < 0.45) g.circle(tx + vx * q * 3 / s, ty + vy * q * 3 / s, (1.4 + q * 5) / s).fill({ color: 0xd8d2c4, alpha: 0.5 * (1 - q / 0.45) });
         }
       } else {
         // Shelling: visible wherever the target token is (above 100 %), bursts at random around it.
