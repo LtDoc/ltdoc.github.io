@@ -412,8 +412,9 @@ design is in `docs/GAME-DESIGN.md`.
 
 ### Supply, support units and matchups (game mode)
 
-Land units are **supplied or cut off**, worked out at End turn: towns supply units within 30 km, and **Supply
-Columns** linked to a friendly town, railhead or another linked column (within 150 km) supply units within 80 km.
+Land units are **supplied or cut off**, worked out at End turn: places supply units within 30 km, and **Supply
+Columns** supply units within 100 km once linked (fed by a friendly city or capital within 300 km, a village
+within 100 km, or a railhead or another linked column within 150 km).
 A cut-off unit (red badge) cannot move or attack and takes double losses when beaten. **Field hospitals** heal
 units around them each turn, **HQs** add attack and defend, **engineers** add defend and **signals** help
 artillery. **Matchups** add strengths and weaknesses to attacks: cavalry is weak against entrenched troops and

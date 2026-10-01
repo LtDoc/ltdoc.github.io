@@ -255,7 +255,10 @@
   /** What a support unit does for those around it, with its reach in km (null for other units). */
   function supportRole(m) {
     const s = state.game?.settings || {}, id = window.UnitTypes?.resolve(m.data?.unitType)?.id, u = state.lobby?.scaleLabel || 'km';
-    if (id === 'supply') return { km: Number(s.supplyRangeKm ?? 80), text: `supplies friendly land units within ${s.supplyRangeKm ?? 80} ${u} when linked (within ${s.supplyLinkKm ?? 150} ${u} of a friendly town, railhead or linked column)` };
+    if (id === 'supply') {
+      const lb = s.supplyLinkBySize || {};
+      return { km: Number(s.supplyRangeKm ?? 100), text: `supplies friendly land units within ${s.supplyRangeKm ?? 100} ${u} when linked: within ${lb.city ?? 300} ${u} of a friendly city or capital, ${lb.village ?? 100} ${u} of a village, or ${s.supplyLinkKm ?? 150} ${u} of a railhead or another linked column` };
+    }
     if (id === 'medical') return { km: Number(s.hospitalKm ?? 40), text: `heals friendly units within ${s.hospitalKm ?? 40} ${u} by ${s.hospitalHeal ?? 10}% each turn` };
     if (id === 'hq') return { km: Number(s.hqKm ?? 40), text: `+${s.hqBonus ?? 1} attack and defend to friendly units within ${s.hqKm ?? 40} ${u}` };
     if (ENGINEER_IDS.includes(id)) return { km: Number(s.engineerKm ?? 20), text: `+${s.engineerDefend ?? 1} defend to friendly units within ${s.engineerKm ?? 20} ${u}` };

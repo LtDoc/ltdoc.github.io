@@ -3,8 +3,9 @@
  * Supply and support units (docs/UNITS.md).
  *
  * Supply is true or false per land unit, decided at End turn (and when the GM recalculates):
- *   - A Supply Column is linked when it is within supplyLinkKm of a friendly town (own or allied), of open
- *     friendly railway connected to a friendly town, or of another linked column (columns chain forward).
+ *   - A Supply Column is linked when a friendly place (own or allied) is close enough for its size
+ *     (supplyLinkBySize: capitals and cities 300 km, towns 200 km, villages 100 km), or when it is within
+ *     supplyLinkKm of open friendly railway connected to a friendly place or of another linked column.
  *   - A land unit is supplied when it is within supplyTownKm of a friendly town (garrison) or within
  *     supplyRangeKm of a linked column. A column itself is supplied when it is linked.
  *   - Ships, aircraft and heroes do not need supply.
@@ -50,7 +51,9 @@ function friendsResolver(lobby) {
  */
 function compute(lobby, settings, markers) {
   const s = settings || {};
-  const townKm = num(s.supplyTownKm, 30), linkKm = num(s.supplyLinkKm, 150), rangeKm = num(s.supplyRangeKm, 80);
+  const townKm = num(s.supplyTownKm, 30), linkKm = num(s.supplyLinkKm, 150), rangeKm = num(s.supplyRangeKm, 100);
+  const bySize = { capital: 300, city: 300, town: 200, village: 100, ...(s.supplyLinkBySize || {}) };
+  const feeds = t => num(bySize[t.data?.size] ?? bySize.village, 100);   // how far a place reaches a column
   const dist = (a, b) => geo.distance(lobby, a.x, a.y, b.x, b.y);
   const friendsOf = friendsResolver(lobby);
   const towns = markers.filter(m => m.type === 'town' && m.data?.nation);
@@ -88,7 +91,7 @@ function compute(lobby, settings, markers) {
     const linked = new Map();   // column id → via
     const queue = [];
     for (const c of mine) {
-      if (myTowns.some(t => dist(c, t) <= linkKm)) { linked.set(c.id, 'town'); queue.push(c); }
+      if (myTowns.some(t => dist(c, t) <= feeds(t))) { linked.set(c.id, 'town'); queue.push(c); }
       else if (railNodes.some(n => dist(c, n) <= linkKm)) { linked.set(c.id, 'rail'); queue.push(c); }
     }
     while (queue.length) {
