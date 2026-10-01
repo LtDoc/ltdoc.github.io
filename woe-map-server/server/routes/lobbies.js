@@ -1024,6 +1024,7 @@ router.delete('/:id/markers/:mid', (req, res) => {
   if (!before) return;
   if (!canEditMarker(req, before)) return res.status(403).json({ error: 'You cannot delete that marker' });
   q.deleteMarker.run(before.id);
+  qb.dropFor.run(req.lobby.id, before.id, before.id);   // its fights end with it (ids can be reused later)
   commitChange(req, 'marker', 'delete', before, null);
   if (!before.adminOnly && !before.visibleTo) logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} removed ${before.name}`);
   res.json({ ok: true });
@@ -1372,6 +1373,7 @@ const qb = {
   all: db.prepare('SELECT * FROM battles WHERE lobby_id = ? AND turn >= ? AND (until_ms IS NULL OR until_ms > ?) ORDER BY id DESC LIMIT 300'),
   insertCrater: db.prepare('INSERT INTO craters (lobby_id, x, y, size, rotation, sprite, turn, expires_turn, until_ms, hidden, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
   crater: db.prepare('SELECT * FROM craters WHERE id = ?'),
+  dropFor: db.prepare('DELETE FROM battles WHERE lobby_id = ? AND (attacker_id = ? OR defender_id = ?)'),
   craters: db.prepare('SELECT * FROM craters WHERE lobby_id = ? AND expires_turn > ? AND (until_ms IS NULL OR until_ms > ?) ORDER BY id LIMIT 3000'),
 };
 /** Crater sprites on the crater sheet (rob assets/tile-B-04.png → sprite atlas misc-04): plain, dark and scorched. */

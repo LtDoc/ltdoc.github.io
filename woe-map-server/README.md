@@ -554,7 +554,9 @@ lulls at their own cadence, and every 7–11 s loose a volley together; tracer s
 shot to shot. The defender's line fires back with about two thirds as many rifles and its own pattern; a side
 that has been destroyed or removed stops firing. Drawn (no sprites), visible from 800 % zoom.
 **Artillery** (and ships) **shell** the target instead: bursts from `public/assets/shellburst.png` land at random
-around it every second or two, each after a flash at the guns pointing at the target. Each bombardment also leaves
+around it every second or two. Each shell leaves the guns with a flash and climbs a slow arc (1–2.4 s, a bright
+shell with a fading trail over a faint dotted trajectory) to where it lands, so the line of fire is clear even
+when the battery's counter hides its muzzle; shells and flashes draw above the tokens. Each bombardment also leaves
 **4–5 craters** around the target, picked from the crater sheet (`rob assets/tile-B-04.png`, atlas `misc-04`;
 plain, dark and scorched), 1.2–2.3 map px across and shown from 400 % zoom. Craters are static sprites stored in
 the `craters` table and stay for **ten turns** (End turn removes the old ones; outside game mode, a day). Both follow the units if

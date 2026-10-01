@@ -109,11 +109,14 @@ class MapRenderer extends EventTarget {
     this.gunG = new PIXI.Graphics();             // this turn's gunfire (tracers, muzzle flashes, impacts), under the tokens
     this.gunG.eventMode = 'none';
     this.battles = new Map();                    // id -> { battle, nextShell }
+    this.arcG = new PIXI.Graphics();             // shells in flight (above the tokens so they are never hidden)
+    this.arcG.eventMode = 'none';
+    this.shellsInFlight = [];                    // { x0, y0, x1, y1, t0, dur, h }
     this.overlayLayer = new PIXI.Container();
     this.handleLayer = new PIXI.Container();
     this.unitDots = new PIXI.Graphics();          // zoomed out on the Earth map: one dot per unit instead of its icon
     this.unitDots.eventMode = 'none';
-    this.world.addChild(this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.craterLayer, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.gunG, this.unitDots, this.markerLayer, this.boomLayer, this.overlayLayer, this.pingLayer, this.handleLayer);
+    this.world.addChild(this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.craterLayer, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.gunG, this.unitDots, this.markerLayer, this.boomLayer, this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
     app.stage.addChild(this.world, this.pingArrows);
 
     app.stage.eventMode = 'static';
@@ -454,6 +457,7 @@ class MapRenderer extends EventTarget {
   remove(id) {
     this.invalidate();
     this._dotsDirty = true;
+    for (const [bid, e] of this.battles) if (e.battle.attackerId === id || e.battle.defenderId === id) this.battles.delete(bid);   // its fights end with it
     if (this.persistTrails) this.queueTrails();
     this._syncCraterZoom();
     const v = this.views.get(id);
@@ -1168,6 +1172,7 @@ class MapRenderer extends EventTarget {
   _tickBattles(nowMs, vx0, vy0, vx1, vy1) {
     const g = this.gunG, s = this.scale;
     g.clear();
+    this._drawShells(nowMs);
     if (!this.battles.size) return false;
     let anim = false;
     const t = nowMs / 1000;
@@ -1190,16 +1195,23 @@ class MapRenderer extends EventTarget {
         if (aStands) this._drawLineFire(g, ax, ay, dx, dy, e.seed, 1, t, s);
         if (dStands) this._drawLineFire(g, dx, dy, ax, ay, e.seed + 7.77, 0.65, t, s);
       } else {
-        // Shelling: visible wherever the target token is (above 100 %), bursts at random around it.
-        if (s < 1.5 || !onScreen(dx, dy, margin)) continue;
+        // Shelling: visible when the guns or the target are on screen (above 150 %). Each shell leaves the guns
+        // with a flash, climbs a slow arc toward where it will land (so players can see where fire comes from),
+        // and bursts on arrival.
+        if (s < 1.5 || !(onScreen(dx, dy, margin) || onScreen(ax, ay, margin))) continue;
         anim = true;
         if (nowMs >= e.nextShell && this.shellFrames) {
           const a = Math.random() * Math.PI * 2, r = (14 + Math.random() * 40) / s;
           const bx = dx + Math.cos(a) * r, by = dy + Math.sin(a) * r * 0.75;
-          const delay = onScreen(ax, ay, margin) && s >= 4 ? 280 : 0;
-          if (delay) this._gunFlash(ax + ux * 12 / s, ay + uy * 12 / s, ux, uy);
-          this.explode(bx, by, 80 + Math.random() * 60, delay, this.shellFrames);
-          e.nextShell = nowMs + 700 + Math.random() * 1500;
+          // Leave the token's edge, not its centre, so the launch is not hidden under the counter.
+          const mx = ax + ux * 16 / s, my = ay + uy * 16 / s - 8 / s;
+          const distPx = Math.hypot(bx - mx, by - my) * s;
+          const dur = Math.max(1000, Math.min(2400, 700 + distPx * 4));          // slow enough to follow
+          const h = Math.max(30, Math.min(160, distPx * 0.35)) / s;                // arc height (up the screen)
+          this.shellsInFlight.push({ x0: mx, y0: my, x1: bx, y1: by, t0: nowMs, dur, h });
+          this._gunFlash(mx, my, ux, uy);
+          this.explode(bx, by, 80 + Math.random() * 60, dur, this.shellFrames);
+          e.nextShell = nowMs + 900 + Math.random() * 1600;
         }
       }
     }
@@ -1278,14 +1290,43 @@ class MapRenderer extends EventTarget {
     }
   }
 
+  /**
+   * Shells in flight: a bright shell with a fading trail along a parabola from the guns to the landing point,
+   * over a faint dotted line of the whole trajectory. Returns true while any is in the air.
+   */
+  _drawShells(nowMs) {
+    const g = this.arcG, s = this.scale;
+    g.clear();
+    if (!this.shellsInFlight.length) return false;
+    const at = (sh, p) => [sh.x0 + (sh.x1 - sh.x0) * p, sh.y0 + (sh.y1 - sh.y0) * p - sh.h * 4 * p * (1 - p)];
+    this.shellsInFlight = this.shellsInFlight.filter(sh => nowMs - sh.t0 < sh.dur);
+    for (const sh of this.shellsInFlight) {
+      const p = Math.max(0, Math.min(1, (nowMs - sh.t0) / sh.dur));
+      // The whole trajectory, faint and dotted, so the line of fire reads at a glance.
+      for (let q = 0.04; q < 1; q += 0.06) { const [x, y] = at(sh, q); g.circle(x, y, 1.3 / s).fill({ color: 0xfff2c0, alpha: 0.35 }); }
+      // Trail: the last stretch behind the shell, fading out.
+      const tail = 0.22, steps = 10;
+      for (let k = 0; k < steps; k++) {
+        const q0 = p - tail * (k + 1) / steps, q1 = p - tail * k / steps;
+        if (q1 <= 0) break;
+        const [x0, y0] = at(sh, Math.max(0, q0)), [x1, y1] = at(sh, q1);
+        g.moveTo(x0, y0).lineTo(x1, y1).stroke({ width: (3.6 - k * 0.25) / s, color: 0xe6e1d6, alpha: 0.7 * (1 - k / steps) });
+      }
+      const [x, y] = at(sh, p);
+      g.circle(x, y, 4.5 / s).fill({ color: 0xffb347, alpha: 0.4 });
+      g.circle(x, y, 2.3 / s).fill({ color: 0xfff5d6, alpha: 1 });
+    }
+    this.invalidate();
+    return this.shellsInFlight.length > 0;
+  }
   /** A short flash at the guns, pointing at the target. */
   _gunFlash(x, y, ux, uy) {
     const g = new PIXI.Graphics(), nx = -uy, ny = ux, f = 10;
     g.poly([ux * f * 2.2, uy * f * 2.2, nx * f * 0.7, ny * f * 0.7, -ux * f * 0.3, -uy * f * 0.3, -nx * f * 0.7, -ny * f * 0.7]).fill({ color: 0xfff1a8, alpha: 0.95 });
     g.circle(ux * f * 0.6, uy * f * 0.6, f * 0.55).fill({ color: 0xffffff, alpha: 0.9 });
     g.position.set(x, y); g.scale.set(1 / this.scale);
-    g.life = 160; g.flash = true;
-    this.fxLayer.addChild(g);
+    g.life = 220; g.flash = true;
+    this.boomLayer.addChild(g);
   }
 
   // ---- GM pings -----------------------------------------------------------------------
@@ -1537,9 +1578,10 @@ class MapRenderer extends EventTarget {
     const k = 1 - Math.pow(0.001, dt / 700); // movement easing
     let anim = this.fxLayer.children.length > 0 || this.boomLayer.children.length > 0;
     if (this._tickPings(nowMs)) anim = true;
-    if (this.battles.size) {
+    if (this.battles.size || this.shellsInFlight.length) {
       const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
       if (this._tickBattles(nowMs, tl.x, tl.y, br.x, br.y)) anim = true;
+      if (this.shellsInFlight.length) anim = true;
     }
     if (this.railLayer.children.length) {
       const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
@@ -1656,7 +1698,7 @@ class MapRenderer extends EventTarget {
         fx.life -= dt;
         if (fx.screenSize) { fx.scale.set(fx.screenSize / (fx.frameSize || this.explosionFrameSize) * inv); }
         else if (fx.pulse) { const p = 1 - fx.life / 700; fx.scale.set((1 + p * 3) * inv); fx.alpha = 1 - p; }
-        else if (fx.flash) { fx.scale.set(inv); fx.alpha = Math.max(0, fx.life / 160); }
+        else if (fx.flash) { fx.scale.set(inv); fx.alpha = Math.max(0, fx.life / 220); }
         else fx.alpha = Math.min(1, fx.life / 900);
         if (fx.life <= 0) { layer.removeChild(fx); fx.destroy(); }
       }
