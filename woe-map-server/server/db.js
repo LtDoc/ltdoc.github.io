@@ -235,6 +235,14 @@ CREATE TABLE IF NOT EXISTS techs (
   UNIQUE (lobby_id, key)
 );
 
+-- Bundled tech additions already merged into a campaign's tree (server/research.js PATCHES).
+CREATE TABLE IF NOT EXISTS tree_patches (
+  lobby_id   INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  patch      TEXT NOT NULL,
+  applied_at INTEGER NOT NULL,
+  PRIMARY KEY (lobby_id, patch)
+);
+
 -- Resource trades between factions (docs/COMMS.md): one-time on acceptance, or recurring at each End turn.
 CREATE TABLE IF NOT EXISTS trades (
   id           INTEGER PRIMARY KEY,

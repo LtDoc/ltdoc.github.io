@@ -164,6 +164,9 @@ function incomeFor(lobby, g, faction, state, markers) {
     } else if (m.type === 'town') {
       const c = s.cityIncome[m.data.size] || s.cityIncome.village;
       inc.money += num(c.money); inc.rp += num(c.rp); inc.manpower += num(c.manpower);
+      // Development levels (long-term projects) add their own income on top of the town's size.
+      const dev = num(m.data.developed), d = s.townDevIncome || {};
+      if (dev > 0) { inc.money += dev * num(d.money); inc.rp += dev * num(d.rp); inc.manpower += dev * num(d.manpower); }
     } else if (m.type === 'factory') {
       const lvl = Math.max(1, num(m.data.industry, 1));
       inc.money += num(s.factoryIncome.money) * lvl; inc.rp += num(s.factoryIncome.rp) * lvl; inc.manpower += num(s.factoryIncome.manpower) * lvl;
@@ -250,6 +253,14 @@ function cancelTradesBetween(lobbyId, a, b, reason) {
   return out;
 }
 
+/** What a queue item is, for reports: a unit's name, 'Factory', or a project ('Develop town to level 2'). */
+function buildLabel(item) {
+  if (item.typeId === 'factory') return 'Factory';
+  const p = GameData.PROJECTS[item.typeId];
+  if (p) return `${p.label} to level ${item.toLevel || '?'}`;
+  return UnitTypes.LIST.find(u => u.id === item.typeId)?.unit || item.typeId;
+}
+
 // ---- Turn resolution --------------------------------------------------------------------
 /**
  * End the current turn. Returns { game, summaries: [{faction, text, data}], shortages }.
@@ -327,7 +338,7 @@ function endTurn(lobby, hooks = {}) {
         if (item.typeId === 'factory' || !item.siteId) return true;
         const site = markers.find(m => m.id === item.siteId);
         if (!site || String(site.data?.nation || '').toLowerCase() === faction.name.toLowerCase()) return true;
-        lostBuilds.push({ type: UnitTypes.LIST.find(u => u.id === item.typeId)?.unit || item.typeId, site: site.name });
+        lostBuilds.push({ type: buildLabel(item), site: site.name });
         return false;
       });
       if (gained.length) parts.push(`took ${gained.map(x => x.name).join(', ')}`);
@@ -349,7 +360,7 @@ function endTurn(lobby, hooks = {}) {
         income: inc, built, researched, gained, lost, lostBuilds, shortages: [],
         stock: { resources: { ...state.resources }, money: state.money, manpower: state.manpower, rp: state.rp },
         research: active ? { name: active.name, progress: num(rs.progress[active.key]), rp: active.rp, queue: rs.queue.map(k => techs.find(t => t.key === k)?.name || k) } : null,
-        queued: (state.production || []).map(item => ({ type: item.typeId === 'factory' ? 'Factory' : (UnitTypes.LIST.find(u => u.id === item.typeId)?.unit || item.typeId), site: item.siteName || '', turnsLeft: item.turnsLeft })),
+        queued: (state.production || []).map(item => ({ type: buildLabel(item), site: item.siteName || '', turnsLeft: item.turnsLeft })),
       } });
     }
     // Shortages bite: up to three of the faction's strongest units lose 10 % strength per short resource.

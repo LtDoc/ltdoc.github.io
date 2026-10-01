@@ -34,7 +34,16 @@ const q = {
       money = excluded.money, prereqs = excluded.prereqs, effects = excluded.effects, description = excluded.description, sort = excluded.sort, updated_at = excluded.updated_at`),
   remove: db.prepare('DELETE FROM techs WHERE lobby_id = ? AND key = ?'),
   clear: db.prepare('DELETE FROM techs WHERE lobby_id = ?'),
+  patched: db.prepare('SELECT 1 FROM tree_patches WHERE lobby_id = ? AND patch = ?'),
+  markPatched: db.prepare('INSERT OR IGNORE INTO tree_patches (lobby_id, patch, applied_at) VALUES (?, ?, ?)'),
 };
+/**
+ * Techs added to the bundled tree after campaigns already had one. Each patch is merged into an existing tree
+ * once (techs the GM already has under the same key are left alone); a GM can still delete them afterwards.
+ */
+const PATCHES = [
+  { id: 'economy-2026-09', keys: ['econ_statistics', 'econ_municipal', 'econ_machine_tools', 'econ_savings', 'econ_scientific_management', 'econ_electrification', 'econ_reconstruction'] },
+];
 const num = (v, f = 0) => { const n = Number(v); return Number.isFinite(n) ? n : f; };
 
 function serialize(row) {
@@ -66,10 +75,24 @@ function seedDefault(lobbyId, replace = false) {
   if (replace) q.clear.run(lobbyId);
   let n = 0;
   techs.forEach((t, i) => { if (replace || !q.one.get(lobbyId, t.key)) { upsert(lobbyId, t, i); n++; } });
+  for (const p of PATCHES) q.markPatched.run(lobbyId, p.id, now());   // a fresh copy already has every addition
   return n;
 }
-/** Make sure a campaign has a tree (first enable). */
-function ensureTree(lobbyId) { if (count(lobbyId) === 0) seedDefault(lobbyId, false); }
+/** Make sure a campaign has a tree (first enable), and merge any bundled additions it has not had yet. */
+function ensureTree(lobbyId) {
+  if (count(lobbyId) === 0) { seedDefault(lobbyId, false); return; }
+  const pending = PATCHES.filter(p => !q.patched.get(lobbyId, p.id));
+  if (!pending.length) return;
+  const file = path.join(__dirname, '..', 'defaults', 'techtree-ww1.json');
+  const techs = JSON.parse(fs.readFileSync(file, 'utf8')).techs;
+  for (const p of pending) {
+    for (const key of p.keys) {
+      const i = techs.findIndex(t => t.key === key);
+      if (i >= 0 && !q.one.get(lobbyId, key)) upsert(lobbyId, techs[i], i);
+    }
+    q.markPatched.run(lobbyId, p.id, now());
+  }
+}
 
 const yearOf = iso => Number(String(iso || '').slice(0, 4)) || 1914;
 /** Keys every faction starts with: techs dated on or before the campaign's start year. */

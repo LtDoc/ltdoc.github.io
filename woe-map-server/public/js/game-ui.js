@@ -56,6 +56,8 @@ const GameUI = (() => {
     document.addEventListener('click', e => {
       const b = e.target.closest('[data-build]');
       if (b) { queueBuild(b.dataset.build, Number(b.dataset.site)); return; }
+      const pj = e.target.closest('[data-project]');
+      if (pj) { queueBuild(pj.dataset.project, Number(pj.dataset.site)); return; }
       const c = e.target.closest('[data-cancelbuild]');
       if (c) { cancelBuild(Number(c.dataset.cancelbuild)); return; }
       const o = e.target.closest('[data-openbuild]');
@@ -265,7 +267,50 @@ const GameUI = (() => {
     return `<div class="section">Production</div>
       ${sites.length ? sites : '<p class="hint">No cities or factories. Production needs a city, a capital or a factory in your colours.</p>'}
       ${factories}
-      ${actor ? `<p><button class="small secondary" data-buildfactory="1" title="${esc(GameData.costLabel(fc))}">Build a factory…</button> <span class="hint">within ${g().settings.factoryRangeKm} ${ctx.state.lobby?.scaleLabel || 'km'} of your city or town</span></p>` : ''}`;
+      ${actor ? `<p><button class="small secondary" data-buildfactory="1" title="${esc(GameData.costLabel(fc))}">Build a factory…</button> <span class="hint">within ${g().settings.factoryRangeKm} ${ctx.state.lobby?.scaleLabel || 'km'} of your city or town</span></p>` : ''}
+      ${developmentHtml(actor)}`;
+  }
+  /** What the next level of a project brings, from the campaign's rules. */
+  function projectGain(p) {
+    const s = g().settings;
+    if (p.project === 'upgradeFactory') return `+${s.factoryIncome.money} money${s.factoryIncome.rp ? `, +${s.factoryIncome.rp} RP` : ''} a turn, +1 build slot`;
+    const d = s.townDevIncome || {};
+    const parts = [d.money ? `+${d.money} money` : '', d.rp ? `+${d.rp} RP` : '', d.manpower ? `+${d.manpower} manpower` : ''].filter(Boolean);
+    return `${parts.join(', ') || 'no income'} a turn${(p.level + 1) % 2 === 0 ? ', +1 build slot' : ''}`;
+  }
+  /** Long-term projects (docs/ECONOMY.md): upgrade factories, develop towns. Running ones first. */
+  function developmentHtml(actor) {
+    const list = (prod.projects || []).slice();
+    if (!list.length) return '';
+    const rank = k => ({ capital: 0, city: 1, factory: 2, village: 3 }[k] ?? 4);
+    list.sort((a, b) => (!!b.active - !!a.active) || rank(a.kind) - rank(b.kind) || a.name.localeCompare(b.name));
+    const st = prod.state;
+    const running = list.filter(p => p.active).length;
+    const rows = list.map(p => {
+      const head = `<b>${esc(p.name)}</b> <span class="hint">${esc(p.kind)} · level ${p.level}/${p.max}</span>`;
+      if (p.active) return `<div class="diplo"><span class="grow">${head}<br><span class="hint">${p.project === 'upgradeFactory' ? 'Upgrading' : 'Developing'} to level ${p.active.toLevel}: ${p.active.turnsLeft} turn${p.active.turnsLeft === 1 ? '' : 's'} left</span></span>${actor ? `<button class="small secondary" data-cancelbuild="${p.active.id}" title="Cancel and refund">×</button>` : ''}</div>`;
+      if (!p.cost) return `<div class="diplo"><span class="grow">${head} <span class="hint">· fully developed</span></span></div>`;
+      const short = [];
+      for (const k of GameData.RESOURCE_KEYS) if ((st.resources[k] || 0) < p.cost[k]) short.push(GameData.byKey[k].name.toLowerCase());
+      if (st.money < p.cost.money) short.push('money');
+      if (st.manpower < p.cost.manpower) short.push('manpower');
+      return `<div class="diplo"><span class="grow">${head}<br><span class="hint">Level ${p.level + 1}: ${esc(projectGain(p))} · ${esc(GameData.costLabel(p.cost))}</span>${short.length ? `<br><span class="hint" style="color:#ff9f80">short of ${esc(short.join(', '))}</span>` : ''}</span>${actor ? `<button class="small" data-project="${p.project}" data-site="${p.id}" ${short.length ? 'disabled' : ''}>${p.project === 'upgradeFactory' ? 'Upgrade' : 'Develop'}</button>` : ''}</div>`;
+    }).join('');
+    return `<details class="sub devlist" ${running ? 'open' : ''}><summary>Development <span class="hint">(${running ? `${running} under way · ` : ''}long-term growth)</span></summary>
+      <p class="hint">Slow projects that pay back over many turns: each factory level adds income and a build slot; each town level adds income, and every second one a build slot. One project per site; each step costs more and takes longer than the last.</p>${rows}</details>`;
+  }
+  /** The project row for a site (for the map popup), when the production view is loaded. */
+  function projectInfo(siteId) { return (prod?.projects || []).find(p => p.id === siteId) || null; }
+  /** Start a site's next project (map popup and Nation tab). */
+  async function startProject(typeId, siteId, factionId) {
+    try {
+      const r = await api.post(`${ctx.base}/game/production`, { typeId, siteId, factionId });
+      if (prod && r.factionId === prod.factionId) prod = r;
+      const p = (r.projects || []).find(x => x.id === siteId);
+      toast(p && p.active ? `${typeId === 'upgradeFactory' ? 'Upgrading' : 'Developing'} ${p.name} to level ${p.active.toLevel} (${p.active.turnsLeft} turns)` : 'Project started');
+      renderNation();
+      return r;
+    } catch (err) { toast(err.message); return null; }
   }
   let buildSiteId = null;
   function openBuildPicker(siteId) {
@@ -309,7 +354,10 @@ const GameUI = (() => {
     const e = myEntry();
     try {
       prod = await api.post(`${ctx.base}/game/production`, { typeId, siteId, factionId: e ? e.faction.id : undefined });
-      toast('Queued'); renderNation(); renderBuildList();
+      const p = GameData.PROJECTS[typeId] ? projectInfo(siteId) : null;
+      toast(p && p.active ? `${p.project === 'upgradeFactory' ? 'Upgrading' : 'Developing'} ${p.name} to level ${p.active.toLevel} (${p.active.turnsLeft} turns)` : 'Queued');
+      renderNation(); renderBuildList();
+      ctx.onProjects?.();
     } catch (err) { toast(err.message); }
   }
   async function cancelBuild(id) {
@@ -519,6 +567,7 @@ const GameUI = (() => {
     $('#earthSeedRow').hidden = state.lobby?.mapKind !== 'earth';
     for (const size of ['capital', 'city', 'village']) for (const k of ['money', 'rp', 'manpower']) set(`#rule_${size}_${k}`, s.cityIncome[size][k]);
     set('#ruleFactoryMoney', s.factoryIncome.money); set('#ruleFactoryRp', s.factoryIncome.rp);
+    set('#ruleDevMoney', s.townDevIncome?.money ?? 3); set('#ruleDevRp', s.townDevIncome?.rp ?? 1); set('#ruleDevManpower', s.townDevIncome?.manpower ?? 0);
     set('#ruleStartRes', s.startStock.resources); set('#ruleStartMoney', s.startStock.money); set('#ruleStartMp', s.startStock.manpower);
   }
 
@@ -580,6 +629,7 @@ const GameUI = (() => {
       cityCapacity: { capital: v('#ruleCapCapital'), city: v('#ruleCapCity'), village: v('#ruleCapVillage') },
       factoryRangeKm: v('#ruleFactoryRange'), coastalKm: v('#ruleCoastal'), researchLead: v('#ruleResearchLead'),
       cityIncome: {}, factoryIncome: { money: v('#ruleFactoryMoney'), rp: v('#ruleFactoryRp') },
+      townDevIncome: { money: v('#ruleDevMoney'), rp: v('#ruleDevRp'), manpower: v('#ruleDevManpower') },
       startStock: { resources: v('#ruleStartRes'), money: v('#ruleStartMoney'), manpower: v('#ruleStartMp') },
     };
     for (const size of ['capital', 'city', 'village']) settings.cityIncome[size] = { money: v(`#rule_${size}_money`), rp: v(`#rule_${size}_rp`), manpower: v(`#rule_${size}_manpower`) };
@@ -748,7 +798,7 @@ const GameUI = (() => {
       </div>`;
   }
 
-  return { init, load, refresh, onGame, onFaction, onRelations, onTerritories, onTurn, onProgress, openReports, renderNation, loadProduction, buildFactoryAt };
+  return { projectInfo, startProject, init, load, refresh, onGame, onFaction, onRelations, onTerritories, onTurn, onProgress, openReports, renderNation, loadProduction, buildFactoryAt };
 })();
 
 // Small helper so the modifiers table starts with every resource present.

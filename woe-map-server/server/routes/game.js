@@ -237,14 +237,22 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
     const state = game.serializeState(game.q.state.get(faction.id) || game.ensureState(req.lobby.id, faction.id, g.settings));
     const fx = research.effectsFor(research.list(req.lobby.id), state.techs || []);
+    const isProject = q => !!GameData.PROJECTS[q.typeId];
     const sites = production.sites(req.lobby, g, access.serializeFaction(faction), markers, fx).map(s => ({
       ...s, coastal: geo.isEarth(req.lobby) ? territory.isCoastal(req.lobby, s.x, s.y, num(g.settings.coastalKm, 30)) : true,
-      queue: (state.production || []).filter(q => q.siteId === s.id && q.typeId !== 'factory'),
+      queue: (state.production || []).filter(q => q.siteId === s.id && q.typeId !== 'factory' && !isProject(q)),
     }));
     const factories = (state.production || []).filter(q => q.typeId === 'factory');
+    // Long-term projects: every factory and town of the faction, with the next step's cost and any project under way.
+    const name = faction.name.toLowerCase();
+    const projects = markers.filter(m => ['factory', 'town'].includes(m.type) && String(m.data?.nation || '').toLowerCase() === name).map(m => {
+      const p = production.projectCostFor(g, fx, m);
+      const active = (state.production || []).find(q => isProject(q) && q.siteId === m.id) || null;
+      return { id: m.id, name: m.name, kind: m.type === 'factory' ? 'factory' : (m.data?.size || 'village'), project: p.id, level: p.level, max: p.max, cost: p.cost, active };
+    });
     const costs = Object.fromEntries([...UnitTypes.LIST.map(t => t.id), 'factory'].map(id => [id, production.costWith(g, fx, id)]));
     const buildable = Object.fromEntries(UnitTypes.LIST.map(t => [t.id, research.canBuild(fx, t.id)]));
-    return { factionId: faction.id, sites, factoryBuilds: factories, costs, buildable, state };
+    return { factionId: faction.id, sites, factoryBuilds: factories, projects, costs, buildable, state };
   }
 
   router.get('/production', (req, res) => {
@@ -269,8 +277,10 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     try { item = production.queue(req.lobby, g, faction, state, markers, { typeId: String(req.body?.typeId || ''), siteId: req.body?.siteId, x: req.body?.x, y: req.body?.y }, fx); }
     catch (e) { return res.status(400).json({ error: e.message }); }
     game.writeState(state);
-    const what = item.typeId === 'factory' ? 'a factory' : (UnitTypes.LIST.find(t => t.id === item.typeId)?.unit || item.typeId);
-    logEvent(req.lobby.id, req.user.id, 'system', `${faction.name} begins building ${what} at ${item.siteName} (${item.turns} turn${item.turns === 1 ? '' : 's'})`, { faction: faction.name, audience: { nations: [faction.name], treasury: true } },
+    const what = item.typeId === 'factory' ? 'building a factory at' : GameData.PROJECTS[item.typeId]
+      ? `${item.typeId === 'upgradeFactory' ? 'upgrading' : 'developing'} ${item.siteName} to level ${item.toLevel}`
+      : `building ${UnitTypes.LIST.find(t => t.id === item.typeId)?.unit || item.typeId} at`;
+    logEvent(req.lobby.id, req.user.id, 'system', `${faction.name} begins ${what}${GameData.PROJECTS[item.typeId] ? '' : ` ${item.siteName}`} (${item.turns} turn${item.turns === 1 ? '' : 's'})`, { faction: faction.name, audience: { nations: [faction.name], treasury: true } },
       ws => ws.lobbyRole === 'gm' || g.settings.publicTreasury || String(ws.nation || '').toLowerCase() === faction.name.toLowerCase());
     broadcastFaction(req, g, f);
     res.status(201).json({ item, ...productionView(req, g, f) });
@@ -719,7 +729,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
         out.unitCosts = cur;
       }
       for (const k of ['waiveMovement', 'occupyNeutrals', 'upkeep', 'publicTreasury', 'capturedIdle', 'diplomatsRequired']) if (s[k] !== undefined) out[k] = !!s[k];
-      for (const grp of ['cityIncome', 'factoryIncome', 'startStock']) {
+      for (const grp of ['cityIncome', 'factoryIncome', 'townDevIncome', 'startStock']) {
         if (s[grp] && typeof s[grp] === 'object') {
           out[grp] = {};
           for (const [k, v] of Object.entries(s[grp])) {
@@ -747,6 +757,14 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
       const site = markers.find(m => m.id === item.siteId);
       const owner = membersByNation.get(faction.name.toLowerCase()) || null;
+      if (GameData.PROJECTS[item.typeId]) {
+        // A finished project raises the site's level (the site may have changed hands: then the work is lost earlier).
+        if (!site) throw new Error(`${item.siteName || 'the site'} is gone`);
+        const lv = GameData.projectLevel(site);
+        const next = Math.min(lv.max, lv.level + 1);
+        const after = writeMarker(req, site, { data: item.typeId === 'upgradeFactory' ? { industry: next } : { developed: next } });
+        return { name: `${after.name} ${item.typeId === 'upgradeFactory' ? 'upgraded' : 'developed'} to level ${next}` };
+      }
       if (item.typeId === 'factory') {
         return createMarker(req, { type: 'factory', name: `${item.siteName || faction.name} Works`, x: item.x, y: item.y, color: faction.color, ownerId: owner, data: { nation: faction.name, industry: 1 } }, true);
       }

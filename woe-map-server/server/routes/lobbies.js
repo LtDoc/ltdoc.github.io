@@ -775,6 +775,7 @@ function sanitizeData(type, data) {
     out.size = ['capital', 'city', 'village'].includes(d.size) ? d.size : 'village';
     out.nation = clean(d.nation, 60);
     if (d.industry !== undefined && d.industry !== '') out.industry = clamp(Math.round(num(d.industry, 0)), 0, 10);   // game mode: production and income weight
+    if (num(d.developed) > 0) out.developed = clamp(Math.round(num(d.developed)), 0, 5);   // long-term development level (docs/ECONOMY.md)
     if (d.major) out.major = true;
   } else if (type === 'poi') {
     out.category = clean(d.category, 40);

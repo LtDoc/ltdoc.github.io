@@ -79,6 +79,33 @@
     const t = window.UnitTypes?.resolve(m.data?.unitType);
     return t ? RAIL_LAND.has(t.cat) : true;
   }
+  // ---- Long-term projects in the popup (docs/ECONOMY.md) ------------------------------------------
+  const GameData = window.GameData;
+  /** May this viewer run projects at a place? The GM anywhere, a player at their own nation's towns and factories. */
+  function mySite(m) {
+    if (!gameOn() || !GameData.projectFor(m) || !m.data?.nation) return false;
+    return state.role === 'gm' || String(state.member?.nation || '').toLowerCase() === String(m.data.nation).toLowerCase();
+  }
+  function developmentStat(m) {
+    const lv = GameData.projectLevel(m);
+    const info = window.GameUI?.projectInfo(m.id);
+    let text = m.type === 'town' ? `level ${lv.level} / ${lv.max}` : '';
+    if (m.type === 'town' && lv.level) {
+      const d = state.game?.settings?.townDevIncome || {};
+      text += ` (+${lv.level * (d.money || 0)} money, +${lv.level * (d.rp || 0)} RP a turn)`;
+    }
+    if (info?.active) text += `${text ? ' · ' : ''}${m.type === 'factory' ? 'upgrading' : 'developing'} to ${info.active.toLevel}: ${info.active.turnsLeft} turn${info.active.turnsLeft === 1 ? '' : 's'} left`;
+    return text ? stat(m.type === 'factory' ? 'Project' : 'Development', text) : '';
+  }
+  function developButton(m) {
+    if (!mySite(m)) return '';
+    const lv = GameData.projectLevel(m);
+    if (lv.level >= lv.max) return '';
+    const info = window.GameUI?.projectInfo(m.id);
+    if (info?.active) return '';
+    const cost = info?.cost || GameData.projectCost(lv.id, lv.step);
+    return `<button class="small" data-act="develop" title="Level ${lv.level + 1}: ${esc(GameData.costLabel(cost))}">${lv.id === 'upgradeFactory' ? '⬆ Upgrade' : '🏗 Develop'}</button>`;
+  }
   function shapeName(s) {
     return s.label || { area: 'Unnamed area', trench: 'Unnamed trench', rail: 'Unnamed railway' }[s.kind] || 'Unnamed line';
   }
@@ -1471,11 +1498,13 @@
       if (d.abilities?.length) body += `<div class="stat"><span class="muted">Abilities</span></div><ul style="margin:2px 0 4px 16px;padding:0;font-size:12px">${d.abilities.map(a => `<li>${esc(a)}</li>`).join('')}</ul>`;
     } else if (m.type === 'town') {
       body += stat('Size', d.size) + nationStat(d.nation);
+      if (gameOn()) body += developmentStat(m);
     } else if (m.type === 'resource') {
       const r = window.GameData?.byKey[d.kind];
       body += stat('Resource', r ? r.name : d.kind) + stat('Yield per turn', d.yield) + nationStat(d.nation);
     } else if (m.type === 'factory') {
-      body += stat('Industry level', d.industry) + nationStat(d.nation);
+      body += stat('Industry level', `${d.industry ?? 1} / 5`) + nationStat(d.nation);
+      if (gameOn()) body += developmentStat(m);
     } else if (m.type === 'poi') {
       body += stat('Category', d.category);
     }
@@ -1487,6 +1516,7 @@
     if (canEdit(m)) actions += `<button class="small" data-act="edit">Edit</button>`;
     if (canEdit(m)) actions += `<button class="small secondary" data-act="lock" title="${m.locked ? 'Let it be selected and dragged again' : 'Clicks and drags pass through a locked token'}">${m.locked ? '🔓 Unlock' : '🔒 Lock'}</button>`;
     if (m.type === 'unit' && canEdit(m) && (d.strength ?? 100) > 0) actions += `<button class="small danger" data-act="attack">⚔ Attack…</button>`;
+    actions += developButton(m);
     if (m.type === 'hero') actions += heroActionsHtml(m);
     actions += `<button class="small secondary" data-act="history">History</button>`;
     if (state.role === 'gm') actions += `<button class="small secondary" data-act="dup">Duplicate</button>`;
@@ -1530,6 +1560,7 @@
       else if (act === 'lock') { const d = await api.patch(`${base}/markers/${m.id}`, { locked: !m.locked }); upsertMarker(d.marker); }
       else if (act === 'attack') openCombat(m);
       else if (['recon', 'steal', 'hunt', 'send', 'recall', 'expel'].includes(act)) await heroOrder(act, m);
+      else if (act === 'develop') { const f = (state.factions || []).find(x => x.name.toLowerCase() === String(m.data?.nation || '').toLowerCase()); await GameUI.startProject(GameData.projectFor(m), m.id, f?.id); renderPopup(); }
       else if (act === 'history') showHistoryFor('marker', m.id);
       else if (act === 'dup') {
         const d = await api.post(`${base}/markers`, {
@@ -1601,7 +1632,7 @@
       <div data-for="town"><div class="grid2">
         <label>Size<select id="${p}Size"><option value="capital">Capital</option><option value="city">City</option><option value="village">Village</option></select></label>
         <label>Faction<select id="${p}TownNationSel">${nationOptions()}</select></label>
-      </div><div class="grid2"><label>Industry <span class="hint">(game mode: 0–10)</span><input id="${p}Industry2" type="number" min="0" max="10" step="1" placeholder="by size"></label></div><label id="${p}TownNationCustomWrap" hidden>Custom nation<input id="${p}TownNation" list="nationList" maxlength="40"></label></div>
+      </div><div class="grid2"><label>Industry <span class="hint">(game mode: 0–10)</span><input id="${p}Industry2" type="number" min="0" max="10" step="1" placeholder="by size"></label><label>Development <span class="hint">(0–5)</span><input id="${p}Developed" type="number" min="0" max="5" step="1" placeholder="0"></label></div><label id="${p}TownNationCustomWrap" hidden>Custom nation<input id="${p}TownNation" list="nationList" maxlength="40"></label></div>
       <div data-for="poi"><label>Category<input id="${p}Category" maxlength="40" placeholder="Ruins, Mine, Fortress…"></label></div>
       <div data-for="hero">
         <div class="grid2">
@@ -1757,7 +1788,7 @@
       movement: v('Movement'), strength: v('Strength') === '' ? 100 : v('Strength'),
       abilities: v('Abilities').split('\n').map(s => s.trim()).filter(Boolean),
     });
-    if (type === 'town') Object.assign(data, { size: v('Size'), nation: readNation(p, 'TownNation'), industry: v('Industry2') });
+    if (type === 'town') Object.assign(data, { size: v('Size'), nation: readNation(p, 'TownNation'), industry: v('Industry2'), developed: Number(v('Developed')) || 0 });
     if (type === 'poi') Object.assign(data, { category: v('Category') });
     if (type === 'resource') Object.assign(data, { kind: v('Kind'), yield: v('Yield') === '' ? 1 : v('Yield'), nation: readNation(p, 'ResNation') });
     if (type === 'factory') Object.assign(data, { industry: v('Industry') || 1, nation: readNation(p, 'FacNation') });
@@ -1792,6 +1823,7 @@
     set('Kind', d.kind || 'grain'); set('Yield', d.yield ?? 3); setNation(p, 'ResNation', m.type === 'resource' ? d.nation : '');
     set('Industry', d.industry ?? 1); setNation(p, 'FacNation', m.type === 'factory' ? d.nation : '');
     set('Industry2', m.type === 'town' ? (d.industry ?? '') : '');
+    set('Developed', m.type === 'town' ? (d.developed || '') : '');
     set('Owner', m.ownerId ?? ''); set('VisibleTo', (m.visibleTo || []).join(', '));
     set('Scale', d.scale ?? 1); set('Rotation', d.rotation ?? 0);
     if (m.type === 'hero') {

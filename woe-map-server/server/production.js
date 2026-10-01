@@ -2,7 +2,8 @@
 /**
  * Production (docs/GAME-DESIGN.md §6.4): factions queue units at the cities and factories they own and pay
  * the cost up front; End turn advances every build and spawns finished units beside their site. Players can
- * also build factories near a city or town they own. Routes live in routes/game.js.
+ * also build factories near a city or town they own, and run long-term projects (docs/ECONOMY.md): upgrading a
+ * factory's level or developing a town. Routes live in routes/game.js.
  */
 const GameData = require('../public/js/game-data');
 const UnitTypes = require('../public/js/units');
@@ -21,8 +22,10 @@ function sites(lobby, g, faction, markers, fx) {
   for (const m of markers) {
     if (!sameNation(m.data?.nation, faction.name)) continue;
     if (m.type === 'town') {
-      const cap = num(s.cityCapacity?.[m.data?.size], 0);
-      if (cap > 0) out.push({ id: m.id, name: m.name, kind: m.data.size, capacity: cap + extra, x: m.x, y: m.y, industry: num(m.data.industry, cap) });
+      // Development adds a build slot every second level (a village becomes a production site at level 2).
+      const base = num(s.cityCapacity?.[m.data?.size], 0), dev = num(m.data?.developed);
+      const cap = base + GameData.devSlots(dev);
+      if (cap > 0) out.push({ id: m.id, name: m.name, kind: m.data.size, capacity: cap + extra, x: m.x, y: m.y, industry: num(m.data.industry, base) + dev });
     } else if (m.type === 'factory') {
       const lvl = Math.max(1, num(m.data?.industry, 1));
       out.push({ id: m.id, name: m.name, kind: 'factory', capacity: lvl + extra, x: m.x, y: m.y, industry: lvl });
@@ -54,12 +57,30 @@ function costWith(g, fx, typeId) {
   return research.applyCost(fx, typeId, t ? t.cat : 'Buildings', GameData.costFor(typeId, g.settings.unitCosts));
 }
 
+/** The next step of a site's project for this faction: { id, level, max, cost } (cost null when maxed out). */
+function projectCostFor(g, fx, marker) {
+  const lv = GameData.projectLevel(marker);
+  if (!lv) return null;
+  let cost = lv.level >= lv.max ? null : research.applyCost(fx, lv.id, 'Projects', GameData.projectCost(lv.id, lv.step));
+  if (cost) for (const k of Object.keys(cost)) cost[k] = Math.round(cost[k]);   // whole numbers after discounts
+  return { ...lv, cost };
+}
+
 function queue(lobby, g, faction, state, markers, { typeId, siteId, x, y }, fx) {
   const s = g.settings;
-  const cost = costWith(g, fx, typeId);
+  let cost = costWith(g, fx, typeId);
   const queueOf = state.production || [];
   let item;
-  if (typeId === 'factory') {
+  if (GameData.PROJECTS[typeId]) {
+    // Long-term project at one of the faction's factories or towns: one at a time per site, no build slot used.
+    const m = markers.find(x => x.id === Number(siteId));
+    if (!m || GameData.projectFor(m) !== typeId || !sameNation(m.data?.nation, faction.name)) throw new Error(`Pick one of your ${typeId === 'upgradeFactory' ? 'factories' : 'towns'}`);
+    const p = projectCostFor(g, fx, m);
+    if (!p.cost) throw new Error(`${m.name} is already at its highest level (${p.max})`);
+    if (queueOf.some(q => GameData.PROJECTS[q.typeId] && q.siteId === m.id)) throw new Error(`${m.name} already has a project under way`);
+    cost = p.cost;
+    item = { typeId, siteId: m.id, siteName: m.name, toLevel: p.level + 1 };
+  } else if (typeId === 'factory') {
     if (!Number.isFinite(num(x, NaN)) || !Number.isFinite(num(y, NaN))) throw new Error('Pick a spot for the factory');
     const range = num(s.factoryRangeKm, 50);
     const anchor = markers.find(m => m.type === 'town' && ['city', 'capital', 'town'].includes(m.data?.size) && sameNation(m.data?.nation, faction.name) && geo.distance(lobby, x, y, m.x, m.y) <= range)
@@ -124,4 +145,4 @@ function spawnPoint(lobby, site, index) {
   return { x: Math.round((site.x + Math.cos(a) * r) * 10) / 10, y: Math.round((site.y + Math.sin(a) * r) * 10) / 10 };
 }
 
-module.exports = { sites, affordable, pay, queue, cancel, advance, spawnPoint, costWith };
+module.exports = { sites, affordable, pay, queue, cancel, advance, spawnPoint, costWith, projectCostFor };

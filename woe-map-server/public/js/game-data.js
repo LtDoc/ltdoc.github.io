@@ -52,6 +52,7 @@ const GameData = (() => {
       village: { money: 1, rp: 0, manpower: 1 },
     },
     factoryIncome: { money: 2, rp: 0, manpower: 0 },   // per factory, times its industry level
+    townDevIncome: { money: 3, rp: 1, manpower: 0 },   // per development level of a town (long-term projects)
     startStock: { resources: 20, money: 100, manpower: 20, rp: 0 },   // stockpiles when game mode starts
     publicTreasury: false,    // players may see every faction's treasury
     factoryRangeKm: 50,       // players may build a factory this close to one of their cities or towns
@@ -177,6 +178,47 @@ const GameData = (() => {
     return `${parts.join(', ') || 'free'} · ${cost.turns} turn${cost.turns === 1 ? '' : 's'}`;
   }
 
+  // ---- Long-term projects (docs/ECONOMY.md) -----------------------------------------------------
+  /**
+   * Development projects queued like builds at a site the faction owns. Each step costs more and takes longer
+   * than the one before, so they pay back over many turns rather than fixing this month's shortfall.
+   *   upgradeFactory: industry level 1 → 5; each level adds factory income and one build slot.
+   *   developTown:    development 0 → max by size; each level adds townDevIncome, every second one a build slot.
+   * `step` is how many steps the site has already taken (factory: level − 1; town: its development level).
+   */
+  const PROJECTS = {
+    upgradeFactory: {
+      label: 'Upgrade factory', verb: 'Upgrade', max: () => 5,
+      base: { iron: 12, coal: 6, timber: 6, money: 50, manpower: 1, turns: 3 },
+      step: { iron: 6, coal: 4, money: 30, turns: 1 },
+    },
+    developTown: {
+      label: 'Develop town', verb: 'Develop', max: size => ({ capital: 5, city: 4, village: 2 }[size] ?? 2),
+      base: { timber: 10, iron: 5, grain: 8, money: 60, manpower: 2, turns: 4 },
+      step: { timber: 5, iron: 3, money: 40, manpower: 1, turns: 2 },
+    },
+  };
+  /** The project a marker can take (by type), or null. */
+  function projectFor(marker) { return marker?.type === 'factory' ? 'upgradeFactory' : marker?.type === 'town' ? 'developTown' : null; }
+  /** Current level, steps taken and maximum for a factory or town marker. */
+  function projectLevel(marker) {
+    const id = projectFor(marker);
+    if (!id) return null;
+    if (id === 'upgradeFactory') { const level = Math.max(1, Math.round(Number(marker.data?.industry) || 1)); return { id, level, step: level - 1, max: 5 }; }
+    const level = Math.max(0, Math.round(Number(marker.data?.developed) || 0));
+    return { id, level, step: level, max: PROJECTS.developTown.max(marker.data?.size) };
+  }
+  /** Full cost row of the next step (before research discounts). */
+  function projectCost(id, step) {
+    const p = PROJECTS[id];
+    const out = {};
+    for (const k of COST_KEYS) out[k] = (p.base[k] || 0) + (p.step[k] || 0) * Math.max(0, step);
+    out.turns = Math.max(1, Math.round(out.turns || 1));
+    return out;
+  }
+  /** Extra build slots a town's development gives (one per two levels). */
+  const devSlots = developed => Math.floor((Number(developed) || 0) / 2);
+
   /** Unit categories that burn oil under upkeep, plus specific land vehicle types. */
   const OIL_CATEGORIES = new Set(['Air', 'Naval']);
   const OIL_TYPES = new Set(['tank', 'armouredcar', 'armouredtrain']);
@@ -212,7 +254,7 @@ const GameData = (() => {
   }
 
   return { RESOURCES, RESOURCE_KEYS, byKey, iconUrl, POOLS, FACTORY_ICON, TURN_STEPS, DEFAULT_SETTINGS, OIL_CATEGORIES, OIL_TYPES, stepDate, fmtDate, mergeSettings, deadlineInfo,
-    COST_KEYS, DEFAULT_COSTS, costFor, costLabel };
+    COST_KEYS, DEFAULT_COSTS, costFor, costLabel, PROJECTS, projectFor, projectLevel, projectCost, devSlots };
 })();
 
 if (typeof window !== 'undefined') window.GameData = GameData;

@@ -410,6 +410,16 @@ design is in `docs/GAME-DESIGN.md`.
   of small random deposits on land so remote factions have something to work with. Everything is an ordinary
   resource marker afterwards.
 
+### Long-term growth (game mode)
+
+Nations can grow their income without cutting their army, slowly. From **Nation → Production → Development**
+(or a town's or factory's popup) they can **upgrade factories** (level 1–5, each level +2 money a turn and a
+build slot) and **develop towns** (capital up to 5, city 4, village 2; each level +3 money and +1 RP a turn, a
+build slot every second level). Each step costs more and takes longer (3–12 turns), one project per site, and
+the levels stay with the place if it is captured. The **Economy** research branch (1915–1919) adds small,
+compounding income bonuses and makes the projects cheaper; existing campaigns receive it automatically.
+Details and numbers: `docs/ECONOMY.md`.
+
 ### Research (game mode)
 
 - **The tree.** When game mode starts the campaign gets a copy of the default WW1 tree
