@@ -12,6 +12,13 @@
       <a class="back" href="/lobbies.html" title="Back to campaigns">←</a>
       <button id="btnSidebar" class="secondary small" title="Toggle sidebar">☰</button>
       <h1 id="lobbyName">Loading…</h1>
+      <div id="notifWrap">
+        <button id="notifBtn" class="secondary small" type="button" title="Notifications">🔔<span id="notifCount"></span></button>
+        <div id="notifPanel" hidden>
+          <div class="nhead"><strong>Notifications</strong><button id="notifTrade" type="button" class="small" title="Offer another nation a trade of resources, money, manpower or research">＋ Trade</button></div>
+          <div id="notifList"></div>
+        </div>
+      </div>
       <div id="presence" title="Online now"></div>
       <div class="toolgroup">
         <button id="btnSelect" class="secondary small" title="Select several tokens: drag a box (S). Shift-drag on the map does the same anytime">⬚</button>
@@ -20,9 +27,10 @@
         <button id="btnDrawArea" class="secondary small" title="Draw an area (A)">▱</button>
         <button id="btnDrawTrench" class="secondary small" title="Dig a trench: click points or drag freehand (T)">⌇</button>
         <button id="btnDrawRail" class="secondary small" title="Lay a railway: click points or drag freehand; start or end on other track to join it (R)">🛤</button>
+        <button id="btnPing" class="secondary small" title="Ping a spot on the map for everyone for a minute (P)" hidden>📍</button>
         <button id="btnGrid" class="secondary small" title="Toggle grid (G)">▦</button>
         <button id="btnFit" class="secondary small" title="Fit map to screen (F)">⛶</button>
-        <button id="btnNotify" class="secondary small" title="Notifications when something happens while this tab is in the background">🔕</button>
+        <button id="btnNotify" class="secondary small" title="Sound and desktop alerts when something happens while this tab is in the background">🔇</button>
         <button id="btnSettings" class="secondary small" title="Campaign settings" hidden>⚙</button>
       </div>
     </header>
@@ -375,6 +383,52 @@
     </div>
   </div>
 
+  <div id="chatDock">
+    <section id="chatWin" hidden>
+      <header class="chat-top">
+        <div id="chatTabs"></div>
+        <button id="chatNew" type="button" class="small secondary" title="New private chat with players or the GM">＋</button>
+        <button id="chatMin" type="button" class="small secondary" title="Minimise">–</button>
+      </header>
+      <div id="chatNewPanel" hidden>
+        <div class="row"><strong class="grow">New private chat</strong><button id="chatNewGm" type="button" class="small" title="A private chat with the GM">Message the GM</button></div>
+        <div id="chatNewList"></div>
+        <input id="chatNewName" maxlength="60" placeholder="Name (optional), e.g. Entente talks">
+        <div class="row"><button id="chatNewStart" type="button" class="small">Start chat</button><button id="chatNewCancel" type="button" class="small secondary">Cancel</button></div>
+      </div>
+      <div id="chatBody"></div>
+      <form id="chatSend"><input id="chatMsg" maxlength="1000" autocomplete="off"><button type="submit" class="small">Send</button></form>
+      <p id="chatReadOnly" class="hint" hidden>Only the GM posts here. Use OOC or a private chat to reply.</p>
+    </section>
+    <button id="chatToggle" type="button" title="Chat: OOC, GM announcements and private chats">💬 Chat<span id="chatBadge" hidden></span></button>
+  </div>
+
+  <div id="tradeModal" class="modal">
+    <div class="card">
+      <button class="close" data-close>×</button>
+      <h2>Offer a trade</h2>
+      <form id="tradeForm">
+        <div class="grid2">
+          <label id="tradeFromWrap">From<select id="tradeFrom"></select></label>
+          <label>To<select id="tradeTo"></select></label>
+        </div>
+        <div class="section">You give</div>
+        <div id="tradeGive" class="goods"></div>
+        <button type="button" id="tradeAddGive" class="small secondary">＋ Add</button>
+        <div class="section">You ask for</div>
+        <div id="tradeTake" class="goods"></div>
+        <button type="button" id="tradeAddTake" class="small secondary">＋ Add</button>
+        <div class="section">When</div>
+        <label class="inline"><input type="radio" name="tradeMode" id="tradeOnce" checked> Once, as soon as they accept</label>
+        <label class="inline"><input type="radio" name="tradeMode" id="tradeRecurring"> Every turn (delivered at End turn)</label>
+        <label id="tradeTurnsWrap" hidden>For how many turns<input id="tradeTurns" type="number" min="1" max="100" value="4"></label>
+        <label>Note <span class="hint">(optional)</span><input id="tradeNote" maxlength="200" placeholder="Coal for the Grand Fleet…"></label>
+        <p class="hint">Both halves change hands together or not at all: a delivery is skipped when either side is short. War cancels the trade.</p>
+        <button type="submit">Send offer</button>
+      </form>
+    </div>
+  </div>
+
   <div id="combatModal" class="modal">
     <div class="card">
       <button class="close" data-close>×</button>
@@ -469,6 +523,7 @@
   <script src="/js/trench.js"></script>
   <script src="/js/railnet.js"></script>
   <script src="/js/rail.js"></script>
+  <script src="/js/comms.js"></script>
   <script src="/js/map-renderer.js"></script>
   <script src="/js/map.js"></script>
 </body>

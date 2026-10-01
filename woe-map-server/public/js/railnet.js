@@ -235,18 +235,21 @@
     return { cost, railKm, walkKm, path };
   }
 
-  /** Walk a route until the budget (cost units) runs out: { x, y, spent, done }. */
+  /** Walk a route until the budget (cost units) runs out: { x, y, spent, done, points } (points: the route walked). */
   function walk(path, budget, dist) {
     let left = budget;
+    const points = [[path[0][0], path[0][1]]];
     for (let i = 1; i < path.length; i++) {
       const [ax, ay] = path[i - 1], [bx, by, f] = path[i];
       const L = dist(ax, ay, bx, by), c = L * f;
-      if (c <= left + 1e-9) { left -= c; continue; }
+      if (c <= left + 1e-9) { left -= c; points.push([bx, by]); continue; }
       const t = c ? left / c : 0;
-      return { x: ax + (bx - ax) * t, y: ay + (by - ay) * t, spent: budget, done: false };
+      const x = ax + (bx - ax) * t, y = ay + (by - ay) * t;
+      points.push([x, y]);
+      return { x, y, spent: budget, done: false, points };
     }
     const last = path[path.length - 1];
-    return { x: last[0], y: last[1], spent: budget - left, done: true };
+    return { x: last[0], y: last[1], spent: budget - left, done: true, points };
   }
 
   /**

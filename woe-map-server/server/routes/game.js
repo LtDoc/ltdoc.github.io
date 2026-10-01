@@ -63,7 +63,8 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       game: g, factions: g.enabled ? stateView(req, g, markers) : [], myFactionId: mine ? mine.id : null,
       canUndo: req.lobbyRole === 'gm' && !!game.q.lastSnapshot.get(req.lobby.id),
       relations: game.relations(req.lobby.id),
-      diplomacy: game.diplomacy(req.lobby.id).filter(d => req.lobbyRole === 'gm' || d.from === (mine && mine.id) || d.to === (mine && mine.id)),
+      diplomacy: game.diplomacy(req.lobby.id).filter(d => req.lobbyRole === 'gm' || d.from === (mine && mine.id) || d.to === (mine && mine.id) || (d.kind === 'war' && d.status === 'accepted')),   // declared wars are public news
+      trades: visibleTrades(req),
       hasTerritories: provinces.has(req.lobby.id) || territory.all(req.lobby.id).length > 0,
       reports: g.enabled ? visibleReports(req, g, game.reports(req.lobby.id)) : { turn: null, turns: [], reports: [] },
     });
@@ -269,7 +270,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     catch (e) { return res.status(400).json({ error: e.message }); }
     game.writeState(state);
     const what = item.typeId === 'factory' ? 'a factory' : (UnitTypes.LIST.find(t => t.id === item.typeId)?.unit || item.typeId);
-    logEvent(req.lobby.id, req.user.id, 'system', `${faction.name} begins building ${what} at ${item.siteName} (${item.turns} turn${item.turns === 1 ? '' : 's'})`, { faction: faction.name },
+    logEvent(req.lobby.id, req.user.id, 'system', `${faction.name} begins building ${what} at ${item.siteName} (${item.turns} turn${item.turns === 1 ? '' : 's'})`, { faction: faction.name, audience: { nations: [faction.name], treasury: true } },
       ws => ws.lobbyRole === 'gm' || g.settings.publicTreasury || String(ws.nation || '').toLowerCase() === faction.name.toLowerCase());
     broadcastFaction(req, g, f);
     res.status(201).json({ item, ...productionView(req, g, f) });
@@ -320,7 +321,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     try { research.start(state, tech, techs, g); } catch (e) { return res.status(400).json({ error: e.message }); }
     game.writeState(state);
     const r = research.researchState(state);
-    logEvent(req.lobby.id, req.user.id, 'system', `${f.name} ${r.active === tech.key ? 'begins researching' : 'plans to research'} ${tech.name}`, { faction: f.name },
+    logEvent(req.lobby.id, req.user.id, 'system', `${f.name} ${r.active === tech.key ? 'begins researching' : 'plans to research'} ${tech.name}`, { faction: f.name, audience: { nations: [f.name], treasury: true } },
       ws => ws.lobbyRole === 'gm' || g.settings.publicTreasury || String(ws.nation || '').toLowerCase() === f.name.toLowerCase());
     broadcastFaction(req, g, f);
     res.status(201).json(techView(req, g, f));
@@ -459,8 +460,14 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     if (!status || !a || !b || a === b) return res.status(400).json({ error: 'Pick two factions and a status' });
     if (!game.q.faction.get(a, req.lobby.id) || !game.q.faction.get(b, req.lobby.id)) return res.status(404).json({ error: 'No such faction' });
     const g = game.get(req.lobby.id);
+    const was = game.relationStatus(req.lobby.id, a, b);
     game.setRelation(req.lobby.id, a, b, status, g.turn);
-    if (status === 'war') expelBetween(req, a, b);
+    if (was !== status) {
+      // On the record like any treaty, so notifications announce wars the GM declares directly.
+      const did = game.q.insertDiplomacy.run(req.lobby.id, a, b, status, 'accepted', 'set by the GM', req.user.id, Date.now()).lastInsertRowid;
+      game.q.resolveDiplomacy.run('accepted', Date.now(), did);
+    }
+    if (status === 'war') { expelBetween(req, a, b); if (game.cancelTradesBetween(req.lobby.id, a, b, 'cancelled by war').length) tradesChanged(req.lobby.id); }
     logEvent(req.lobby.id, req.user.id, 'system', `${factionName(req, a)} and ${factionName(req, b)} are now at ${status === 'alliance' ? 'alliance' : status}`);
     broadcastRelations(req.lobby.id);
     res.json({ relations: game.relations(req.lobby.id) });
@@ -487,7 +494,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const note = [clean(req.body?.note, 200), envoy ? `carried by ${require('../../public/js/heroes').starText(envoy.data.stars)} ${envoy.name}` : ''].filter(Boolean).join(' · ');
     const id = game.q.insertDiplomacy.run(req.lobby.id, mine.id, to, kind, 'pending', note, req.user.id, Date.now()).lastInsertRowid;
     const verb = kind === 'war' ? 'queued a declaration of war on' : kind === 'peace' ? 'offered peace to' : 'proposed an alliance to';
-    logEvent(req.lobby.id, req.user.id, 'system', `${mine.name} ${verb} ${factionName(req, to)} (awaiting the GM)`, { diplomacyId: id },
+    logEvent(req.lobby.id, req.user.id, 'system', `${mine.name} ${verb} ${factionName(req, to)} (awaiting the GM)`, { diplomacyId: id, audience: { nations: [mine.name] } },
       ws => ws.lobbyRole === 'gm' || String(ws.nation || '').toLowerCase() === mine.name.toLowerCase());
     broadcastRelations(req.lobby.id);
     res.status(201).json({ diplomacy: game.serializeDiplomacy(game.q.diplomacyOne.get(id, req.lobby.id)), turn: g.turn });
@@ -519,6 +526,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       if (d.kind === 'war') {
         game.setRelation(req.lobby.id, d.from_faction, d.to_faction, 'war', g.turn);
         expelBetween(req, d.from_faction, d.to_faction);
+        if (game.cancelTradesBetween(req.lobby.id, d.from_faction, d.to_faction, 'cancelled by war').length) tradesChanged(req.lobby.id);
         return finish('accepted', `⚔ ${from} declares war on ${to}!`);
       }
       // Peace and alliance: approved, now the other side decides.
@@ -533,6 +541,110 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       if (action === 'decline') return finish('declined', `${to} declined ${from}'s ${d.kind === 'peace' ? 'peace offer' : 'alliance proposal'}`);
       game.setRelation(req.lobby.id, d.from_faction, d.to_faction, d.kind === 'peace' ? 'peace' : 'alliance', g.turn);
       return finish('accepted', d.kind === 'peace' ? `🕊 ${from} and ${to} make peace` : `🤝 ${from} and ${to} form an alliance`);
+    }
+    res.status(400).json({ error: 'Unknown action' });
+  });
+
+  // ---- Trades (docs/COMMS.md) -----------------------------------------------------------------------
+  /** Trades a viewer may see: the GM sees all, a player those of their own faction. */
+  function visibleTrades(req) {
+    const mine = myFaction(req);
+    return game.trades(req.lobby.id).filter(t => req.lobbyRole === 'gm' || (mine && (t.from === mine.id || t.to === mine.id)));
+  }
+  /** Tell everyone to refetch their trades (each sees a different list). */
+  function tradesChanged(lobbyId) { hub.broadcast(lobbyId, { type: 'tradesChanged' }); }
+  /** A log line for the two sides of a trade and the GM. */
+  function tradeLog(req, t, message) {
+    const names = [factionName(req, t.from), factionName(req, t.to)];
+    const set = new Set(names.map(n => n.toLowerCase()));
+    logEvent(req.lobby.id, req.user.id, 'system', message, { tradeId: t.id, audience: { nations: names } },
+      ws => ws.lobbyRole === 'gm' || set.has(String(ws.nation || '').toLowerCase()));
+  }
+  /** { coal: 10, money: 50 } with only known goods and positive amounts. */
+  function bundle(raw) {
+    const out = {};
+    if (raw && typeof raw === 'object') for (const k of game.TRADE_KEYS) { const v = Math.round(clamp(num(raw[k]), 0, 1e6) * 10) / 10; if (v > 0) out[k] = v; }
+    return out;
+  }
+  const describe = t => `${game.goodsText(t.give)} for ${game.goodsText(t.take)}${t.mode === 'recurring' ? ` every turn for ${t.turns} turn${t.turns === 1 ? '' : 's'}` : ''}`;
+
+  router.get('/trades', (req, res) => res.json({ trades: visibleTrades(req) }));
+
+  /** Propose a trade: a player for their faction (the GM for any faction). The other side accepts or declines. */
+  router.post('/trades', (req, res) => {
+    const b = req.body || {};
+    const gm = req.lobbyRole === 'gm';
+    const from = gm && b.fromFactionId ? game.q.faction.get(Number(b.fromFactionId), req.lobby.id) : myFaction(req);
+    if (!from) return res.status(400).json({ error: 'You need a faction to trade' });
+    const to = game.q.faction.get(Number(b.toFactionId), req.lobby.id);
+    if (!to || to.id === from.id) return res.status(400).json({ error: 'Pick another nation' });
+    if (game.relationStatus(req.lobby.id, from.id, to.id) === 'war') return res.status(409).json({ error: `${from.name} is at war with ${to.name}` });
+    const give = bundle(b.give), take = bundle(b.take);
+    if (!Object.keys(give).length && !Object.keys(take).length) return res.status(400).json({ error: 'Add something to give or ask for' });
+    const mode = b.mode === 'recurring' ? 'recurring' : 'once';
+    const turns = mode === 'recurring' ? clamp(Math.round(num(b.turns, 4)), 1, 100) : 1;
+    const note = clean(b.note, 200);
+    const id = game.q.insertTrade.run(req.lobby.id, from.id, to.id, JSON.stringify(give), JSON.stringify(take), mode, turns, 0, 'pending', note, req.user.id, Date.now()).lastInsertRowid;
+    const t = game.serializeTrade(game.q.tradeOne.get(id, req.lobby.id));
+    tradeLog(req, t, `📦 ${from.name} offers ${to.name} a trade: ${describe(t)}`);
+    tradesChanged(req.lobby.id);
+    res.status(201).json({ trade: t });
+  });
+
+  /** accept / decline (the receiving side), withdraw (the proposer), cancel (either side, or the GM). */
+  router.post('/trades/:tid/:action', (req, res) => {
+    const row = game.q.tradeOne.get(Number(req.params.tid), req.lobby.id);
+    if (!row) return res.status(404).json({ error: 'No such trade' });
+    const t = game.serializeTrade(row);
+    const gm = req.lobbyRole === 'gm', mine = myFaction(req), action = req.params.action;
+    const isFrom = !!(mine && mine.id === t.from), isTo = !!(mine && mine.id === t.to);
+    if (!gm && !isFrom && !isTo) return res.status(403).json({ error: 'Not your trade' });
+    const from = factionName(req, t.from), to = factionName(req, t.to);
+    const g = game.get(req.lobby.id);
+    const settle = (status, turnsLeft, log) => {
+      game.q.updateTrade.run(status, turnsLeft, JSON.stringify(log || t.log), ['pending', 'active'].includes(status) ? null : Date.now(), t.id);
+      tradesChanged(req.lobby.id);
+      return game.serializeTrade(game.q.tradeOne.get(t.id, req.lobby.id));
+    };
+    if (action === 'withdraw') {
+      if (!gm && !isFrom) return res.status(403).json({ error: 'Only the proposer can withdraw' });
+      if (t.status !== 'pending') return res.status(400).json({ error: 'Already answered' });
+      const out = settle('withdrawn', 0);
+      tradeLog(req, t, `📦 ${from} withdrew its trade offer to ${to}`);
+      return res.json({ trade: out });
+    }
+    if (action === 'decline') {
+      if (!gm && !isTo) return res.status(403).json({ error: 'Only the other side can answer' });
+      if (t.status !== 'pending') return res.status(400).json({ error: 'Already answered' });
+      const out = settle('declined', 0);
+      tradeLog(req, t, `📦 ${to} declined ${from}'s trade (${describe(t)})`);
+      return res.json({ trade: out });
+    }
+    if (action === 'cancel') {
+      if (t.status !== 'active') return res.status(400).json({ error: 'Only a running trade can be cancelled' });
+      const out = settle('cancelled', t.turnsLeft, [...t.log, { turn: g.turn, ok: false, text: `cancelled by ${gm && !mine ? 'the GM' : (isFrom ? from : to)}` }]);
+      tradeLog(req, t, `📦 The trade between ${from} and ${to} was cancelled by ${gm && !isFrom && !isTo ? 'the GM' : (isFrom ? from : to)}`);
+      return res.json({ trade: out });
+    }
+    if (action === 'accept') {
+      if (!gm && !isTo) return res.status(403).json({ error: 'Only the other side can answer' });
+      if (t.status !== 'pending') return res.status(400).json({ error: 'Already answered' });
+      if (game.relationStatus(req.lobby.id, t.from, t.to) === 'war') return res.status(409).json({ error: `${from} and ${to} are at war` });
+      if (t.mode === 'recurring') {
+        const out = settle('active', t.turns);
+        tradeLog(req, t, `🤝 ${to} accepted ${from}'s trade: ${describe(t)}, delivered at each End turn`);
+        return res.json({ trade: out });
+      }
+      // One-time: both halves change hands now, or nothing does.
+      const fs = game.factionStates(req.lobby.id, g.settings);
+      const A = fs.find(x => x.faction.id === t.from), B = fs.find(x => x.faction.id === t.to);
+      const r = game.exchange(A.state, B.state, t);
+      if (!r.ok) return res.status(409).json({ error: `${r.short.side === 'from' ? from : to} does not have enough ${game.goodName(r.short.good)}` });
+      game.writeState(A.state); game.writeState(B.state);
+      const out = settle('completed', 0, [{ turn: g.turn, ok: true, text: `${from} → ${to}: ${describe(t)}` }]);
+      tradeLog(req, t, `🤝 ${from} and ${to} traded: ${from} sent ${game.goodsText(t.give)}, ${to} sent ${game.goodsText(t.take)}`);
+      hub.broadcast(req.lobby.id, { type: 'tradesChanged', treasury: true });   // treasuries changed: Nation tabs refresh
+      return res.json({ trade: out });
     }
     res.status(400).json({ error: 'Unknown action' });
   });
@@ -732,7 +844,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
   /** A log line only the listed nations and the GM receive. */
   function secretLog(req, nations, message, data) {
     const set = new Set(nations.filter(Boolean).map(norm));
-    logEvent(req.lobby.id, null, 'system', message, data || null, ws => ws.lobbyRole === 'gm' || set.has(norm(ws.nation)));
+    logEvent(req.lobby.id, null, 'system', message, { ...(data || {}), audience: { nations: nations.filter(Boolean) } }, ws => ws.lobbyRole === 'gm' || set.has(norm(ws.nation)));
   }
   /** The nearest town's name, for reports ("near Strasbourg"). */
   function placeName(req, markers, x, y) {
@@ -979,7 +1091,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       after = writeShape(req, rail, { ...(rail.data || {}), cuts: [...(rail.data?.cuts || []), cut] });
     }
     const hidden = !!(unit.adminOnly || unit.visibleTo);
-    const event = logEvent(req.lobby.id, req.user.id, 'combat', text, { railId: rail.id, unitId: unit.id, success, rolls, x: at.x, y: at.y },
+    const event = logEvent(req.lobby.id, req.user.id, 'combat', text, { railId: rail.id, unitId: unit.id, success, rolls, x: at.x, y: at.y, hidden },
       hidden ? (ws => ws.lobbyRole === 'gm' || ws.user.id === req.user.id) : null);
     res.status(201).json({ event, success, shape: after });
   });

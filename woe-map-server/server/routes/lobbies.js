@@ -101,7 +101,7 @@ const MARKER_TYPES = ['unit', 'town', 'poi', 'player', 'scenery', 'resource', 'f
 const Heroes = require('../../public/js/heroes');
 const heroRules = require('../heroes');
 /** Hero fields only the GM (or the rules) may change: players move and command heroes, they do not rewrite them. */
-const PROTECTED_HERO_FIELDS = ['role', 'stars', 'perception', 'intelligence', 'movement', 'ap', 'nation', 'status', 'postedTo', 'travel', 'capturedBy', 'movedKm', 'apUsed'];
+const PROTECTED_HERO_FIELDS = ['role', 'stars', 'perception', 'intelligence', 'movement', 'ap', 'nation', 'status', 'postedTo', 'travel', 'capturedBy', 'movedKm', 'apUsed', 'trail'];
 const game = require('../game');
 const rails = require('../rails');
 const GameData = require('../../public/js/game-data');
@@ -736,6 +736,22 @@ function canEditMarker(req, m) {
   return m.ownerId === req.user.id && !m.adminOnly;
 }
 
+/** A trail: up to 120 [x, y] points. */
+function cleanTrail(raw) {
+  return raw.filter(p => Array.isArray(p) && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1])))
+    .slice(-120).map(p => [Math.round(Number(p[0]) * 10) / 10, Math.round(Number(p[1]) * 10) / 10]);
+}
+/**
+ * Game mode: the way a unit or hero has come this turn, drawn on the map until End turn clears it.
+ * `path` is the route taken (a rail trip's track), first point the start and last the destination.
+ */
+function extendTrail(before, x, y, path) {
+  const prev = Array.isArray(before.data?.trail) && before.data.trail.length ? before.data.trail : [[before.x, before.y]];
+  let mid = Array.isArray(path) ? path.slice(1, -1) : [];
+  if (mid.length > 40) { const k = Math.ceil(mid.length / 40); mid = mid.filter((_, i) => i % k === 0); }
+  return cleanTrail([...prev, ...mid, [x, y]]);
+}
+
 function sanitizeData(type, data) {
   const d = (data && typeof data === 'object') ? data : {};
   const out = { notes: clean(d.notes, 2000) };
@@ -747,6 +763,7 @@ function sanitizeData(type, data) {
       strength: clamp(num(d.strength, 100), 0, 100),
       movedKm: Math.max(0, num(d.movedKm)), apUsed: Math.max(0, num(d.apUsed)),   // game mode: used this turn
     });
+    if (Array.isArray(d.trail)) out.trail = cleanTrail(d.trail);
   } else if (type === 'resource') {
     out.kind = GameData.byKey[d.kind] ? d.kind : 'grain';
     out.yield = clamp(num(d.yield, 1), 0, 50);
@@ -775,6 +792,7 @@ function sanitizeData(type, data) {
       status: Heroes.STATUS[d.status] ? d.status : 'active',
       movedKm: Math.max(0, num(d.movedKm)), apUsed: Math.max(0, num(d.apUsed)),
     });
+    if (Array.isArray(d.trail)) out.trail = cleanTrail(d.trail);
     if (out.status === 'posted' && d.postedTo) out.postedTo = num(d.postedTo);
     if (out.status === 'travelling' && d.travel && typeof d.travel === 'object') {
       out.travel = { to: num(d.travel.to), toName: clean(d.travel.toName, 60), x: num(d.travel.x), y: num(d.travel.y), arrives: num(d.travel.arrives), home: !!d.travel.home };
@@ -884,6 +902,7 @@ router.patch('/:id/markers/:mid', (req, res) => {
     if (mv.error) return res.status(409).json({ error: mv.error });
     x = mv.x; y = mv.y;
     if (mv.movedKm !== undefined) b.data = { ...(b.data || {}), movedKm: mv.movedKm };
+    if (g.enabled && ['unit', 'hero'].includes(before.type)) b.data = { ...(b.data || {}), trail: extendTrail(before, x, y, mv.path) };
     if (mv.clamped) clampNote = `${before.name} could only move ${Math.round(mv.remaining)} of ${mv.dist} this turn`;
     if (mv.route) railNote = `${before.name} went by rail (${Math.round(mv.route.railKm)} ${geo.isEarth(req.lobby) ? 'km' : (req.lobby.scale_label || 'units')} of track${mv.clamped ? ', stopped short' : ''})`;
   }
@@ -935,14 +954,19 @@ router.post('/:id/markers/move', (req, res) => {
   for (const p of plan) {
     let x = t < 1 ? Math.round((p.before.x + (p.x - p.before.x) * t) * 10) / 10 : p.x;
     let y = t < 1 ? Math.round((p.before.y + (p.y - p.before.y) * t) * 10) / 10 : p.y;
+    let path = p.chk.path || null;
     if (p.chk.route) {
       byRail++;
-      if (t < 1) { const w = rails.walk(req.lobby, p.chk.route.path, p.chk.cost * t); x = Math.round(w.x * 10) / 10; y = Math.round(w.y * 10) / 10; }
+      if (t < 1) { const w = rails.walk(req.lobby, p.chk.route.path, p.chk.cost * t); x = Math.round(w.x * 10) / 10; y = Math.round(w.y * 10) / 10; path = w.points; }
     }
-    if (p.chk.movedKm !== undefined) {
-      const used = num(p.before.data.movedKm);
-      const spent = p.chk.cost !== undefined ? p.chk.cost * t : geo.distance(req.lobby, p.before.x, p.before.y, x, y);
-      const data = { ...p.before.data, movedKm: Math.round((used + spent) * 10) / 10 };
+    if (p.chk.movedKm !== undefined || (g.enabled && ['unit', 'hero'].includes(p.before.type))) {
+      const data = { ...p.before.data };
+      if (p.chk.movedKm !== undefined) {
+        const used = num(p.before.data.movedKm);
+        const spent = p.chk.cost !== undefined ? p.chk.cost * t : geo.distance(req.lobby, p.before.x, p.before.y, x, y);
+        data.movedKm = Math.round((used + spent) * 10) / 10;
+      }
+      if (g.enabled && ['unit', 'hero'].includes(p.before.type)) data.trail = extendTrail(p.before, x, y, path);
       q.updateMarker.run(p.before.type, p.before.name, x, y, p.before.iconFile, p.before.iconFile ? null : p.before.iconUrl, p.before.color,
         p.before.adminOnly ? 1 : 0, p.before.visibleTo ? JSON.stringify(p.before.visibleTo) : null, p.before.ownerId, JSON.stringify(data), now(), p.before.locked ? 1 : 0, p.before.id);
     } else q.moveMarker.run(x, y, now(), p.before.id);
@@ -1187,6 +1211,116 @@ router.post('/:id/history/:hid/revert', (req, res) => {
   res.json({ entry: e, [entry.entity]: after });
 });
 
+// ---- Private chats (docs/COMMS.md) -----------------------------------------------------------------
+// OOC chat is the lobby's chat events and GM announcements are 'announce' events; private chats between
+// members live here and only their members receive or read them (the GM too, only when a member).
+const qc = {
+  channels: db.prepare('SELECT * FROM chat_channels WHERE lobby_id = ? ORDER BY last_at DESC'),
+  channel: db.prepare('SELECT * FROM chat_channels WHERE id = ? AND lobby_id = ?'),
+  insertChannel: db.prepare('INSERT INTO chat_channels (lobby_id, name, members, created_by, created_at, last_at) VALUES (?, ?, ?, ?, ?, ?)'),
+  updateChannel: db.prepare('UPDATE chat_channels SET name = ?, members = ?, last_at = ? WHERE id = ?'),
+  deleteChannel: db.prepare('DELETE FROM chat_channels WHERE id = ?'),
+  touchChannel: db.prepare('UPDATE chat_channels SET last_at = ? WHERE id = ?'),
+  messages: db.prepare(`SELECT c.*, u.display_name FROM chat_messages c LEFT JOIN users u ON u.id = c.user_id
+    WHERE c.channel_id = ? AND c.id < ? ORDER BY c.id DESC LIMIT ?`),
+  message: db.prepare('SELECT c.*, u.display_name FROM chat_messages c LEFT JOIN users u ON u.id = c.user_id WHERE c.id = ?'),
+  insertMessage: db.prepare('INSERT INTO chat_messages (lobby_id, channel_id, user_id, message, created_at) VALUES (?, ?, ?, ?, ?)'),
+};
+function serializeChannel(c) {
+  return { id: c.id, name: c.name, members: access.safeJson(c.members) || [], createdBy: c.created_by, createdAt: c.created_at, lastAt: c.last_at };
+}
+function serializeChat(m) {
+  return { id: m.id, channelId: m.channel_id, userId: m.user_id, displayName: m.display_name || 'System', message: m.message, createdAt: m.created_at };
+}
+/** The channel, if the caller is one of its members. */
+function myChannel(req, res) {
+  const row = qc.channel.get(Number(req.params.cid), req.lobby.id);
+  const c = row && serializeChannel(row);
+  if (!c || !c.members.includes(req.user.id)) { res.status(404).json({ error: 'No such chat' }); return null; }
+  return c;
+}
+const toMembers = c => ws => c.members.includes(ws.user.id);
+
+router.get('/:id/chats', (req, res) => {
+  res.json({ channels: qc.channels.all(req.lobby.id).map(serializeChannel).filter(c => c.members.includes(req.user.id)) });
+});
+
+/** Open a chat with other members of the campaign (players or the GM). */
+router.post('/:id/chats', (req, res) => {
+  const ids = new Set(access.getMembers(req.lobby.id).map(m => m.user_id));
+  const members = [...new Set([req.user.id, ...(Array.isArray(req.body?.members) ? req.body.members.map(Number) : [])])].filter(id => ids.has(id)).slice(0, 30);
+  if (members.length < 2) return res.status(400).json({ error: 'Pick at least one other person' });
+  // Re-use an existing chat with exactly the same people and no name.
+  const name = clean(req.body?.name, 60);
+  const same = qc.channels.all(req.lobby.id).map(serializeChannel)
+    .find(c => !name && !c.name && c.members.length === members.length && members.every(id => c.members.includes(id)));
+  if (same) return res.json({ channel: same });
+  const t = now();
+  const id = qc.insertChannel.run(req.lobby.id, name, JSON.stringify(members), req.user.id, t, t).lastInsertRowid;
+  const channel = serializeChannel(qc.channel.get(id, req.lobby.id));
+  hub.broadcast(req.lobby.id, { type: 'chatChannel', channel }, toMembers(channel));
+  res.status(201).json({ channel });
+});
+
+/** Leave a chat; the last member out deletes it. */
+router.post('/:id/chats/:cid/leave', (req, res) => {
+  const c = myChannel(req, res);
+  if (!c) return;
+  const members = c.members.filter(id => id !== req.user.id);
+  if (!members.length) qc.deleteChannel.run(c.id);
+  else {
+    qc.updateChannel.run(c.name, JSON.stringify(members), now(), c.id);
+    const channel = serializeChannel(qc.channel.get(c.id, req.lobby.id));
+    const mid = qc.insertMessage.run(req.lobby.id, c.id, null, `${req.user.displayName} left the chat`, now()).lastInsertRowid;
+    hub.broadcast(req.lobby.id, { type: 'chatChannel', channel }, toMembers(channel));
+    hub.broadcast(req.lobby.id, { type: 'chatMessage', message: serializeChat(qc.message.get(mid)) }, toMembers(channel));
+  }
+  res.json({ ok: true });
+});
+
+router.get('/:id/chats/:cid/messages', (req, res) => {
+  const c = myChannel(req, res);
+  if (!c) return;
+  const before = num(req.query.before, Number.MAX_SAFE_INTEGER), limit = clamp(num(req.query.limit, 100), 1, 200);
+  res.json({ messages: qc.messages.all(c.id, before, limit).reverse().map(serializeChat) });
+});
+
+router.post('/:id/chats/:cid/messages', (req, res) => {
+  const c = myChannel(req, res);
+  if (!c) return;
+  const message = clean(req.body?.message, 1000);
+  if (!message) return res.status(400).json({ error: 'Empty message' });
+  const t = now();
+  const id = qc.insertMessage.run(req.lobby.id, c.id, req.user.id, message, t).lastInsertRowid;
+  qc.touchChannel.run(t, c.id);
+  const msg = serializeChat(qc.message.get(id));
+  hub.broadcast(req.lobby.id, { type: 'chatMessage', message: msg }, toMembers(c));
+  res.status(201).json({ message: msg });
+});
+
+// ---- GM map pings ----------------------------------------------------------------------------
+// A ping is a short-lived marker everyone sees for a minute; kept in memory only (late joiners get the live ones).
+const PING_MS = 60000;
+const pings = new Map();   // lobbyId -> [{ id, x, y, label, by, at, until }]
+function livePings(lobbyId) {
+  const list = (pings.get(lobbyId) || []).filter(p => p.until > Date.now());
+  pings.set(lobbyId, list);
+  return list;
+}
+router.get('/:id/pings', (req, res) => res.json({ pings: livePings(req.lobby.id) }));
+router.post('/:id/pings', (req, res) => {
+  if (req.lobbyRole !== 'gm') return res.status(403).json({ error: 'Only the GM can ping the map' });
+  const x = num(req.body?.x, NaN), y = num(req.body?.y, NaN);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !inBounds(req, x, y)) return res.status(400).json({ error: 'Ping a spot on the map' });
+  const t = Date.now();
+  const ping = { id: `${t}-${Math.floor(Math.random() * 1e6)}`, x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, label: clean(req.body?.label, 60), by: req.user.displayName, at: t, until: t + PING_MS };
+  const list = livePings(req.lobby.id);
+  list.push(ping);
+  if (list.length > 20) list.shift();
+  hub.broadcast(req.lobby.id, { type: 'ping', ping });
+  res.status(201).json({ ping });
+});
+
 // ---- Events / chat / dice / combat -----------------------------------------------------------------
 router.get('/:id/events', (req, res) => {
   const since = num(req.query.since, 0);
@@ -1195,7 +1329,10 @@ router.get('/:id/events', (req, res) => {
   const g = game.get(req.lobby.id);
   const myNation = String(req.member?.nation || '').toLowerCase();
   const events = q.events.all(req.lobby.id, since, limit).reverse().map(serializeEvent)
-    .filter(e => gm || !(e.data && e.data.hidden))
+    .filter(e => gm || !(e.data && e.data.hidden) || e.userId === req.user.id)
+    // Lines meant for some nations (spy reports, diplomacy in progress, trades, builds) stay with them.
+    .filter(e => gm || !e.data?.audience || (e.data.audience.treasury && g.settings.publicTreasury) ||
+      (e.data.audience.nations || []).some(n => String(n).toLowerCase() === myNation) || (e.data.audience.users || []).includes(req.user.id))
     // Turn summaries are private to the faction unless treasuries are public.
     .filter(e => gm || e.kind !== 'turn' || g.settings.publicTreasury || String(e.data?.faction || '').toLowerCase() === myNation);
   res.json({ events });
@@ -1206,6 +1343,11 @@ const ROLL_RE = /^\/(?:roll|r)\s+(\d{0,2})d(\d{1,4})(?:\s*([+-])\s*(\d{1,4}))?\s
 router.post('/:id/chat', (req, res) => {
   const message = clean(req.body?.message, 500);
   if (!message) return res.status(400).json({ error: 'Empty message' });
+  if (req.body?.channel === 'gm') {
+    // GM channel: announcements everyone reads and only the GM writes.
+    if (req.lobbyRole !== 'gm') return res.status(403).json({ error: 'Only the GM posts in the GM channel' });
+    return res.status(201).json({ event: logEvent(req.lobby.id, req.user.id, 'announce', message) });
+  }
   const m = ROLL_RE.exec(message);
   if (m) {
     const n = clamp(num(m[1], 1) || 1, 1, 20);

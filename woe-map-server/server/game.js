@@ -26,7 +26,7 @@ const q = {
   updateState: db.prepare(`UPDATE faction_state SET resources = ?, money = ?, manpower = ?, rp = ?, techs = ?, research = ?,
     production = ?, mods = ?, updated_at = ? WHERE faction_id = ?`),
   markers: db.prepare('SELECT * FROM markers WHERE lobby_id = ?'),
-  resetUnits: db.prepare(`UPDATE markers SET data = json_set(data, '$.movedKm', 0, '$.apUsed', 0), updated_at = ? WHERE lobby_id = ? AND type IN ('unit', 'hero')`),
+  resetUnits: db.prepare(`UPDATE markers SET data = json_remove(json_set(data, '$.movedKm', 0, '$.apUsed', 0), '$.trail'), updated_at = ? WHERE lobby_id = ? AND type IN ('unit', 'hero')`),
   clearReveals: db.prepare(`UPDATE markers SET data = json_remove(data, '$.revealTo'), updated_at = ? WHERE lobby_id = ? AND json_extract(data, '$.revealTo') IS NOT NULL`),
   setStrength: db.prepare(`UPDATE markers SET data = json_set(data, '$.strength', ?), updated_at = ? WHERE id = ?`),
   relations: db.prepare('SELECT * FROM relations WHERE lobby_id = ?'),
@@ -35,6 +35,12 @@ const q = {
     ON CONFLICT(lobby_id, a, b) DO UPDATE SET status = excluded.status, since_turn = excluded.since_turn`),
   diplomacy: db.prepare('SELECT * FROM diplomacy WHERE lobby_id = ? ORDER BY id DESC LIMIT 100'),
   diplomacyOne: db.prepare('SELECT * FROM diplomacy WHERE id = ? AND lobby_id = ?'),
+  trades: db.prepare("SELECT * FROM trades WHERE lobby_id = ? AND (status IN ('pending', 'active') OR resolved_at > ?) ORDER BY id DESC LIMIT 200"),
+  tradeOne: db.prepare('SELECT * FROM trades WHERE id = ? AND lobby_id = ?'),
+  tradesActive: db.prepare("SELECT * FROM trades WHERE lobby_id = ? AND status = 'active' ORDER BY id"),
+  insertTrade: db.prepare('INSERT INTO trades (lobby_id, from_faction, to_faction, give, take, mode, turns, turns_left, status, note, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+  updateTrade: db.prepare('UPDATE trades SET status = ?, turns_left = ?, log = ?, resolved_at = ? WHERE id = ?'),
+  openTradesBetween: db.prepare("SELECT * FROM trades WHERE lobby_id = ? AND status IN ('pending', 'active') AND ((from_faction = ? AND to_faction = ?) OR (from_faction = ? AND to_faction = ?))"),
   insertDiplomacy: db.prepare('INSERT INTO diplomacy (lobby_id, from_faction, to_faction, kind, status, note, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
   resolveDiplomacy: db.prepare('UPDATE diplomacy SET status = ?, resolved_at = ? WHERE id = ?'),
   insertSnapshot: db.prepare('INSERT INTO turn_snapshots (lobby_id, turn, data, created_at) VALUES (?, ?, ?, ?)'),
@@ -194,6 +200,56 @@ function serializeDiplomacy(d) {
 }
 function diplomacy(lobbyId) { return q.diplomacy.all(lobbyId).map(serializeDiplomacy); }
 
+// ---- Trades (docs/COMMS.md) ---------------------------------------------------------------------
+/** Goods a trade can carry: every resource plus money, manpower and research points. */
+const TRADE_KEYS = [...GameData.RESOURCE_KEYS, 'money', 'manpower', 'rp'];
+function serializeTrade(t) {
+  return {
+    id: t.id, from: t.from_faction, to: t.to_faction, give: access.safeJson(t.give) || {}, take: access.safeJson(t.take) || {},
+    mode: t.mode, turns: t.turns, turnsLeft: t.turns_left, status: t.status, note: t.note, log: access.safeJson(t.log) || [],
+    createdBy: t.created_by, createdAt: t.created_at, resolvedAt: t.resolved_at,
+  };
+}
+/** Open trades plus those settled in the last week. */
+function trades(lobbyId) { return q.trades.all(lobbyId, Date.now() - 7 * 86400000).map(serializeTrade); }
+const stockOf = (state, k) => GameData.RESOURCE_KEYS.includes(k) ? num(state.resources[k]) : num(state[k]);
+function addStock(state, k, v) {
+  if (GameData.RESOURCE_KEYS.includes(k)) state.resources[k] = round(num(state.resources[k]) + v);
+  else state[k] = round(num(state[k]) + v);
+}
+/** The first good a state cannot cover, or null. */
+function shortOf(state, bundle) {
+  for (const [k, v] of Object.entries(bundle || {})) if (num(v) > 0 && stockOf(state, k) < num(v) - 1e-9) return k;
+  return null;
+}
+function goodsText(bundle) {
+  const parts = Object.entries(bundle || {}).filter(([, v]) => num(v) > 0)
+    .map(([k, v]) => `${round(v)} ${k === 'rp' ? 'RP' : (GameData.byKey[k]?.name || k).toLowerCase()}`);
+  return parts.length ? parts.join(', ') : 'nothing';
+}
+const goodName = k => k === 'rp' ? 'research points' : (GameData.byKey[k]?.name || k).toLowerCase();
+/**
+ * Exchange one delivery between two faction states (in memory): both sides must cover their half or
+ * nothing moves. Returns { ok, short: { side, good } | null }.
+ */
+function exchange(fromState, toState, t) {
+  const sf = shortOf(fromState, t.give), st = shortOf(toState, t.take);
+  if (sf || st) return { ok: false, short: sf ? { side: 'from', good: sf } : { side: 'to', good: st } };
+  for (const [k, v] of Object.entries(t.give)) { addStock(fromState, k, -num(v)); addStock(toState, k, num(v)); }
+  for (const [k, v] of Object.entries(t.take)) { addStock(toState, k, -num(v)); addStock(fromState, k, num(v)); }
+  return { ok: true, short: null };
+}
+/** War ends every open trade between the two sides. Returns the trades cancelled. */
+function cancelTradesBetween(lobbyId, a, b, reason) {
+  const out = [];
+  for (const t of q.openTradesBetween.all(lobbyId, a, b, b, a)) {
+    const log = [...(access.safeJson(t.log) || []), { turn: get(lobbyId).turn, ok: false, text: reason || 'cancelled' }];
+    q.updateTrade.run('cancelled', t.turns_left, JSON.stringify(log), Date.now(), t.id);
+    out.push(serializeTrade(q.tradeOne.get(t.id, lobbyId)));
+  }
+  return out;
+}
+
 // ---- Turn resolution --------------------------------------------------------------------
 /**
  * End the current turn. Returns { game, summaries: [{faction, text, data}], shortages }.
@@ -212,11 +268,27 @@ function endTurn(lobby, hooks = {}) {
   const summaries = [], strengthHits = [];
   const territory = require('./territory');
   transaction(() => {
-    q.insertSnapshot.run(lobby.id, g.turn, JSON.stringify({ states: fs.map(x => x.state), game: { turn: g.turn, date: g.date }, territories: territory.all(lobby.id), relations: relations(lobby.id), provinces: require('./provinces').ownership(lobby.id) }), now());
+    q.insertSnapshot.run(lobby.id, g.turn, JSON.stringify({ states: fs.map(x => x.state), game: { turn: g.turn, date: g.date }, territories: territory.all(lobby.id), relations: relations(lobby.id), provinces: require('./provinces').ownership(lobby.id), trades: q.tradesActive.all(lobby.id).map(t => ({ id: t.id, status: t.status, turnsLeft: t.turns_left, log: t.log })) }), now());
     q.pruneSnapshots.run(lobby.id, lobby.id);
+    // Recurring trades deliver first: both halves or nothing, then one fewer delivery to go.
+    const tradeNotes = new Map();
+    const note = (fid, text) => { if (!tradeNotes.has(fid)) tradeNotes.set(fid, []); tradeNotes.get(fid).push(text); };
+    for (const row of q.tradesActive.all(lobby.id)) {
+      const t = serializeTrade(row);
+      const A = fs.find(x => x.faction.id === t.from), B = fs.find(x => x.faction.id === t.to);
+      if (!A || !B) continue;
+      const r = exchange(A.state, B.state, t);
+      const left = Math.max(0, t.turnsLeft - 1);
+      const text = r.ok ? `${A.faction.name} → ${B.faction.name}: ${goodsText(t.give)} for ${goodsText(t.take)}`
+        : `missed: ${(r.short.side === 'from' ? A : B).faction.name} was short of ${goodName(r.short.good)}`;
+      q.updateTrade.run(left > 0 ? 'active' : 'completed', left, JSON.stringify([...t.log, { turn: g.turn, ok: r.ok, text }].slice(-60)), left > 0 ? null : Date.now(), t.id);
+      const tail = left > 0 ? ` (${left} to go)` : ' (last delivery)';
+      note(A.faction.id, r.ok ? `trade with ${B.faction.name}: sent ${goodsText(t.give)}, got ${goodsText(t.take)}${tail}` : `trade with ${B.faction.name} ${text}${tail}`);
+      note(B.faction.id, r.ok ? `trade with ${A.faction.name}: sent ${goodsText(t.take)}, got ${goodsText(t.give)}${tail}` : `trade with ${A.faction.name} ${text}${tail}`);
+    }
     for (const { faction, state } of fs) {
       const inc = incomeFor(lobby, g, faction, state, markers);
-      const parts = [];
+      const parts = [...(tradeNotes.get(faction.id) || [])];
       for (const k of GameData.RESOURCE_KEYS) {
         const delta = inc.resources[k] - inc.upkeep[k];
         if (!delta && !inc.upkeep[k]) continue;
@@ -332,6 +404,8 @@ function undoTurn(lobby) {
     }
     if (Array.isArray(data.provinces)) require('./provinces').restoreOwnership(lobby.id, data.provinces);
     if (Array.isArray(data.relations)) for (const r of data.relations) setRelation(lobby.id, r.a, r.b, r.status, r.sinceTurn);
+    // Recurring trades go back to where they stood (deliveries are inside the restored treasuries).
+    if (Array.isArray(data.trades)) for (const t of data.trades) q.updateTrade.run(t.status, t.turnsLeft, t.log, null, t.id);
     g.turn = data.game.turn; g.date = data.game.date;
     save(g);
     q.deleteSnapshot.run(snap.id);
@@ -359,10 +433,10 @@ function checkMove(lobby, g, isGm, marker, x, y) {
   if (remaining <= 0.01) return { error: `${marker.name} has no movement left this turn (${round(allowance)} ${unit} per turn)` };
   const route = require('./rails').plan(lobby, g.settings, marker, x, y);
   const cost = route ? route.cost : dist;
-  if (cost <= remaining + 1e-6) return { x, y, clamped: false, movedKm: round(used + cost), cost, route };
+  if (cost <= remaining + 1e-6) return { x, y, clamped: false, movedKm: round(used + cost), cost, route, path: route ? route.path.map(p => [p[0], p[1]]) : null };
   if (route) {
     const w = require('./rails').walk(lobby, route.path, remaining);
-    return { x: round(w.x), y: round(w.y), clamped: true, movedKm: round(allowance), remaining, dist: round(cost), cost, route };
+    return { x: round(w.x), y: round(w.y), clamped: true, movedKm: round(allowance), remaining, dist: round(cost), cost, route, path: w.points };
   }
   const t = remaining / dist;
   return { x: round(marker.x + (x - marker.x) * t), y: round(marker.y + (y - marker.y) * t), clamped: true, movedKm: round(allowance), remaining, dist: round(dist), cost };
@@ -392,10 +466,11 @@ function checkAttack(g, isGm, marker) {
 }
 
 /** Fields a player may not change on their own unit while the game is running. */
-const PROTECTED_UNIT_FIELDS = ['attack', 'defend', 'ap', 'range', 'movement', 'strength', 'unitType', 'nation', 'movedKm', 'apUsed'];
+const PROTECTED_UNIT_FIELDS = ['attack', 'defend', 'ap', 'range', 'movement', 'strength', 'unitType', 'nation', 'movedKm', 'apUsed', 'trail'];
 
 module.exports = {
   get, save, serializeGame, ensureState, serializeState, writeState, factionStates, incomeFor, endTurn, undoTurn, reports,
   checkMove, checkAttack, checkRange, attackRange, PROTECTED_UNIT_FIELDS, emptyResources, q,
   relationStatus, setRelation, relations, diplomacy, serializeDiplomacy, factionEffects,
+  TRADE_KEYS, trades, serializeTrade, exchange, shortOf, goodsText, goodName, cancelTradesBetween,
 };

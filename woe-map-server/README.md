@@ -360,8 +360,9 @@ design is in `docs/GAME-DESIGN.md`.
   colour and the owner follow the faction. **Factories** are markers with an industry level 1–5. Both are
   locked by default like towns. Ownership by territory arrives in phase 2; until then the GM sets it.
 - **Movement.** A unit may move `movement × distance per movement point` per turn (50 km by default on the
-  Earth map, map units elsewhere). While a player drags a unit a green ring shows how far it may still go;
-  a drop beyond it is clamped to the ring and the player is told. A formation moves as one and is limited
+  Earth map, map units elsewhere). Click a unit or hero to see a green ring of how far it may still go
+  this turn, then click inside it to move there (players no longer drag units in game mode; the GM still can).
+  Each move leaves a trail in the unit's colour until End turn. A formation moves as one and is limited
   by its slowest unit. Units that have moved carry an amber dot (red when their allowance is spent). The GM
   is never limited, and a rule switch waives the limits for everyone.
 - **Attack reach.** A unit's range stat times the campaign's *attack reach per range point* (50 km by
@@ -510,7 +511,7 @@ off the map. The GM creates heroes from the Add tab and assigns each an owner. F
 The GM lays railways with the 🛤 tool (R): click points or drag freehand; lines that start or end on other track
 join it. The track is drawn with the pixel-art tile from the train sheet, and trains run back and forth along
 every open stretch. In game mode land units and heroes ride any open track held by their side, an ally or no one
-at 4× their normal pace (dragging a unit highlights the track it can still reach). A unit's **Attack…** list also
+at 4× their normal pace (selecting a unit highlights the track it can still reach). A unit's **Attack…** list also
 offers railway sections in reach: d20 + attack against d20 + the line's defence and its best guard; a success
 closes 20 km of line, marked with smoke, until the GM or a nearby unit of the holder repairs it. Full rules:
 `docs/RAILWAYS.md`.
@@ -531,9 +532,18 @@ with a looping fire-and-smoke sprite until a GM deletes it or restores its stren
 work). The sheets are `public/assets/explosion.png` (4×4 frames of 64 px) and `public/assets/burning.webp`
 (8×8 frames of 128 px); swap in any sheet with the same layout to restyle them.
 
-### Notifications
+### Chat, notifications, trades and pings
 
-The 🔔 button turns on a chime and, if the browser allows it, a desktop notification whenever someone else
+**💬 Chat** (bottom right) has an OOC tab for everyone (the same chat as the Log, with `/roll`), a GM tab for
+announcements only the GM can post, and private chats between any members, including the GM. The **🔔**
+notification centre (top centre) lists diplomacy and trades that need your answer, with Accept, Decline,
+Approve or Block right there, and rings when wars are declared. **＋ Trade** offers another nation resources,
+money, manpower or research points, once or every turn for a set number of turns. The GM's **📍** tool (P) pings
+a spot on the map for everyone for a minute. Details: `docs/COMMS.md`.
+
+### Alerts
+
+The 🔊 / 🔇 button turns on a chime and, if the browser allows it, a desktop notification whenever someone else
 moves a marker, chats, rolls or fights while your tab is in the background. It never fires while you are looking
 at the map.
 
@@ -541,7 +551,8 @@ at the map.
 
 Clients open `/ws` (authenticated by the session cookie) and send `{type:'join', lobbyId}`. The server pushes
 `marker` and `shape` (upsert/delete, filtered per viewer), `drag` (live preview while someone drags), `history`,
-`presence`, `event` (chat/system/roll/combat), `members`, `lobby` (settings/map changed), `role` and `kicked`.
+`presence`, `event` (chat/system/roll/combat/announce), `members`, `lobby` (settings/map changed), `role`, `kicked`,
+`chatChannel` and `chatMessage` (private chats, members only), `tradesChanged`, `ping`.
 All persistent changes go through the REST API, which validates, records history and then broadcasts.
 
 ## Keyboard
@@ -550,7 +561,8 @@ All persistent changes go through the REST API, which validates, records history
 `Z` undo last point · `Enter` finish drawing · right-click a vertex to remove it ·
 Shift-drag a selected drawing to move it · `G` grid · `F` fit ·
 `Esc` cancel/close · `Delete` delete selected marker or drawing (if allowed) · wheel to zoom · drag empty map to pan ·
-drag a marker to move it (if allowed).
+drag a marker to move it (if allowed; in game mode click a unit, then click inside its ring) · `R` railway ·
+`P` ping (GM).
 
 ## How it is put together
 

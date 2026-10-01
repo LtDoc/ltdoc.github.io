@@ -59,7 +59,7 @@ p { margin: 8px 0; }
 /* ---- Map app layout ---- */
 #app { position: fixed; inset: 0; display: grid; grid-template-rows: 48px 1fr; grid-template-columns: 320px 1fr; }
 #app.nosidebar { grid-template-columns: 0 1fr; }
-#topbar { grid-column: 1 / 3; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #1a2530; border-bottom: 1px solid #0f1720; z-index: 5; }
+#topbar { position: relative; grid-column: 1 / 3; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #1a2530; border-bottom: 1px solid #0f1720; z-index: 5; }
 #topbar h1 { font-size: 16px; margin: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #topbar a.back { font-size: 18px; padding: 0 4px; }
 #presence { display: flex; gap: 4px; margin-right: 6px; }
@@ -247,3 +247,63 @@ details.sub > summary .hint { text-transform: none; letter-spacing: 0; }
 .railcuts { display: grid; gap: 4px; margin: 6px 0 2px; }
 .railcut { display: flex; align-items: center; gap: 6px; font-size: 12px; }
 .railcut > span { flex: 1; min-width: 0; }
+
+/* ---- Notification centre (top centre) ---- */
+#notifWrap { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 12; }
+#notifBtn { position: relative; padding: 4px 10px; }
+#notifBtn.has { background: #7d5a17; }
+#notifBtn #notifCount:not(:empty) { margin-left: 5px; background: var(--danger); color: #fff; border-radius: 9px; padding: 0 6px; font-size: 11px; font-weight: 700; }
+#notifBtn.ring { animation: notifRing .9s ease; }
+@keyframes notifRing { 0%,100% { transform: rotate(0); } 15% { transform: rotate(-14deg); } 30% { transform: rotate(12deg); } 45% { transform: rotate(-9deg); } 60% { transform: rotate(6deg); } 75% { transform: rotate(-3deg); } }
+#notifPanel { position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); width: min(420px, calc(100vw - 32px)); max-height: 70vh; overflow: auto;
+  background: var(--panel); border: 1px solid #46617a; border-radius: var(--radius); box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+#notifPanel .nhead { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-bottom: 1px solid #3d566e; position: sticky; top: 0; background: var(--panel); }
+.nitem { display: flex; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #3d566e; align-items: flex-start; }
+.nitem.needs { background: rgba(241, 196, 15, .08); }
+.nitem.new { box-shadow: inset 3px 0 0 #f1c40f; }
+.nitem .nicon { font-size: 18px; line-height: 1.2; }
+.nitem .nbody { flex: 1; min-width: 0; }
+.nitem .ntext { font-size: 13px; }
+.nitem .nsub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.nitem .nacts { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.nitem .ndismiss { background: transparent; color: var(--muted); padding: 0 4px; font-size: 16px; }
+@media (max-width: 720px) { #notifWrap { position: static; transform: none; } #notifPanel { position: fixed; top: 52px; left: 50%; } }
+
+/* ---- Chat window (bottom right) ---- */
+#chatDock { position: fixed; right: 16px; bottom: 16px; z-index: 15; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; }
+#chatDock > * { pointer-events: auto; }
+#chatToggle { box-shadow: 0 4px 16px rgba(0,0,0,.45); border-radius: 20px; padding: 8px 14px; }
+#chatToggle.active { outline: none; background: var(--panel2); }
+#chatBadge { margin-left: 6px; background: var(--danger); border-radius: 9px; padding: 0 6px; font-size: 11px; font-weight: 700; }
+#chatWin { width: min(360px, calc(100vw - 32px)); height: min(460px, calc(100vh - 140px)); display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid #46617a; border-radius: var(--radius); box-shadow: 0 10px 30px rgba(0,0,0,.5); overflow: hidden; }
+#chatWin[hidden] { display: none; }
+.chat-top { display: flex; align-items: center; gap: 4px; padding: 6px; border-bottom: 1px solid #3d566e; background: #1f2d3a; }
+#chatTabs { flex: 1; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: thin; }
+.ctab { background: var(--panel2); padding: 4px 8px; font-size: 12px; white-space: nowrap; flex: none; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+.ctab.on { background: var(--accent); }
+.ctab .cnt { margin-left: 5px; background: var(--danger); border-radius: 8px; padding: 0 5px; font-size: 10px; font-weight: 700; }
+#chatNewPanel { padding: 8px 10px; border-bottom: 1px solid #3d566e; background: #263646; max-height: 60%; overflow: auto; }
+#chatNewPanel .grow { flex: 1; }
+#chatNewPanel input[type=text], #chatNewPanel #chatNewName { margin: 6px 0; }
+#chatBody { flex: 1; overflow: auto; padding: 8px 10px; }
+.chat-head { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); padding-bottom: 6px; margin-bottom: 6px; border-bottom: 1px solid #3d566e; }
+.chat-head > span { flex: 1; }
+.cmsg { margin: 0 0 8px; font-size: 13px; }
+.cmsg .who { font-weight: 700; margin-right: 6px; }
+.cmsg .when { color: var(--muted); font-size: 11px; margin-left: 6px; }
+.cmsg .text { white-space: pre-wrap; word-wrap: break-word; }
+.cmsg.own .text { color: #d6eaf8; }
+.cmsg.roll { color: #f1c40f; }
+.cmsg.sys { color: var(--muted); font-style: italic; }
+.cmsg.announce { background: rgba(230, 126, 34, .12); border-left: 3px solid var(--accent2); padding: 4px 8px; border-radius: 4px; }
+.chat-empty { text-align: center; margin-top: 30px; }
+#chatSend { display: flex; gap: 6px; padding: 6px; border-top: 1px solid #3d566e; }
+#chatSend input { margin: 0; }
+#chatReadOnly { padding: 8px 10px; margin: 0; border-top: 1px solid #3d566e; }
+.log .ev.announce { color: #f5b041; }
+
+/* ---- Trade dialog ---- */
+.goods { display: grid; gap: 4px; margin: 4px 0; }
+.goodrow { display: grid; grid-template-columns: 1fr 90px auto; gap: 6px; align-items: center; }
+.goodrow select, .goodrow input { margin: 0; }

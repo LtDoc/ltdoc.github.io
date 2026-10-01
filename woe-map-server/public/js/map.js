@@ -120,10 +120,12 @@
     const net = railNet();
     if (!net.edges.length) return;
     const segs = RailNet.reach(net, { x: lead.x, y: lead.y }, remaining, { usable: railUsable(lead.data?.nation), speed: railOpts().speed });
-    renderer.showRailReach(segs.map(r => {
+    const out = segs.map(r => {
       const e = net.edges[r.edge], A = net.nodes[e.a], B = net.nodes[e.b];
       return [A.x + (B.x - A.x) * r.from, A.y + (B.y - A.y) * r.from, A.x + (B.x - A.x) * r.to, A.y + (B.y - A.y) * r.to];
-    }));
+    });
+    renderer.showRailReach(out);
+    return out;
   }
   /** Drawn points → railway centreline: simplified and lightly rounded, ends snapped onto existing track. */
   function railPath(raw) {
@@ -214,11 +216,96 @@
   function syncRailButton() {
     const btn = $('#btnDrawRail');
     if (btn) btn.hidden = gameOn() && state.role !== 'gm';
+    $('#btnPing').hidden = state.role !== 'gm';
+  }
+
+  // ---- Click to move (game mode) ------------------------------------------------------------------
+  // Select a unit or hero to see how far it can still go; click inside the ring (or on track it can reach)
+  // to send it there. A selected group moves together, keeping its shape. The GM can still drag tokens.
+  const MOVERS = ['unit', 'hero'];
+  const rulesOn = () => gameOn() && !state.game?.settings?.waiveMovement;
+  function clickMoves(m) {
+    return !!m && rulesOn() && MOVERS.includes(m.type) && canEdit(m) && !m.locked && !(m.type === 'hero' && ['travelling', 'captured'].includes(m.data?.status));
+  }
+  renderer.dragAllowed = m => !(rulesOn() && MOVERS.includes(m.type)) || state.role === 'gm';
+  function remainingFor(m) {
+    const km = Number(state.game?.settings?.kmPerMove) || 50;
+    return Math.max(0, (Number(m.data?.movement) || 0) * km - (Number(m.data?.movedKm) || 0));
+  }
+  /** The selected tokens that move by click: { lead, list, remaining } (remaining = the slowest one's), or null. */
+  function movers() {
+    const ids = (state.selectedIds || []).length > 1 ? state.selectedIds : (state.selectedId != null ? [state.selectedId] : []);
+    const list = ids.map(id => state.markers.get(id)).filter(clickMoves);
+    if (!list.length) return null;
+    const lead = list.find(m => m.id === state.selectedId) || list[0];
+    return { lead, list, remaining: Math.min(...list.map(remainingFor)) };
+  }
+  let reachSegs = [];
+  function updateMoveRange() {
+    const ms = movers();
+    reachSegs = [];
+    if (!ms) { renderer.hideRange(); return; }
+    const { lead, list, remaining } = ms;
+    const rx = remaining / (distanceUnits(lead.x, lead.y, lead.x + 1, lead.y) || 1);
+    const ry = remaining / (distanceUnits(lead.x, lead.y, lead.x, lead.y + 1) || 1);
+    renderer.showRange(lead.x, lead.y, rx, remaining <= 0.01, ry);
+    if (remaining > 0.01 && list.every(canRide)) reachSegs = showRailReach(lead, remaining) || [];
+    else renderer.hideRailReach();
+  }
+  function insideReach(ms, x, y) {
+    if (ms.remaining <= 0.01) return false;
+    if (distanceUnits(ms.lead.x, ms.lead.y, x, y) <= ms.remaining + 1e-6) return true;
+    const tol = 16 / renderer.scale;
+    return reachSegs.some(([x1, y1, x2, y2]) => RailNet.project([[x1, y1], [x2, y2]], x, y).d2 <= tol * tol);
+  }
+  renderer.onMapClick = (x, y) => {
+    if (state.placing || renderer.mode) return false;
+    const ms = movers();
+    if (!ms || !insideReach(ms, x, y)) return false;           // outside the ring: an ordinary click (deselect)
+    if (ms.list.length === 1) commitMove({ id: ms.lead.id, x, y });
+    else commitMove({ id: ms.lead.id, moves: ms.list.map(m => ({ id: m.id, x: m.x + (x - ms.lead.x), y: m.y + (y - ms.lead.y) })) });
+    return true;
+  };
+
+  // ---- GM pings ---------------------------------------------------------------------------------------
+  const pingGo = document.createElement('button');
+  pingGo.type = 'button'; pingGo.className = 'small'; pingGo.id = 'pingGo'; pingGo.hidden = true;
+  pingGo.textContent = '📍 Go to ping'; pingGo.title = 'Centre the map on the GM\'s latest ping';
+  pingGo.onclick = () => { if (!renderer.goToPing()) pingGo.hidden = true; };
+  $('#notifWrap').appendChild(pingGo);
+  let pingTimer = null;
+  function showPing(p, quiet) {
+    renderer.addPing(p);
+    pingGo.hidden = false;
+    clearTimeout(pingTimer);
+    pingTimer = setTimeout(() => { pingGo.hidden = true; }, Math.max(0, p.until - Date.now()));
+    if (!quiet && p.by !== me.displayName) { toast(`📍 ${p.by} pinged the map${p.label ? `: ${p.label}` : ''}`, 4000); notify('Map ping', `${p.by} pinged the map`); }
+  }
+  function armPing() {
+    if (state.placing?.ping) { disarmPlacing(); return; }
+    disarmPlacing();
+    state.placing = { ping: true };
+    renderer.setPassThrough(true);
+    renderer.app.canvas.style.cursor = 'crosshair';
+    $('#modeHud').classList.add('show');
+    $('#btnModeUndo').hidden = true; $('#btnModeClear').hidden = true; $('#btnModeDone').hidden = true;
+    $('#modeText').textContent = 'Ping: click a spot on the map; everyone sees it for a minute. Esc to cancel.';
+    $('#btnPing').classList.add('active');
+  }
+  async function loadPings() {
+    try { for (const p of (await api.get(`${base}/pings`)).pings) showPing(p, true); } catch { /* none */ }
+  }
+
+  /** Game mode keeps movement trails until End turn instead of fading arrows. */
+  function syncTrails() {
+    const on = gameOn();
+    if (renderer.persistTrails !== on) { renderer.persistTrails = on; renderer.redrawTrails(); }
   }
 
   renderer.addEventListener('select', e => {
     state.selectedId = e.detail.id; state.selectedIds = e.detail.ids || []; state.selectedShapeId = e.detail.shapeId;
     renderPopup(); highlightList();
+    updateMoveRange();
     if (state.selectedIds.length > 1) toast(`${state.selectedIds.length} tokens selected: drag any of them to move the group`, 1800);
   });
   renderer.addEventListener('mode', e => {
@@ -241,8 +328,9 @@
     renderer.showRange(lead.x, lead.y, remaining / perPx, remaining <= 0.01);
     if (units.every(canRide)) showRailReach(lead, remaining);
   });
-  renderer.addEventListener('dragend', async e => {
-    const { id, x, y, moves } = e.detail;
+  renderer.addEventListener('dragend', e => commitMove(e.detail));
+  /** Send a move (one token, or a group's moves) to the server and apply what it decided. */
+  async function commitMove({ id, x, y, moves }) {
     try {
       if (moves) {
         const d = await api.post(`${base}/markers/move`, { moves: moves.map(m => ({ id: m.id, x: round1(m.x), y: round1(m.y) })) });
@@ -261,7 +349,8 @@
       if (m) renderer.upsert(m);
       if (moves) await loadMarkers();
     }
-  });
+    updateMoveRange();
+  }
   renderer.addEventListener('zoom', e => { $('#zoomLabel').textContent = Math.round(e.detail.scale * 100) + '%'; });
   renderer.addEventListener('frame', positionPopup);
   renderer.addEventListener('measure', e => {
@@ -371,6 +460,7 @@
     $$('#qaList .qa').forEach(b => b.classList.remove('active'));
     $('#qaResPlace')?.classList.remove('active');
     $('#qaHeroPlace')?.classList.remove('active');
+    $('#btnPing')?.classList.remove('active');
     renderer.app.canvas.style.cursor = renderer.mode ? 'crosshair' : '';
     if (!renderer.mode) $('#modeHud').classList.remove('show');
   }
@@ -405,6 +495,12 @@
   }
   renderer.addEventListener('mapclick', async e => {
     if (!state.placing) return;
+    if (state.placing.ping) {
+      try { const d = await api.post(`${base}/pings`, { x: round1(e.detail.x), y: round1(e.detail.y) }); showPing(d.ping, true); }
+      catch (err) { toast(err.message); }
+      disarmPlacing();
+      return;
+    }
     if (state.placing.factory) {
       if (await GameUI.buildFactoryAt(round1(e.detail.x), round1(e.detail.y))) disarmPlacing();
       return;
@@ -679,6 +775,7 @@
     if (isNew && !quiet) renderer.pulse(m.x, m.y, colorNum(m.color));
     renderMarkerLists();
     if (state.selectedId === m.id) renderPopup();
+    if (state.selectedId === m.id || (state.selectedIds || []).includes(m.id)) updateMoveRange();
     gameMarkerChanged(m.type);
   }
 
@@ -772,7 +869,10 @@
         case 'drag': renderer.ghostMove(msg.id, msg.x, msg.y); break;
         case 'event': {
           const e = msg.event;
-          state.events.push(e); if (state.events.length > 200) state.events.shift(); renderLog(true);
+          if (!state.events.some(x => x.id === e.id)) state.events.push(e);
+          if (state.events.length > 200) state.events.shift();
+          renderLog(true);
+          Comms.onEvent(e);
           if (e.kind === 'combat' && e.data) {
             const { attackerId, defenderId, outcome, losses } = e.data;
             const gone = id => !!(losses && losses[id] && losses[id].to === 0 && losses[id].from > 0);
@@ -780,7 +880,8 @@
             renderer.hit(attackerId, outcome === 'defender', gone(attackerId));
           }
           if (e.userId !== me.id) {
-            if (e.kind === 'chat') notify(e.displayName, e.message);
+            if (e.kind === 'chat' && !$('#chatWin').hidden) { /* reading the chat already */ }
+            else if (e.kind === 'chat') notify(e.displayName, e.message);
             else if (e.kind === 'roll') notify(`${e.displayName} rolled`, e.message);
             else if (e.kind === 'combat') notify('Combat', e.message);
             else if (e.data && e.data.deadline) { notify('Turn deadline', e.message); toast(e.message, 5000); }
@@ -789,14 +890,18 @@
         }
         case 'members': await loadMembers(); break;
         case 'factions': await loadFactions(); await loadMembers(); await loadMarkers(); if (gameOn()) GameUI.load().catch(() => {}); break;
-        case 'game': GameUI.onGame(msg.game); syncRailButton(); break;
+        case 'game': { const was = !!state.game?.enabled; GameUI.onGame(msg.game); syncRailButton(); syncTrails(); updateMoveRange(); if (was !== !!msg.game?.enabled) Comms.loadTrades(); else Comms.refresh(); break; }
         case 'turn': GameUI.onTurn(msg); break;
         case 'faction': GameUI.onFaction(msg); break;
         case 'territory': renderer.setTerritories(msg.territories, !!msg.replace); GameUI.onTerritories(); break;
         case 'provinces': await loadProvinces(); break;
         case 'provinceOwners': renderer.setProvinceOwners(msg.owners || [], !!msg.replace); GameUI.onTerritories(); break;
         case 'progress': GameUI.onProgress(msg); break;
-        case 'relations': GameUI.onRelations(msg); break;
+        case 'relations': GameUI.onRelations(msg); Comms.onRelations(); break;
+        case 'tradesChanged': Comms.onTradesChanged(msg); break;
+        case 'chatChannel': Comms.onChatChannel(msg.channel); break;
+        case 'chatMessage': Comms.onChatMessage(msg.message); break;
+        case 'ping': showPing(msg.ping); break;
         case 'reload': if (msg.what === 'markers') await loadMarkers(); break;
         case 'lobby': {
           state.lobby = { ...msg.lobby, joinCode: msg.lobby.joinCode ?? state.lobby?.joinCode, yourRole: state.role };
@@ -846,7 +951,7 @@
     }
   }
   function renderNotifyButton() {
-    $('#btnNotify').textContent = notifyPref.enabled ? '🔔' : '🔕';
+    $('#btnNotify').textContent = notifyPref.enabled ? '🔊' : '🔇';
     $('#btnNotify').classList.toggle('active', notifyPref.enabled);
   }
   $('#btnNotify').onclick = async () => {
@@ -2047,6 +2152,7 @@
       if (e.kind === 'roll') return `<div class="ev roll"><span class="who">${esc(e.displayName)}</span> ${esc(e.message)}<span class="when">${fmtTime(e.createdAt)}</span></div>`;
       if (e.kind === 'combat') return `<div class="ev combat">${esc(e.message)}<span class="when">${fmtTime(e.createdAt)}</span></div>`;
       if (e.kind === 'turn') return `<div class="ev turn">📅 ${esc(e.message)}<span class="when">${fmtTime(e.createdAt)}</span></div>`;
+      if (e.kind === 'announce') return `<div class="ev announce">📣 <span class="who">${esc(e.displayName)}</span> ${esc(e.message)}<span class="when">${fmtTime(e.createdAt)}</span></div>`;
       return `<div class="ev system">${esc(e.message)}<span class="when">${fmtTime(e.createdAt)}</span></div>`;
     }).join('') || '<p class="muted">Nothing has happened yet.</p>';
     if (scroll === undefined || atBottom || scroll) el.scrollTop = el.scrollHeight;
@@ -2247,6 +2353,7 @@
   $('#btnDrawLine').onclick = () => (renderer.mode === 'draw' && renderer.draw.kind === 'line') ? renderer.cancelMode() : renderer.startDraw('line');
   $('#btnDrawArea').onclick = () => (renderer.mode === 'draw' && renderer.draw.kind === 'area') ? renderer.cancelMode() : renderer.startDraw('area');
   $('#btnDrawTrench').onclick = () => (renderer.mode === 'draw' && renderer.draw.kind === 'trench') ? renderer.cancelMode() : renderer.startDraw('trench');
+  $('#btnPing').onclick = armPing;
   $('#btnDrawRail').onclick = () => (renderer.mode === 'draw' && renderer.draw.kind === 'rail') ? renderer.cancelMode() : renderer.startDraw('rail');
   $('#btnModeUndo').onclick = () => renderer.modeUndo();
   $('#btnModeClear').onclick = () => renderer.modeClear();
@@ -2274,6 +2381,7 @@
     if (e.key === 'a' || e.key === 'A') $('#btnDrawArea').click();
     if (e.key === 't' || e.key === 'T') $('#btnDrawTrench').click();
     if ((e.key === 'r' || e.key === 'R') && !$('#btnDrawRail').hidden) $('#btnDrawRail').click();
+    if ((e.key === 'p' || e.key === 'P') && state.role === 'gm') armPing();
     if ((e.key === 'z' || e.key === 'Z') && renderer.mode) renderer.modeUndo();
     if (e.key === 'Delete') {
       if ((state.selectedIds || []).length > 1) {
@@ -2304,6 +2412,9 @@
     await loadShapes();
     await loadEvents();
     await loadHistory();
+    syncTrails();
+    await Comms.init({ state, me, base, renderer, notify, GameUI });
+    loadPings();
     connectWs();
   } catch (err) {
     if (err.status === 403 || err.status === 404) { alert(err.message); location.replace('/lobbies.html'); }

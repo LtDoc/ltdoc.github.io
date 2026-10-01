@@ -78,6 +78,14 @@ class MapRenderer extends EventTarget {
     this.railLayer = new PIXI.Container();      // railway track, trains and smoke over cut sections
     this.railLayer.eventMode = 'none';
     this.railCutKm = 10;                        // half-length of a cut section (campaign rule, set by map.js)
+    this.trailG = new PIXI.Graphics();          // game mode: where units and heroes went this turn
+    this.trailG.eventMode = 'none';
+    this.persistTrails = false;                 // set by map.js while game mode is on (no fading move arrows then)
+    this.pingLayer = new PIXI.Container(); this.pingLayer.eventMode = 'none';
+    this.pingArrows = new PIXI.Graphics(); this.pingArrows.eventMode = 'none';
+    this.pings = new Map();                     // id -> { ping, c }
+    this.dragAllowed = () => true;              // (marker) => may it be dragged? map.js: units move by click in game mode
+    this.onMapClick = null;                     // (x, y) => true when map.js handled a click on empty map
     this.shapesLayer = new PIXI.Container();
     this.fxLayer = new PIXI.Container();
     this.markerLayer = new PIXI.Container();
@@ -87,8 +95,8 @@ class MapRenderer extends EventTarget {
     this.handleLayer = new PIXI.Container();
     this.unitDots = new PIXI.Graphics();          // zoomed out on the Earth map: one dot per unit instead of its icon
     this.unitDots.eventMode = 'none';
-    this.world.addChild(this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.trenchLayer, this.railLayer, this.shapesLayer, this.fxLayer, this.unitDots, this.markerLayer, this.boomLayer, this.overlayLayer, this.handleLayer);
-    app.stage.addChild(this.world);
+    this.world.addChild(this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.unitDots, this.markerLayer, this.boomLayer, this.overlayLayer, this.pingLayer, this.handleLayer);
+    app.stage.addChild(this.world, this.pingArrows);
 
     app.stage.eventMode = 'static';
     app.stage.hitArea = app.screen;
@@ -376,6 +384,8 @@ class MapRenderer extends EventTarget {
     }
     if (this.provinceLayer) this.provinceLayer.setZoom(this.scale);
     if (this._aura) this._drawAura();
+    if (this.persistTrails) this.queueTrails();
+    if (this._range) { const r = this._range; this.showRange(r.x, r.y, r.radius, r.exhausted, r.ry); }
     if (this.earth) {
       clearTimeout(this._earthTimer);
       this._earthTimer = setTimeout(() => { if (this.earth) { this.earth.redraw(this.scale); this.invalidate(); } }, 120);
@@ -421,6 +431,7 @@ class MapRenderer extends EventTarget {
   remove(id) {
     this.invalidate();
     this._dotsDirty = true;
+    if (this.persistTrails) this.queueTrails();
     const v = this.views.get(id);
     if (v) {
       v.dying = true;
@@ -485,6 +496,7 @@ class MapRenderer extends EventTarget {
 
   /** Movement trail: fading arrow from (x1,y1) to (x2,y2). */
   trail(x1, y1, x2, y2, color) {
+    if (this.persistTrails) return;
     this.invalidate();
     if (Math.hypot(x2 - x1, y2 - y1) < 2) return;
     const w = 3 / this.scale;
@@ -986,17 +998,19 @@ class MapRenderer extends EventTarget {
 
   // ---- Movement range ring (game mode) ----------------------------------------------
   /** Draw the remaining-movement circle (world units) around a unit being dragged. */
-  showRange(x, y, radius, exhausted) {
+  showRange(x, y, radius, exhausted, ry) {
     if (!this._rangeG) { this._rangeG = new PIXI.Graphics(); this._rangeG.eventMode = 'none'; this.overlayLayer.addChild(this._rangeG); }
+    this._range = { x, y, radius, exhausted, ry };
     const g = this._rangeG, s = this.scale;
     g.clear();
     const color = exhausted ? 0xe74c3c : 0x2ecc71;
-    if (radius > 0) g.circle(x, y, radius).fill({ color, alpha: 0.08 }).stroke({ width: 2 / s, color, alpha: 0.9 });
+    if (radius > 0) g.ellipse(x, y, radius, ry || radius).fill({ color, alpha: 0.1 }).stroke({ width: 2.5 / s, color, alpha: 0.95 });
     else g.circle(x, y, 10 / s).stroke({ width: 2 / s, color, alpha: 0.9 });
     g.visible = true;
     this.invalidate();
   }
   hideRange() {
+    this._range = null;
     if (this._rangeG) { this._rangeG.visible = false; this.invalidate(); }
     this.hideRailReach();
   }
@@ -1043,6 +1057,98 @@ class MapRenderer extends EventTarget {
     this.invalidate();
   }
   hideAura() { this._aura = null; if (this._auraG && this._auraG.visible) { this._auraG.visible = false; this.invalidate(); } }
+
+  // ---- Movement trails (game mode) --------------------------------------------------
+  /** Redraw every unit's and hero's trail this turn (marker.data.trail), in its colour, with an arrow at the end. */
+  redrawTrails() {
+    clearTimeout(this._trailTimer);
+    this._trailTimer = null;
+    const g = this.trailG, s = this.scale;
+    g.clear();
+    if (!this.persistTrails) { this.invalidate(); return; }
+    const w = 3.4 / s;
+    for (const v of this.views.values()) {
+      const t = v.marker.data?.trail;
+      if (v.dying || !Array.isArray(t) || t.length < 1 || !['unit', 'hero'].includes(v.marker.type)) continue;
+      const pts = [...t, [v.marker.x, v.marker.y]];
+      if (pts.length < 2) continue;
+      const path = () => { g.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]); };
+      path(); g.stroke({ width: w * 2, color: 0x111111, alpha: 0.6, join: 'round', cap: 'round' });
+      path(); g.stroke({ width: w, color: v.colorNum, alpha: 0.95, join: 'round', cap: 'round' });
+      g.circle(pts[0][0], pts[0][1], w * 1.6).fill({ color: v.colorNum, alpha: 0.95 }).stroke({ width: w * 0.6, color: 0x111111, alpha: 0.5 });
+      // The arrowhead sits short of the token so it is not hidden under it.
+      const [bx, by] = pts[pts.length - 1];
+      let k = pts.length - 2;
+      while (k > 0 && Math.hypot(bx - pts[k][0], by - pts[k][1]) < 4 / s) k--;
+      const [ax, ay] = pts[k], L = Math.hypot(bx - ax, by - ay);
+      if (L > 1e-6) {
+        const back = Math.min(L * 0.5, 16 / s), tx = bx - (bx - ax) / L * back, ty = by - (by - ay) / L * back;
+        const a = Math.atan2(by - ay, bx - ax), H = 12 / s;
+        g.poly([tx, ty, tx - H * Math.cos(a - 0.5), ty - H * Math.sin(a - 0.5), tx - H * Math.cos(a + 0.5), ty - H * Math.sin(a + 0.5)])
+          .fill({ color: v.colorNum, alpha: 0.95 }).stroke({ width: w * 0.5, color: 0x111111, alpha: 0.5 });
+      }
+    }
+    this.invalidate();
+  }
+  /** Coalesce trail redraws (many marker updates arrive together after End turn or a group move). */
+  queueTrails() { if (!this._trailTimer) this._trailTimer = setTimeout(() => this.redrawTrails(), 30); }
+
+  // ---- GM pings -----------------------------------------------------------------------
+  /** Show a ping until ping.until: a pin with pulsing rings, plus an arrow at the screen edge when it is off screen. */
+  addPing(ping) {
+    if (this.pings.has(ping.id) || ping.until <= Date.now()) return;
+    const c = new PIXI.Container(); c.eventMode = 'none';
+    const rings = new PIXI.Graphics();
+    const pin = new PIXI.Graphics();
+    pin.circle(0, -22, 9).fill(0xe74c3c).stroke({ width: 2.5, color: 0xffffff });
+    pin.poly([-7, -17, 7, -17, 0, -2]).fill(0xe74c3c);
+    pin.circle(0, -22, 3.2).fill(0xffffff);
+    pin.ellipse(0, 0, 6, 2.5).fill({ color: 0x000000, alpha: 0.35 });
+    const label = new PIXI.Text({ text: ping.label || `📍 ${ping.by || 'GM'}`, style: { fontFamily: 'system-ui, sans-serif', fontSize: 13, fontWeight: '700', fill: 0xffffff, stroke: { color: 0x000000, width: 3 } }, resolution: 2 });
+    label.anchor.set(0.5, 1); label.position.set(0, -34);
+    c.addChild(rings, pin, label);
+    c.position.set(ping.x, ping.y);
+    this.pingLayer.addChild(c);
+    this.pings.set(ping.id, { ping, c, rings });
+    this.invalidate();
+  }
+  _tickPings(nowMs) {
+    const g = this.pingArrows;
+    g.clear();
+    if (!this.pings.size) return false;
+    const s = this.scale, sw = this.app.screen.width, sh = this.app.screen.height, M = 26;
+    for (const [id, p] of this.pings) {
+      const left = p.ping.until - Date.now();
+      if (left <= 0) { this.pingLayer.removeChild(p.c); p.c.destroy({ children: true }); this.pings.delete(id); continue; }
+      const alpha = Math.min(1, left / 5000);
+      p.c.scale.set(1 / s);
+      p.c.alpha = alpha;
+      const t = ((nowMs - p.ping.at) % 1600) / 1600;
+      p.rings.clear();
+      for (const k of [0, 0.5]) {
+        const u = (t + k) % 1;
+        p.rings.circle(0, 0, 8 + u * 46).stroke({ width: 3, color: 0xe74c3c, alpha: (1 - u) * 0.9 });
+      }
+      // Off screen: an arrow on the edge pointing at it.
+      const sp = this.worldToScreen(p.ping.x, p.ping.y);
+      if (sp.x < 0 || sp.y < 0 || sp.x > sw || sp.y > sh) {
+        const cx = sw / 2, cy = sh / 2, dx = sp.x - cx, dy = sp.y - cy;
+        const k = Math.min((sw / 2 - M) / Math.abs(dx || 1e-6), (sh / 2 - M) / Math.abs(dy || 1e-6));
+        const ex = cx + dx * k, ey = cy + dy * k, a = Math.atan2(dy, dx);
+        g.circle(ex, ey, 15).fill({ color: 0xe74c3c, alpha: 0.9 * alpha }).stroke({ width: 2, color: 0xffffff, alpha });
+        g.poly([ex + 13 * Math.cos(a), ey + 13 * Math.sin(a), ex + 5 * Math.cos(a + 2.2), ey + 5 * Math.sin(a + 2.2), ex + 5 * Math.cos(a - 2.2), ey + 5 * Math.sin(a - 2.2)])
+          .fill({ color: 0xffffff, alpha });
+      }
+    }
+    return this.pings.size > 0;
+  }
+  /** Centre on the newest live ping; returns false when there is none. */
+  goToPing(id) {
+    const p = id ? this.pings.get(id) : [...this.pings.values()].pop();
+    if (!p) return false;
+    this.centerOn(p.ping.x, p.ping.y);
+    return true;
+  }
 
   // ---- Input ------------------------------------------------------------------------
   _bindInput() {
@@ -1148,6 +1254,7 @@ class MapRenderer extends EventTarget {
         const pan = this._pan; this._pan = null;
         if (!pan.moved && pan.button === 0 && !this.mode) {
           const p = this.screenToWorld(e.global.x, e.global.y);
+          if (this.onMapClick && this.onMapClick(p.x, p.y)) return;
           this.select(null);
           this.dispatchEvent(new CustomEvent('mapclick', { detail: { x: p.x, y: p.y } }));
         }
@@ -1181,6 +1288,11 @@ class MapRenderer extends EventTarget {
     if (this.mode && this.mode !== 'select') { this._modeClick(e); e.stopPropagation(); return; }
     e.stopPropagation();
     if (e.shiftKey) { if (this.canDrag(view.marker)) this.toggleSelect(view.id); return; }
+    if (this.canDrag(view.marker) && !this.dragAllowed(view.marker)) {
+      if (this.selected.has(view.id) && this.selected.size > 1) this.selectMany([...this.selected], view.id);
+      else this.select(view.id);
+      return;
+    }
     if (this.canDrag(view.marker)) {
       const p = this.screenToWorld(e.global.x, e.global.y);
       this._drag = { view, ox: p.x - view.x, oy: p.y - view.y, moved: false, last: 0, startX: view.x, startY: view.y };
@@ -1223,6 +1335,7 @@ class MapRenderer extends EventTarget {
     const t = nowMs / 1000;
     const k = 1 - Math.pow(0.001, dt / 700); // movement easing
     let anim = this.fxLayer.children.length > 0 || this.boomLayer.children.length > 0;
+    if (this._tickPings(nowMs)) anim = true;
     if (this.railLayer.children.length) {
       const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
       const vx0 = tl.x, vy0 = tl.y, vx1 = br.x, vy1 = br.y;
@@ -1533,6 +1646,7 @@ class MarkerView {
       const d = Math.hypot(marker.x - this.x, marker.y - this.y);
       if (d > 6) this.r.trail(this.x, this.y, marker.x, marker.y, this.colorNum);
     }
+    if (this.r.persistTrails && (marker.data?.trail || prev?.data?.trail)) this.r.queueTrails();
   }
 
   async _buildBody() {

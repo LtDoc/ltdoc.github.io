@@ -234,6 +234,47 @@ CREATE TABLE IF NOT EXISTS techs (
   updated_at  INTEGER NOT NULL,
   UNIQUE (lobby_id, key)
 );
+
+-- Resource trades between factions (docs/COMMS.md): one-time on acceptance, or recurring at each End turn.
+CREATE TABLE IF NOT EXISTS trades (
+  id           INTEGER PRIMARY KEY,
+  lobby_id     INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  from_faction INTEGER NOT NULL,
+  to_faction   INTEGER NOT NULL,
+  give         TEXT NOT NULL DEFAULT '{}',           -- JSON { coal: 10, money: 50, ... } sent by from_faction
+  take         TEXT NOT NULL DEFAULT '{}',           -- JSON, sent back by to_faction
+  mode         TEXT NOT NULL DEFAULT 'once',         -- once | recurring
+  turns        INTEGER NOT NULL DEFAULT 1,           -- recurring: number of deliveries
+  turns_left   INTEGER NOT NULL DEFAULT 0,
+  status       TEXT NOT NULL DEFAULT 'pending',      -- pending | active | completed | declined | withdrawn | cancelled
+  note         TEXT NOT NULL DEFAULT '',
+  log          TEXT NOT NULL DEFAULT '[]',           -- JSON [{ turn, ok, text }] deliveries
+  created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at   INTEGER NOT NULL,
+  resolved_at  INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_trades_lobby ON trades(lobby_id, id);
+
+-- Private chats between members (docs/COMMS.md). OOC chat and GM announcements live in events.
+CREATE TABLE IF NOT EXISTS chat_channels (
+  id         INTEGER PRIMARY KEY,
+  lobby_id   INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL DEFAULT '',
+  members    TEXT NOT NULL DEFAULT '[]',             -- JSON array of user ids
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at INTEGER NOT NULL,
+  last_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_channels_lobby ON chat_channels(lobby_id);
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id         INTEGER PRIMARY KEY,
+  lobby_id   INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  channel_id INTEGER NOT NULL REFERENCES chat_channels(id) ON DELETE CASCADE,
+  user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  message    TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_channel ON chat_messages(channel_id, id);
 `);
 
 // ---- Lightweight migrations for databases created by earlier versions -------------

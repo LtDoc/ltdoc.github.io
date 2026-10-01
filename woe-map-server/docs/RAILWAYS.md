@@ -42,7 +42,7 @@ Track is **open** to a nation when it is not cut and the ground under it belongs
 (neutral or unclaimed land), or no land at all (bridges and ferries). Another power's railways are closed to it,
 at peace or at war, so captured provinces bring their railways with them.
 
-Dragging a unit shows the usual movement ring plus the track it can still reach this turn, in green. The move
+Selecting a unit shows its movement ring plus the track it can still reach this turn, in green; clicking on that track sends it by rail. The move
 toast says "went by rail (N km of track)". A formation moved together follows each unit's own route.
 
 ## Attacking a railway
