@@ -572,7 +572,10 @@ attacker's own nation and, in game mode, its allies are never offered or accepte
 each side rolls the campaign's combat die and adds attack or defend. The loser loses *base loss* + *margin ×
 extra per point* of strength, the winner loses the *winner's loss*, ties cost both half the base. The defaults
 (d20, 10 %, 2 %, 5 %) live in campaign settings. Results go to the log, both units shake and an explosion
-sprite plays over them (bigger, with two follow-up blasts, when a unit is destroyed), and the strength changes
+sprite plays over them (bigger, with two follow-up blasts, when a unit is destroyed), and the losses pop up
+over each unit as **floating numbers** (red "−23" with the strength left, bigger for heavy blows, "DESTROYED" at
+zero, "No loss" for a side that came off unharmed). Any strength change shows the same way, wherever it comes
+from: attrition at End turn, a hospital (green "+10"), or the GM. The strength changes
 are ordinary history entries, so a bad fight can be reverted. A unit at zero strength is greyed out and burns
 with a looping fire-and-smoke sprite until a GM deletes it or restores its strength (an edit or a revert both
 work).

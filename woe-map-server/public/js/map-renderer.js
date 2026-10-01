@@ -585,6 +585,49 @@ class MapRenderer extends EventTarget {
     this.fxLayer.addChild(g);
   }
 
+  /**
+   * A number that pops up over a unit, rises and fades: losses in red, healing in green, a word ("No loss").
+   * Sized in screen pixels so it reads at any zoom; several on one unit stack instead of overlapping.
+   * `sub` is a smaller line under it (strength left, "Destroyed"); `delay` lets an explosion land first.
+   */
+  floatText(id, text, { color = 0xff4d3d, size = 24, sub = '', subColor = 0xffffff, delay = 0 } = {}) {
+    const v = this.views.get(id);
+    if (!v) return;
+    const c = new PIXI.Container(); c.eventMode = 'none'; c.visible = false;
+    const main = new PIXI.Text({ text, resolution: 2, style: {
+      fontFamily: 'Georgia, "Times New Roman", serif', fontSize: size, fontWeight: '900', fill: color,
+      stroke: { color: 0x000000, width: Math.max(4, size / 5), join: 'round' },
+      dropShadow: { color: 0x000000, alpha: 0.6, blur: 3, distance: 2, angle: Math.PI / 2 } } });
+    main.anchor.set(0.5, 1);
+    c.addChild(main);
+    if (sub) {
+      const t = new PIXI.Text({ text: sub, resolution: 2, style: {
+        fontFamily: 'system-ui, sans-serif', fontSize: 13, fontWeight: '800', fill: subColor, letterSpacing: 0.5,
+        stroke: { color: 0x000000, width: 3, join: 'round' } } });
+      t.anchor.set(0.5, 0); t.position.set(0, 1);
+      c.addChild(t);
+    }
+    const stack = this.boomLayer.children.filter(f => f.floater && f.floater.id === id && f.life > 900).length;
+    c.floater = { id, x: v.x, y: v.y, off: stack * (sub ? 40 : 26), jitter: (Math.random() - 0.5) * 16, delay, span: 2000 };
+    c.life = 2000 + delay;
+    this.boomLayer.addChild(c);
+    this.invalidate();
+  }
+  /** One frame of a floating number: a quick pop, then an eased rise with a fade over the last third. */
+  _tickFloater(fx, inv) {
+    const f = fx.floater, t = f.span - fx.life;   // ms since it appeared (negative while delayed)
+    if (t < 0) { fx.visible = false; return; }
+    fx.visible = true;
+    const p = Math.min(1, t / f.span);
+    const pop = t < 140 ? 0.5 + 0.8 * (t / 140) : t < 280 ? 1.3 - 0.3 * ((t - 140) / 140) : 1;
+    const v = this.views.get(f.id);
+    if (v && !v.dying) { f.x = v.x; f.y = v.y; }
+    const rise = 1 - Math.pow(1 - p, 3);
+    fx.scale.set(pop * inv);
+    fx.position.set(f.x + f.jitter * inv, f.y - (30 + f.off + 46 * rise) * inv);
+    fx.alpha = p > 0.62 ? Math.max(0, 1 - (p - 0.62) / 0.38) : 1;
+  }
+
   // ---- Shapes ----------------------------------------------------------------------
   upsertShape(shape) {
     this.invalidate();
@@ -1782,6 +1825,7 @@ class MapRenderer extends EventTarget {
       for (const fx of [...layer.children]) {
         fx.life -= dt;
         if (fx.splashInfo) { this._drawSplash(fx, nowMs); if (fx.life <= 0) { layer.removeChild(fx); fx.destroy(); } continue; }
+        if (fx.floater) { this._tickFloater(fx, inv); if (fx.life <= 0) { layer.removeChild(fx); fx.destroy({ children: true }); } continue; }
         if (fx.screenSize) { fx.scale.set(fx.screenSize / (fx.frameSize || this.explosionFrameSize) * inv); }
         else if (fx.pulse) { const p = 1 - fx.life / 700; fx.scale.set((1 + p * 3) * inv); fx.alpha = 1 - p; }
         else if (fx.flash) { fx.scale.set(inv); fx.alpha = Math.max(0, fx.life / 220); }

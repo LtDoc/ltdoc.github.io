@@ -876,15 +876,31 @@
   }
 
   function upsertMarker(m, quiet) {
-    const isNew = !state.markers.has(m.id);
+    const prev = state.markers.get(m.id), isNew = !prev;
     m.flagUrl = flagFor(m);
     state.markers.set(m.id, m);
     renderer.upsert(m);
+    strengthChanged(prev, m);
     if (isNew && !quiet) renderer.pulse(m.x, m.y, colorNum(m.color));
     renderMarkerLists();
     if (state.selectedId === m.id) renderPopup();
     if (state.selectedId === m.id || (state.selectedIds || []).includes(m.id)) updateMoveRange();
     gameMarkerChanged(m.type);
+  }
+
+  /**
+   * Floating numbers over a unit whose strength changed, however it happened (a battle, attrition at End turn,
+   * a hospital, the GM): losses in red with the strength left, healing in green.
+   */
+  function strengthChanged(prev, m) {
+    if (!prev || m.type !== 'unit') return;
+    const a = Math.round(Number(prev.data?.strength ?? 100)), b = Math.round(Number(m.data?.strength ?? 100));
+    if (!Number.isFinite(a) || !Number.isFinite(b) || a === b) return;
+    if (b < a) {
+      const gone = b <= 0, d = a - b;
+      renderer.floatText(m.id, `−${d}`, { color: gone ? 0xff2d20 : 0xff5a45, size: gone || d >= 25 ? 32 : d >= 12 ? 27 : 23,
+        sub: gone ? (m.data?.surrendered ? '⚑ SURRENDERED' : 'DESTROYED') : `${b}% strength`, subColor: gone ? 0xffc2b5 : 0xffffff, delay: 160 });
+    } else renderer.floatText(m.id, `+${b - a}`, { color: 0x5ee07a, size: 23, sub: `${b}% strength` });
   }
 
   function removeMarker(id) {
@@ -986,6 +1002,8 @@
             const gone = id => !!(losses && losses[id] && losses[id].to === 0 && losses[id].from > 0);
             renderer.hit(defenderId, outcome !== 'defender', gone(defenderId));
             renderer.hit(attackerId, outcome === 'defender', gone(attackerId));
+            // Losses float up from the strength change itself (strengthChanged); a side that lost nothing says so.
+            for (const id of [attackerId, defenderId]) if (losses?.[id] && losses[id].loss === 0) renderer.floatText(id, 'No loss', { color: 0xd5dde3, size: 17, delay: 160 });
           }
           if (e.userId !== me.id) {
             if (e.kind === 'chat' && !$('#chatWin').hidden) { /* reading the chat already */ }
