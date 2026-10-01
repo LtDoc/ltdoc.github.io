@@ -524,8 +524,12 @@ Details and numbers: `docs/ECONOMY.md`.
   ground that belongs to a faction it is **at war** with, or on neutral ground (rule switch), it carves a
   circle of the capture radius (30 km) out of that territory into its own. A city or capital of the enemy
   inside the circle is taken with a larger district (75 km) and flips to the attacker, with a campaign
-  event. If an enemy land unit stands within the capture radius the front holds and nothing changes: contested
-  ground is settled by combat. Naval and air units never change borders, and allies can march through each
+  event. **Defended ground does not fall**: a province with a defender anywhere in it (a land unit of its owner,
+  or of anyone at war with the attacker) stays put. Ending a move in one, or with a defender within the capture
+  radius, the front holds and nothing changes; a defended province or city nearby is left out of what is taken.
+  The defenders must be beaten first: when an attack destroys a defender, an attacker standing on enemy ground
+  takes it at once if no other defender holds it (on maps without provinces, "in it" means within the capture
+  radius of the defender). Naval and air units never change borders, and allies can march through each
   other. Units at zero strength do not capture. Territory is never given back automatically: the line stays
   until someone advances the other way.
 - **Relations and diplomacy.** Every pair of factions is at peace, at war or allied. A player queues a

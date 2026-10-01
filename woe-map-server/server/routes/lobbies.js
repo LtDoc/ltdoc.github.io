@@ -322,7 +322,7 @@ function afterMove(req, unit) {
   try { r = territory.capture(req.lobby, g, unit, factions, markers, (a, b) => game.relationStatus(req.lobby.id, a, b)); }
   catch (e) { console.warn('capture failed', e); return null; }
   if (!r) return null;
-  if (r.held) return `${unit.name} faces enemy troops: the front holds`;
+  if (r.held) return `${unit.name} faces defenders: the ground holds until they are beaten`;
   for (const f of r.flips) setMarkerNation(req, f.marker, f.nation, true);
   if (r.changed.length) hub.broadcast(req.lobby.id, { type: 'territory', territories: r.changed });
   if (r.owners && r.owners.length) hub.broadcast(req.lobby.id, { type: 'provinceOwners', owners: r.owners });
@@ -1498,7 +1498,7 @@ router.post('/:id/combat', (req, res) => {
     commitChange(req, 'marker', 'update', m, after);
     return after;
   };
-  apply(a, aLoss); apply(d, dLoss);
+  const aAfter = apply(a, aLoss); apply(d, dLoss);
 
   const fmt = (m, l) => `${m.name} ${l.loss ? `loses ${l.loss}% (${l.from}→${l.to}${l.to === 0 ? ', destroyed' : ''})` : 'is unharmed'}`;
   const notes = [bonusA.attack ? `attacker +${bonusA.attack} tech` : '', genA ? `attacker +${genA.bonus} ${genA.hero.name}` : '',
@@ -1542,7 +1542,11 @@ router.post('/:id/combat', (req, res) => {
     }
     if (made.length) hub.broadcast(req.lobby.id, { type: 'craters', craters: made }, audience);
   }
-  res.status(201).json({ event });
+  // Defended ground falls once its defenders are beaten: an attacker standing on enemy ground that destroys a
+  // defender takes the ground now if no other defender holds it (territory.capture).
+  let captureNote = null;
+  if (g.enabled && losses[d.id].to === 0 && num(aAfter.data?.strength, 100) > 0) captureNote = afterMove(req, aAfter);
+  res.status(201).json({ event, captureNote });
 });
 
 module.exports = router;

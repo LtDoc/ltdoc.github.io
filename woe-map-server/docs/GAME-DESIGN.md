@@ -173,8 +173,11 @@ territory that is not its own:
 
 1. If the territory owner is at **war** with the unit's faction, or the territory is **neutral** and the
    campaign allows occupying neutrals, continue; otherwise nothing happens (you can march through an ally).
-2. If an **enemy land unit** is within `captureRadius` of the landing point, the front holds: no change.
-   Contested ground is resolved by combat, not by who clicks first.
+2. If an **enemy land unit** is within `captureRadius` of the landing point, or (with provinces) anywhere in the
+   province the unit lands in, the front holds: no change. Defended provinces and cities nearby are left out of
+   steps 3 and 4. Contested ground is resolved by combat, not by who clicks first: when an attack destroys a
+   defender, the attacker re-runs this rule from where it stands and takes the ground if nobody else holds it.
+   (Changed 1 Oct 2026; before, only defenders within `captureRadius` of the landing point counted.)
 3. Otherwise carve a circle of `captureRadius` (default 30 km) around the unit out of the owner's territory
    and union it into the mover's. The circle is clipped to land, so coastal advances do not paint the sea.
    With provinces, the unit takes the province it stands in plus the owner's provinces whose centre lies

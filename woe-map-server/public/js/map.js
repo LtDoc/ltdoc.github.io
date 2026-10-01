@@ -2378,7 +2378,7 @@
         }
         const d = await api.post(`${base}/combat`, { attackerId: attacker.id, defenderId: Number(val) });
         closeModals();
-        toast(d.event.message, 6000);
+        toast(d.event.message + (d.captureNote ? ` · ${d.captureNote}` : ''), 6000);
         if (!state.events.some(x => x.id === d.event.id)) { state.events.push(d.event); renderLog(true); }
       } catch (err) { toast(err.message); }
     };

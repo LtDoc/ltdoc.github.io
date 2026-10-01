@@ -468,6 +468,8 @@ function isLandUnit(m) {
 /**
  * The capture rule after a land unit's committed move (§5.2). `relation(a, b)` returns peace|war|alliance.
  * Returns null when nothing happens, else { changed: territories, flips: [{marker, nation}], cities: [names], held }.
+ * Defended ground does not fall: a province (or, without provinces, the ground within the capture radius) with a
+ * defender in it stays with its owner until the defenders are beaten. Landing in one, the front holds.
  */
 function capture(lobby, g, unit, factions, markers, relation) {
   if (!g.enabled || !isLandUnit(unit) || Number(unit.data?.strength ?? 100) <= 0) return null;
@@ -482,30 +484,47 @@ function capture(lobby, g, unit, factions, markers, relation) {
   const s = g.settings;
   const radius = Number(s.captureRadiusKm) || 30;
   const ownerName = owner === NEUTRAL ? '' : (factions.find(f => f.id === owner)?.name || '').toLowerCase();
-  // Contested ground: an enemy land unit within the radius holds the front.
-  const enemyNear = markers.some(m => m.id !== unit.id && isLandUnit(m) && Number(m.data?.strength ?? 100) > 0 &&
-    String(m.data?.nation || '').toLowerCase() !== mine.name.toLowerCase() &&
-    (() => { const f = factions.find(x => x.name.toLowerCase() === String(m.data?.nation || '').toLowerCase()); return f && relation(mine.id, f.id) === 'war'; })() &&
-    geo.distance(lobby, unit.x, unit.y, m.x, m.y) <= radius);
-  if (enemyNear) return { held: true, changed: [], owners: [], flips: [], cities: [] };
+  // Defenders: living land units of the ground's owner, or of anyone at war with the mover (the owner's allies in the war).
+  const isDefender = m => {
+    if (m.id === unit.id || !isLandUnit(m) || Number(m.data?.strength ?? 100) <= 0 || m.data?.surrendered) return false;
+    const n = String(m.data?.nation || '').toLowerCase();
+    if (!n || n === mine.name.toLowerCase()) return false;
+    if (ownerName && n === ownerName) return true;
+    const f = factions.find(x => x.name.toLowerCase() === n);
+    return !!f && relation(mine.id, f.id) === 'war';
+  };
+  const defenders = markers.filter(isDefender);
+  const held = { held: true, changed: [], owners: [], flips: [], cities: [], owner, mine };
+  // Contested ground: a defender within the radius holds the front.
+  if (defenders.some(m => geo.distance(lobby, unit.x, unit.y, m.x, m.y) <= radius)) return held;
+  const pv = provinces().has(lobby.id) ? provinces() : null;
+  // Provinces with a defender anywhere in them (province maps).
+  const defended = new Set();
+  if (pv) for (const m of defenders) { const p = pv.at(lobby.id, m.x, m.y); if (p) defended.add(p.id); }
+  const landing = pv ? pv.at(lobby.id, unit.x, unit.y) : null;
+  if (landing && defended.has(landing.id)) return held;
+  // A defended city does not fall, nor bring its surroundings with it.
+  const cityDefended = m => pv ? (() => { const p = pv.at(lobby.id, m.x, m.y); return !!p && defended.has(p.id); })()
+    : defenders.some(d => geo.distance(lobby, m.x, m.y, d.x, d.y) <= radius);
   const cities = [];
   const enemyCities = markers.filter(m => m.type === 'town' && ['city', 'capital'].includes(m.data?.size) &&
     String(m.data?.nation || '').toLowerCase() === ownerName && String(m.data?.nation || '').toLowerCase() !== mine.name.toLowerCase() &&
-    geo.distance(lobby, unit.x, unit.y, m.x, m.y) <= radius);
+    geo.distance(lobby, unit.x, unit.y, m.x, m.y) <= radius && !cityDefended(m));
   let changed = [], owners = [];
-  if (provinces().has(lobby.id)) {
+  if (pv) {
     // Province rule: the province under the unit and the owner's provinces whose centre is within the
-    // capture radius; an enemy city inside adds the owner's provinces within the city radius.
-    const pv = provinces();
-    const theirs = p => p.factionId === owner;
+    // capture radius; an enemy city inside adds the owner's provinces within the city radius. Defended ones stay.
+    const theirs = p => p.factionId === owner && !defended.has(p.id);
     const ids = new Set(pv.within(lobby, unit.x, unit.y, radius, theirs).map(p => p.id));
-    const landing = pv.at(lobby.id, unit.x, unit.y);
     if (landing && theirs(landing)) ids.add(landing.id);
     for (const m of enemyCities) { for (const p of pv.within(lobby, m.x, m.y, Number(s.cityRadiusKm) || 75, theirs)) ids.add(p.id); cities.push(m); }
     owners = pv.give(lobby, [...ids], mine.id);
   } else {
     let multi = circle(lobby, unit.x, unit.y, radius);
     for (const m of enemyCities) { multi = pc.union(multi, circle(lobby, m.x, m.y, Number(s.cityRadiusKm) || 75)); cities.push(m); }
+    // Ground within the capture radius of a defender stays with its owner.
+    const reach = radius + (enemyCities.length ? (Number(s.cityRadiusKm) || 75) * 2 : 0) + radius;
+    for (const d of defenders) if (geo.distance(lobby, unit.x, unit.y, d.x, d.y) <= reach) multi = pc.difference(multi, circle(lobby, d.x, d.y, radius));
     changed = carve(lobby.id, mine.id, landClip(lobby, multi));
   }
   const flips = ownershipChanges(ownerLookup(lobby), factions, markers, lobby).filter(f => f.nation.toLowerCase() === mine.name.toLowerCase());
