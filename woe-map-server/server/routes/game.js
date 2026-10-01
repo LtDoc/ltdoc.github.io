@@ -714,7 +714,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       const numIn = (k, lo, hi) => { if (s[k] !== undefined) out[k] = clamp(num(s[k], g.settings[k]), lo, hi); };
       if (s.supplyLinkBySize && typeof s.supplyLinkBySize === 'object') {
         out.supplyLinkBySize = { ...(g.settings.supplyLinkBySize || {}) };
-        for (const k of ['capital', 'city', 'town', 'village']) if (s.supplyLinkBySize[k] !== undefined) out.supplyLinkBySize[k] = clamp(num(s.supplyLinkBySize[k], 0), 0, 5000);
+        for (const k of ['capital', 'city', 'village']) if (s.supplyLinkBySize[k] !== undefined) out.supplyLinkBySize[k] = clamp(num(s.supplyLinkBySize[k], 0), 0, 5000);
       }
       numIn('supplyTownKm', 0, 2000); numIn('supplyLinkKm', 0, 5000); numIn('supplyRangeKm', 0, 2000); numIn('hospitalKm', 0, 1000); numIn('hospitalHeal', 0, 100);
       numIn('hqKm', 0, 1000); numIn('hqBonus', 0, 10); numIn('engineerKm', 0, 1000); numIn('engineerDefend', 0, 10); numIn('signalsKm', 0, 1000); numIn('signalsArtillery', 0, 10);

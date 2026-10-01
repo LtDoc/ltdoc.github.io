@@ -4,7 +4,7 @@
  *
  * Supply is true or false per land unit, decided at End turn (and when the GM recalculates):
  *   - A Supply Column is linked when a friendly place (own or allied) is close enough for its size
- *     (supplyLinkBySize: capitals and cities 300 km, towns 200 km, villages 100 km), or when it is within
+ *     (supplyLinkBySize: capitals 300 km, cities 200 km, villages 100 km), or when it is within
  *     supplyLinkKm of open friendly railway connected to a friendly place or of another linked column.
  *   - A land unit is supplied when it is within supplyTownKm of a friendly town (garrison) or within
  *     supplyRangeKm of a linked column. A column itself is supplied when it is linked.
@@ -52,7 +52,7 @@ function friendsResolver(lobby) {
 function compute(lobby, settings, markers) {
   const s = settings || {};
   const townKm = num(s.supplyTownKm, 30), linkKm = num(s.supplyLinkKm, 150), rangeKm = num(s.supplyRangeKm, 100);
-  const bySize = { capital: 300, city: 300, town: 200, village: 100, ...(s.supplyLinkBySize || {}) };
+  const bySize = { capital: 300, city: 200, village: 100, ...(s.supplyLinkBySize || {}) };
   const feeds = t => num(bySize[t.data?.size] ?? bySize.village, 100);   // how far a place reaches a column
   const dist = (a, b) => geo.distance(lobby, a.x, a.y, b.x, b.y);
   const friendsOf = friendsResolver(lobby);

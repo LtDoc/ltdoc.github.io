@@ -12,8 +12,8 @@ Ships, aircraft and heroes do not need supply.
 - **Towns are the nodes.** A unit within **30 km** of a friendly town (its nation's or an ally's) is supplied
   directly, as a garrison.
 - **Supply Columns carry it forward.** A Supply Column (unit type *Supply / logistics*) is **linked** when a
-  friendly place is close enough for its size: **capitals and cities within 300 km, villages within 100 km**
-  (a *town* size, if one is added, reaches 200 km). A column is also linked within **150 km** of open friendly
+  friendly place is close enough for its size: **capitals within 300 km, cities within 200 km, villages within
+  100 km**. A column is also linked within **150 km** of open friendly
   **railway** connected to a friendly place (a railhead; cut or enemy-held track does not count) or of another
   linked column, so columns can chain forward.
 - **A linked column supplies** friendly land units within **100 km**: its stretch of front. A column itself is
@@ -37,7 +37,7 @@ Selecting one shows its reach on the map; its panel says what it does.
 
 | Unit | Effect | Reach |
 |---|---|---|
-| Supply / logistics (Supply Column) | supplies land units (above) | 100 km (fed from cities 300 km, villages 100 km) |
+| Supply / logistics (Supply Column) | supplies land units (above) | 100 km (fed from capitals 300 km, cities 200 km, villages 100 km) |
 | Medical / field hospital | heals damaged units by 10 % strength at each End turn (not destroyed ones) | 40 km |
 | Headquarters | +1 attack and +1 defend | 40 km |
 | Engineers, pioneers, sappers | +1 defend | 20 km |
@@ -78,7 +78,7 @@ each rule that applied. "Entrenched" means the defender has trench cover.
 
 ## Campaign rules
 
-Supply on/off · a place feeds a column within: capital (300 km), city (300 km), village (100 km) · column supplies
+Supply on/off · a place feeds a column within: capital (300 km), city (200 km), village (100 km) · column supplies
 within (100 km) · railhead / column chain (150 km) · garrison within a place (30 km) ·
 hospital heals within (40 km) and by (10 %) · HQ within (40 km) and bonus (+1) · engineers within (20 km) and
 +defend (1) · signals within (60 km) and +artillery attack (1).

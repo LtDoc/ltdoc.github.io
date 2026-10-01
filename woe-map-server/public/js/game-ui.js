@@ -564,7 +564,7 @@ const GameUI = (() => {
     set('#ruleTrenchRange', s.trenchRangeKm); set('#ruleTrenchDug', s.trenchBonusDug); set('#ruleTrenchReinforced', s.trenchBonusReinforced);
     set('#ruleCaptureRadius', s.captureRadiusKm); set('#ruleCityRadius', s.cityRadiusKm); set('#ruleOccupyNeutrals', s.occupyNeutrals);
     set('#ruleSupplyOn', s.supplyEnabled !== false); set('#ruleSupplyTown', s.supplyTownKm); set('#ruleSupplyLink', s.supplyLinkKm);
-    const lb = s.supplyLinkBySize || {}; set('#ruleLinkCapital', lb.capital ?? 300); set('#ruleLinkCity', lb.city ?? 300); set('#ruleLinkVillage', lb.village ?? 100); set('#ruleSupplyRange', s.supplyRangeKm);
+    const lb = s.supplyLinkBySize || {}; set('#ruleLinkCapital', lb.capital ?? 300); set('#ruleLinkCity', lb.city ?? 200); set('#ruleLinkVillage', lb.village ?? 100); set('#ruleSupplyRange', s.supplyRangeKm);
     set('#ruleHospitalKm', s.hospitalKm); set('#ruleHospitalHeal', s.hospitalHeal); set('#ruleHqKm', s.hqKm); set('#ruleHqBonus', s.hqBonus);
     set('#ruleEngKm', s.engineerKm); set('#ruleEngDefend', s.engineerDefend); set('#ruleSigKm', s.signalsKm); set('#ruleSigArt', s.signalsArtillery);
     set('#ruleRailSpeed', s.railSpeed); set('#ruleRailCut', s.railCutKm); set('#ruleRailDefence', s.railDefence); set('#ruleRailGuard', s.railGuardKm); set('#ruleRailRepair', s.railRepairKm); set('#ruleRailJoin', s.railJoinKm);

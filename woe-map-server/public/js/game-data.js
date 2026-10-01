@@ -70,7 +70,7 @@ const GameData = (() => {
     spyStealPerStar: 5,       // heroes: research points a successful theft takes per star
     supplyEnabled: true,      // supply (docs/UNITS.md): land units are supplied or cut off, decided at End turn
     supplyTownKm: 30,         // supply: land units this close to a friendly town are supplied directly (garrison)
-    supplyLinkBySize: { capital: 300, city: 300, town: 200, village: 100 },   // supply: a place feeds a Supply Column this close, by size
+    supplyLinkBySize: { capital: 300, city: 200, village: 100 },   // supply: a place feeds a Supply Column this close, by size
     supplyLinkKm: 150,        // supply: a Supply Column this close to a railhead or another linked column is linked too
     supplyRangeKm: 100,       // supply: a linked Supply Column supplies land units this close (its stretch of front)
     hospitalKm: 40,           // support: field hospitals heal friendly units this close at End turn…
