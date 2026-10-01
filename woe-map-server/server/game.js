@@ -31,7 +31,7 @@ const q = {
   resetUnits: db.prepare(`UPDATE markers SET data = json_remove(json_set(data, '$.movedKm', 0, '$.apUsed', 0), '$.trail'), updated_at = ? WHERE lobby_id = ? AND type IN ('unit', 'hero')`),
   clearReveals: db.prepare(`UPDATE markers SET data = json_remove(data, '$.revealTo'), updated_at = ? WHERE lobby_id = ? AND json_extract(data, '$.revealTo') IS NOT NULL`),
   setStrength: db.prepare(`UPDATE markers SET data = json_set(data, '$.strength', ?), updated_at = ? WHERE id = ?`),
-  setSupplied: db.prepare(`UPDATE markers SET data = json_set(data, '$.supplied', json(?)), updated_at = ? WHERE id = ?`),
+  setSupplied: db.prepare(`UPDATE markers SET data = json_set(data, '$.supplied', json(?), '$.supplyFrom', json(?)), updated_at = ? WHERE id = ?`),
   relations: db.prepare('SELECT * FROM relations WHERE lobby_id = ?'),
   relation: db.prepare('SELECT * FROM relations WHERE lobby_id = ? AND a = ? AND b = ?'),
   setRelation: db.prepare(`INSERT INTO relations (lobby_id, a, b, status, since_turn) VALUES (?, ?, ?, ?, ?)
@@ -422,8 +422,10 @@ function applySupply(lobby, settings, summaries) {
     const r = result.get(m.id);
     if (!r) continue;
     if (r.supplied) supplied++; else unsupplied++;
-    if ((m.data?.supplied !== false) !== r.supplied || m.data?.supplied === undefined) {
-      q.setSupplied.run(JSON.stringify(r.supplied), now(), m.id);
+    const from = r.from ? { id: r.from.id ?? null, name: r.from.name || '', kind: r.from.kind } : null;
+    const sameFrom = JSON.stringify(m.data?.supplyFrom ?? null) === JSON.stringify(from);
+    if ((m.data?.supplied !== false) !== r.supplied || m.data?.supplied === undefined || !sameFrom) {
+      q.setSupplied.run(JSON.stringify(r.supplied), JSON.stringify(from), now(), m.id);
       changed.push(m.id);
     }
     if (!r.supplied && summaries) {
@@ -526,7 +528,7 @@ function checkAttack(g, isGm, marker) {
 }
 
 /** Fields a player may not change on their own unit while the game is running. */
-const PROTECTED_UNIT_FIELDS = ['attack', 'defend', 'ap', 'range', 'movement', 'strength', 'unitType', 'nation', 'movedKm', 'apUsed', 'trail', 'supplied'];
+const PROTECTED_UNIT_FIELDS = ['attack', 'defend', 'ap', 'range', 'movement', 'strength', 'unitType', 'nation', 'movedKm', 'apUsed', 'trail', 'supplied', 'supplyFrom'];
 
 module.exports = {
   get, save, serializeGame, ensureState, serializeState, writeState, factionStates, incomeFor, endTurn, undoTurn, reports,

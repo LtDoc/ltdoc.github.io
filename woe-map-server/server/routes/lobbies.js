@@ -765,6 +765,7 @@ function sanitizeData(type, data) {
       movedKm: Math.max(0, num(d.movedKm)), apUsed: Math.max(0, num(d.apUsed)),   // game mode: used this turn
     });
     if (d.supplied === false || d.supplied === true) out.supplied = d.supplied;   // set at End turn (docs/UNITS.md)
+    if (d.supplyFrom && typeof d.supplyFrom === 'object') out.supplyFrom = { id: d.supplyFrom.id == null ? null : num(d.supplyFrom.id), name: clean(d.supplyFrom.name, 60), kind: clean(d.supplyFrom.kind, 12) };
     if (Array.isArray(d.trail)) out.trail = cleanTrail(d.trail);
   } else if (type === 'resource') {
     out.kind = GameData.byKey[d.kind] ? d.kind : 'grain';

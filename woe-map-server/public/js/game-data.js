@@ -73,6 +73,8 @@ const GameData = (() => {
     supplyLinkBySize: { capital: 600, city: 400, village: 200 },   // supply: a place feeds a Supply Column this close, by size
     supplyLinkKm: 150,        // supply: a Supply Column this close to a railhead or another linked column is linked too
     supplyRangeKm: 100,       // supply: a linked Supply Column supplies land units this close (its stretch of front)
+    convoyLinkKm: 200,        // supply: a convoy (transport ships) feeds Supply Columns this close, anywhere (invasions)
+    convoyRangeKm: 100,       // supply: a convoy supplies land units this close (a beachhead)
     hospitalKm: 40,           // support: field hospitals heal friendly units this close at End turn…
     hospitalHeal: 10,         // …by this much strength (%)
     hqKm: 40, hqBonus: 1,     // support: headquarters add attack and defend to friendly units this close

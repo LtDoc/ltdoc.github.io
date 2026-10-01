@@ -259,6 +259,7 @@
       const lb = s.supplyLinkBySize || {};
       return { km: Number(s.supplyRangeKm ?? 100), text: `supplies friendly land units within ${s.supplyRangeKm ?? 100} ${u} when linked: within ${lb.capital ?? 600} ${u} of a friendly capital, ${lb.city ?? 400} ${u} of a city, ${lb.village ?? 200} ${u} of a village, or ${s.supplyLinkKm ?? 150} ${u} of a railhead or another linked column` };
     }
+    if (id === 'transport') return { km: Number(s.convoyRangeKm ?? 100), text: `a floating supply base: supplies friendly land units within ${s.convoyRangeKm ?? 100} ${u} and feeds Supply Columns within ${s.convoyLinkKm ?? 200} ${u}, anywhere (invasions)` };
     if (id === 'medical') return { km: Number(s.hospitalKm ?? 40), text: `heals friendly units within ${s.hospitalKm ?? 40} ${u} by ${s.hospitalHeal ?? 10}% each turn` };
     if (id === 'hq') return { km: Number(s.hqKm ?? 40), text: `+${s.hqBonus ?? 1} attack and defend to friendly units within ${s.hqKm ?? 40} ${u}` };
     if (ENGINEER_IDS.includes(id)) return { km: Number(s.engineerKm ?? 20), text: `+${s.engineerDefend ?? 1} defend to friendly units within ${s.engineerKm ?? 20} ${u}` };
@@ -271,7 +272,8 @@
     const t = window.UnitTypes?.resolve(m.data?.unitType);
     const land = !t || ['Infantry', 'Mounted & mobile', 'Artillery', 'Support'].includes(t.cat);
     if (supplyOn() && land) {
-      rows += stat('Supply', m.data?.supplied === false ? 'OUT OF SUPPLY: cannot move or attack; double losses when beaten' : (m.data?.supplied === true ? 'supplied' : 'not yet worked out (End turn decides)'));
+      rows += stat('Supply', m.data?.supplied === false ? 'OUT OF SUPPLY: cannot move or attack; double losses when beaten'
+        : m.data?.supplied === true ? `supplied${supplySourceText(m.data.supplyFrom)}` : 'not yet worked out (End turn decides)');
     }
     const role = supportRole(m);
     if (role && gameOn()) rows += stat('Support', role.text + (m.data?.supplied === false ? ' (not while cut off)' : ''));
@@ -1507,7 +1509,32 @@
     const d = await api.post(`${base}/game/heroes/${m.id}/${act}`, body);
     toast(d.message || 'Done', d.intel ? 9000 : 6000);
   }
+  /** "by Paris (garrison)", "by 2nd Supply Column", "by convoy …", "from a railhead". */
+  function supplySourceText(f) {
+    if (!f) return '';
+    if (f.kind === 'rail') return ' from a railhead';
+    if (f.kind === 'place') return ` by ${f.name}`;
+    if (f.kind === 'convoy') return ` by the convoy ${f.name}`;
+    return ` by ${f.name}`;
+  }
+  /** The chain a unit's supply runs along: unit → column → column … → place, convoy or railhead. */
+  function supplyChain(m) {
+    const pts = [[m.x, m.y]];
+    let f = m.data?.supplyFrom, guard = 0;
+    while (f && f.id != null && guard++ < 30) {
+      const src = state.markers.get(f.id);
+      if (!src) break;
+      pts.push([src.x, src.y]);
+      f = src.type === 'unit' ? src.data?.supplyFrom : null;
+    }
+    return pts;
+  }
+  function syncSupplyLine(m) {
+    if (m && m.type === 'unit' && supplyOn() && m.data?.supplied === true && m.data?.supplyFrom) renderer.showSupplyLine(supplyChain(m));
+    else renderer.hideSupplyLine();
+  }
   function syncAura(m) {
+    syncSupplyLine(m);
     if (m && m.type === 'hero' && m.data?.role === 'general' && heroReady(m)) {
       const [rx, ry] = kmToWorld(m.x, m.y, Number(heroSettings().heroAuraKm ?? 60));
       renderer.showAura(m.x, m.y, rx, ry);

@@ -563,7 +563,7 @@ const GameUI = (() => {
     set('#rulePublic', s.publicTreasury); set('#ruleCapturedIdle', s.capturedIdle);
     set('#ruleTrenchRange', s.trenchRangeKm); set('#ruleTrenchDug', s.trenchBonusDug); set('#ruleTrenchReinforced', s.trenchBonusReinforced);
     set('#ruleCaptureRadius', s.captureRadiusKm); set('#ruleCityRadius', s.cityRadiusKm); set('#ruleOccupyNeutrals', s.occupyNeutrals);
-    set('#ruleSupplyOn', s.supplyEnabled !== false); set('#ruleSupplyTown', s.supplyTownKm); set('#ruleSupplyLink', s.supplyLinkKm);
+    set('#ruleSupplyOn', s.supplyEnabled !== false); set('#ruleSupplyTown', s.supplyTownKm); set('#ruleSupplyLink', s.supplyLinkKm); set('#ruleConvoyLink', s.convoyLinkKm ?? 200); set('#ruleConvoyRange', s.convoyRangeKm ?? 100);
     const lb = s.supplyLinkBySize || {}; set('#ruleLinkCapital', lb.capital ?? 600); set('#ruleLinkCity', lb.city ?? 400); set('#ruleLinkVillage', lb.village ?? 200); set('#ruleSupplyRange', s.supplyRangeKm);
     set('#ruleHospitalKm', s.hospitalKm); set('#ruleHospitalHeal', s.hospitalHeal); set('#ruleHqKm', s.hqKm); set('#ruleHqBonus', s.hqBonus);
     set('#ruleEngKm', s.engineerKm); set('#ruleEngDefend', s.engineerDefend); set('#ruleSigKm', s.signalsKm); set('#ruleSigArt', s.signalsArtillery);
@@ -632,7 +632,7 @@ const GameUI = (() => {
       capturedIdle: $('#ruleCapturedIdle').checked,
       trenchRangeKm: v('#ruleTrenchRange'), trenchBonusDug: v('#ruleTrenchDug'), trenchBonusReinforced: v('#ruleTrenchReinforced'),
       captureRadiusKm: v('#ruleCaptureRadius'), cityRadiusKm: v('#ruleCityRadius'), occupyNeutrals: $('#ruleOccupyNeutrals').checked,
-      supplyEnabled: $('#ruleSupplyOn').checked, supplyTownKm: v('#ruleSupplyTown'), supplyLinkKm: v('#ruleSupplyLink'), supplyLinkBySize: { capital: v('#ruleLinkCapital'), city: v('#ruleLinkCity'), village: v('#ruleLinkVillage') }, supplyRangeKm: v('#ruleSupplyRange'),
+      supplyEnabled: $('#ruleSupplyOn').checked, supplyTownKm: v('#ruleSupplyTown'), supplyLinkKm: v('#ruleSupplyLink'), convoyLinkKm: v('#ruleConvoyLink'), convoyRangeKm: v('#ruleConvoyRange'), supplyLinkBySize: { capital: v('#ruleLinkCapital'), city: v('#ruleLinkCity'), village: v('#ruleLinkVillage') }, supplyRangeKm: v('#ruleSupplyRange'),
       hospitalKm: v('#ruleHospitalKm'), hospitalHeal: v('#ruleHospitalHeal'), hqKm: v('#ruleHqKm'), hqBonus: v('#ruleHqBonus'),
       engineerKm: v('#ruleEngKm'), engineerDefend: v('#ruleEngDefend'), signalsKm: v('#ruleSigKm'), signalsArtillery: v('#ruleSigArt'),
       railSpeed: v('#ruleRailSpeed'), railCutKm: v('#ruleRailCut'), railDefence: v('#ruleRailDefence'), railGuardKm: v('#ruleRailGuard'), railRepairKm: v('#ruleRailRepair'), railJoinKm: v('#ruleRailJoin'),

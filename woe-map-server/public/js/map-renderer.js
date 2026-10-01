@@ -409,6 +409,7 @@ class MapRenderer extends EventTarget {
     }
     if (this.provinceLayer) this.provinceLayer.setZoom(this.scale);
     if (this._aura) this._drawAura();
+    if (this._supplyPts) this._drawSupplyLine();
     if (this.persistTrails) this.queueTrails();
     this._syncCraterZoom();
     if (this._range) { const r = this._range; this.showRange(r.x, r.y, r.radius, r.exhausted, r.ry); }
@@ -1090,6 +1091,28 @@ class MapRenderer extends EventTarget {
     g.visible = true;
     this.invalidate();
   }
+  /** A selected unit's supply chain: a dashed amber line through its columns back to the source. */
+  showSupplyLine(points) {
+    if (!this._supplyG) { this._supplyG = new PIXI.Graphics(); this._supplyG.eventMode = 'none'; this.overlayLayer.addChildAt(this._supplyG, 0); }
+    this._supplyPts = points;
+    this._drawSupplyLine();
+  }
+  _drawSupplyLine() {
+    const g = this._supplyG, pts = this._supplyPts, s = this.scale;
+    if (!g || !pts) return;
+    g.clear();
+    if (pts.length < 2) { g.visible = false; return; }
+    const dash = 9 / s, gap = 6 / s;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [ax, ay] = pts[i], [bx, by] = pts[i + 1], L = Math.hypot(bx - ax, by - ay) || 1, ux = (bx - ax) / L, uy = (by - ay) / L;
+      for (let d = 0; d < L; d += dash + gap) { const e = Math.min(L, d + dash); g.moveTo(ax + ux * d, ay + uy * d).lineTo(ax + ux * e, ay + uy * e); }
+    }
+    g.stroke({ width: 2.4 / s, color: 0xf5b041, alpha: 0.9 });
+    for (const [x, y] of pts.slice(1)) g.circle(x, y, 4 / s).fill({ color: 0xf5b041, alpha: 0.9 });
+    g.visible = true;
+    this.invalidate();
+  }
+  hideSupplyLine() { this._supplyPts = null; if (this._supplyG && this._supplyG.visible) { this._supplyG.visible = false; this.invalidate(); } }
   hideAura() { this._aura = null; if (this._auraG && this._auraG.visible) { this._auraG.visible = false; this.invalidate(); } }
 
   // ---- Movement trails (game mode) --------------------------------------------------
