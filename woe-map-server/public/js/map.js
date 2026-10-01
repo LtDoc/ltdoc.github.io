@@ -324,15 +324,19 @@
     const tol = 16 / renderer.scale;
     return reachSegs.some(([x1, y1, x2, y2]) => RailNet.project([[x1, y1], [x2, y2]], x, y).d2 <= tol * tol);
   }
-  renderer.onMapClick = (x, y) => {
-    if (state.placing || renderer.mode) return false;
+  // Left-click selects; right-click on the map sends the selection there. Right-click on a unit opens its panel.
+  renderer.addEventListener('mapcontext', e => {
+    const { x, y } = e.detail;
+    if (state.placing || renderer.mode) return;
     const ms = movers();
-    if (ms) { const c = ms.list.find(cutOff); if (c) { toast(`${c.name} is out of supply and cannot move until a Supply Column reaches it`); return false; } }
-    if (!ms || !insideReach(ms, x, y)) return false;           // outside the ring: an ordinary click (deselect)
+    if (!ms) return;
+    const c = ms.list.find(cutOff);
+    if (c) { toast(`${c.name} is out of supply and cannot move until a Supply Column reaches it`); return; }
+    if (ms.remaining <= 0.01) { toast(`${ms.list.length > 1 ? 'The slowest of them' : ms.lead.name} has no movement left this turn`); return; }
+    if (!insideReach(ms, x, y)) { toast(`Out of reach: ${ms.list.length > 1 ? 'the group' : ms.lead.name} can still go ${fmtNum(ms.remaining)} ${state.lobby?.scaleLabel || 'km'} this turn (inside the green ring or along the green track)`); return; }
     if (ms.list.length === 1) commitMove({ id: ms.lead.id, x, y });
     else commitMove({ id: ms.lead.id, moves: ms.list.map(m => ({ id: m.id, x: m.x + (x - ms.lead.x), y: m.y + (y - ms.lead.y) })) });
-    return true;
-  };
+  });
 
   // ---- GM pings ---------------------------------------------------------------------------------------
   const pingGo = document.createElement('button');
@@ -379,11 +383,11 @@
     const sel = e.detail.id != null ? state.markers.get(e.detail.id) : null;
     if (sel && PANEL_ON_RIGHT.includes(sel.type) && state.panelFor !== sel.id && !panelHinted) {
       panelHinted = true;
-      toast('Right-click a unit to open its panel', 2600);
+      toast(rulesOn() ? 'Right-click the map to move it there · right-click a unit for its panel' : 'Right-click a unit to open its panel', 3200);
     }
     renderPopup(); highlightList();
     updateMoveRange();
-    if (state.selectedIds.length > 1) toast(`${state.selectedIds.length} tokens selected: ${rulesOn() ? 'click inside the ring to move them together' : 'drag any of them to move the group'}`, 1800);
+    if (state.selectedIds.length > 1) toast(`${state.selectedIds.length} tokens selected: ${rulesOn() ? 'right-click inside the ring to move them together' : 'drag any of them to move the group'}`, 1800);
   });
   renderer.addEventListener('mode', e => {
     $('#btnSelect').classList.toggle('active', e.detail.mode === 'select');

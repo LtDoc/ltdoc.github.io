@@ -67,13 +67,14 @@ API: `POST /api/lobbies/:id/pings` (GM), `GET /pings`; WebSocket `ping`.
 
 ## Moving units (game mode)
 
-- **Panels open on right-click.** A left-click on a unit or hero only selects it (for moving); right-click it,
-  or pick it from the sidebar list or the Nation tab, to open its panel. Other markers open on a left-click as before.
-- **Click to move.** Click one of your units or heroes: a green ring shows how far it can still go this turn
-  (an ellipse on the Earth map, where north–south and east–west kilometres differ), plus any railway track it
-  can reach. Click inside the ring, or on highlighted track, to send it there. Clicking outside the ring
-  deselects as usual. A selected group (box or Shift-click) moves together to the clicked point, keeping its
-  shape, limited by its slowest member.
+- **Left-click selects, right-click moves.** Left-click one of your units or heroes: a green ring shows how far
+  it can still go this turn (an ellipse on the Earth map, where north–south and east–west kilometres differ),
+  plus any railway track it can reach. **Right-click** the map inside the ring, or on highlighted track, to send
+  it there; it stays selected so you can move it again. A right-click outside the ring says how far it can
+  still go. A selected group (box or Shift-click) moves together to the point, keeping its shape, limited by its
+  slowest member. Right-click and drag still pans the map; left-click on empty map deselects.
+- **Panels open on right-click.** Right-click a unit or hero (or pick it from the sidebar list or the Nation
+  tab) to open its panel. Other markers open on a left-click as before.
 - Players no longer drag units or heroes while the game is running; the GM still can, to place things anywhere.
   Towns, resources and other markers drag as before, and outside game mode (or with movement limits waived)
   everything drags as it used to.

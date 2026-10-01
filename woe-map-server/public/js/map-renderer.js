@@ -701,6 +701,12 @@ class MapRenderer extends EventTarget {
   }
 
   _shapePointer(id, e) {
+    if (e.button === 2 && !this.mode) {
+      e.stopPropagation();
+      const p = this.screenToWorld(e.global.x, e.global.y);
+      this.dispatchEvent(new CustomEvent('mapcontext', { detail: { x: p.x, y: p.y } }));
+      return;
+    }
     if (e.button !== 0) return;
     if (this.mode) { this._modeClick(e); e.stopPropagation(); return; }
     e.stopPropagation();
@@ -1546,6 +1552,9 @@ class MapRenderer extends EventTarget {
           if (this.onMapClick && this.onMapClick(p.x, p.y)) return;
           this.select(null);
           this.dispatchEvent(new CustomEvent('mapclick', { detail: { x: p.x, y: p.y } }));
+        } else if (!pan.moved && pan.button === 2 && !this.mode) {
+          const p = this.screenToWorld(e.global.x, e.global.y);
+          this.dispatchEvent(new CustomEvent('mapcontext', { detail: { x: p.x, y: p.y } }));
         }
       }
       if (this._drag) {

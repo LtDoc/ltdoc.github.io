@@ -361,7 +361,8 @@ design is in `docs/GAME-DESIGN.md`.
   locked by default like towns. Ownership by territory arrives in phase 2; until then the GM sets it.
 - **Movement.** A unit may move `movement × distance per movement point` per turn (50 km by default on the
   Earth map, map units elsewhere). Click a unit or hero to see a green ring of how far it may still go
-  this turn, then click inside it to move there (players no longer drag units in game mode; the GM still can).
+  this turn, then right-click the map inside it to move there (players no longer drag units in game mode; the GM
+still can).
   Each move leaves a trail in the unit's colour until End turn. A formation moves as one and is limited
   by its slowest unit. Units that have moved carry an amber dot (red when their allowance is spent). The GM
   is never limited, and a rule switch waives the limits for everyone.
@@ -614,7 +615,8 @@ All persistent changes go through the REST API, which validates, records history
 `Z` undo last point · `Enter` finish drawing · right-click a vertex to remove it ·
 Shift-drag a selected drawing to move it · `G` grid · `F` fit ·
 `Esc` cancel/close · `Delete` delete selected marker or drawing (if allowed) · wheel to zoom · drag empty map to pan ·
-drag a marker to move it (if allowed; in game mode click a unit, then click inside its ring) · right-click a unit or hero for its panel · `R` railway ·
+drag a marker to move it (if allowed; in game mode left-click a unit to select it, then right-click the map inside
+its ring to move it there) · right-click a unit or hero for its panel · `R` railway ·
 `P` ping (GM).
 
 ## How it is put together
