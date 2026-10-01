@@ -15,6 +15,11 @@
  * dragend {id,x,y}, zoom {scale}, measure {px,points}|null, drawprogress {kind,points}|null,
  * drawend {kind,points}, frame.
  */
+/** Stable pseudo-random number in [0, 1) from two numbers. */
+function hash01(a, b) { const v = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453; return v - Math.floor(v); }
+/** Smooth wandering value in about [0, 1] (sum of incommensurate sines), for bursts and lulls. */
+function smooth(x) { return 0.5 + 0.25 * Math.sin(x) + 0.15 * Math.sin(x * 2.31 + 1.7) + 0.1 * Math.sin(x * 5.13 + 0.4); }
+
 /** Slice a sprite sheet laid out as one row of square frames. */
 function rowFrames(tex) {
   const fw = tex.height, n = Math.max(1, Math.round(tex.width / fw)), out = [];
@@ -1179,41 +1184,69 @@ class MapRenderer extends EventTarget {
       if (b.kind === 'gunfire') {
         if (!gunZoom || !(onScreen(ax, ay, margin * 3) || onScreen(dx, dy, margin * 3) || onScreen((ax + dx) / 2, (ay + dy) / 2, L / 2 + margin))) continue;
         anim = true;
-        // A regiment engaging along a line: riflemen spread across a front perpendicular to the line of fire,
-        // each sending rounds at a point along the enemy's front. Fronts are sized on screen so they read at any zoom.
+        // A regiment engaging along a line: riflemen spread across a front perpendicular to the line of fire.
+        // Every round is a shot fired at a moment in the past, so it keeps the heading it was fired on while the
+        // sections of the line sweep their aim along the enemy's front, fire in bursts and lulls, and now and
+        // then loose a volley together. Sizes are on screen so it reads at any zoom.
         const r0 = Math.min(L * 0.25, 14 / s), r1 = Math.min(L * 0.25, 10 / s);
         const sx = ax + ux * r0, sy = ay + uy * r0, ex = dx - ux * r1, ey = dy - uy * r1;
         const span = Math.max(1e-6, Math.hypot(ex - sx, ey - sy));
         const front = Math.max(70, Math.min(190, span * s * 0.9)) / s;      // own firing line (world units)
         const enemyFront = front * 0.75;
         const rifles = Math.max(10, Math.min(28, Math.round(front * s / 7)));
-        const speed = 460 / s;                                              // world units per second (screen-constant)
-        const seg = 12 / s, w = 1.8 / s;
-        // The firing line itself: a faint haze of powder smoke along the front.
-        g.moveTo(sx - nx * front / 2, sy - ny * front / 2).lineTo(sx + nx * front / 2, sy + ny * front / 2).stroke({ width: 7 / s, color: 0xe8e4da, alpha: 0.12, cap: 'round' });
+        const sections = Math.max(2, Math.round(rifles / 7));
+        const baseSpeed = 460 / s;                                          // world units per second (screen-constant)
+        const w = 1.8 / s;
+        const seed = e.seed;
+        // The firing line itself: a haze of powder smoke along the front that thickens and thins.
+        const haze = 0.08 + 0.08 * smooth(t * 0.3 + seed);
+        g.moveTo(sx - nx * front / 2, sy - ny * front / 2).lineTo(sx + nx * front / 2, sy + ny * front / 2).stroke({ width: 8 / s, color: 0xe8e4da, alpha: haze, cap: 'round' });
+        // Volleys: every 7–11 s the whole line fires together for a moment.
+        const volleyPeriod = 7 + hash01(seed, 1) * 4;
+        const volleyAt = tf => ((tf / volleyPeriod) % 1 + 1) % 1 < 0.06 ? 1 : 0;
         for (let i = 0; i < rifles; i++) {
-          const k = (e.seed + i * 7919) % 1000 / 1000, k2 = (e.seed * 3 + i * 104729) % 1000 / 1000;   // stable per rifle
+          const k = hash01(seed, i * 3 + 11), k2 = hash01(seed, i * 3 + 12), k3 = hash01(seed, i * 3 + 13);   // stable per rifle
+          const sec = Math.min(sections - 1, Math.floor(i * sections / rifles));
           const o = ((i + 0.5) / rifles - 0.5) * front + (k - 0.5) * front / rifles;   // place on our front
-          const oT = (o / front) * enemyFront + (k2 - 0.5) * enemyFront * 0.35;        // aim on their front
           const fx = sx + nx * o - ux * k2 * 4 / s, fy = sy + ny * o - uy * k2 * 4 / s; // ragged line
-          const tx = ex + nx * oT, ty = ey + ny * oT;
-          const dxl = tx - fx, dyl = ty - fy, ll = Math.max(1e-6, Math.hypot(dxl, dyl)), vx = dxl / ll, vy = dyl / ll;
-          // Each rifle fires in bursts: one or two rounds in flight at a time.
-          for (let r = 0; r < 2; r++) {
-            const p = ((t * speed / ll) + k * 3.1 + r * 0.5) % 1;
-            if (r === 1 && k2 < 0.45) continue;
-            const px = fx + dxl * p, py = fy + dyl * p;
-            g.moveTo(px, py).lineTo(px + vx * seg, py + vy * seg).stroke({ width: w * 2.6, color: 0xffb347, alpha: 0.22 });   // glow
-            g.moveTo(px, py).lineTo(px + vx * seg, py + vy * seg).stroke({ width: w, color: 0xfff0a0, alpha: 0.95 });
+          const period = 0.32 + k3 * 0.55;                                              // this rifle's cadence
+          const phase = k * period;
+          // Where on the enemy's front this rifle aims at time tf: its share of the front, swept by its section.
+          const sweepW = 0.25 + 0.45 * hash01(seed, 200 + sec), sweepF = 0.25 + 0.5 * hash01(seed, 300 + sec), sweepP = hash01(seed, 400 + sec) * 6.28;
+          const aim = tf => (o / front) * enemyFront * 0.7 + Math.sin(tf * sweepF + sweepP) * enemyFront * sweepW * 0.5 + (k2 - 0.5) * enemyFront * 0.2;
+          // Section activity: bursts and lulls (0..1), full during a volley.
+          const active = tf => Math.max(volleyAt(tf), Math.min(1, Math.max(0, smooth(tf * 0.45 + sec * 3.7 + seed) * 1.5 - 0.35)));
+          const flight = span / baseSpeed;
+          const last = Math.floor((t - phase) / period);
+          let flashed = false;
+          for (let j = last; j >= last - 6; j--) {
+            const tf = j * period + phase;                                              // when this shot was fired
+            const age = t - tf;
+            if (age < 0) continue;
+            if (age > flight * 1.3 + 0.6) break;
+            if (hash01(seed + j * 0.37, i) > active(tf)) continue;                       // this shot was not fired
+            const hs = hash01(j, i + seed);                                             // per-shot variation
+            const sp = baseSpeed * (0.82 + hs * 0.36);
+            const oT = aim(tf) + (hs - 0.5) * enemyFront * 0.08;
+            const tx = ex + nx * oT, ty = ey + ny * oT;
+            const dxl = tx - fx, dyl = ty - fy, ll = Math.max(1e-6, Math.hypot(dxl, dyl)), vx = dxl / ll, vy = dyl / ll;
+            const T = ll / sp;
+            if (age <= T) {
+              const p = age / T, seg = (8 + hs * 9) / s;
+              const px = fx + dxl * p, py = fy + dyl * p;
+              const core = hs < 0.15 ? 0xffd2a0 : hs > 0.9 ? 0xffffff : 0xfff0a0;     // a few redder or whiter rounds
+              g.moveTo(px, py).lineTo(px + vx * seg, py + vy * seg).stroke({ width: w * 2.6, color: 0xffb347, alpha: 0.2 });   // glow
+              g.moveTo(px, py).lineTo(px + vx * seg, py + vy * seg).stroke({ width: w * (0.8 + hs * 0.4), color: core, alpha: 0.95 });
+              if (age < 0.06 && !flashed) {                                            // muzzle flash on the shot
+                flashed = true;
+                const fl = (3 + hs * 2) / s;
+                g.poly([fx + vx * fl * 2, fy + vy * fl * 2, fx + nx * fl * 0.6, fy + ny * fl * 0.6, fx - nx * fl * 0.6, fy - ny * fl * 0.6]).fill({ color: 0xfff3b0, alpha: 0.95 });
+              }
+            } else {
+              const q = (age - T) / 0.6;                                               // dust where it landed
+              if (q < 1) g.circle(tx + vx * q * 3 / s, ty + vy * q * 3 / s, (1.2 + q * 5 * (0.6 + hs * 0.8)) / s).fill({ color: 0xd8d2c4, alpha: 0.45 * (1 - q) });
+            }
           }
-          // Muzzle flashes ripple along the line.
-          if (Math.sin(t * 19 + i * 2.7 + k * 6) > 0.7) {
-            const f = 3.6 / s;
-            g.poly([fx + vx * f * 2, fy + vy * f * 2, fx + nx * f * 0.6, fy + ny * f * 0.6, fx - nx * f * 0.6, fy - ny * f * 0.6]).fill({ color: 0xfff3b0, alpha: 0.95 });
-          }
-          // Dust kicked up along the enemy's front.
-          const q = (t * 1.5 + k * 1.7) % 1;
-          if (q < 0.45) g.circle(tx + vx * q * 3 / s, ty + vy * q * 3 / s, (1.4 + q * 5) / s).fill({ color: 0xd8d2c4, alpha: 0.5 * (1 - q / 0.45) });
         }
       } else {
         // Shelling: visible wherever the target token is (above 100 %), bursts at random around it.

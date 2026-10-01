@@ -548,8 +548,10 @@ notes "guns out of reach of the reply"); it still takes the winner's loss when i
 `GET /api/lobbies/:id/battles`, WebSocket `battle`; hidden fights only for the GM and the attacking player).
 Infantry and other direct-fire attackers show **gunfire**: a regiment's firing line (a ragged front of riflemen
 as wide as the gap between the units, 70–190 px on screen) sending tracers at points along the enemy's front,
-with muzzle flashes rippling along the line, a haze of powder smoke and dust where rounds land; drawn (no
-sprites) and visible from 800 % zoom.
+with muzzle flashes on each shot, a haze of powder smoke and dust where rounds land. Each round keeps the
+heading it was fired on while sections of the line sweep their aim along the enemy front, fire in bursts and
+lulls at their own cadence, and every 7–11 s loose a volley together; tracer speed, length and colour vary
+shot to shot. Drawn (no sprites), visible from 800 % zoom.
 **Artillery** (and ships) **shell** the target instead: bursts from `public/assets/shellburst.png` land at random
 around it every second or two, each after a flash at the guns pointing at the target. Each bombardment also leaves
 **4–5 craters** around the target, picked from the crater sheet (`rob assets/tile-B-04.png`, atlas `misc-04`;
