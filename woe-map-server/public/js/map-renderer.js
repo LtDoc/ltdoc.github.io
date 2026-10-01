@@ -2186,6 +2186,25 @@ class MarkerView {
     this.r.invalidate();
     const m = this.marker;
     const wrecked = m.type === 'unit' && Number(m.data?.strength ?? 100) <= 0;
+    // A unit that surrendered for want of supply flies a white flag instead of burning.
+    const surrendered = wrecked && m.data?.surrendered === true;
+    if (surrendered) {
+      if (this.fire) { this.root.removeChild(this.fire); this.fire.destroy(); this.fire = null; }
+      if (!this.whiteFlag) {
+        const g = new PIXI.Graphics();
+        g.eventMode = 'none';
+        // Pole, then a white flag with a ragged, wind-caught fly.
+        g.moveTo(0, 0).lineTo(0, -34).stroke({ width: 2.4, color: 0x6e4b2a });
+        g.circle(0, -35, 1.8).fill(0x8a6a44);
+        g.poly([1, -33, 9, -35, 17, -32, 24, -34, 22, -27, 25, -21, 17, -23, 9, -20, 1, -22]).fill({ color: 0xffffff, alpha: 0.97 }).stroke({ width: 1, color: 0x9a9a9a, alpha: 0.9 });
+        g.moveTo(8, -31).lineTo(14, -24).stroke({ width: 0.8, color: 0xd0d0d0, alpha: 0.9 });
+        g.position.set(this.w / 2 - 6, -this.h / 2 + 4);
+        this.whiteFlag = g;
+        this.root.addChild(g);
+      }
+      return;
+    }
+    if (this.whiteFlag) { this.root.removeChild(this.whiteFlag); this.whiteFlag.destroy(); this.whiteFlag = null; }
     if (!wrecked || !this.r.burningFrames) {
       if (this.fire) { this.root.removeChild(this.fire); this.fire.destroy(); this.fire = null; }
       return;

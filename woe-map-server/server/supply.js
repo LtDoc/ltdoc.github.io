@@ -174,7 +174,7 @@ function healing(lobby, settings, markers) {
   const hospitals = markers.filter(m => m.type === 'unit' && typeId(m) === 'medical' && working(m));
   const out = [];
   for (const u of markers) {
-    if (!needsSupply(u) || !alive(u)) continue;
+    if (!needsSupply(u) || !alive(u) || u.data?.supplied === false) continue;   // no medicine reaches a cut-off unit
     const from = num(u.data?.strength, 100);
     if (from >= 100) continue;
     const friends = friendsOf(u.data?.nation);

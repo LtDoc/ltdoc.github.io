@@ -413,12 +413,13 @@ still can).
 
 ### Supply, support units and matchups (game mode)
 
-Land units are **supplied or cut off**, worked out at End turn: places supply units within 30 km, and **Supply
+Land units are **supplied or cut off**, kept up to date live as units, places and railways change: places supply units within 30 km, and **Supply
 Columns** supply units within 100 km once linked (fed by a friendly capital within 600 km, a city within 400 km,
 a village within 200 km, or a railhead or another linked column within 150 km, so columns can be strung out
 far from home). **Convoys** (transport ships) supply troops within 100 km and feed columns within 200 km anywhere,
 so invasions can be supplied; selecting a unit draws its supply line back to its source.
-A cut-off unit (red badge) cannot move or attack and takes double losses when beaten. **Field hospitals** heal
+A cut-off unit (red badge) cannot move or attack and takes double losses when beaten; from its second End turn
+cut off it loses a quarter of its remaining strength each turn and below 10 % surrenders under a white flag. **Field hospitals** heal
 units around them each turn, **HQs** add attack and defend, **engineers** add defend and **signals** help
 artillery. **Matchups** add strengths and weaknesses to attacks: cavalry is weak against entrenched troops and
 machine guns but strong against artillery, tanks break wire and machine guns, anti-aircraft hits aircraft,

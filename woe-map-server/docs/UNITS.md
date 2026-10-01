@@ -23,14 +23,20 @@ Ships, aircraft and heroes do not need supply.
   columns carries supply as far from a place, railhead or convoy as you like (each one supplies its own 100 km).
 - **A linked column supplies** friendly land units within **100 km**: its stretch of front. A column itself is
   supplied when linked.
-- **When:** supply is worked out at **End turn** for the coming turn (and when game mode is switched on, and
-  when the GM presses **Recalculate supply now**). It holds for the whole turn, so moving a column up takes
-  effect at the next End turn. Units placed mid-turn count as supplied until then.
+- **Live:** supply is recomputed whenever something that can move a supply line changes (a unit or place is
+  moved, created, removed or changes hands, a railway is cut or repaired, war or an alliance changes) and every
+  open map gets the new status at once. Bringing a column up frees cut-off units the same turn, so they can
+  move and fight again. End turn, switching game mode on and **Recalculate supply now** also recompute it.
 
 A **cut-off** unit:
 - cannot move (the move is refused; clicking it shows a red ring and says why);
 - cannot attack or sabotage railways;
-- takes **double losses** when an attack on it succeeds.
+- takes **double losses** when an attack on it succeeds;
+- gets no healing from field hospitals or medical tech;
+- suffers **attrition** at End turn: the first End turn cut off costs nothing; from the second on it loses
+  **25 %** of its remaining strength each turn (100 → 75 → 56 → 42 …); below **10 %** it **surrenders**:
+  strength 0, a **white flag** over the counter instead of smoke. Its panel counts the turns cut off; turn
+  reports list the strength lost and any surrender. Getting supply back resets the count.
 
 It shows a red no-entry badge and is slightly dimmed; its panel says "OUT OF SUPPLY". A supplied unit's panel
 says where its supply comes from ("supplied by 2nd Supply Column"), and selecting it draws its supply line: a
@@ -88,6 +94,6 @@ each rule that applied. "Entrenched" means the defender has trench cover.
 
 Supply on/off · a place feeds a column within: capital (600 km), city (400 km), village (200 km) · column supplies
 within (100 km) · railhead / column chain (150 km) · garrison within a place (30 km) · convoy feeds columns within (200 km) ·
-convoy supplies units within (100 km) ·
+convoy supplies units within (100 km) · attrition (25 % a turn from the 2nd turn cut off) · surrenders below (10 %) ·
 hospital heals within (40 km) and by (10 %) · HQ within (40 km) and bonus (+1) · engineers within (20 km) and
 +defend (1) · signals within (60 km) and +artillery attack (1).

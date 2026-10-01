@@ -272,8 +272,11 @@
     const t = window.UnitTypes?.resolve(m.data?.unitType);
     const land = !t || ['Infantry', 'Mounted & mobile', 'Artillery', 'Support'].includes(t.cat);
     if (supplyOn() && land) {
-      rows += stat('Supply', m.data?.supplied === false ? 'OUT OF SUPPLY: cannot move or attack; double losses when beaten'
-        : m.data?.supplied === true ? `supplied${supplySourceText(m.data.supplyFrom)}` : 'not yet worked out (End turn decides)');
+      const st = state.game?.settings || {}, cutTurns = Number(m.data?.unsuppliedTurns) || 0;
+      rows += stat('Supply', m.data?.surrendered && Number(m.data?.strength ?? 100) <= 0 ? '⚑ SURRENDERED for want of supply'
+        : m.data?.supplied === false
+          ? `OUT OF SUPPLY${cutTurns ? ` for ${cutTurns} turn${cutTurns === 1 ? '' : 's'}` : ''}: cannot move or attack; double losses when beaten; ${cutTurns >= 1 ? `loses ${st.attritionRate ?? 25}% strength at the next End turn` : `attrition (${st.attritionRate ?? 25}% a turn) starts at the second End turn cut off`}, surrenders below ${st.attritionDisbandBelow ?? 10}%`
+          : m.data?.supplied === true ? `supplied${supplySourceText(m.data.supplyFrom)}` : 'not yet worked out');
     }
     const role = supportRole(m);
     if (role && gameOn()) rows += stat('Support', role.text + (m.data?.supplied === false ? ' (not while cut off)' : ''));

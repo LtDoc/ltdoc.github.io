@@ -31,6 +31,8 @@ const q = {
   resetUnits: db.prepare(`UPDATE markers SET data = json_remove(json_set(data, '$.movedKm', 0, '$.apUsed', 0), '$.trail'), updated_at = ? WHERE lobby_id = ? AND type IN ('unit', 'hero')`),
   clearReveals: db.prepare(`UPDATE markers SET data = json_remove(data, '$.revealTo'), updated_at = ? WHERE lobby_id = ? AND json_extract(data, '$.revealTo') IS NOT NULL`),
   setStrength: db.prepare(`UPDATE markers SET data = json_set(data, '$.strength', ?), updated_at = ? WHERE id = ?`),
+  markerOne: db.prepare('SELECT * FROM markers WHERE id = ?'),
+  setAttrition: db.prepare(`UPDATE markers SET data = json_set(data, '$.strength', ?, '$.unsuppliedTurns', ?, '$.surrendered', json(?)), updated_at = ? WHERE id = ?`),
   setSupplied: db.prepare(`UPDATE markers SET data = json_set(data, '$.supplied', json(?), '$.supplyFrom', json(?)), updated_at = ? WHERE id = ?`),
   relations: db.prepare('SELECT * FROM relations WHERE lobby_id = ?'),
   relation: db.prepare('SELECT * FROM relations WHERE lobby_id = ? AND a = ? AND b = ?'),
@@ -326,7 +328,7 @@ function endTurn(lobby, hooks = {}) {
       // Recovery: damaged units heal when the faction has medical services.
       const fx = research.effectsFor(techs, state.techs || []);
       if (fx.recover > 0) {
-        for (const u of markers.filter(m => m.type === 'unit' && String(m.data?.nation || '').toLowerCase() === faction.name.toLowerCase() && num(m.data.strength, 100) > 0 && num(m.data.strength, 100) < 100)) {
+        for (const u of markers.filter(m => m.type === 'unit' && String(m.data?.nation || '').toLowerCase() === faction.name.toLowerCase() && num(m.data.strength, 100) > 0 && num(m.data.strength, 100) < 100 && m.data?.supplied !== false)) {   // cut-off units get no medical care
           const st = Math.min(100, num(u.data.strength, 100) + fx.recover);
           q.setStrength.run(st, now(), u.id); u.data.strength = st;
         }
@@ -379,6 +381,14 @@ function endTurn(lobby, hooks = {}) {
       const s = summaries.find(x => x.faction.id === hit.faction.id);
       if (s) s.data.shortages.push({ resource: hit.resource, units: hit.units });
     }
+    // Supply is kept live; make sure it is current, then cut-off units suffer attrition (docs/UNITS.md).
+    if (g.settings.supplyEnabled !== false) {
+      applySupply(lobby, g.settings);
+      for (const a of applyAttrition(lobby, g.settings, summaries)) {
+        const u = markers.find(m => m.id === a.id);
+        if (u) { u.data.strength = a.to; u.data.supplied = false; }
+      }
+    }
     // Field hospitals heal damaged friendly units around them (docs/UNITS.md).
     const supply = require('./supply');
     for (const h of supply.healing(lobby, g.settings, markers)) {
@@ -401,6 +411,11 @@ function endTurn(lobby, hooks = {}) {
     // One report per faction, kept for the last 60 turns, for the turn report modal.
     for (const s of summaries) {
       if (s.data.healed?.length) s.text += `, field hospitals restored ${s.data.healed.length} unit${s.data.healed.length === 1 ? '' : 's'}`;
+      if (s.data.attrition?.length) {
+        const gone = s.data.attrition.filter(a => a.surrendered), worn = s.data.attrition.filter(a => !a.surrendered);
+        if (worn.length) s.text += `, attrition (out of supply): ${worn.slice(0, 6).map(a => `${a.name} ${a.from}→${a.to}%`).join(', ')}${worn.length > 6 ? ', …' : ''}`;
+        if (gone.length) s.text += `, ⚑ surrendered for want of supply: ${gone.map(a => a.name).join(', ')}`;
+      }
       if (s.data.unsupplied?.length) s.text += `, ${s.data.unsupplied.length} unit${s.data.unsupplied.length === 1 ? '' : 's'} out of supply (${s.data.unsupplied.slice(0, 6).join(', ')}${s.data.unsupplied.length > 6 ? ', …' : ''})`;
       q.insertReport.run(lobby.id, ended.turn, s.faction.id, JSON.stringify({ ...s.data, turn: ended.turn, date: ended.date, nextDate: g.date, text: s.text }), now());
     }
@@ -417,7 +432,7 @@ function applySupply(lobby, settings, summaries) {
   const markers = q.markers.all(lobby.id).map(access.serializeMarker);
   const result = require('./supply').compute(lobby, settings, markers);
   let supplied = 0, unsupplied = 0;
-  const changed = [];
+  const changed = [], changes = [];
   for (const m of markers) {
     const r = result.get(m.id);
     if (!r) continue;
@@ -427,13 +442,44 @@ function applySupply(lobby, settings, summaries) {
     if ((m.data?.supplied !== false) !== r.supplied || m.data?.supplied === undefined || !sameFrom) {
       q.setSupplied.run(JSON.stringify(r.supplied), JSON.stringify(from), now(), m.id);
       changed.push(m.id);
+      changes.push({ before: m, after: access.serializeMarker(q.markerOne.get(m.id)) });
     }
     if (!r.supplied && summaries) {
       const s = summaries.find(x => x.faction.name.toLowerCase() === String(m.data?.nation || '').toLowerCase());
       if (s) (s.data.unsupplied = s.data.unsupplied || []).push(m.name);
     }
   }
-  return { supplied, unsupplied, changed };
+  return { supplied, unsupplied, changed, changes, result };
+}
+
+/**
+ * Attrition at End turn: a land unit still cut off counts its turns without supply. The first costs nothing;
+ * from the second on it loses attritionRate % of its remaining strength each turn, and below
+ * attritionDisbandBelow % it surrenders (strength 0, white flag). Supplied units start counting again.
+ */
+function applyAttrition(lobby, settings, summaries) {
+  const rate = Number(settings.attritionRate ?? 25) / 100, floor = Number(settings.attritionDisbandBelow ?? 10);
+  const out = [];
+  for (const m of q.markers.all(lobby.id).map(access.serializeMarker)) {
+    if (m.type !== 'unit' || m.data?.supplied === undefined || num(m.data?.strength, 100) <= 0) continue;
+    if (!require('./supply').needsSupply(m)) continue;
+    if (m.data.supplied !== false) {
+      if (num(m.data.unsuppliedTurns)) q.setAttrition.run(num(m.data.strength, 100), 0, 'false', now(), m.id);
+      continue;
+    }
+    const turns = num(m.data.unsuppliedTurns) + 1;
+    const from = num(m.data.strength, 100);
+    let to = from, surrendered = false;
+    if (turns >= 2 && rate > 0) {
+      to = Math.round(from * (1 - rate));
+      if (to < floor) { to = 0; surrendered = true; }
+    }
+    q.setAttrition.run(to, turns, surrendered ? 'true' : 'false', now(), m.id);
+    const s = summaries && summaries.find(x => x.faction.name.toLowerCase() === String(m.data?.nation || '').toLowerCase());
+    if (s && to < from) (s.data.attrition = s.data.attrition || []).push({ name: m.name, from, to, turns, surrendered });
+    out.push({ id: m.id, name: m.name, nation: m.data?.nation, from, to, turns, surrendered });
+  }
+  return out;
 }
 
 /** Turn reports of one ended turn (the latest when turn is omitted): [{ turn, factionId, data }]. */
@@ -528,11 +574,11 @@ function checkAttack(g, isGm, marker) {
 }
 
 /** Fields a player may not change on their own unit while the game is running. */
-const PROTECTED_UNIT_FIELDS = ['attack', 'defend', 'ap', 'range', 'movement', 'strength', 'unitType', 'nation', 'movedKm', 'apUsed', 'trail', 'supplied', 'supplyFrom'];
+const PROTECTED_UNIT_FIELDS = ['attack', 'defend', 'ap', 'range', 'movement', 'strength', 'unitType', 'nation', 'movedKm', 'apUsed', 'trail', 'supplied', 'supplyFrom', 'unsuppliedTurns', 'surrendered'];
 
 module.exports = {
   get, save, serializeGame, ensureState, serializeState, writeState, factionStates, incomeFor, endTurn, undoTurn, reports,
-  checkMove, checkAttack, checkRange, attackRange, PROTECTED_UNIT_FIELDS, emptyResources, q, applySupply,
+  checkMove, checkAttack, checkRange, attackRange, PROTECTED_UNIT_FIELDS, emptyResources, q, applySupply, applyAttrition,
   relationStatus, setRelation, relations, diplomacy, serializeDiplomacy, factionEffects,
   TRADE_KEYS, trades, serializeTrade, exchange, shortOf, goodsText, goodName, cancelTradesBetween,
 };

@@ -18,7 +18,7 @@ const research = require('../research');
 const UnitTypes = require('../../public/js/units');
 const geo = require('../geo');
 
-module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById, createMarker, writeMarker, writeShape, canEditMarker }) {
+module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById, createMarker, writeMarker, writeShape, canEditMarker, scheduleSupply }) {
   const router = express.Router({ mergeParams: true });
 
   function requireGm(req, res, next) {
@@ -461,6 +461,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
 
   // ---- Relations and diplomacy ---------------------------------------------------------------
   function broadcastRelations(lobbyId) {
+    scheduleSupply(lobbyId);   // allies share places and railways for supply
     hub.broadcast(lobbyId, { type: 'relations', relations: game.relations(lobbyId), diplomacy: game.diplomacy(lobbyId) });
   }
   function factionName(req, id) { return game.q.faction.get(Number(id), req.lobby.id)?.name || '?'; }
@@ -716,7 +717,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
         out.supplyLinkBySize = { ...(g.settings.supplyLinkBySize || {}) };
         for (const k of ['capital', 'city', 'village']) if (s.supplyLinkBySize[k] !== undefined) out.supplyLinkBySize[k] = clamp(num(s.supplyLinkBySize[k], 0), 0, 5000);
       }
-      numIn('supplyTownKm', 0, 2000); numIn('supplyLinkKm', 0, 5000); numIn('supplyRangeKm', 0, 2000); numIn('convoyLinkKm', 0, 5000); numIn('convoyRangeKm', 0, 2000); numIn('hospitalKm', 0, 1000); numIn('hospitalHeal', 0, 100);
+      numIn('supplyTownKm', 0, 2000); numIn('supplyLinkKm', 0, 5000); numIn('supplyRangeKm', 0, 2000); numIn('convoyLinkKm', 0, 5000); numIn('attritionRate', 0, 100); numIn('attritionDisbandBelow', 0, 100); numIn('convoyRangeKm', 0, 2000); numIn('hospitalKm', 0, 1000); numIn('hospitalHeal', 0, 100);
       numIn('hqKm', 0, 1000); numIn('hqBonus', 0, 10); numIn('engineerKm', 0, 1000); numIn('engineerDefend', 0, 10); numIn('signalsKm', 0, 1000); numIn('signalsArtillery', 0, 10);
       numIn('railSpeed', 1, 50); numIn('railCutKm', 1, 500); numIn('railDefence', -10, 50); numIn('railGuardKm', 0, 1000); numIn('railRepairKm', 0, 1000); numIn('railJoinKm', 0, 200);
       numIn('heroAuraKm', 0, 5000); numIn('spySecurity', -10, 30); numIn('spyCounterKm', 0, 5000); numIn('spyStealPerStar', 0, 1000);

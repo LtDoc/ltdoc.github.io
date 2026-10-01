@@ -160,7 +160,28 @@ function broadcastLobby(lobby) {
 }
 
 /** Record history and push both the entity change and the history entry to the right viewers. */
+/**
+ * Supply is live (docs/UNITS.md): changes to units, places or railways (and to relations) recompute it once
+ * the current request has finished writing, and the markers whose status changed are pushed to every viewer.
+ */
+const supplyPending = new Set();
+function scheduleSupply(lobbyId) {
+  if (supplyPending.has(lobbyId)) return;
+  supplyPending.add(lobbyId);
+  setImmediate(() => {
+    supplyPending.delete(lobbyId);
+    try {
+      const g = game.get(lobbyId);
+      if (!g.enabled || g.settings.supplyEnabled === false) return;
+      const lobby = access.getLobby(lobbyId);
+      if (!lobby) return;
+      for (const c of game.applySupply(lobby, g.settings).changes) hub.broadcastEntity(lobbyId, 'marker', c.before, c.after, null);
+    } catch (e) { console.warn('supply refresh failed', e); }
+  });
+}
 function commitChange(req, entity, action, before, after, reverts = null) {
+  const subject = after || before;
+  if ((entity === 'marker' && ['unit', 'town'].includes(subject.type)) || (entity === 'shape' && subject.kind === 'rail')) scheduleSupply(req.lobby.id);
   const entry = hist.record({
     lobbyId: req.lobby.id, userId: req.user.id, entity, entityId: (after || before).id, action, before, after, reverts,
   });
@@ -306,7 +327,7 @@ function afterMove(req, unit) {
 }
 
 // Game layer (turns, treasuries, territories, diplomacy): routes/game.js, sharing this router's lobby middleware.
-router.use('/:id/game', require('./game')({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById, createMarker, writeMarker, writeShape, canEditMarker }));
+router.use('/:id/game', require('./game')({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById, createMarker, writeMarker, writeShape, canEditMarker, scheduleSupply }));
 
 router.get('/:id', (req, res) => {
   const online = new Set(hub.presence(req.lobby.id).map(u => u.id));
@@ -765,6 +786,8 @@ function sanitizeData(type, data) {
       movedKm: Math.max(0, num(d.movedKm)), apUsed: Math.max(0, num(d.apUsed)),   // game mode: used this turn
     });
     if (d.supplied === false || d.supplied === true) out.supplied = d.supplied;   // set at End turn (docs/UNITS.md)
+    if (num(d.unsuppliedTurns) > 0) out.unsuppliedTurns = Math.round(num(d.unsuppliedTurns));
+    if (d.surrendered === true) out.surrendered = true;
     if (d.supplyFrom && typeof d.supplyFrom === 'object') out.supplyFrom = { id: d.supplyFrom.id == null ? null : num(d.supplyFrom.id), name: clean(d.supplyFrom.name, 60), kind: clean(d.supplyFrom.kind, 12) };
     if (Array.isArray(d.trail)) out.trail = cleanTrail(d.trail);
   } else if (type === 'resource') {
