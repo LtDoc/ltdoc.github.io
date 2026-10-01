@@ -91,6 +91,8 @@ const GameUI = (() => {
     ctx.state.game = d.game; ctx.state.gameFactions = d.factions; ctx.state.myFactionId = d.myFactionId; ctx.state.canUndo = d.canUndo;
     ctx.state.relations = d.relations || []; ctx.state.diplomacy = d.diplomacy || []; ctx.state.hasTerritories = !!d.hasTerritories;
     ctx.state.reports = d.reports || { turn: null, turns: [], reports: [] };
+    ctx.state.ready = d.ready || [];
+    if (ctx.renderReady) ctx.renderReady();
     refresh();
     loadProduction();
   }

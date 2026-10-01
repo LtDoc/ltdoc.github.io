@@ -596,7 +596,9 @@ announcements only the GM can post, and private chats between any members, inclu
 notification centre (top centre) lists diplomacy and trades that need your answer, with Accept, Decline,
 Approve or Block right there, and rings when wars are declared. **＋ Trade** offers another nation resources,
 money, manpower or research points, once or every turn for a set number of turns. The GM's **📍** tool (P) pings
-a spot on the map for everyone for a minute. Details: `docs/COMMS.md`.
+a spot on the map for everyone for a minute. In game mode the ready-up bar beside the campaign name shows each
+player nation's flag with a green ✓ once its player has finished the turn, so the GM knows when to End turn.
+Details: `docs/COMMS.md`.
 
 ### Alerts
 

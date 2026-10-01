@@ -58,6 +58,23 @@ points, in either direction ("4 coal for 25 money"). The GM can offer trades bet
 API: `GET/POST /api/lobbies/:id/game/trades`, `POST /game/trades/:tid/accept|decline|withdraw|cancel`;
 WebSocket `tradesChanged` (clients re-fetch their own list).
 
+## Ready-up bar (top left, game mode)
+
+Next to the campaign name, every nation that has a player shows its flag (or colour dot) and a count such as
+**2/5 ready**. A player clicks their own nation (first in the bar, outlined in orange, labelled **Ready up**) when
+they have finished their turn: the flag lights up with a green ✓. Clicking again takes it back. Hovering a flag
+shows who readied it and when. Nations without a player (run by the GM) are left out.
+
+The GM sees the same bar and can click any nation to mark or clear it for them. When the last nation readies,
+the bar turns green and the GM gets a toast (and a chime / desktop alert when 🔊 is on): time to End turn.
+End turn and Undo turn clear every mark. Ready status only informs the GM; it does not end the turn by itself.
+
+On phones the bar floats just under the top bar, at the top left of the map.
+
+API: `POST /api/lobbies/:id/game/ready { ready: true|false, factionId? }` (`factionId` for the GM only; a
+player always marks their own nation); `GET /game` includes `ready` for the current turn. WebSocket: `ready`
+`{ turn, ready: [{ factionId, userId, at }] }`. Table `turn_ready`.
+
 ## GM pings
 
 The GM's 📍 button (or **P**) then a click on the map drops a pulsing red pin everyone sees for one minute.

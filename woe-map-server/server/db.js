@@ -268,6 +268,16 @@ CREATE TABLE IF NOT EXISTS craters (
 );
 CREATE INDEX IF NOT EXISTS idx_craters_lobby ON craters(lobby_id, expires_turn);
 
+-- Ready-up: a nation's player says they are done with this turn (cleared when the turn ends or is undone).
+CREATE TABLE IF NOT EXISTS turn_ready (
+  lobby_id   INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  faction_id INTEGER NOT NULL REFERENCES factions(id) ON DELETE CASCADE,
+  turn       INTEGER NOT NULL,
+  user_id    INTEGER,
+  at         INTEGER NOT NULL,
+  PRIMARY KEY (lobby_id, faction_id)
+);
+
 -- Bundled tech additions already merged into a campaign's tree (server/research.js PATCHES).
 CREATE TABLE IF NOT EXISTS tree_patches (
   lobby_id   INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,

@@ -788,12 +788,14 @@
     refreshFormLists();
     renderNationList();
     reapplyFlags();
+    renderReady();
   }
 
   async function loadFactions() {
     const d = await api.get(`${base}/factions`);
     state.factions = d.factions;
     renderFactions();
+    renderReady();
     refreshFormLists();
     renderNationList();
     reapplyFlags();
@@ -979,6 +981,7 @@
         case 'game': { const was = !!state.game?.enabled; GameUI.onGame(msg.game); syncRailButton(); syncTrails(); updateMoveRange(); if (was !== !!msg.game?.enabled) Comms.loadTrades(); else Comms.refresh(); break; }
         case 'turn': GameUI.onTurn(msg); loadBattles(); break;
         case 'faction': GameUI.onFaction(msg); break;
+        case 'ready': if (msg.turn === state.game?.turn) { state.ready = msg.ready || []; renderReady(); } break;
         case 'territory': renderer.setTerritories(msg.territories, !!msg.replace); GameUI.onTerritories(); break;
         case 'provinces': await loadProvinces(); break;
         case 'provinceOwners': renderer.setProvinceOwners(msg.owners || [], !!msg.replace); GameUI.onTerritories(); break;
@@ -1052,6 +1055,47 @@
     if (notifyPref.enabled) { beep(); toast('You will hear a chime (and see a desktop notification if allowed) when things happen while this tab is in the background.'); }
   };
   renderNotifyButton();
+
+  // ---- Ready-up bar ----------------------------------------------------------------------
+  /** Nations that have a player: each shows its flag, with a green check once its player is done for the turn. */
+  let allReadyWas = null;
+  function renderReady() {
+    const bar = $('#readyBar');
+    const players = new Set((state.members || []).filter(m => m.role !== 'gm' && m.nation).map(m => m.nation.trim().toLowerCase()));
+    const list = gameOn() ? (state.factions || []).filter(f => players.has(f.name.toLowerCase())) : [];
+    bar.hidden = !list.length;
+    if (!list.length) { bar.innerHTML = ''; allReadyWas = null; return; }
+    const gm = state.role === 'gm';
+    const mine = gm ? null : factionByName(state.member?.nation);
+    const ready = new Map((state.ready || []).map(r => [r.factionId, r]));
+    const done = list.filter(f => ready.has(f.id)).length, all = done === list.length;
+    const clock = ms => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const who = id => state.members.find(m => m.userId === id)?.displayName;
+    // Your own nation comes first.
+    const ordered = mine ? [...list.filter(f => f.id === mine.id), ...list.filter(f => f.id !== mine.id)] : list;
+    bar.innerHTML = `<span class="rcount" title="Nations whose players are ready for the turn to end">${done}/${list.length} ready</span>` + ordered.map(f => {
+      const r = ready.get(f.id), own = !!mine && f.id === mine.id, can = gm || own;
+      const by = r && who(r.userId);
+      const tip = `${f.name}: ${r ? `ready since ${clock(r.at)}${by ? ` (${by})` : ''}` : 'still playing'}${own ? (r ? '. Click to take it back' : '. Click when you have finished your turn') : gm ? (r ? '. Click to clear' : '. Click to mark ready for them') : ''}`;
+      const icon = f.flagUrl ? `<img class="flag" src="${esc(f.flagUrl)}" alt="">` : `<span class="rdot" style="background:${esc(f.color)}"></span>`;
+      return `<button type="button" class="rchip ${r ? 'ready' : ''} ${own ? 'mine' : ''} ${can ? 'can' : ''}" data-fid="${f.id}" title="${esc(tip)}" aria-label="${esc(tip)}" aria-pressed="${r ? 'true' : 'false'}" ${can ? '' : 'tabindex="-1"'}><span class="ricon">${icon}<span class="chk">✓</span></span>${own ? `<span class="rlabel">${r ? 'Ready' : 'Ready up'}</span>` : ''}</button>`;
+    }).join('');
+    bar.classList.toggle('all', all);
+    if (gm && all && allReadyWas === false) {
+      toast(`All ${list.length} nations are ready: you can end turn ${state.game.turn}`, 6000);
+      notify('Everyone is ready', `All nations are ready to end turn ${state.game.turn}`);
+    }
+    allReadyWas = all;
+  }
+  $('#readyBar').addEventListener('click', async e => {
+    const chip = e.target.closest('.rchip.can');
+    if (!chip) return;
+    const fid = Number(chip.dataset.fid), on = !chip.classList.contains('ready');
+    try {
+      const d = await api.post(`${base}/game/ready`, { ready: on, factionId: state.role === 'gm' ? fid : undefined });
+      if (d.turn === state.game?.turn) { state.ready = d.ready; renderReady(); }
+    } catch (err) { toast(err.message); }
+  });
 
   // ---- Presence / members ---------------------------------------------------------------
   function initials(name) { return String(name || '?').trim().split(/\s+/).map(p => p[0]).join('').slice(0, 2).toUpperCase(); }
@@ -2545,7 +2589,7 @@
   try {
     await loadLobby();
     await loadFactions();
-    GameUI.init({ state, renderer, base, $, $$, flagImg, openPanel, loadMarkers, loadTerritories, loadProvinces, removeBorderDrawings, armBrush, armFactory, notify, isGm: () => state.role === 'gm' });
+    GameUI.init({ state, renderer, base, $, $$, flagImg, openPanel, loadMarkers, loadTerritories, loadProvinces, removeBorderDrawings, armBrush, armFactory, notify, renderReady, isGm: () => state.role === 'gm' });
     await GameUI.load().catch(err => console.warn('game state', err));
     syncRailButton();
     await loadTerritories();

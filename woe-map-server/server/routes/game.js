@@ -46,6 +46,11 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       return out;
     });
   }
+  /** Ready-up rows for the current turn (the client works out which nations have players). */
+  function readyList(lobbyId, g) {
+    return game.q.readyAll.all(lobbyId).filter(r => r.turn === g.turn).map(r => ({ factionId: r.faction_id, userId: r.user_id, at: r.at }));
+  }
+  function broadcastReady(lobbyId, g) { hub.broadcast(lobbyId, { type: 'ready', turn: g.turn, ready: readyList(lobbyId, g) }); }
   function broadcastGame(lobbyId, g) { hub.broadcast(lobbyId, { type: 'game', game: g }); }
   /** Push one faction's state to its player(s) and the GM (everyone when treasuries are public). */
   function broadcastFaction(req, g, faction) {
@@ -65,6 +70,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       relations: game.relations(req.lobby.id),
       diplomacy: game.diplomacy(req.lobby.id).filter(d => req.lobbyRole === 'gm' || d.from === (mine && mine.id) || d.to === (mine && mine.id) || (d.kind === 'war' && d.status === 'accepted')),   // declared wars are public news
       trades: visibleTrades(req),
+      ready: g.enabled ? readyList(req.lobby.id, g) : [],
       hasTerritories: provinces.has(req.lobby.id) || territory.all(req.lobby.id).length > 0,
       reports: g.enabled ? visibleReports(req, g, game.reports(req.lobby.id)) : { turn: null, turns: [], reports: [] },
     });
@@ -763,6 +769,19 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     res.json({ game: saved });
   });
 
+  /** Ready-up: a player marks their nation done with this turn (the GM may mark any nation). */
+  router.post('/ready', (req, res) => {
+    const g = game.get(req.lobby.id);
+    if (!g.enabled) return res.status(400).json({ error: 'Game mode is off' });
+    const gm = req.lobbyRole === 'gm';
+    const faction = gm && req.body?.factionId ? game.q.faction.get(Number(req.body.factionId), req.lobby.id) : myFaction(req);
+    if (!faction) return res.status(gm ? 404 : 403).json({ error: gm ? 'No such faction' : 'You do not play a nation' });
+    if (req.body?.ready === false) game.q.clearReady.run(req.lobby.id, faction.id);
+    else game.q.setReady.run(req.lobby.id, faction.id, g.turn, req.user.id, Date.now());
+    broadcastReady(req.lobby.id, g);
+    res.json({ turn: g.turn, ready: readyList(req.lobby.id, g) });
+  });
+
   router.post('/end-turn', requireGm, (req, res) => {
     const before = game.get(req.lobby.id);
     if (!before.enabled) return res.status(400).json({ error: 'Game mode is off' });
@@ -822,6 +841,8 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     for (const f of game.q.factions.all(req.lobby.id)) broadcastFaction(req, g, f);
     // Everyone learns the turn ended (toast, chime, report modal); the report itself is fetched per viewer.
     hub.broadcast(req.lobby.id, { type: 'turn', ended: before.turn, turn: g.turn, date: g.date });
+    game.q.clearAllReady.run(req.lobby.id);
+    broadcastReady(req.lobby.id, g);
     res.json({ game: g, summaries: result.summaries.map(s => ({ faction: s.faction.name, text: s.text })) });
   });
 
@@ -829,6 +850,8 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const g = game.undoTurn(req.lobby);
     if (!g) return res.status(400).json({ error: 'Nothing to undo' });
     logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} undid the last turn: back to turn ${g.turn}, ${GameData.fmtDate(g.date)}`);
+    game.q.clearAllReady.run(req.lobby.id);
+    broadcastReady(req.lobby.id, g);
     broadcastGame(req.lobby.id, g);
     hub.broadcast(req.lobby.id, { type: 'territory', territories: provinces.has(req.lobby.id) ? [] : territory.all(req.lobby.id), replace: true });
     if (provinces.has(req.lobby.id)) broadcastLand(req.lobby.id, { owners: provinces.ownership(req.lobby.id), replace: true });
