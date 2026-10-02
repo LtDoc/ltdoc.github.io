@@ -89,6 +89,10 @@ class MapRenderer extends EventTarget {
     this.factionInfo = new Map();                // factionId -> { color, name }
     this.sceneryLayer = new PIXI.Container();   // buildings, trenches, craters: scale with the map
     this.sceneryLayer.sortableChildren = true;
+    this.lakeG = new PIXI.Graphics();           // the Earth's lakes again, over the territory colours (see _loadLakes)
+    this.lakeG.eventMode = 'none';
+    this.lakeShoreG = new PIXI.Graphics();
+    this.lakeShoreG.eventMode = 'none';
     this.townLayer = new PIXI.Container();      // towns drawn from above (towns.js), at map scale, under craters and counters
     this.townLayer.eventMode = 'none';
     this.towns = new Map();                      // town marker id -> { key, m, plan, g, fires, dirty }
@@ -135,7 +139,7 @@ class MapRenderer extends EventTarget {
     this.ghostLayer = new PIXI.Container(); this.ghostLayer.eventMode = 'none'; // fog of war: last known enemy positions
     this.rideLayer = new PIXI.Container(); this.rideLayer.eventMode = 'none';   // trains carrying units on a rail trip
     this.rides = new Map();                                                      // unit id -> rail trip being played
-    this.world.addChild(...[this.mapLayer, this.territoryLayer, this.gridLayer, this.townLayer, this.scarLayer, this.snowG, this.sceneryLayer, this.craterLayer, this.craterSmokeG, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.fogLayer, this.skirmish?.layer, this.gunG, this.unitDots, this.ghostLayer, this.rideLayer].filter(Boolean), this.markerLayer, this.boomLayer, ...(this.skirmish ? [this.skirmish.airLayer] : []), this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
+    this.world.addChild(...[this.mapLayer, this.territoryLayer, this.lakeG, this.lakeShoreG, this.gridLayer, this.townLayer, this.scarLayer, this.snowG, this.sceneryLayer, this.craterLayer, this.craterSmokeG, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.fogLayer, this.skirmish?.layer, this.gunG, this.unitDots, this.ghostLayer, this.rideLayer].filter(Boolean), this.markerLayer, this.boomLayer, ...(this.skirmish ? [this.skirmish.airLayer] : []), this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
     app.stage.addChild(this.world, this.weatherG, this.pingArrows);
 
     app.stage.eventMode = 'static';
@@ -227,6 +231,7 @@ class MapRenderer extends EventTarget {
 
   // ---- Map image / Earth -----------------------------------------------------------
   _clearMap() {
+    this.lakes = null; this.lakeG.clear(); this.lakeShoreG.clear();
     if (this.earth) { this.mapLayer.removeChild(this.earth.container); this.earth.destroy(); this.earth = null; }
     for (const c of this.mapLayer.removeChildren()) c.destroy();
   }
@@ -244,7 +249,63 @@ class MapRenderer extends EventTarget {
     earth.redraw(this.scale);
     this._drawGrid();
     this.fit();
+    this._loadLakes(opts, gen);
     return true;
+  }
+  /**
+   * The vector Earth's lakes (when they are drawn), indexed on a grid of map px: water for the towns, whose streets,
+   * houses and fields would otherwise run out over them (the provinces cover the lakes, as the land they lie in
+   * does). Towns laid out before the lakes arrived are laid out again. The lakes are drawn once more over the
+   * territory colours, with their shores, so they read as water whoever holds the land round them.
+   */
+  async _loadLakes(opts, gen) {
+    this.lakes = null;
+    this.lakeG.clear(); this.lakeShoreG.clear();
+    if (opts.showLakes === false) return;
+    const data = await window.EarthMap.load('lakes').catch(() => null);
+    if (!data || gen !== this._mapGen) return;
+    const W = opts.width, H = opts.height, CELL = 16, grid = new Map(), list = [];
+    for (const poly of data.polygons) {
+      const rings = poly.map(r => r.map(p => window.EarthMap.project(p[0], p[1], W, H)));
+      if (!rings.length || !rings[0].length) continue;
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const [x, y] of rings[0]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      const i = list.push({ rings, bbox: [x0, y0, x1, y1] }) - 1;
+      for (let gx = Math.floor(x0 / CELL); gx <= Math.floor(x1 / CELL); gx++) for (let gy = Math.floor(y0 / CELL); gy <= Math.floor(y1 / CELL); gy++) {
+        const k = gx * 100000 + gy;
+        if (!grid.has(k)) grid.set(k, []);
+        grid.get(k).push(i);
+      }
+    }
+    this.lakes = { grid, list, CELL };
+    const st = window.EarthMap.STYLES[opts.style] || window.EarthMap.STYLES.atlas;
+    this.lakeStyle = st;
+    for (const { rings } of list) {
+      this.lakeG.poly(rings[0].flat()).fill(st.lake);
+      for (let i = 1; i < rings.length; i++) this.lakeG.poly(rings[i].flat()).cut();
+    }
+    this._drawLakeShores();
+    for (const t of this.towns.values()) { t.g?.destroy(); t.g = null; t.plan = null; t.fires = []; }
+    this.invalidate();
+  }
+  /** The lakes' shores: a thin line the same width on screen at any zoom (redrawn on zoom). */
+  _drawLakeShores() {
+    const g = this.lakeShoreG;
+    g.clear();
+    if (!this.lakes) return;
+    for (const { rings } of this.lakes.list) for (const r of rings) g.poly(r.flat(), true);
+    g.stroke({ width: 1 / this.scale, color: this.lakeStyle.coast, alpha: 0.9 });
+  }
+  /** Whether a map point lies in one of the Earth's lakes (not on an island in it). */
+  _inLake(x, y) {
+    const L = this.lakes;
+    if (!L) return false;
+    for (const i of L.grid.get(Math.floor(x / L.CELL) * 100000 + Math.floor(y / L.CELL)) || []) {
+      const { rings, bbox: b } = L.list[i];
+      if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) continue;
+      if (pointInMulti(x, y, [rings])) return true;
+    }
+    return false;
   }
 
   async setMap(url, w, h) {
@@ -428,6 +489,7 @@ class MapRenderer extends EventTarget {
       this._territoryTimer = setTimeout(() => this._redrawTerritories(), 120);
     }
     if (this.provinceLayer) this.provinceLayer.setZoom(this.scale);
+    if (this.lakes) this._drawLakeShores();
     if (this._aura) this._drawAura();
     if (this._supplyPts) this._drawSupplyLine();
     if (this.persistTrails) this.queueTrails();
@@ -630,7 +692,7 @@ class MapRenderer extends EventTarget {
     const t0 = performance.now();
     let built = 0, pending = false;
     const detail = this.scale >= 5;
-    const isLand = (x, y) => !(this.provinceLayer && this.provinceLayer.size) || !!this.provinceAt(x, y);
+    const isLand = (x, y) => (!(this.provinceLayer && this.provinceLayer.size) || !!this.provinceAt(x, y)) && !this._inLake(x, y);
     for (const t of this.towns.values()) {
       const m = t.m, reach = t.plan ? t.plan.reach : 22;
       const inView = m.x + reach > vx0 && m.x - reach < vx1 && m.y + reach > vy0 && m.y - reach < vy1;
