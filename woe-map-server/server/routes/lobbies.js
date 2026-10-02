@@ -1515,34 +1515,37 @@ function loadConvoy(req, res) {
   const row = q.marker.get(Number(req.params.cid), req.lobby.id);
   const c = row && access.serializeMarker(row);
   if (!c || !access.canSee(c, viewerOf(req)) || !isConvoy(c)) { res.status(404).json({ error: 'No such convoy' }); return null; }
-  if (!canEditMarker(req, c)) { res.status(403).json({ error: `You do not command ${c.name}` }); return null; }
   if (num(c.data?.strength, 100) <= 0) { res.status(409).json({ error: `${c.name} has been destroyed` }); return null; }
   return c;
 }
 /** Spent for the turn (game mode): boarding or landing takes the rest of a unit's move. */
 function spentMove(g, m) { return Math.max(num(m.data?.movedKm), (num(m.data?.movement) + 10) * num(g.settings.kmPerMove, 50)); }
-
-/** Embark land units (and heroes) next to a convoy: up to convoyCapacity aboard at once. */
-router.post('/:id/convoys/:cid/embark', (req, res) => {
-  const convoy = loadConvoy(req, res);
-  if (!convoy) return;
-  const g = game.get(req.lobby.id), s = g.settings, gm = req.lobbyRole === 'gm', v = viewerOf(req);
-  const cap = num(s.convoyCapacity, 10), boardKm = num(s.convoyBoardKm, 30);
-  let aboard = cargoOf(req.lobby.id, convoy.id).length;
-  const ids = Array.isArray(req.body?.unitIds) ? req.body.unitIds.slice(0, 50) : [];
-  const done = [], errors = [];
+const lc = s => String(s || '').trim().toLowerCase();
+/** Are two nations allies (game mode relations)? */
+function allied(lobbyId, a, b) {
+  if (!a || !b || lc(a) === lc(b)) return false;
+  const fs = q.factions.all(lobbyId);
+  const fa = fs.find(f => lc(f.name) === lc(a)), fb = fs.find(f => lc(f.name) === lc(b));
+  return !!fa && !!fb && game.relationStatus(lobbyId, fa.id, fb.id) === 'alliance';
+}
+/** Why a unit cannot board a convoy right now (distance, capacity aside), or null. */
+function boardError(req, convoy, m) {
   const territory = require('../territory');
-  for (const id of ids) {
-    const row = q.marker.get(Number(id), req.lobby.id);
-    const m = row && access.serializeMarker(row);
-    if (!m || !access.canSee(m, v)) { errors.push(`${id}: not found`); continue; }
-    if (!canEditMarker(req, m)) { errors.push(`${m.name}: not yours`); continue; }
-    const land = m.type === 'hero' ? !['captured', 'travelling'].includes(m.data?.status) : territory.isLandUnit(m);
-    if (!land) { errors.push(`${m.name}: only land units and heroes embark`); continue; }
-    if (m.data?.aboard) { errors.push(`${m.name}: already aboard`); continue; }
-    if (m.type === 'unit' && num(m.data?.strength, 100) <= 0) { errors.push(`${m.name}: destroyed`); continue; }
-    if (!gm && String(m.data?.nation || '').toLowerCase() !== String(convoy.data?.nation || '').toLowerCase()) { errors.push(`${m.name}: not of ${convoy.data?.nation || 'the convoy'}'s nation`); continue; }
-    if (geo.distance(req.lobby, m.x, m.y, convoy.x, convoy.y) > boardKm) { errors.push(`${m.name}: more than ${boardKm} ${geo.isEarth(req.lobby) ? 'km' : (req.lobby.scale_label || 'units')} from ${convoy.name}`); continue; }
+  if (m.type === 'hero' ? ['captured', 'travelling'].includes(m.data?.status) : !territory.isLandUnit(m)) return `${m.name}: only land units and heroes embark`;
+  if (m.data?.aboard) return `${m.name}: already aboard`;
+  if (m.type === 'unit' && num(m.data?.strength, 100) <= 0) return `${m.name}: destroyed`;
+  const boardKm = num(game.get(req.lobby.id).settings.convoyBoardKm, 30);
+  if (geo.distance(req.lobby, m.x, m.y, convoy.x, convoy.y) > boardKm) return `${m.name}: more than ${boardKm} ${geo.isEarth(req.lobby) ? 'km' : (req.lobby.scale_label || 'units')} from ${convoy.name}`;
+  return null;
+}
+/** Put units aboard (checks done). Returns { done, errors, aboard, cap }. */
+function doEmbark(req, convoy, units) {
+  const g = game.get(req.lobby.id), cap = num(g.settings.convoyCapacity, 10);
+  let aboard = cargoOf(req.lobby.id, convoy.id).length;
+  const done = [], errors = [];
+  for (const m of units) {
+    const err = boardError(req, convoy, m);
+    if (err) { errors.push(err); continue; }
     if (aboard >= cap) { errors.push(`${convoy.name} is full (${cap})`); break; }
     const data = { aboard: convoy.id, supplied: true, unsuppliedTurns: 0, trail: [[convoy.x, convoy.y]] };
     if (g.enabled) data.movedKm = spentMove(g, m);
@@ -1550,20 +1553,16 @@ router.post('/:id/convoys/:cid/embark', (req, res) => {
     aboard++;
   }
   if (done.length) sideLog(req, convoy.data?.nation, `⛴ ${done.map(m => m.name).join(', ')} embarked on ${convoy.name} (${aboard}/${cap} aboard)`);
-  if (!done.length) return res.status(409).json({ error: errors.join('; ') || 'Nobody to embark' });
-  res.json({ embarked: done, errors, aboard, capacity: cap });
-});
-
-/** Land everyone aboard at once on the nearest beach within convoyLandKm; with none in reach they stay aboard. */
-router.post('/:id/convoys/:cid/disembark', (req, res) => {
-  const convoy = loadConvoy(req, res);
-  if (!convoy) return;
-  const g = game.get(req.lobby.id), s = g.settings, landKm = num(s.convoyLandKm, 100);
+  return { done, errors, aboard, cap };
+}
+/** Land everyone aboard on the nearest beach in reach. Throws a message when there is none. */
+function doDisembark(req, convoy) {
+  const g = game.get(req.lobby.id), landKm = num(g.settings.convoyLandKm, 100);
   const cargo = cargoOf(req.lobby.id, convoy.id);
-  if (!cargo.length) return res.status(400).json({ error: `Nobody is aboard ${convoy.name}` });
+  if (!cargo.length) throw new Error(`Nobody is aboard ${convoy.name}`);
   const territory = require('../territory');
   const beach = territory.nearestLand(req.lobby, convoy.x, convoy.y, landKm);
-  if (!beach) return res.status(409).json({ error: `No beach within ${landKm} ${geo.isEarth(req.lobby) ? 'km' : (req.lobby.scale_label || 'units')}: sail ${convoy.name} closer to the coast` });
+  if (!beach) throw new Error(`No beach within ${landKm} ${geo.isEarth(req.lobby) ? 'km' : (req.lobby.scale_label || 'units')}: sail ${convoy.name} closer to the coast`);
   // They come ashore together, spread a little along the beach (on land where possible).
   const spots = cargo.map((_, i) => {
     if (i === 0) return beach;
@@ -1580,7 +1579,147 @@ router.post('/:id/convoys/:cid/disembark', (req, res) => {
   sideLog(req, convoy.data?.nation, `⚓ ${landed.length} unit${landed.length === 1 ? '' : 's'} landed from ${convoy.name}${place ? ` near ${place}` : ''}: ${landed.map(m => m.name).join(', ')}`);
   // Landing on enemy ground takes it like any advance (defended ground holds).
   const notes = landed.map(m => afterMove(req, m)).filter(Boolean);
-  res.json({ landed, beach, note: notes.join(' · ') || null });
+  return { landed, beach, note: notes.join(' · ') || null };
+}
+
+// ---- Allied boarding requests: the side that acts asks the other (docs/UNITS.md) ----------------------------------
+const qr = {
+  insert: db.prepare(`INSERT INTO convoy_requests (lobby_id, kind, convoy_id, unit_ids, from_nation, to_nations, approved, status, turn, created_by, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, '[]', 'pending', ?, ?, ?)`),
+  one: db.prepare('SELECT * FROM convoy_requests WHERE id = ? AND lobby_id = ?'),
+  recent: db.prepare('SELECT * FROM convoy_requests WHERE lobby_id = ? AND (status = \'pending\' OR resolved_at > ?) ORDER BY id DESC LIMIT 100'),
+  set: db.prepare('UPDATE convoy_requests SET approved = ?, status = ?, note = ?, resolved_at = ? WHERE id = ?'),
+};
+function serializeRequest(r) {
+  const convoy = q.marker.get(r.convoy_id, r.lobby_id);
+  const ids = access.safeJson(r.unit_ids) || [];
+  const units = (Array.isArray(ids) ? ids : []).map(id => q.marker.get(id, r.lobby_id)).filter(Boolean);
+  return { id: r.id, kind: r.kind, convoyId: r.convoy_id, convoyName: convoy ? convoy.name : 'a convoy', convoyNation: convoy ? access.safeJson(convoy.data).nation || '' : '',
+    unitIds: ids, unitNames: units.map(u => u.name), from: r.from_nation, to: access.safeJson(r.to_nations) || [], approved: access.safeJson(r.approved) || [],
+    status: r.status, note: r.note || '', turn: r.turn, createdAt: r.created_at, resolvedAt: r.resolved_at };
+}
+const involvedIn = (r, nation) => !!nation && [r.from, ...r.to].some(n => lc(n) === lc(nation));
+/** Tell the nations in a request (and the GM) to refetch their requests. */
+function broadcastRequests(lobbyId, r) {
+  const set = new Set([r.from, ...r.to].map(lc));
+  hub.broadcast(lobbyId, { type: 'convoyRequests' }, ws => ws.lobbyRole === 'gm' || set.has(lc(ws.nation)));
+}
+function createRequest(req, kind, convoy, unitIds, from, to) {
+  const g = game.get(req.lobby.id);
+  const id = qr.insert.run(req.lobby.id, kind, convoy.id, JSON.stringify(unitIds), from, JSON.stringify(to), g.turn, req.user.id, now()).lastInsertRowid;
+  const r = serializeRequest(qr.one.get(id, req.lobby.id));
+  broadcastRequests(req.lobby.id, r);
+  return r;
+}
+
+router.get('/:id/convoy-requests', (req, res) => {
+  const gm = req.lobbyRole === 'gm', mine = req.member?.nation || '', turn = game.get(req.lobby.id).turn;
+  const list = qr.recent.all(req.lobby.id, now() - 2 * 86400000).map(serializeRequest)
+    .filter(r => gm || involvedIn(r, mine))
+    .map(r => (r.status === 'pending' && r.turn < turn ? { ...r, status: 'expired' } : r));
+  res.json({ requests: list });
+});
+
+/**
+ * Embark units on a convoy. Your own units on your own convoy board at once. Allied units go through a request:
+ * the convoy's nation asks the units' nation, or the units' nation asks the convoy's; they board when it agrees.
+ */
+router.post('/:id/convoys/:cid/embark', (req, res) => {
+  const convoy = loadConvoy(req, res);
+  if (!convoy) return;
+  const gm = req.lobbyRole === 'gm', v = viewerOf(req), mine = req.member?.nation || '';
+  const controls = canEditMarker(req, convoy), C = convoy.data?.nation || '';
+  const now_ = [], asks = new Map(), errors = [];   // asks: nation to ask -> unit ids
+  for (const id of (Array.isArray(req.body?.unitIds) ? req.body.unitIds.slice(0, 50) : [])) {
+    const row = q.marker.get(Number(id), req.lobby.id);
+    const m = row && access.serializeMarker(row);
+    if (!m || !access.canSee(m, v)) { errors.push(`${id}: not found`); continue; }
+    const err = boardError(req, convoy, m);
+    if (err) { errors.push(err); continue; }
+    const U = m.data?.nation || '';
+    if (gm || (controls && canEditMarker(req, m) && lc(U) === lc(C))) now_.push(m);
+    else if (controls && allied(req.lobby.id, U, C)) { if (!asks.has(U)) asks.set(U, []); asks.get(U).push(m.id); }
+    else if (canEditMarker(req, m) && allied(req.lobby.id, U, C)) { if (!asks.has(C)) asks.set(C, []); asks.get(C).push(m.id); }
+    else errors.push(`${m.name}: ${controls ? 'not yours or an ally\'s' : `not yours, or ${C || 'the convoy\'s nation'} is not your ally`}`);
+  }
+  const result = now_.length ? doEmbark(req, convoy, now_) : { done: [], errors: [], aboard: cargoOf(req.lobby.id, convoy.id).length, cap: num(game.get(req.lobby.id).settings.convoyCapacity, 10) };
+  const requested = [...asks].map(([to, ids]) => createRequest(req, 'embark', convoy, ids, mine, [to]));
+  for (const r of requested) sideLog(req, mine, `⛴ ${mine} asks ${r.to.join(', ')}: ${r.unitNames.join(', ')} to board ${convoy.name}`);
+  const allErrors = [...errors, ...result.errors];
+  if (!result.done.length && !requested.length) return res.status(409).json({ error: allErrors.join('; ') || 'Nobody to embark' });
+  res.json({ embarked: result.done, requested, errors: allErrors, aboard: result.aboard, capacity: result.cap });
+});
+
+/**
+ * Land everyone aboard at once. The convoy's nation lands its own troops at once; with allies aboard, each of
+ * those nations is asked first. An ally with troops aboard may ask the convoy's nation to land them.
+ */
+router.post('/:id/convoys/:cid/disembark', (req, res) => {
+  const convoy = loadConvoy(req, res);
+  if (!convoy) return;
+  const gm = req.lobbyRole === 'gm', mine = req.member?.nation || '', C = convoy.data?.nation || '';
+  const cargo = cargoOf(req.lobby.id, convoy.id);
+  if (!cargo.length) return res.status(400).json({ error: `Nobody is aboard ${convoy.name}` });
+  const others = [...new Set(cargo.map(m => m.data?.nation || '').filter(n => lc(n) !== lc(C)))];
+  let to = null;
+  if (gm || (canEditMarker(req, convoy) && !others.length)) {
+    try { return res.json(doDisembark(req, convoy)); } catch (e) { return res.status(409).json({ error: e.message }); }
+  }
+  if (canEditMarker(req, convoy)) to = others;
+  else if (cargo.some(m => lc(m.data?.nation) === lc(mine)) && allied(req.lobby.id, mine, C)) to = [C];
+  else return res.status(403).json({ error: `You have no troops aboard ${convoy.name}` });
+  // Fail early when there is no beach anyway.
+  if (!require('../territory').nearestLand(req.lobby, convoy.x, convoy.y, num(game.get(req.lobby.id).settings.convoyLandKm, 100))) {
+    return res.status(409).json({ error: `No beach within ${num(game.get(req.lobby.id).settings.convoyLandKm, 100)} km: sail ${convoy.name} closer to the coast` });
+  }
+  const r = createRequest(req, 'disembark', convoy, [], mine, to);
+  sideLog(req, mine, `⚓ ${mine} asks ${to.join(', ')} to land the troops aboard ${convoy.name}`);
+  res.json({ landed: [], requested: [r] });
+});
+
+/** Answer a boarding or landing request: approve or decline (the asked nations), withdraw (the asking one). */
+router.post('/:id/convoy-requests/:rid/:action', (req, res) => {
+  const row = qr.one.get(Number(req.params.rid), req.lobby.id);
+  if (!row) return res.status(404).json({ error: 'No such request' });
+  const r = serializeRequest(row), gm = req.lobbyRole === 'gm', mine = req.member?.nation || '', action = req.params.action;
+  if (r.status !== 'pending') return res.status(409).json({ error: `That request is already ${r.status}` });
+  const finish = (status, note) => {
+    qr.set.run(JSON.stringify(r.approved), status, note || '', now(), r.id);
+    const out = serializeRequest(qr.one.get(r.id, req.lobby.id));
+    broadcastRequests(req.lobby.id, out);
+    return out;
+  };
+  if (r.turn < game.get(req.lobby.id).turn) return res.status(409).json({ error: 'That request has expired (a new turn began)', request: finish('expired', 'a new turn began') });
+  if (action === 'withdraw') {
+    if (!gm && lc(r.from) !== lc(mine)) return res.status(403).json({ error: 'Only the asking nation can withdraw it' });
+    return res.json({ request: finish('withdrawn') });
+  }
+  const asked = r.to.find(n => lc(n) === lc(mine) && !r.approved.some(a => lc(a) === lc(n)));
+  if (!gm && !asked) return res.status(403).json({ error: 'This request is not waiting for your answer' });
+  if (action === 'decline') {
+    sideLog(req, r.from, `✋ ${gm ? 'The GM' : mine} declined ${r.from}'s request for ${r.convoyName}`);
+    return res.json({ request: finish('declined', gm ? 'declined by the GM' : `declined by ${mine}`) });
+  }
+  if (action !== 'approve') return res.status(400).json({ error: 'Unknown action' });
+  r.approved = gm ? [...r.to] : [...r.approved, asked];
+  if (r.to.some(n => !r.approved.some(a => lc(a) === lc(n)))) {   // others still to answer
+    qr.set.run(JSON.stringify(r.approved), 'pending', '', null, r.id);
+    broadcastRequests(req.lobby.id, r);
+    return res.json({ request: serializeRequest(qr.one.get(r.id, req.lobby.id)) });
+  }
+  // Everyone agreed: do it now, if it can still be done.
+  const crow = q.marker.get(r.convoyId, req.lobby.id), convoy = crow && access.serializeMarker(crow);
+  if (!convoy || num(convoy.data?.strength, 100) <= 0) return res.status(409).json({ error: 'The convoy is gone', request: finish('failed', 'the convoy is gone') });
+  if (r.kind === 'embark') {
+    const units = r.unitIds.map(id => q.marker.get(Number(id), req.lobby.id)).filter(Boolean).map(access.serializeMarker);
+    const out = doEmbark(req, convoy, units);
+    if (!out.done.length) return res.status(409).json({ error: out.errors.join('; ') || 'Nobody could board', request: finish('failed', out.errors.join('; ')) });
+    return res.json({ request: finish('done', out.errors.join('; ')), embarked: out.done });
+  }
+  try {
+    const out = doDisembark(req, convoy);
+    return res.json({ request: finish('done', out.note || ''), ...out });
+  } catch (e) { return res.status(409).json({ error: e.message, request: finish('failed', e.message) }); }
 });
 
 /** This turn's battles the viewer may see (hidden ones: the GM and the attacking player). */

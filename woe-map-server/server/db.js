@@ -327,6 +327,25 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_chat_messages_channel ON chat_messages(channel_id, id);
 
+-- Allied convoys (docs/UNITS.md): a nation asks an ally to let troops board or land; the asked nations approve.
+CREATE TABLE IF NOT EXISTS convoy_requests (
+  id          INTEGER PRIMARY KEY,
+  lobby_id    INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  kind        TEXT NOT NULL,                        -- embark | disembark
+  convoy_id   INTEGER NOT NULL,
+  unit_ids    TEXT NOT NULL DEFAULT '[]',           -- embark: the units to board (JSON)
+  from_nation TEXT NOT NULL,
+  to_nations  TEXT NOT NULL DEFAULT '[]',           -- the nations that must agree (JSON)
+  approved    TEXT NOT NULL DEFAULT '[]',           -- those that have (JSON)
+  status      TEXT NOT NULL DEFAULT 'pending',      -- pending | done | declined | withdrawn | failed | expired
+  note        TEXT NOT NULL DEFAULT '',
+  turn        INTEGER NOT NULL DEFAULT 1,
+  created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at  INTEGER NOT NULL,
+  resolved_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_convoy_requests_lobby ON convoy_requests(lobby_id, id);
+
 -- Fog of war (docs/FOG-OF-WAR.md): where each nation last saw an enemy unit that is now out of its sight.
 CREATE TABLE IF NOT EXISTS fog_ghosts (
   lobby_id    INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,

@@ -204,8 +204,32 @@ const Comms = (() => {
           text: `Trade ${from} ⇄ ${to} ${t.status === 'completed' ? (t.mode === 'once' ? 'done' : 'finished') : t.status}`, sub: `${what} · ${fmtTime(t.resolvedAt)}` });
       }
     }
+    // Allied convoys: boarding and landing requests between nations (docs/UNITS.md).
+    const lc = s => String(s || '').trim().toLowerCase(), me = mine ? factionName(mine) : '';
+    for (const r of ctx.state.convoyRequests || []) {
+      const units = r.unitNames.length ? r.unitNames.join(', ') : 'units';
+      const theirShip = lc(r.from) === lc(r.convoyNation);
+      const text = r.kind === 'embark'
+        ? (theirShip ? `${r.from} asks to carry your ${units} aboard ${r.convoyName}` : `${r.from} asks to board ${units} onto ${r.convoyName}`)
+        : (theirShip ? `${r.from} wants to land the troops aboard ${r.convoyName}, yours included` : `${r.from} asks to land the troops aboard ${r.convoyName}`);
+      const icon = r.kind === 'embark' ? '⛴' : '⚓';
+      const waitingOnMe = r.to.some(n => lc(n) === lc(me)) && !r.approved.some(a => lc(a) === lc(me));
+      if (r.status === 'pending' && (waitingOnMe || (gm && !me))) {
+        out.push({ key: `cr${r.id}:pending`, icon, needs: true, text, sub: `Your answer${r.to.length > 1 ? ` (needed from ${r.to.join(', ')})` : ''}`,
+          actions: [['Allow', () => convoyReq(r, 'approve')], ['Refuse', () => convoyReq(r, 'decline'), 'danger']] });
+      } else if (r.status === 'pending' && lc(r.from) === lc(me)) {
+        const waiting = r.to.filter(n => !r.approved.some(a => lc(a) === lc(n)));
+        out.push({ key: `cr${r.id}:pending`, icon, needs: false, text: r.kind === 'embark' ? `You asked to board ${units} onto ${r.convoyName}` : `You asked to land the troops aboard ${r.convoyName}`,
+          sub: `Waiting for ${waiting.join(', ')}`, actions: [['Withdraw', () => convoyReq(r, 'withdraw'), 'secondary']] });
+      } else if (r.status !== 'pending' && r.resolvedAt && now - r.resolvedAt < DAY) {
+        const how = { done: r.kind === 'embark' ? 'boarded' : 'landed', declined: 'refused', withdrawn: 'withdrawn', failed: 'could not be done', expired: 'expired' }[r.status] || r.status;
+        out.push({ key: `cr${r.id}:${r.status}`, icon, needs: false, info: true, text: `${r.kind === 'embark' ? `Boarding ${r.convoyName}` : `Landing from ${r.convoyName}`}: ${how}`,
+          sub: [r.note, fmtTime(r.resolvedAt)].filter(Boolean).join(' · ') });
+      }
+    }
     const dismissed = new Set(prefs.dismissed || []);
-    return out.filter(i => !(i.info && dismissed.has(i.key)));
+    // What waits for your answer comes first, then the rest in the order above.
+    return out.filter(i => !(i.info && dismissed.has(i.key))).sort((x, y) => (y.needs ? 1 : 0) - (x.needs ? 1 : 0));
   }
   function goods(b) {
     const parts = Object.entries(b || {}).filter(([, v]) => v > 0)
@@ -219,6 +243,18 @@ const Comms = (() => {
   async function trade(t, action) {
     try { await api.post(`${ctx.base}/game/trades/${t.id}/${action}`, {}); await loadTrades(); if (action === 'accept') ctx.GameUI.load().catch(() => {}); }
     catch (err) { toast(err.message); }
+  }
+  async function convoyReq(r, action) {
+    try {
+      const d = await api.post(`${ctx.base}/convoy-requests/${r.id}/${action}`, {});
+      if (d.embarked || d.landed) toast(d.embarked ? `${d.embarked.length} boarded ${r.convoyName}` : `${d.landed.length} landed from ${r.convoyName}`, 5000);
+      await loadConvoyRequests();
+    } catch (err) { toast(err.message); await loadConvoyRequests(); }
+  }
+  async function loadConvoyRequests() {
+    if (!gameOn()) { ctx.state.convoyRequests = []; renderNotifs(); return; }
+    try { ctx.state.convoyRequests = (await api.get(`${ctx.base}/convoy-requests`)).requests; } catch { /* not a member any more */ }
+    renderNotifs();
   }
   async function loadTrades() {
     if (!gameOn()) { ctx.state.trades = []; renderNotifs(); return; }
@@ -353,6 +389,7 @@ const Comms = (() => {
     open = !!prefs.open;
     if (open) await openTab(tab); else renderChat();
     await loadTrades();
+    await loadConvoyRequests();
   }
 
   function onEvent(e) {
@@ -380,7 +417,7 @@ const Comms = (() => {
   }
   function refresh() { renderChat(); renderNotifs(); }
 
-  return { init, onEvent, onChatChannel, onChatMessage, onRelations, onTradesChanged, refresh, loadTrades, openTrade, startChat };
+  return { init, onEvent, onChatChannel, onChatMessage, onRelations, onTradesChanged, refresh, loadTrades, loadConvoyRequests, openTrade, startChat };
 })();
 
 window.Comms = Comms;

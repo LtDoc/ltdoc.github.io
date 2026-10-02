@@ -574,7 +574,9 @@ closes 20 km of line, marked with smoke, until the GM or a nearby unit of the ho
 
 **Convoys** (*Transports / convoy*) carry up to 10 land units or heroes: they embark within 30 km, sail with the
 convoy out of sight, and land together on the nearest beach within 100 km (no beach, no landing). A convoy sunk
-or removed takes everyone aboard with it. Details: `docs/UNITS.md`.
+or removed takes everyone aboard with it. Allies can share a convoy: whichever side acts (boarding an ally's
+troops, asking to board an ally's convoy, landing with allies aboard) sends the other side a request to allow.
+Details: `docs/UNITS.md`.
 
 ### Dice and combat
 

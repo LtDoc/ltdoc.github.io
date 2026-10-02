@@ -26,6 +26,15 @@ Ships, aircraft and heroes do not need supply.
   on enemy ground takes it like any advance (defended ground holds). Boarding and landing each use up the units'
   move for the turn. If the convoy is **sunk or removed, everyone aboard goes down with it**. Rules: ⚖ Rules →
   Supply & support → Troops at sea (`convoyCapacity`, `convoyBoardKm`, `convoyLandKm`).
+- **Allies share convoys, by request.** Whichever side acts asks the other, and nothing happens until it agrees
+  (🔔 notifications: **Allow** / **Refuse**; the asker can **Withdraw**):
+  - a convoy's nation embarking an ally's units asks that ally; an ally's player boarding its own units onto
+    the convoy (**⛴ Ask to board**) asks the convoy's nation;
+  - landing with allied troops aboard asks every nation with troops aboard; an ally with troops aboard can ask
+    the convoy's nation to land them (**⚓ Ask to land**).
+  On approval the move is made then, if it still can be (in reach, room aboard, a beach close enough). Once
+  aboard, the convoy's nation sails it as usual; the troops stay their own nation's and are theirs again
+  ashore. Requests lapse at End turn. The GM acts directly, no request needed.
 - **Columns chain.** A column within **150 km** of another linked column is linked through it, so a string of
   columns carries supply as far from a place, railhead or convoy as you like (each one supplies its own 100 km).
 - **A linked column supplies** friendly land units within **100 km**: its stretch of front. A column itself is

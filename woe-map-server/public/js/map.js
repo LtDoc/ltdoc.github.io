@@ -948,19 +948,29 @@
     renderer.upsert(displayed(m));                                   // …and onto the beach
     if (prev && m.data?.ride && m.data.ride.at !== prev.data?.ride?.at && Date.now() - m.data.ride.at < 20000) renderer.playRide(m.id, m.data.ride);
   }
-  /** Units and heroes that could board a convoy now: yours, ashore, of its nation, close enough. */
+  /** Are two nations allies? */
+  function allied(a, b) {
+    if (!a || !b || String(a).toLowerCase() === String(b).toLowerCase()) return false;
+    const fb = factionByName(b);
+    return !!fb && friendIds(a).ids.has(fb.id);
+  }
+  /**
+   * Units and heroes that could board a convoy now: ashore, close enough, and yours of its nation (they board at
+   * once) or, on your own convoy, an ally's (its nation is asked first).
+   */
   function boarders(c) {
-    const { board } = convoyRules(), n = String(c.data?.nation || '').toLowerCase(), gm = state.role === 'gm';
-    return [...state.markers.values()].filter(m => m.id !== c.id && canEdit(m) && !m.data?.aboard
+    const { board } = convoyRules(), C = c.data?.nation, gm = state.role === 'gm', mineShip = canEdit(c);
+    return [...state.markers.values()].filter(m => m.id !== c.id && !m.data?.aboard
       && (m.type === 'hero' ? !['captured', 'travelling'].includes(m.data?.status) : m.type === 'unit' && !isConvoyM(m) && isLandType(m) && Number(m.data?.strength ?? 100) > 0)
-      && (gm || String(m.data?.nation || '').toLowerCase() === n)
+      && (gm || (canEdit(m) && String(m.data?.nation || '').toLowerCase() === String(C || '').toLowerCase()) || (mineShip && allied(m.data?.nation, C)))
       && distanceUnits(m.x, m.y, c.x, c.y) <= board);
   }
-  /** Convoys a unit could board now. */
+  /** Convoys a unit could board now: its own nation's (at once) or an ally's (asked first). */
   function convoysNear(m) {
     const { board, cap } = convoyRules(), n = String(m.data?.nation || '').toLowerCase(), gm = state.role === 'gm';
-    return [...state.markers.values()].filter(c => isConvoyM(c) && canEdit(c) && Number(c.data?.strength ?? 100) > 0
-      && (gm || String(c.data?.nation || '').toLowerCase() === n) && distanceUnits(m.x, m.y, c.x, c.y) <= board && cargoOf(c.id).length < cap)
+    return [...state.markers.values()].filter(c => isConvoyM(c) && Number(c.data?.strength ?? 100) > 0
+      && (gm || (canEdit(c) && String(c.data?.nation || '').toLowerCase() === n) || allied(m.data?.nation, c.data?.nation))
+      && distanceUnits(m.x, m.y, c.x, c.y) <= board && cargoOf(c.id).length < cap)
       .sort((a, b) => distanceUnits(m.x, m.y, a.x, a.y) - distanceUnits(m.x, m.y, b.x, b.y));
   }
   function convoyRows(m) {
@@ -970,16 +980,25 @@
     return stat('Carrying', `${cargo.length}/${cap}${cargo.length ? ': ' + cargo.map(x => esc(x.name)).join(', ') : ' (troops within ' + convoyRules().board + ' km can embark)'}`);
   }
   function convoyActions(m) {
-    if (m.data?.aboard) return `<button class="small secondary" data-act="showship">⛴ Show convoy</button>`;
+    if (m.data?.aboard) {
+      const c = state.markers.get(Number(m.data.aboard));
+      // Your troops on an ally's convoy: ask its nation to land them.
+      const ask = c && !canEdit(c) && canEdit(m) ? `<button class="small" data-act="askland" title="${esc(c.data?.nation || 'Its nation')} is asked to land everyone aboard">⚓ Ask to land</button>` : '';
+      return `<button class="small secondary" data-act="showship">⛴ Show convoy</button>${ask}`;
+    }
     const { cap, land } = convoyRules();
     let h = '';
     if (isConvoyM(m)) {
       if (!canEdit(m) || Number(m.data?.strength ?? 100) <= 0) return '';
       const n = cargoOf(m.id).length, room = cap - n, cand = boarders(m).slice(0, Math.max(0, room));
-      if (cand.length) h += `<button class="small" data-act="embarkall" title="${esc(cand.map(x => x.name).join(', '))}">⛴ Embark nearby (${cand.length})</button>`;
-      if (n) h += `<button class="small" data-act="disembark" title="Everyone aboard lands at once on the nearest beach within ${land} km">⚓ Land troops (${n})</button>`;
+      const allies = cand.filter(x => !canEdit(x)).length;
+      if (cand.length) h += `<button class="small" data-act="embarkall" title="${esc(cand.map(x => x.name).join(', '))}${allies ? ` (${allies} of an ally's: its nation is asked first)` : ''}">⛴ Embark nearby (${cand.length})</button>`;
+      const allyAboard = cargoOf(m.id).some(x => String(x.data?.nation || '').toLowerCase() !== String(m.data?.nation || '').toLowerCase());
+      if (n) h += `<button class="small" data-act="disembark" title="Everyone aboard lands at once on the nearest beach within ${land} km${allyAboard && state.role !== 'gm' ? '; the allies aboard are asked first' : ''}">⚓ Land troops (${n})</button>`;
     } else if (canEdit(m) && (m.type === 'hero' || (m.type === 'unit' && isLandType(m)))) {
-      for (const c of convoysNear(m).slice(0, 2)) h += `<button class="small" data-act="board" data-convoy="${c.id}">⛴ Board ${esc(c.name)}</button>`;
+      for (const c of convoysNear(m).slice(0, 2)) h += canEdit(c) || state.role === 'gm'
+        ? `<button class="small" data-act="board" data-convoy="${c.id}">⛴ Board ${esc(c.name)}</button>`
+        : `<button class="small" data-act="board" data-convoy="${c.id}" title="${esc(c.data?.nation || 'Its nation')} is asked first">⛴ Ask to board ${esc(c.name)}</button>`;
     }
     return h;
   }
@@ -990,14 +1009,19 @@
       const ids = act === 'board' ? [m.id] : boarders(c).slice(0, convoyRules().cap - cargoOf(c.id).length).map(x => x.id);
       const d = await api.post(`${base}/convoys/${c.id}/embark`, { unitIds: ids });
       for (const x of d.embarked) upsertMarker(x);
-      toast(`${d.embarked.length} embarked on ${c.name} (${d.aboard}/${d.capacity})${d.errors.length ? ' · ' + d.errors.join('; ') : ''}`, 5000);
+      const asked = (d.requested || []).map(r => `asked ${r.to.join(', ')} about ${r.unitNames.length}`);
+      toast([d.embarked.length ? `${d.embarked.length} embarked on ${c.name} (${d.aboard}/${d.capacity})` : '', ...asked, ...d.errors].filter(Boolean).join(' · '), 6000);
+      Comms.loadConvoyRequests();
       renderer.select(c.id);
       return;
     }
-    if (act === 'disembark') {
-      const d = await api.post(`${base}/convoys/${m.id}/disembark`, {});
-      for (const x of d.landed) upsertMarker(x);
-      toast(`${d.landed.length} landed${d.note ? ' · ' + d.note : ''}`, 5000);
+    if (act === 'disembark' || act === 'askland') {
+      const c = act === 'askland' ? state.markers.get(Number(m.data?.aboard)) : m;
+      const d = await api.post(`${base}/convoys/${c.id}/disembark`, {});
+      for (const x of d.landed || []) upsertMarker(x);
+      if (d.requested?.length) toast(`Asked ${d.requested[0].to.join(', ')} to agree to the landing`, 5000);
+      else toast(`${d.landed.length} landed${d.note ? ' · ' + d.note : ''}`, 5000);
+      Comms.loadConvoyRequests();
     }
   }
 
@@ -1124,6 +1148,7 @@
         case 'progress': GameUI.onProgress(msg); break;
         case 'relations': GameUI.onRelations(msg); Comms.onRelations(); break;
         case 'tradesChanged': Comms.onTradesChanged(msg); break;
+        case 'convoyRequests': Comms.loadConvoyRequests(); break;
         case 'chatChannel': Comms.onChatChannel(msg.channel); break;
         case 'chatMessage': Comms.onChatMessage(msg.message); break;
         case 'ping': showPing(msg.ping); break;
@@ -1859,7 +1884,7 @@
 
   async function popupAction(act, m, btn) {
     try {
-      if (['board', 'embarkall', 'disembark', 'showship'].includes(act)) await convoyAction(act, m, btn);
+      if (['board', 'embarkall', 'disembark', 'askland', 'showship'].includes(act)) await convoyAction(act, m, btn);
       else if (act === 'center') renderer.centerOn(m.x, m.y);
       else if (act === 'edit') openEdit(m);
       else if (act === 'lock') { const d = await api.patch(`${base}/markers/${m.id}`, { locked: !m.locked }); upsertMarker(d.marker); }
