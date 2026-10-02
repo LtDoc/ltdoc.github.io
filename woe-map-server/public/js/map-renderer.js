@@ -86,6 +86,9 @@ class MapRenderer extends EventTarget {
     this.factionInfo = new Map();                // factionId -> { color, name }
     this.sceneryLayer = new PIXI.Container();   // buildings, trenches, craters: scale with the map
     this.sceneryLayer.sortableChildren = true;
+    this.townLayer = new PIXI.Container();      // towns drawn from above (towns.js), at map scale, under craters and counters
+    this.townLayer.eventMode = 'none';
+    this.towns = new Map();                      // town marker id -> { key, m, plan, g, fires, dirty }
     this.scarLayer = new PIXI.Container();      // churned, darkened ground around shell craters, under everything built
     this.scarLayer.eventMode = 'none';
     this.craterLayer = new PIXI.Container();    // shell craters (static sprites, ten turns), under trenches and tokens
@@ -125,7 +128,7 @@ class MapRenderer extends EventTarget {
     this.ghostLayer = new PIXI.Container(); this.ghostLayer.eventMode = 'none'; // fog of war: last known enemy positions
     this.rideLayer = new PIXI.Container(); this.rideLayer.eventMode = 'none';   // trains carrying units on a rail trip
     this.rides = new Map();                                                      // unit id -> rail trip being played
-    this.world.addChild(...[this.mapLayer, this.territoryLayer, this.gridLayer, this.scarLayer, this.sceneryLayer, this.craterLayer, this.craterSmokeG, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.fogLayer, this.skirmish?.layer, this.gunG, this.unitDots, this.ghostLayer, this.rideLayer].filter(Boolean), this.markerLayer, this.boomLayer, ...(this.skirmish ? [this.skirmish.airLayer] : []), this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
+    this.world.addChild(...[this.mapLayer, this.territoryLayer, this.gridLayer, this.townLayer, this.scarLayer, this.sceneryLayer, this.craterLayer, this.craterSmokeG, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.fogLayer, this.skirmish?.layer, this.gunG, this.unitDots, this.ghostLayer, this.rideLayer].filter(Boolean), this.markerLayer, this.boomLayer, ...(this.skirmish ? [this.skirmish.airLayer] : []), this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
     app.stage.addChild(this.world, this.pingArrows);
 
     app.stage.eventMode = 'static';
@@ -450,6 +453,7 @@ class MapRenderer extends EventTarget {
   upsert(marker) {
     this.invalidate();
     if (marker.type === 'unit') this._dotsDirty = true;
+    this._townUpsert(marker);
     let v = this.views.get(marker.id);
     if (v && v.dying) { v.root.parent?.removeChild(v.root); v.root.destroy({ children: true }); v = null; }
     if (!v) {
@@ -473,6 +477,7 @@ class MapRenderer extends EventTarget {
     for (const [bid, e] of this.battles) if (e.battle.attackerId === id || e.battle.defenderId === id) this.battles.delete(bid);   // its fights end with it
     if (this.persistTrails) this.queueTrails();
     this._syncCraterZoom();
+    this._townRemove(id);
     const v = this.views.get(id);
     if (v) {
       v.dying = true;
@@ -484,6 +489,84 @@ class MapRenderer extends EventTarget {
     this.invalidate();
     for (const v of this.views.values()) { v.root.parent?.removeChild(v.root); v.root.destroy({ children: true }); }
     this.views.clear();
+    for (const id of [...this.towns.keys()]) this._townRemove(id);
+  }
+
+  // ---- Towns ------------------------------------------------------------------------------------------------
+  // Every town marker is drawn as a town from above (towns.js), grown from its name: built the first time it comes
+  // into view (a few a frame), and redrawn when shells fall on it, its houses burnt out or reduced to rubble.
+  _townUpsert(m) {
+    if (m.type !== 'town' || !window.TownArt) { if (this.towns.has(m.id)) this._townRemove(m.id); return; }
+    const key = `${m.data?.size || 'village'}|${m.name}|${m.x}|${m.y}`, t = this.towns.get(m.id);
+    if (t && t.key === key) return;
+    if (t) this._townRemove(m.id);
+    this.towns.set(m.id, { key, m: { id: m.id, name: m.name, x: m.x, y: m.y, data: { size: m.data?.size } }, plan: null, g: null, fires: [], dirty: false });
+  }
+  _townRemove(id) {
+    const t = this.towns.get(id);
+    if (!t) return;
+    t.g?.destroy();
+    this.towns.delete(id);
+  }
+  /** Towns hit by a crater redraw with their damage. */
+  _townsHit(craters) {
+    for (const t of this.towns.values()) if (t.plan && craters.some(c => Math.hypot(c.x - t.plan.x, c.y - t.plan.y) < t.plan.R * 1.4 + 3)) t.dirty = true;
+  }
+  /** Draw a town with what the shells have done to it; houses hit this turn are burning. */
+  _drawTown(t, detail) {
+    const p = t.plan, near = [...this.craters.values()].filter(c => Math.hypot(c.x - p.x, c.y - p.y) < p.R * 1.4 + 3)
+      .map(c => ({ x: c.x - p.x, y: c.y - p.y, S: c.craterSize, fresh: c.fresh }));
+    const hash = b => { const v = Math.sin(b.x * 127.1 + b.y * 311.7) * 43758.5453; return v - Math.floor(v); };
+    const damageOf = b => {
+      let d = 0;
+      for (const c of near) {
+        const r = Math.hypot(b.x - c.x, b.y - c.y);
+        if (r < c.S * 0.5) return 2;
+        if (r < c.S * 1.3 && hash(b) < 0.8) d = 1;
+      }
+      return d;
+    };
+    t.g?.destroy();
+    t.g = window.TownArt.draw(p, damageOf, detail);
+    t.detail = detail;
+    t.g.position.set(p.x, p.y);
+    this.townLayer.addChild(t.g);
+    // Fires: up to six burnt-out houses round each of this turn's craters.
+    t.fires = [];
+    for (const c of near.filter(c => c.fresh)) {
+      let n = 0;
+      for (const b of p.buildings) {
+        if (n >= 6 || Math.hypot(b.x - c.x, b.y - c.y) > c.S * 1.4 || damageOf(b) !== 1) continue;
+        t.fires.push({ x: p.x + b.x, y: p.y + b.y, s: Math.max(b.w, b.h), seed: hash(b) }); n++;
+      }
+    }
+    t.dirty = false;
+  }
+  /** Each frame: towns shown from 150 % zoom, those in view built (a little at a time) or redrawn as needed. */
+  _tickTowns(vx0, vy0, vx1, vy1) {
+    const on = this.scale >= 1.5 && this.towns.size > 0;
+    this.townLayer.visible = on;
+    if (!on) return false;
+    // Full detail (shadows, pitched roofs, furrows, hedges) from 500 %; a lighter drawing further out. Building
+    // stops after about 10 ms a frame (a capital takes several), and carries on in the next.
+    const t0 = performance.now();
+    let built = 0, pending = false;
+    const detail = this.scale >= 5;
+    const isLand = (x, y) => !(this.provinceLayer && this.provinceLayer.size) || !!this.provinceAt(x, y);
+    for (const t of this.towns.values()) {
+      const m = t.m, reach = t.plan ? t.plan.reach : 22;
+      const inView = m.x + reach > vx0 && m.x - reach < vx1 && m.y + reach > vy0 && m.y - reach < vy1;
+      if (!inView) { if (t.g) t.g.visible = false; continue; }
+      if (!t.plan || t.dirty || t.detail !== detail) {
+        if (built && performance.now() - t0 > 10) { pending = true; continue; }
+        built++;
+        if (!t.plan) t.plan = window.TownArt.plan(m, isLand);
+        this._drawTown(t, detail);
+      }
+      t.g.visible = true;
+    }
+    if (pending) this.invalidate();
+    return pending;
   }
 
   /** Remote live-drag preview: tween towards the position without persisting. */
@@ -1331,6 +1414,7 @@ class MapRenderer extends EventTarget {
   // ---- Shell craters -----------------------------------------------------------------------------
   /** Replace all craters (from GET /battles). */
   setCraters(list) {
+    for (const t of this.towns.values()) t.dirty = !!t.plan;
     for (const sp of this.craters.values()) { sp.scar?.destroy(); sp.destroy(); }
     this.craters.clear();
     this.craterLayer.removeChildren();
@@ -1369,11 +1453,12 @@ class MapRenderer extends EventTarget {
         this.invalidate();
       }).catch(() => {});
     }
+    this._townsHit(list || []);
     this._syncCraterZoom();
     this.invalidate();
   }
   /** Craters are a few map px across: hide them while they would be specks (their dark ground shows a little sooner). */
-  _syncCraterZoom() { this.craterLayer.visible = this.scale >= 4; this.scarLayer.visible = this.scale >= 2.5; this.craterSmokeG.visible = this.scale >= 4; }
+  _syncCraterZoom() { this.craterLayer.visible = this.scale >= 4; this.scarLayer.visible = this.scale >= 2.5; this.craterSmokeG.visible = this.scale >= 1.5; }
   /**
    * Ground scars, generated once: four variants of a ragged blotch of churned mud (value noise for its edge and
    * texture: wet dark earth, drier lighter clods, a few standing puddles), scorched dark close round the hole, and
@@ -1437,6 +1522,24 @@ class MapRenderer extends EventTarget {
     if (!this.craterSmokeG.visible) return false;
     const t = nowMs / 1000;
     let any = false;
+    // Burning houses in shelled towns: flames licking up, and a tall column of dark smoke leaning downwind.
+    for (const tw of this.towns.values()) {
+      if (!tw.fires.length || !tw.g?.visible) continue;
+      for (const f of tw.fires) {
+        if (f.x < vx0 - 6 || f.x > vx1 + 6 || f.y < vy0 - 2 || f.y > vy1 + 12) continue;
+        any = true;
+        for (let w = 0; w < 5; w++) {
+          const p = ((t * 0.09 + f.seed + w * 0.2) % 1), rise = p * 3.6, drift = p * p * 1.6 + Math.sin(t * 0.5 + w + f.seed * 6) * 0.1 * p;
+          const r = 0.12 + p * 0.75, a = 0.42 * Math.sin(Math.PI * Math.min(1, p * 1.3)) * (1 - p * 0.5);
+          for (const k of [1, 0.7, 0.42]) g.circle(f.x + drift, f.y - rise, r * k).fill({ color: p < 0.25 ? 0x2d2925 : 0x4b4741, alpha: a * 0.4 });
+        }
+        const fl = 0.6 + 0.4 * Math.sin(t * 9 + f.seed * 40) * Math.sin(t * 13.7 + f.seed * 17);
+        g.circle(f.x, f.y, f.s * 0.9 * fl).fill({ color: 0xff6a1a, alpha: 0.35 });
+        g.circle(f.x, f.y - f.s * 0.15, f.s * 0.5 * fl).fill({ color: 0xffb03a, alpha: 0.75 });
+        g.circle(f.x, f.y - f.s * 0.2, f.s * 0.22 * fl).fill({ color: 0xfff0b0, alpha: 0.85 });
+      }
+    }
+    if (this.scale < 4) return any;
     for (const sp of this.craters.values()) {
       if (!sp.fresh) continue;
       const S = sp.craterSize, x = sp.x, y = sp.y;
@@ -1995,7 +2098,11 @@ class MapRenderer extends EventTarget {
       if (this._tickBattles(nowMs, tl.x, tl.y, br.x, br.y)) anim = true;
       if (this.shellsInFlight.length) anim = true;
     }
-    if (this.craters.size && this.scale >= 4) {
+    if ((this.craters.size || this.towns.size) && this.scale >= 1.5) {
+      const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
+      if (this._tickTowns(tl.x, tl.y, br.x, br.y)) anim = true;
+    } else this.townLayer.visible = false;
+    if (this.craters.size && this.scale >= 1.5) {
       const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
       if (this._tickCraterSmoke(nowMs, tl.x, tl.y, br.x, br.y)) anim = true;
     } else this.craterSmokeG.clear();

@@ -208,6 +208,14 @@ view. Details: `docs/UI.md`.
   edits units already on the map; it only changes what new units start with. Stats also appear in the type
   dropdown and the symbol key.
 - **Town**: capital (star), city, village. **POI**: diamond. **Player**: circle with initial.
+- **Towns on the ground.** Under each town's counter the town itself is drawn from above at map scale, grown
+  procedurally from its name (`public/js/towns.js`), so it always looks the same: main roads out of the centre,
+  bending as they go, ring boulevards, a dense web of side streets and lanes, houses packed several rows deep in the
+  old centre and thinning out along the roads, a square and a cathedral or church, parks, and a patchwork of hedged
+  fields, woods and farms round it. Capitals are very large (about 20 map px across), cities large (10), villages
+  small (3) in the middle of their fields. Shown from 150 % zoom, in full detail from 500 %. Shelled towns show the
+  damage: houses near a crater are burnt-out shells or rubble, and this turn's hits set them burning, with flames
+  and tall smoke columns.
 - Any marker can use an uploaded image or external URL as its icon instead. Prefer uploads: an external
   image host must send CORS headers for WebGL to use it, and when it does not the marker silently falls back
   to the drawn sprite. Uploaded icons are shrunk to 256 px in the browser first.
