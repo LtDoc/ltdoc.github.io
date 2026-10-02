@@ -1635,6 +1635,7 @@ class MapRenderer extends EventTarget {
       if (b.kind === 'gunfire') {
         if (!squadsOn) continue;
         anim = true;
+        this._drawHaze(g, b, ax, ay, dx, dy, t, s, false);
         // The attacker's line opens fire; the defender's line answers, a little lighter, while it still stands.
         const live = id => { const v = this.views.get(id); return !v || (!v.dying && Number(v.marker.data?.strength ?? 100) > 0); };
         const aStands = !!Av && live(b.attackerId), dStands = !!Dv && live(b.defenderId);
@@ -1655,6 +1656,7 @@ class MapRenderer extends EventTarget {
         // and bursts on arrival.
         if (s < 1.5 || !(onScreen(dx, dy, margin) || onScreen(ax, ay, margin))) continue;
         anim = true;
+        if (gunZoom) this._drawHaze(g, b, ax, ay, dx, dy, t, s, true);
         if (nowMs >= e.nextShell && this.shellFrames) {
           const a = Math.random() * Math.PI * 2, r = (14 + Math.random() * 40) / s;
           const bx = dx + Math.cos(a) * r, by = dy + Math.sin(a) * r * 0.75;
@@ -1697,6 +1699,27 @@ class MapRenderer extends EventTarget {
     }
     if (sk && sk.frame(fronts, keep, nowMs, s, g)) anim = true;
     return anim;
+  }
+  /**
+   * Battle smoke: a haze of powder smoke (and, under shellfire, dust) over a fight, thickening the longer it has gone
+   * on (full after ten minutes), in big soft patches drifting slowly downwind and swelling as they go, over both lines
+   * and the ground between (over the target only, for a bombardment).
+   */
+  _drawHaze(g, b, ax, ay, dx, dy, t, s, shells) {
+    const age = (Date.now() - (b.createdAt || Date.now())) / 60000, k = Math.min(1, 0.15 + age / 10 * 0.85);
+    const L = Math.hypot(dx - ax, dy - ay);
+    if (L < 1e-6) return;
+    const ux = (dx - ax) / L, uy = (dy - ay) / L, nx = -uy, ny = ux, seed = b.id * 1.37;
+    const n = shells ? 8 : 12, colour = shells ? 0xb4aa98 : 0xd8d5cc;
+    for (let i = 0; i < n; i++) {
+      const h1 = hash01(seed, i * 3 + 1), h2 = hash01(seed, i * 3 + 2), h3 = hash01(seed, i * 3 + 3);
+      const life = 30 + h3 * 20, p = ((t / life + h1) % 1);   // each patch drifts across over 30–50 s, then forms again
+      const along = shells ? 1 : 0.1 + h2 * 0.8, cx = ax + (dx - ax) * along, cy = ay + (dy - ay) * along;
+      const spread = (shells ? 70 : 110) / s, o = (h1 - 0.5) * spread;
+      const x = cx + nx * o + (p - 0.5) * 90 / s, y = cy + ny * o + (p - 0.5) * 24 / s - (shells ? 0 : 0);
+      const r = (36 + h2 * 30) * (0.7 + p * 0.6) / s, a = (shells ? 0.16 : 0.14) * k * Math.sin(Math.PI * p);
+      for (const m of [1, 0.72, 0.45]) g.circle(x, y, r * m).fill({ color: colour, alpha: a * 0.45 });
+    }
   }
   /**
    * A gas attack: a row of cylinders on the gas troops' line hisses out a yellow-green cloud, which rolls downwind
