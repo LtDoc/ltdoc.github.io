@@ -16,6 +16,9 @@
  * drawend {kind,points}, frame.
  */
 /** Stable pseudo-random number in [0, 1) from two numbers. */
+// Craters are drawn at this share of the size stored with them (and their mud, smoke and damage to towns with them),
+// so they sit better among the towns and counters.
+const CRATER_SCALE = 0.65;
 function hash01(a, b) { const v = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453; return v - Math.floor(v); }
 /** Smooth wandering value in about [0, 1] (sum of incommensurate sines), for bursts and lulls. */
 function smooth(x) { return 0.5 + 0.25 * Math.sin(x) + 0.15 * Math.sin(x * 2.31 + 1.7) + 0.1 * Math.sin(x * 5.13 + 0.4); }
@@ -1511,7 +1514,7 @@ class MapRenderer extends EventTarget {
       const wear = Math.min(1, age / 10);
       const sp = new PIXI.Sprite(PIXI.Texture.EMPTY);
       sp.anchor.set(0.5); sp.position.set(c.x, c.y); sp.rotation = (Number(c.rotation) || 0) * Math.PI / 180;
-      sp.eventMode = 'none'; sp.alpha = 0.95 * (1 - 0.35 * wear); sp.craterSize = Number(c.size) || 1.5;
+      sp.eventMode = 'none'; sp.alpha = 0.95 * (1 - 0.35 * wear); sp.craterSize = (Number(c.size) || 1.5) * CRATER_SCALE;
       sp.fresh = age === 0; sp.seed = (Number(c.id) * 0.6180339887) % 1;
       const scars = this._scarTextures(), scar = new PIXI.Sprite(scars[Number(c.id) % scars.length]);
       scar.anchor.set(0.5); scar.position.set(c.x, c.y); scar.rotation = sp.seed * Math.PI * 2; scar.eventMode = 'none';

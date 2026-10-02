@@ -70,7 +70,7 @@ const BattleSound = (() => {
     for (const k of BEDS) {
       const b = beds[k];
       if (!b) continue;
-      b.g.gain.setTargetAtTime(Math.max(0, Math.min(1, lv[k])) * (k === 'gunfire' ? 0.9 : k === 'trench' ? 0.6 : 0.85), t, 0.35);
+      b.g.gain.setTargetAtTime(Math.max(0, Math.min(1, lv[k])) * (k === 'gunfire' ? 0.54 : k === 'trench' ? 0.36 : 0.85), t, 0.35);
       b.p.pan.setTargetAtTime(Math.max(-0.8, Math.min(0.8, pan * (k === 'distant' ? 0.4 : 0.7))), t, 0.35);
     }
   }

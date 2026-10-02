@@ -683,7 +683,7 @@ around it every second or two. Each shell leaves the guns with a flash and climb
 shell with a fading trail over a faint dotted trajectory) to where it lands, so the line of fire is clear even
 when the battery's counter hides its muzzle; shells and flashes draw above the tokens. Each bombardment also leaves
 **4–5 craters** around the target (on land only: shells that fall in the sea leave none), picked from the crater sheet (`rob assets/tile-B-04.png`, atlas `misc-04`;
-plain, dark and scorched), 1.2–2.3 map px across and shown from 400 % zoom. Craters are static sprites stored in
+plain, dark and scorched), drawn 0.8–1.5 map px across (65 % of the size stored with them) and shown from 400 % zoom. Craters are static sprites stored in
 the `craters` table and stay for **ten turns** (End turn removes the old ones; outside game mode, a day). Each
 crater lies in a scar of **churned mud** about three times its size (generated in the renderer: ragged wet and dry
 earth, scorched dark round the hole, a few standing puddles, clods and pale subsoil thrown out; shown from 250 %), so
