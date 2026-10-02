@@ -654,6 +654,10 @@ quarter of an hour (they are drawn in the browser, not saved).
 A section hit hard **routs** back behind its line and rallies; one destroyed **surrenders**: its last men are
 marched off under a white flag. **Stretcher bearers** carry the wounded back to the aid post.
 A ship that goes down leaves an **oil slick**, burning at first, with wreckage drifting in it.
+**Weather** follows the game's date: in winter snow lies on the land beyond a snow line that moves with the month
+(on the vector Earth: from about 43° north in January to 55° in November and March, deepening northwards), and each
+turn has its weather from its date, snow falling on some winter turns and rain on some turns all year, most in
+autumn, drawn over the view from 400 % zoom; from autumn to spring the mud round shell craters is darker.
 
 **Machine-gun companies** and **trench mortars** go in as four gun-and-crew teams, left empty when their crew are
 down. Other **artillery** shows four guns of its type, each worked by two men (guns recoil and smoke, shells leave

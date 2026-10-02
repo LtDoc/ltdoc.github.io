@@ -89,6 +89,10 @@ class MapRenderer extends EventTarget {
     this.townLayer = new PIXI.Container();      // towns drawn from above (towns.js), at map scale, under craters and counters
     this.townLayer.eventMode = 'none';
     this.towns = new Map();                      // town marker id -> { key, m, plan, g, fires, dirty }
+    this.snowG = new PIXI.Graphics();           // winter: snow lying on the land, over the towns and fields (see Weather)
+    this.snowG.eventMode = 'none';
+    this.weatherG = new PIXI.Graphics();        // falling snow or rain, in screen space over the whole map
+    this.weatherG.eventMode = 'none';
     this.scarLayer = new PIXI.Container();      // churned, darkened ground around shell craters, under everything built
     this.scarLayer.eventMode = 'none';
     this.craterLayer = new PIXI.Container();    // shell craters (static sprites, ten turns), under trenches and tokens
@@ -128,8 +132,8 @@ class MapRenderer extends EventTarget {
     this.ghostLayer = new PIXI.Container(); this.ghostLayer.eventMode = 'none'; // fog of war: last known enemy positions
     this.rideLayer = new PIXI.Container(); this.rideLayer.eventMode = 'none';   // trains carrying units on a rail trip
     this.rides = new Map();                                                      // unit id -> rail trip being played
-    this.world.addChild(...[this.mapLayer, this.territoryLayer, this.gridLayer, this.townLayer, this.scarLayer, this.sceneryLayer, this.craterLayer, this.craterSmokeG, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.fogLayer, this.skirmish?.layer, this.gunG, this.unitDots, this.ghostLayer, this.rideLayer].filter(Boolean), this.markerLayer, this.boomLayer, ...(this.skirmish ? [this.skirmish.airLayer] : []), this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
-    app.stage.addChild(this.world, this.pingArrows);
+    this.world.addChild(...[this.mapLayer, this.territoryLayer, this.gridLayer, this.townLayer, this.scarLayer, this.snowG, this.sceneryLayer, this.craterLayer, this.craterSmokeG, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.fogLayer, this.skirmish?.layer, this.gunG, this.unitDots, this.ghostLayer, this.rideLayer].filter(Boolean), this.markerLayer, this.boomLayer, ...(this.skirmish ? [this.skirmish.airLayer] : []), this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
+    app.stage.addChild(this.world, this.weatherG, this.pingArrows);
 
     app.stage.eventMode = 'static';
     app.stage.hitArea = app.screen;
@@ -490,6 +494,76 @@ class MapRenderer extends EventTarget {
     for (const v of this.views.values()) { v.root.parent?.removeChild(v.root); v.root.destroy({ children: true }); }
     this.views.clear();
     for (const id of [...this.towns.keys()]) this._townRemove(id);
+  }
+
+  // ---- Weather ----------------------------------------------------------------------------------------------
+  // The season follows the game's date. In winter snow lies on the land beyond a snow line that moves with the
+  // month (on the vector Earth, by latitude: 43–46° from December to February, 54–55° in November and March, mirrored
+  // south of the equator), deepening to a full white cover 8° beyond it. Each turn has its weather, drawn from its
+  // date: snow falling on some winter turns, rain on some turns in every season, most in autumn. Falling snow or
+  // rain is drawn from 400 % zoom over the whole view; in wet weather and in autumn and winter the ground round the
+  // shell craters is darker mud.
+  _syncWeather() {
+    const date = this.gameDate?.() || '', provinces = this.provinceLayer?.size || 0;
+    const key = `${date}|${provinces}|${this.mapSize?.h}`;
+    if (key === this._wxKey) return;
+    this._wxKey = key;
+    this.snowG.clear();
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(date);
+    if (!m) { this.weather = null; return; }
+    const month = +m[2], roll = hash01(+m[1] * 0.37 + month * 3.1, +m[3] * 1.7);
+    const LINE = { 12: 46, 1: 43, 2: 45, 11: 55, 3: 54 }, north = LINE[month] ?? null, south = LINE[((month + 5) % 12) + 1] ?? null;
+    const winter = north != null || south != null;
+    const rainChance = { 9: 0.4, 10: 0.55, 11: 0.5, 3: 0.35, 4: 0.4, 5: 0.3 }[month] ?? (winter ? 0.3 : 0.15);
+    this.weather = { month, north, south, snowing: (month === 12 || month <= 2) && roll < 0.5, raining: roll >= 0.5 && roll < 0.5 + rainChance, wet: [9, 10, 11, 12, 1, 2, 3].includes(month) };
+    for (const sp of this.craters.values()) if (sp.scar) sp.scar.tint = this.weather.wet ? 0xb8a898 : 0xffffff;   // wet season: darker mud
+    // Snow lying on the land: provinces beyond the snow line, white at an alpha rising with latitude.
+    if (!provinces || !winter) return;
+    const H = this.mapSize.h, latOf = y => 90 - y / H * 180, levels = new Map();
+    for (const p of this.provinceLayer.list) {
+      if (!p.bbox || !p.g) continue;
+      const lat = latOf((p.bbox[1] + p.bbox[3]) / 2);
+      const depth = north != null && lat > north - 1 ? (lat - north + 1) / 9 : south != null && lat < -south + 1 ? (-south + 1 - lat) / 9 : 0;
+      if (depth <= 0) continue;
+      const lv = Math.min(6, Math.ceil(depth * 6));
+      if (!levels.has(lv)) levels.set(lv, []);
+      levels.get(lv).push(p.g);
+    }
+    for (const [lv, list] of levels) for (const multi of list) for (const poly of multi) {
+      if (!poly.length) continue;
+      this.snowG.poly(poly[0].flat()).fill({ color: 0xf4f6f8, alpha: 0.1 * lv });
+      for (let i = 1; i < poly.length; i++) this.snowG.poly(poly[i].flat()).cut();
+    }
+  }
+  /** Snow or rain falling over the view (screen space), from 400 % zoom. Returns true while it falls. */
+  _tickWeather(nowMs) {
+    const g = this.weatherG, w = this.weather;
+    g.clear();
+    if (!w || this.scale < 4) return false;
+    // Where the view is: snow beyond the snow line, rain short of it.
+    let lat = null;
+    if (this.provinceLayer?.size) { const c = this.screenToWorld(this.app.screen.width / 2, this.app.screen.height / 2); lat = 90 - c.y / this.mapSize.h * 180; }
+    const snowy = lat == null ? !!(w.north || w.south) : (w.north != null && lat > w.north - 3) || (w.south != null && lat < -w.south + 3);
+    const snow = w.snowing && snowy, rain = w.raining || (w.snowing && !snowy);
+    if (!snow && !rain) return false;
+    const W = this.app.screen.width, H = this.app.screen.height, t = nowMs / 1000;
+    if (snow) {
+      g.rect(0, 0, W, H).fill({ color: 0xe6ecf2, alpha: 0.06 });
+      for (let i = 0; i < 170; i++) {
+        const h1 = hash01(i, 1.3), h2 = hash01(i, 2.7), h3 = hash01(i, 4.1), v = 26 + h3 * 34;
+        const y = ((h2 * H + t * v) % (H + 20)) - 10, x = ((h1 * W + t * 9 + Math.sin(t * 0.8 + i) * 14) % (W + 20) + W + 20) % (W + 20) - 10;
+        g.circle(x, y, 0.9 + h3 * 1.6).fill({ color: 0xffffff, alpha: 0.55 + h3 * 0.35 });
+      }
+    } else {
+      g.rect(0, 0, W, H).fill({ color: 0x1f2a33, alpha: 0.08 });
+      for (let i = 0; i < 140; i++) {
+        const h1 = hash01(i, 5.3), h2 = hash01(i, 6.7), h3 = hash01(i, 8.1), v = 520 + h3 * 260;
+        const y = ((h2 * H + t * v) % (H + 40)) - 20, x = ((h1 * W - t * v * 0.18) % (W + 40) + W + 40) % (W + 40) - 20;
+        g.moveTo(x, y).lineTo(x - 2.4, y + 12 + h3 * 6);
+      }
+      g.stroke({ width: 1.1, color: 0xb8c4cf, alpha: 0.45 });
+    }
+    return true;
   }
 
   // ---- Towns ------------------------------------------------------------------------------------------------
@@ -1442,6 +1516,7 @@ class MapRenderer extends EventTarget {
       scar.anchor.set(0.5); scar.position.set(c.x, c.y); scar.rotation = sp.seed * Math.PI * 2; scar.eventMode = 'none';
       scar.scale.set(sp.craterSize * 3.3 / scar.texture.width);
       scar.alpha = 0.9 * (1 - 0.7 * wear);
+      if (this.weather?.wet) scar.tint = 0xb8a898;   // wet season: darker mud
       sp.scar = scar;
       this.scarLayer.addChild(scar);
       this.craters.set(c.id, sp);
@@ -2177,6 +2252,8 @@ class MapRenderer extends EventTarget {
       if (this._tickBattles(nowMs, tl.x, tl.y, br.x, br.y)) anim = true;
       if (this.shellsInFlight.length) anim = true;
     }
+    this._syncWeather();
+    if (this._tickWeather(nowMs)) anim = true;
     if ((this.craters.size || this.towns.size) && this.scale >= 1.5) {
       const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
       if (this._tickTowns(tl.x, tl.y, br.x, br.y)) anim = true;
