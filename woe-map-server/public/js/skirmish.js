@@ -12,7 +12,9 @@
 (function () {
   const SQUAD = 8;
   const AIM_OFF = 0.66;            // the levelled rifle points ~38° above the figure's right: turn it onto the enemy
-  const SIZE = { aim: 18, up: 18, dead: 22 };   // longest side on screen, px (before the zoom boost)
+  // One scale for every pose, so the figures keep the sheet's proportions (a soldier seen from above is about half
+  // as long as one lying full length): set by the fallen figure's length on screen, px (before the zoom boost).
+  const DEAD_PX = 22;
   const RUN_PX_S = 34;             // running pace, screen px a second
   const UNIFORMS = ['grey', 'beige', 'green'];
   // Defaults by nation name, keeping the 1914 sides apart at a glance: the Central Powers in field grey, Britain,
@@ -116,6 +118,7 @@
 
     _tick(q, f, nowMs, t, s, boost, g) {
       const kit = this.tex[q.kit] || this.tex.grey;
+      const unit = DEAD_PX / kit.dead.len * boost / s;   // world units per atlas px, for every pose
       const nx = -f.uy, ny = f.ux, theta = Math.atan2(f.uy, f.ux);
       const at = (o, d) => [f.cx + nx * o * f.front - f.ux * d / s, f.cy + ny * o * f.front - f.uy * d / s];
       const living = q.men.filter(m => !m.dead);
@@ -141,7 +144,7 @@
           const k = m.fellAt && age < 320 ? age / 320 : 1;
           sp.position.set(x, y);
           sp.rotation = m.rot;
-          const sc = SIZE.dead / kit.dead.len * boost / s * (1.25 - 0.25 * k);
+          const sc = unit * (1.25 - 0.25 * k);
           sp.scale.set(m.flip ? -sc : sc, sc);
           sp.alpha = 0.35 + 0.65 * k;
           continue;
@@ -165,7 +168,7 @@
             this._pose(m, kit, 'up');
             sp.position.set(x, y);
             sp.rotation = Math.atan2(y1 - y0, x1 - x0) + Math.PI / 2;
-            const sc = SIZE.up / kit.up.len * boost / s * (1 + 0.07 * Math.abs(Math.sin(t * 13 + m.i)));
+            const sc = unit * (1 + 0.07 * Math.abs(Math.sin(t * 13 + m.i)));
             sp.scale.set(sc);
             continue;
           } else { sp.visible = false; continue; }   // still waiting to leave the unit
@@ -177,9 +180,9 @@
         const aim = theta + Math.sin(t * 0.7 + m.phase * 2) * 0.1;
         sp.position.set(x, y);
         sp.rotation = aim + AIM_OFF;
-        sp.scale.set(SIZE.aim / kit.aim.len * boost / s);
+        sp.scale.set(unit);
         if (shot && g) {
-          const mx = x + Math.cos(aim) * 8.5 * boost / s, my = y + Math.sin(aim) * 8.5 * boost / s;
+          const reach = kit.aim.len * unit * 0.45, mx = x + Math.cos(aim) * reach, my = y + Math.sin(aim) * reach;
           g.circle(mx, my, 3.2 * boost / s).fill({ color: 0xffc94a, alpha: 0.35 });
           g.circle(mx, my, 1.5 * boost / s).fill({ color: 0xfff6c8, alpha: 0.95 });
         }
