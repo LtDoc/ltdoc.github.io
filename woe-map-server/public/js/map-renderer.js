@@ -1377,7 +1377,7 @@ class MapRenderer extends EventTarget {
     this._drawShells(nowMs);
     const sk = this.skirmish, fronts = new Map(), keep = new Set();
     const gunZoom = s >= 8;
-    if (!this.battles.size && !(gunZoom && sk?.mounts)) { if (sk && sk.squads.size) sk.clear(); return false; }
+    if (!this.battles.size && !(gunZoom && (sk?.mounts || sk?.ships))) { if (sk && sk.squads.size) sk.clear(); return false; }
     let anim = false;
     const t = nowMs / 1000;
     const onScreen = (x, y, m) => x > vx0 - m && x < vx1 + m && y > vy0 - m && y < vy1 + m;
@@ -1420,9 +1420,9 @@ class MapRenderer extends EventTarget {
         // The attacker's line opens fire; the defender's line answers, a little lighter, while it still stands.
         const live = id => { const v = this.views.get(id); return !v || (!v.dying && Number(v.marker.data?.strength ?? 100) > 0); };
         const aStands = !!Av && live(b.attackerId), dStands = !!Dv && live(b.defenderId);
-        // Planes and horsemen do their own fighting (skirmish.js): no rifle line from their tokens, and none aimed at
+        // Planes, horsemen and ships do their own fighting (skirmish.js): no rifle line from their tokens, and none aimed at
         // a plane's token either (its planes are over the fight).
-        const own = k => (k === 'air' || k === 'horse') && !!sk?.mounts, air = !!sk?.mounts && (kA === 'air' || kD === 'air');
+        const own = k => ((k === 'air' || k === 'horse') && !!sk?.mounts) || (k === 'ships' && !!sk?.ships), air = !!sk?.mounts && (kA === 'air' || kD === 'air');
         if (aStands && !own(kA) && !air) this._drawLineFire(g, ax, ay, dx, dy, e.seed, 1, t, s, pA, kD ? LINE : 10);
         if (dStands && !own(kD) && !air) this._drawLineFire(g, dx, dy, ax, ay, e.seed + 7.77, 0.65, t, s, pD, kA ? LINE : 10);
       } else {
@@ -1448,13 +1448,20 @@ class MapRenderer extends EventTarget {
         }
       }
     }
-    // Air units out of a fight, on screen: their planes circle over them.
-    if (gunZoom && sk?.mounts) {
+    // Air and naval units out of a fight, on screen: their planes circle over them, their ships lie around them.
+    if (gunZoom && (sk?.mounts || sk?.ships)) {
       const m = 120 / s;
       for (const [id, v] of this.views) {
         if (fronts.has(id) || v.dying || v.riding || !onScreen(v.x, v.y, m)) continue;
         if (v._skType !== v.marker.data?.unitType || v._skKind === undefined) { v._skType = v.marker.data?.unitType; v._skKind = window.Skirmish.kindOf(v.marker); }
-        if (v._skKind !== 'air') continue;
+        if (v._skKind === 'ships' && sk.ships) {
+          // Bows the way it last moved (else either way, steady for the unit).
+          const tr = v.marker.data?.trail, a = Array.isArray(tr) && tr.length > 1 ? tr[tr.length - 1][0] - tr[tr.length - 2][0] : 0;
+          fronts.set(id, { view: v, kind: 'ships', idle: true, cx: v.x, cy: v.y, ux: a ? Math.sign(a) : (id % 2 ? 1 : -1), uy: 0 });
+          keep.add(id);
+          continue;
+        }
+        if (v._skKind !== 'air' || !sk.mounts) continue;
         fronts.set(id, { view: v, kind: 'air', mode: 'orbit', ax: v.x, ay: v.y, hx: v.x, hy: v.y });
         keep.add(id);
       }
@@ -1878,8 +1885,9 @@ class MapRenderer extends EventTarget {
     const k = 1 - Math.pow(0.001, dt / 700); // movement easing
     let anim = this.fxLayer.children.length > 0 || this.boomLayer.children.length > 0;
     if (this._tickPings(nowMs)) anim = true;
-    // From 800 % the planes of air units are up, circling, whether or not they fight (skirmish.js).
-    if (this.battles.size || this.shellsInFlight.length || this.skirmish?.squads.size || (s >= 8 && this.skirmish?.mounts)) {
+    // From 800 % the planes of air units are up, circling, and naval units' ships lie on the water, whether or not
+    // they fight (skirmish.js).
+    if (this.battles.size || this.shellsInFlight.length || this.skirmish?.squads.size || (s >= 8 && (this.skirmish?.mounts || this.skirmish?.ships))) {
       const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
       if (this._tickBattles(nowMs, tl.x, tl.y, br.x, br.y)) anim = true;
       if (this.shellsInFlight.length) anim = true;

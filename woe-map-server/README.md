@@ -635,6 +635,11 @@ from them, a gun whose crew is down falls silent).
 
 **Tanks** roll out two to a unit, one knocked out at 50 % strength. Each nation has its own tank design.
 
+**Ships:** each naval unit shows its squadron (two battleships, six or seven destroyers, four to six submarines, a
+convoy of freighters…), in or out of a fight. In a fight the ships fire salvoes that splash around the enemy,
+torpedo craft and submarines loose torpedoes, and ships lost go down burning. Built by
+`node scripts/build-ships.js "rob assets"`.
+
 The figures come from `public/assets/soldiers.png`, built from the army folders by
 `node scripts/build-soldiers.js "rob assets"` (`public/js/skirmish.js`). Details: `docs/UNITS.md`.
 **Artillery** (and ships) **shell** the target instead: bursts from `public/assets/shellburst.png` land at random

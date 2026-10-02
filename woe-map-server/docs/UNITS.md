@@ -205,6 +205,47 @@ Atlas: `public/assets/mounts.png`, cut by `node scripts/build-mounts.js "rob ass
 into field grey, olive and horizon blue), the Russian Infantry folder's cavalryman, and Army Assets/PlaneSprites.png. The 36 planes are sorted by eye into 23
 liveries; the table is at the top of the script.
 
+### Ships in a fight
+
+Every naval unit is a squadron or flotilla of its class, shown from 800 % zoom, in or out of a fight:
+
+| Unit | Ships | Picture |
+|---|---|---|
+| Dreadnought / battleship | 2 | Battleship.png |
+| Pre-dreadnought | 2 | Predreadnought.png |
+| Battlecruiser | 2 | Battlecruiser.png |
+| Armoured cruiser | 3 | ArmouredCruiser.png |
+| Light cruiser | 3–4 | LightCruiser.png |
+| Destroyers | 6–7 | DestroyerSprites.png (one design per nation) |
+| Torpedo boats | 6–8 | TorpedoBoat.png |
+| Submarine / U-boat | 4–6 | SubSprites.png (one design per nation) |
+| Minelayer / minesweeper | 2–3 | TorpedoBoat.png |
+| Gunboat / river monitor | 3–4 | TorpedoBoat.png |
+| Transports / convoy | 5–6 | CargoConvoy.png (a mix of freighters) |
+| Seaplane carrier | 1 | CargoConvoy.png (a converted merchantman) |
+
+Where there is a range, each unit keeps its own number. Gunboat.png, Minelayer.png and TorpedoBoat.png are the same
+picture, so the small craft share it.
+
+- **Formation:** the ships lie in loose formation around their token (in a fight, around their line, a little ahead
+  of it), one behind the other down the screen. The art is in profile, so ships face left or right, never up or
+  down. In a fight their bows point at the enemy; out of one, the way the unit last moved. Each rolls a little,
+  with a bow wave and foam streaming astern. Submarines run submerged: faint and blue-grey.
+- **Gunfire:** in a fight, ships fire salvoes on their own clocks, with flashes along the deck and gun smoke. The
+  shells land after their flight time as splashes around the enemy's line, or as bursts if he is ashore.
+  - Capital ships fire four guns a salvo, cruisers three, destroyers and gunboats two, the rest one.
+  - Freighters and submarines do not fire guns.
+  - When a ship unit bombards at range, its shells fly from one of its ships along the usual shell arcs.
+- **Torpedoes:** destroyers, torpedo boats and submarines loose them now and then. A short pale track runs out to the
+  enemy and ends in a column of water, sometimes with a hit.
+- **Losses:** one ship per share of the unit's strength (a two-ship squadron loses one at 50 %). The ship lists,
+  burns, smokes, settles and goes down, leaving a ring of foam. Repairs bring a ship back.
+- **Gun lines:** naval units' tokens draw no rifle-fire line; their ships do the fighting.
+
+Atlas: `public/assets/ships.png`, cut by `node scripts/build-ships.js "rob assets"` (sheets split into ships at the
+emptiest line between them, shrunk by half). Ship sizes are not to true scale: a battleship is about 84 px long
+(before the zoom boost) and a destroyer 40 px, sized against the guns and tanks.
+
 ## Campaign rules
 
 Supply on/off · a place feeds a column within: capital (600 km), city (400 km), village (200 km) · column supplies

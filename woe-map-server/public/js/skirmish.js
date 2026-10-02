@@ -20,10 +20,15 @@
  *   - aircraft: four planes of one livery, flying over the map with their shadows below. Out of a fight they circle
  *     their unit; against ground or ships they make strafing runs over the target (bombers drop bombs on it);
  *     against other aircraft both squadrons mix it up over the fight, each plane chasing an enemy, firing when it
- *     has one in its sights and breaking hard when it is chased. A plane shot down spins away trailing smoke.
+ *     has one in its sights and breaking hard when it is chased. A plane shot down spins away trailing smoke;
+ *   - ships: each naval unit is a squadron or flotilla of its class (public/assets/ships.png, scripts/build-ships.js):
+ *     two battleships, three armoured cruisers, six or seven destroyers, four to six submarines, a convoy of
+ *     freighters… They lie in loose formation on the water, wakes streaming astern, also out of a fight. In a fight
+ *     they turn their bows on the enemy and fire salvoes that raise splashes around him (or burst on land); destroyers,
+ *     torpedo boats and submarines (running submerged) loose torpedoes. A ship lost lists, burns and goes down.
  *
  * Losses follow strength: one man in eight per 12.5 % lost (at 50 %: four standing, four fallen), one tank in two per
- * 50 %, one plane in four per 25 %. Each nation fights as one of the armies the art has: American, British, French,
+ * 50 %, one plane in four per 25 %, one ship by its share of the squadron. Each nation fights as one of the armies the art has: American, British, French,
  * German or Russian (chosen on the faction, else guessed from its name), so all of a nation's troops look alike;
  * the kit follows the game's date (1916 helmets and gear from 1916, greatcoats and winter dress from November to
  * February); assault regiments go in as stormtroopers or trench raiders, French colonial troops as zouaves. Each
@@ -43,6 +48,17 @@
   const RIDERS = 8, RIDER_PX = 34, GALLOP_PX_S = 70, TROT_PX_S = 28;
   const RIDER_FOR = { british: 'beige', german: 'grey', american: 'green', french: 'french', russian: 'russian' };   // mounts.json riders
   const PLANES = 4;
+  // Naval units: [ship class in ships.json, fewest and most ships in the unit, a ship's length on screen in px before
+  // the zoom boost (big ships kept short against true scale, as the guns and tanks are), guns firing in a salvo,
+  // time between salvoes (ms), torpedoes].
+  const FLEET = {
+    dreadnought: ['battleship', 2, 2, 84, 4, 4500, false], predreadnought: ['predreadnought', 2, 2, 76, 4, 5000, false],
+    battlecruiser: ['battlecruiser', 2, 2, 90, 4, 4500, false], armouredcruiser: ['armouredcruiser', 3, 3, 70, 3, 4000, false],
+    lightcruiser: ['lightcruiser', 3, 4, 62, 3, 3000, false], destroyer: ['destroyer', 6, 7, 40, 2, 2200, true],
+    torpedoboat: ['smallcraft', 6, 8, 30, 1, 2600, true], submarine: ['submarine', 4, 6, 34, 0, 0, true],
+    minelayer: ['smallcraft', 2, 3, 38, 1, 3500, false], gunboat: ['smallcraft', 3, 4, 30, 2, 2600, false],
+    transport: ['merchant', 5, 6, 48, 0, 0, false], seaplanecarrier: ['merchant', 1, 1, 60, 1, 4000, false],
+  };
   const PLANE_PX = { fighter: 30, reconair: 30, seaplane: 32, bomber: 40 };
   const FLY_PX_S = { fighter: 76, reconair: 64, seaplane: 60, bomber: 48 };   // air speed, screen px a second
   const TURN = { fighter: 2.7, reconair: 2.2, seaplane: 2.0, bomber: 1.5 };     // turn rate, radians a second
@@ -106,7 +122,7 @@
       this.squads = new Map();       // unit id -> squad
       this.uniforms = new Map();     // nation (lower case) -> uniform
       this.factions = [];
-      this.tex = null; this.mach = null; this.mounts = null; this._liv = null;
+      this.tex = null; this.mach = null; this.mounts = null; this.ships = null; this._liv = null;
       this._load();
     }
     async _load() {
@@ -135,6 +151,13 @@
         this._liv = null;
         this.r.invalidate();
       } catch (e) { console.warn('Cavalry and aircraft sprites not available', e); }
+      try {
+        const meta = await fetch('/assets/ships.json?v=1').then(r => r.json());
+        const base = await PIXI.Assets.load({ src: '/assets/ships.png?v=1', loadParser: 'loadTextures' });
+        this.ships = Object.fromEntries(Object.entries(meta.classes).map(([k, l]) =>
+          [k, l.map(([x, y, w, h, ax, ay]) => ({ t: frame(base, { x, y, w, h }), w, h, ax, ay }))]));
+        this.r.invalidate();
+      } catch (e) { console.warn('Ship sprites not available', e); }
     }
     /** Faction list from the map page: [{ name, uniform }]. */
     setFactions(list) {
@@ -174,7 +197,7 @@
     }
     /**
      * What a unit shows in a fight: 'rifles' (infantry), 'guns' (artillery, machine guns), 'tanks', 'horse' (cavalry),
-     * 'air' (aeroplanes), or null.
+     * 'air' (aeroplanes), 'ships' (naval units), or null.
      */
     static kindOf(m) {
       const t = typeOf(m);
@@ -184,6 +207,7 @@
       if (t.cat === 'Infantry') return 'rifles';
       if (HORSE.has(t.id)) return 'horse';
       if (AIR.has(t.id)) return 'air';
+      if (FLEET[t.id]) return 'ships';
       return null;
     }
     static isInfantry(m) { return Skirmish.kindOf(m) === 'rifles'; }
@@ -233,6 +257,7 @@
      */
     fireGun(unitId, nowMs) {
       const q = this.squads.get(unitId);
+      if (q && q.kind === 'ships' && q.shown) return this._shipShot(q, nowMs);
       if (!q || q.kind !== 'guns' || !q.shown) return null;
       const ready = q.machines.filter(gn => gn.manned && gn.muzzle);
       if (!ready.length) return null;
@@ -247,7 +272,8 @@
      * width, world units), backPx (from the line back to the token, screen px), tx, ty (centre of the enemy's line),
      * createdAt, kind, shells }. Aircraft instead: { kind: 'air', view, mode ('orbit', 'strafe' or 'dogfight'), ax, ay
      * (what they fly over: their own token, the target, or the defender in a dogfight), hx, hy (their token), enemyId,
-     * createdAt }.
+     * createdAt }. Ships out of a fight: { kind: 'ships', view, idle: true, cx, cy (their token), ux (1: bows to the
+     * right, -1: to the left), uy: 0 }.
      * `keep`: every unit still in a battle this turn (squads off screen keep their state). Draws flashes and smoke on
      * `g`. Returns true while a squad is on screen.
      */
@@ -263,6 +289,7 @@
       for (const [id, f] of fronts) {
         if (f.kind !== 'rifles' && !this.mach) continue;
         if ((f.kind === 'horse' || f.kind === 'air') && !this.mounts) continue;
+        if (f.kind === 'ships' && !this.ships) continue;
         let q = this.squads.get(id);
         if (q && q.kind !== f.kind) { this._drop(q); this.squads.delete(id); q = null; }
         if (!q) { q = this._make(id, f, nowMs, s); this.squads.set(id, q); }
@@ -305,6 +332,22 @@
           this.shadowC.addChild(p.sh); this.planeC.addChild(p.sp);
           this._launch(p, f, s, fresh && f.mode !== 'orbit', hash(seed, i + 50));
           q.machines.push(p);
+        }
+        return q;
+      }
+      if (kind === 'ships') {
+        const type = typeOf(v?.marker)?.id, [cls, lo, hi] = FLEET[type] || FLEET.destroyer;
+        const frames = this.ships[cls], n = lo + Math.floor(hash(seed, 1) * (hi - lo + 1)), alive = aliveFor(before, n);
+        // Warships of a class come in one design per nation; a convoy is a mix of freighters.
+        const design = strHash(v?.marker?.data?.nation) % frames.length;
+        q.type = type; q.torps = []; q.foam = [];
+        for (let k = 0; k < n; k++) {
+          const fr = frames[cls === 'merchant' ? (design + k * 5) % frames.length : design];
+          const sh = { k, fr, sp: new PIXI.Sprite(fr.t), dead: k >= alive, gone: k >= alive, sink: null, phase: hash(seed, k + 30) * 6,
+            jx: hash(seed, k + 50) - 0.5, nextShot: nowMs + 600 + hash(seed, k + 70) * 3000, firedAt: 0, foamAt: 0, torpAt: nowMs + 3000 + hash(seed, k + 90) * 14000, guns: [] };
+          sh.sp.anchor.set(fr.ax, fr.ay); sh.sp.eventMode = 'none';
+          this.machC.addChild(sh.sp);
+          q.machines.push(sh);
         }
         return q;
       }
@@ -381,6 +424,7 @@
       const unit = TORSO_PX / this.tex.torso * boost / s;   // world units per soldier-atlas px, for every figure
       const ux = f.ux || 0, uy = f.uy || 0;
       if (q.kind === 'air') this._tickAir(q, f, nowMs, t, s, boost);
+      else if (q.kind === 'ships') this._tickShips(q, f, nowMs, t, s, boost, g);
       else {
         const nx = -uy, ny = ux, theta = Math.atan2(uy, ux);
         const at = (o, d) => [f.cx + nx * o * f.front - ux * d / s, f.cy + ny * o * f.front - uy * d / s];
@@ -495,6 +539,109 @@
           q.dust.push({ x: m.sp.x - Math.cos(m.hd) * back / s, y: m.sp.y - Math.sin(m.hd) * back / s, t0: nowMs });
         }
       }
+    }
+
+    // ---- Ships -----------------------------------------------------------------------------------------------------
+    /**
+     * A squadron lies in loose formation around its point (its token, or its line in a fight), ships one behind the
+     * other down the screen, bows on the enemy (the art is in profile, so they face left or right). Each rolls a
+     * little and leaves foam streaming astern. In a fight they fire salvoes: flashes along the deck, smoke, and
+     * after the flight time splashes around the enemy's line (shell bursts if he is ashore); torpedo craft loose
+     * torpedoes that run to the enemy and end in a column of water.
+     */
+    _tickShips(q, f, nowMs, t, s, boost, g) {
+      const [, , , lenPx, guns, every, torpedoes] = FLEET[q.type] || FLEET.destroyer;
+      const L = lenPx * boost, sub = q.type === 'submarine', face = (f.ux || 1) >= 0 ? 1 : -1, n = q.machines.length;
+      const fight = !f.idle && f.tx != null;
+      // Losses: a ship goes down per share of strength lost; repairs bring one back.
+      const afloat = q.machines.filter(sh => !sh.dead), want = aliveFor(strengthOf(f.view), n);
+      if (afloat.length > want && nowMs >= q.nextDeath) {
+        const sh = afloat[Math.floor(Math.random() * afloat.length)];
+        sh.dead = true; sh.sink = { t0: nowMs, dir: Math.random() < 0.5 ? -1 : 1 };
+        this.r.explode(sh.sp.x, sh.sp.y - 3 / s, Math.max(36, L * 0.6));
+        q.nextDeath = nowMs + 900 + Math.random() * 900;
+      } else if (afloat.length < want) {
+        const sh = q.machines.find(x => x.gone);
+        if (sh) { sh.dead = sh.gone = false; sh.sink = null; sh.sp.alpha = 0; sh.risen = nowMs; }
+      }
+      for (const sh of q.machines) {
+        const sp = sh.sp, fr = sh.fr, sc = L / fr.w / s;
+        if (sh.gone) { sp.visible = false; continue; }
+        // Station in the formation, screen px from the point: each ship a little lower (nearer) than the one before.
+        const dy = (sh.k - (n - 1) / 2) * L * (sub ? 0.36 : 0.3), dx = (sh.k % 2 ? 1 : -1) * L * 0.2 + sh.jx * L * 0.25 + Math.sin(t * 0.25 + sh.phase) * 3 * boost;
+        let x = f.cx + dx / s, y = f.cy + (dy + Math.sin(t * 1.3 + sh.phase) * 0.6) / s, roll = Math.sin(t * 0.9 + sh.phase) * 0.015, alpha = sub ? 0.5 : 1;
+        if (sh.sink) {
+          // Hit and going down: listing, settling and fading, smoke and fire pouring from her.
+          const k = Math.min(1, (nowMs - sh.sink.t0) / 4500);
+          roll += sh.sink.dir * 0.35 * k; y += 5 * k / s; alpha *= 1 - k * k;
+          if (nowMs - (sh.smokeAt || 0) > 140 && k < 0.9) { sh.smokeAt = nowMs; q.puffs.push({ x: x + (Math.random() - 0.5) * L * 0.5 / s, y: y - L * 0.08 / s, t0: nowMs, dark: true, big: true }); }
+          if (Math.random() < 0.08 && k < 0.7) this._flash(g, x + (Math.random() - 0.5) * L * 0.6 / s, y - 2 / s, 2.2 * boost / s);
+          if (k >= 1) { sh.gone = true; sp.visible = false; q.foam.push({ x, y, t0: nowMs, ring: true, r: L * 0.4 }); continue; }
+        }
+        if (sh.risen) { const k = Math.min(1, (nowMs - sh.risen) / 1200); alpha *= k; if (k >= 1) sh.risen = 0; }
+        sp.visible = true;
+        sp.position.set(x, y);
+        sp.rotation = roll * face;
+        sp.scale.set(face * sc, sc);
+        sp.alpha = alpha;
+        sp.tint = sub ? 0xa8bcc8 : 0xffffff;
+        // Foam: a bow wave and a wake streaming astern (it is the water that moves: the ships keep station).
+        const halfLen = fr.w * sc / 2;
+        if (!sh.dead && nowMs - sh.foamAt > 90) {
+          sh.foamAt = nowMs;
+          q.foam.push({ x: x - face * halfLen * 0.95, y: y + (Math.random() - 0.5) * 1.2 / s, t0: nowMs, vx: -face * 16 * boost / s });
+        }
+        if (!sh.dead) g.ellipse(x + face * halfLen * 0.97, y, 2.2 * boost / s, 1.1 * boost / s).fill({ color: 0xffffff, alpha: 0.55 });
+        // Gun positions along the deck (world units, filled in for _shipShot).
+        sh.guns = []; for (let i = 0; i < guns; i++) sh.guns.push([x + face * (guns > 1 ? (i / (guns - 1) - 0.5) * 0.6 : 0.1) * fr.w * sc, y - fr.h * sc * 0.35]);
+        if (!fight || sh.dead) continue;
+        // Salvo: on the ship's own clock (a bombardment's shells come through fireGun instead).
+        if (guns && !f.shells && nowMs >= sh.nextShot) { sh.nextShot = nowMs + every * (0.75 + Math.random() * 0.6); this._salvo(q, sh, f, nowMs, s, boost, L); }
+        if (guns && nowMs - sh.firedAt < 140) for (const [gx, gy] of sh.guns) this._flash(g, gx + face * 2 / s, gy, (L > 60 ? 3 : 2) * boost / s);
+        if (torpedoes && nowMs >= sh.torpAt) {
+          sh.torpAt = nowMs + (sub ? 8000 : 16000) + Math.random() * 10000;
+          const tx = f.tx + (Math.random() - 0.5) * 50 / s, ty = f.ty + (Math.random() - 0.5) * 40 / s, d = Math.hypot(tx - x, ty - y) * s;
+          q.torps.push({ x0: x + face * halfLen * 0.6, y0: y + 1 / s, x1: tx, y1: ty, t0: nowMs, dur: Math.max(1500, d / 55 * 1000) });
+        }
+      }
+      // Torpedo tracks: a pale line running out to the enemy, then a column of water (now and then a hit).
+      q.torps = q.torps.filter(tp => {
+        const k = (nowMs - tp.t0) / tp.dur;
+        if (k >= 1) { this.r.splash(tp.x1, tp.y1, 70); if (Math.random() < 0.35) this.r.explode(tp.x1, tp.y1, 46, 120); return false; }
+        // The track: a short pale streak behind the running torpedo, fading towards the tail.
+        const hx = tp.x0 + (tp.x1 - tp.x0) * k, hy = tp.y0 + (tp.y1 - tp.y0) * k, d = Math.hypot(tp.x1 - tp.x0, tp.y1 - tp.y0) || 1;
+        const tail = Math.min(k * d, 28 * boost / s), bx = (tp.x1 - tp.x0) / d, by = (tp.y1 - tp.y0) / d;
+        g.moveTo(hx - bx * tail, hy - by * tail).lineTo(hx - bx * tail * 0.4, hy - by * tail * 0.4).stroke({ width: 1.2 * boost / s, color: 0xf2f6f8, alpha: 0.18 });
+        g.moveTo(hx - bx * tail * 0.4, hy - by * tail * 0.4).lineTo(hx, hy).stroke({ width: 1.4 * boost / s, color: 0xf2f6f8, alpha: 0.4 });
+        return true;
+      });
+      // Foam fading on the water.
+      q.foam = q.foam.filter(p => nowMs - p.t0 < (p.ring ? 3000 : 1500));
+      for (const p of q.foam) {
+        const age = (nowMs - p.t0) / (p.ring ? 3000 : 1500);
+        if (p.ring) { g.ellipse(p.x, p.y, (p.r * (0.5 + age)) * boost / s, (p.r * 0.3 * (0.5 + age)) * boost / s).stroke({ width: 1.5 / s, color: 0xffffff, alpha: 0.5 * (1 - age) }); continue; }
+        g.ellipse(p.x + p.vx * age * 1.5, p.y, (1.6 + age * 3) * boost / s, (0.8 + age * 1.2) * boost / s).fill({ color: 0xffffff, alpha: 0.45 * (1 - age) });
+      }
+    }
+    /** A salvo from one ship: flashes and smoke at its guns, then the shells land around the enemy's line. */
+    _salvo(q, sh, f, nowMs, s, boost, L) {
+      sh.firedAt = nowMs;
+      for (const [gx, gy] of sh.guns) q.puffs.push({ x: gx, y: gy, t0: nowMs, big: L > 60 });
+      const size = Math.max(30, Math.min(90, L * 0.8));
+      for (let i = 0; i < sh.guns.length; i++) {
+        const x = f.tx + (Math.random() - 0.5) * 70 / s, y = f.ty + (Math.random() - 0.5) * 45 / s, delay = 900 + Math.random() * 700 + i * 90;
+        if (this.r._isWater(x, y, null)) this.r.splash(x, y, size, delay);
+        else this.r.explode(x, y, size, delay, this.r.shellFrames);
+      }
+    }
+    /** A shell fired for a bombardment (MapRenderer, shelling): from one of the ships' guns. */
+    _shipShot(q, nowMs) {
+      const ready = q.machines.filter(sh => !sh.dead && sh.guns.length);
+      if (!ready.length) return null;
+      const sh = ready[Math.floor(Math.random() * ready.length)], [x, y] = sh.guns[Math.floor(Math.random() * sh.guns.length)];
+      sh.firedAt = nowMs; sh.nextShot = nowMs + 3000 + Math.random() * 3000;
+      q.puffs.push({ x, y, t0: nowMs, big: true });
+      return { x, y };
     }
 
     // ---- Aircraft --------------------------------------------------------------------------------------------------
