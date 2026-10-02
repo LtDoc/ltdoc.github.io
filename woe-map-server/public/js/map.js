@@ -1163,7 +1163,10 @@
           break;
         }
         case 'role': if (state.viewAs && !msg.viewAs) { setViewAs(null); break; }   // demoted, or the nation was deleted
-          state.role = msg.role; await loadLobby(); await loadMarkers(); await loadShapes(); await loadHistory(); GameUI.load().catch(() => {}); toast(`You are now a ${msg.role === 'gm' ? 'game master' : 'player'}${msg.nation ? ` of ${msg.nation}` : ''}`); break;
+          // Everything the server filters by role or nation is fetched again: a player promoted to GM now sees every
+          // fight, hidden unit and log line, and a GM made a player stops seeing them.
+          state.role = msg.role; await loadLobby(); await loadMarkers(); await loadShapes(); await loadHistory(); GameUI.load().catch(() => {});
+          loadBattles(); loadVision(); loadEvents().catch(() => {}); Comms.loadConvoyRequests(); toast(`You are now a ${msg.role === 'gm' ? 'game master' : 'player'}${msg.nation ? ` of ${msg.nation}` : ''}`); break;
         case 'kicked': alert('You are no longer part of this campaign.'); location.replace('/lobbies.html'); break;
         case 'error': toast(msg.error); break;
         default: break;
