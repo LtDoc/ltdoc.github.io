@@ -38,9 +38,9 @@ function viewerFor(lobby, user, viewAs) {
   const role = getRole(lobby, user);
   if (!role) return null;
   const f = viewAsFaction(lobby, role, viewAs);
-  if (f) return { role: 'player', realRole: 'gm', userId: user.id, nation: f.name, viewAs: f.id };
+  if (f) return { role: 'player', realRole: 'gm', userId: user.id, nation: f.name, viewAs: f.id, lobbyId: lobby.id };
   const m = getMember(lobby.id, user.id);
-  return { role, userId: user.id, nation: m ? m.nation : '' };
+  return { role, userId: user.id, nation: m ? m.nation : '', lobbyId: lobby.id };
 }
 
 const sameNation = (a, b) => !!String(b || '').trim() && String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
@@ -61,6 +61,8 @@ function canControl(m, viewer) {
  * Can this viewer see a serialized marker or shape?
  * GMs see everything. Players never see GM-only items. Owners/creators always see their own.
  * Otherwise an item restricted to nations is visible only if the viewer's nation is listed.
+ * Under fog of war (viewer.lobbyId set, the campaign rule on), other sides' units and heroes are visible only
+ * within sight (server/vision.js); "Visible to" and a spy's reveal still show them anywhere.
  */
 function canSee(obj, viewer) {
   if (!obj || !viewer) return false;
@@ -79,8 +81,8 @@ function canSee(obj, viewer) {
     return (!!n && String(obj.data.nation || '').trim().toLowerCase() === n) || listed(obj.visibleTo);
   }
   const vt = obj.visibleTo;
-  if (!vt || !vt.length) return true;
-  return listed(vt);
+  if (vt && vt.length) return listed(vt);
+  return !viewer.lobbyId || require('./vision').sees(viewer, obj);
 }
 
 const DEFAULT_COMBAT = { die: 20, baseLoss: 10, marginMult: 2, winnerLoss: 5 };

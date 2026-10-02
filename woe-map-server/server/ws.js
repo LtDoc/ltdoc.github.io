@@ -13,7 +13,7 @@ function send(ws, msg) {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
 }
 
-function viewer(ws) { return { role: ws.lobbyRole, userId: ws.user.id, nation: ws.nation || '', viewAs: ws.viewAs || null }; }
+function viewer(ws) { return { role: ws.lobbyRole, userId: ws.user.id, nation: ws.nation || '', viewAs: ws.viewAs || null, lobbyId: ws.lobbyId }; }
 /** Take on a viewer: a GM viewing as a nation is a player of it on this socket (presence still shows the GM). */
 function applyViewer(ws, v) {
   ws.lobbyRole = v.role; ws.nation = v.nation; ws.viewAs = v.viewAs || null; ws.realRole = v.realRole || v.role;
@@ -61,14 +61,43 @@ function broadcastEntity(lobbyId, entity, before, after, actorId) {
     const v = viewer(ws);
     const sees = after && access.canSee(after, v);
     const saw = before && access.canSee(before, v);
-    if (sees) ws.send(JSON.stringify({ type: entity, action: 'upsert', [entity]: after, actorId }));
+    if (sees) ws.send(JSON.stringify({ type: entity, action: 'upsert', [entity]: entity === 'marker' ? require('./vision').redact(after, v) : after, actorId }));
     else if (saw) ws.send(JSON.stringify({ type: entity, action: 'delete', id, actorId }));
   }
 }
 
-/** Send a message only to sockets that can see the given serialized entity (or to GMs when null). */
+/**
+ * Send a message only to sockets that can see the given serialized entity (or to GMs when null). Under fog of
+ * war another side's unit is never included, even in sight: its history would show where it has been.
+ */
 function broadcastVisible(lobbyId, msg, obj) {
-  broadcast(lobbyId, msg, ws => obj ? access.canSee(obj, viewer(ws)) : ws.lobbyRole === 'gm');
+  broadcast(lobbyId, msg, ws => obj ? access.canSee(obj, viewer(ws)) && require('./vision').sameSide(viewer(ws), obj) : ws.lobbyRole === 'gm');
+}
+
+/**
+ * Fog of war (server/vision.js): after vision changes, send each player the other sides' units that came into
+ * sight (upserts) or went out of it (deletes), and their fog overlay and last known positions when those changed.
+ */
+function syncFog(lobbyId, only = null) {
+  const set = rooms.get(Number(lobbyId));
+  if (!set) return;
+  const vision = require('./vision');
+  const st = vision.state(lobbyId);
+  for (const ws of set) {
+    if (ws.readyState !== ws.OPEN || (only && ws !== only)) continue;
+    const v = viewer(ws);
+    const ov = vision.overlay(v), key = JSON.stringify(ov);
+    if (key !== ws.fogKey) { ws.fogKey = key; send(ws, { type: 'vision', vision: ov }); }
+    if (!st.on || v.role === 'gm') { ws.fogSeen = null; continue; }
+    const seen = new Map();
+    for (const m of st.markers) if (vision.foreign(v, m) && access.canSee(m, v)) seen.set(m.id, m);
+    const prev = ws.fogSeen;
+    if (prev) {
+      for (const [id, m] of seen) if (!prev.has(id)) send(ws, { type: 'marker', action: 'upsert', marker: vision.redact(m, v), actorId: null, fog: true });
+      for (const id of prev.keys()) if (!seen.has(id)) send(ws, { type: 'marker', action: 'delete', id, actorId: null, fog: true });
+    }
+    ws.fogSeen = seen;
+  }
 }
 
 function leaveRoom(ws) {
@@ -76,7 +105,7 @@ function leaveRoom(ws) {
   const set = rooms.get(ws.lobbyId);
   if (set) { set.delete(ws); if (set.size === 0) rooms.delete(ws.lobbyId); }
   const old = ws.lobbyId;
-  ws.lobbyId = null; ws.lobbyRole = null; ws.nation = ''; ws.viewAs = null; ws.realRole = null;
+  ws.lobbyId = null; ws.lobbyRole = null; ws.nation = ''; ws.viewAs = null; ws.realRole = null; ws.fogSeen = null; ws.fogKey = null;
   broadcastPresence(old);
 }
 
@@ -90,6 +119,7 @@ function joinRoom(ws, lobbyId, viewAs) {
   rooms.get(lobby.id).add(ws);
   send(ws, { type: 'joined', lobbyId: lobby.id, role: v.role, viewAs: v.viewAs || null, users: presence(lobby.id) });
   broadcastPresence(lobby.id);
+  try { syncFog(lobby.id, ws); } catch (e) { console.warn('fog of war on join failed', e); }   // what it sees now, and its overlay
 }
 
 function handleMessage(ws, raw) {
@@ -109,8 +139,9 @@ function handleMessage(ws, raw) {
       if (!row) return;
       const m = access.serializeMarker(row);
       if (!access.canControl(m, viewer(ws))) return;
+      // Under fog of war only the unit's own side sees where it is being dragged.
       broadcast(ws.lobbyId, { type: 'drag', id, x, y, userId: ws.user.id },
-        other => other !== ws && access.canSee(m, viewer(other)));
+        other => other !== ws && access.canSee(m, viewer(other)) && require('./vision').sameSide(viewer(other), m));
       return;
     }
     default: return;
@@ -164,9 +195,10 @@ function refreshRoles(lobbyId) {
     if (!v) { leaveRoom(ws); send(ws, { type: 'kicked', lobbyId: Number(lobbyId) }); continue; }
     const changed = v.role !== ws.lobbyRole || v.nation !== ws.nation || (v.viewAs || null) !== ws.viewAs;
     applyViewer(ws, v);
-    if (changed) send(ws, { type: 'role', role: v.role, nation: v.nation, viewAs: v.viewAs || null });
+    if (changed) { ws.fogSeen = null; send(ws, { type: 'role', role: v.role, nation: v.nation, viewAs: v.viewAs || null }); }
   }
   broadcastPresence(Number(lobbyId));
+  require('./vision').schedulePush(lobbyId);
 }
 
-module.exports = { attach, broadcast, broadcastEntity, broadcastVisible, broadcastPresence, presence, refreshRoles };
+module.exports = { attach, broadcast, broadcastEntity, broadcastVisible, broadcastPresence, presence, refreshRoles, syncFog };

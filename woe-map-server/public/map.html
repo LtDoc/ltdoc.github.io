@@ -525,6 +525,7 @@
           <button type="button" data-page="r-rail">Railways</button>
           <button type="button" data-page="r-heroes">Heroes</button>
           <button type="button" data-page="r-trench">Trenches</button>
+          <button type="button" data-page="r-fog">Fog of war</button>
         </nav>
         <div class="setpages">
           <form id="settingsForm">
@@ -685,6 +686,26 @@
             <section data-page="r-trench" hidden>
               <h3>Trenches</h3>
               <div class="grid3"><label>Cover range<input id="ruleTrenchRange" type="number" step="any" min="0"></label><label>Dug: +defend<input id="ruleTrenchDug" type="number" step="any" min="0"></label><label>Reinforced: +defend<input id="ruleTrenchReinforced" type="number" step="any" min="0"></label></div>
+            </section>
+            <section data-page="r-fog" hidden>
+              <h3>Fog of war</h3>
+              <label class="inline"><input type="checkbox" id="ruleFog"> Fog of war: players see other nations' units and heroes only within sight of their own units, places and ground. Allies share sight; territory, towns and resources stay public.</label>
+              <p class="hint">On the Earth map sight goes by province: a province is in sight when it is your own, when one of your units or places stands in it, or when its centre is within their range. On uploaded maps it goes by distance. An attacker is revealed to the side it attacks until End turn. Check what a nation sees with 👁 View as player.</p>
+              <div class="section">How far each sees (km)</div>
+              <table class="ruletable">
+                <tbody>
+                  <tr><th>Infantry</th><td><input data-vis="Infantry" type="number" step="any" min="0"></td><th>Cavalry &amp; mobile</th><td><input data-vis="Mounted &amp; mobile" type="number" step="any" min="0"></td></tr>
+                  <tr><th>Support</th><td><input data-vis="Support" type="number" step="any" min="0"></td><th>Reconnaissance</th><td><input data-vis="reconnaissance" type="number" step="any" min="0"></td></tr>
+                  <tr><th>Artillery</th><td><input data-vis="Artillery" type="number" step="any" min="0"></td><th>Tanks</th><td><input data-vis="tank" type="number" step="any" min="0"></td></tr>
+                  <tr><th>Heroes</th><td><input data-vis="hero" type="number" step="any" min="0"></td><th>Armoured trains</th><td><input data-vis="armouredtrain" type="number" step="any" min="0"></td></tr>
+                  <tr><th>Ships</th><td><input data-vis="Naval" type="number" step="any" min="0"></td><th>Submarines</th><td><input data-vis="submarine" type="number" step="any" min="0"></td></tr>
+                  <tr><th>Aircraft</th><td><input data-vis="Air" type="number" step="any" min="0"></td><th>Reconnaissance aircraft</th><td><input data-vis="reconair" type="number" step="any" min="0"></td></tr>
+                  <tr><th>Airships</th><td><input data-vis="airship" type="number" step="any" min="0"></td><th>Observation balloons</th><td><input data-vis="balloon" type="number" step="any" min="0"></td></tr>
+                  <tr><th>Capital</th><td><input data-vis="capital" type="number" step="any" min="0"></td><th>City</th><td><input data-vis="city" type="number" step="any" min="0"></td></tr>
+                  <tr><th>Village</th><td><input data-vis="village" type="number" step="any" min="0"></td><th>Submarines are spotted within</th><td><input id="ruleSubSpot" type="number" step="any" min="0"></td></tr>
+                </tbody>
+              </table>
+              <p class="hint">Units at 0 % strength see nothing. Research can add range (Aerial photography: aircraft +100 km).</p>
             </section>
             <div class="rulesave" id="rulesSave" hidden><button type="submit">Save rules</button><span class="hint">Saves every rules page at once.</span></div>
           </form>

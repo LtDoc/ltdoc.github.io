@@ -11,6 +11,7 @@ const access = require('../lobbyAccess');
 const geo = require('../geo');
 const hub = require('../ws');
 const hist = require('../history');
+const vision = require('../vision');   // fog of war
 const { imageSize } = require('../imageSize');
 const UnitTypes = require('../../public/js/units');   // shared catalogue: formation names and default stats
 const Naming = require('../../public/js/naming');     // shared ordinal rules for sequential unit names
@@ -121,7 +122,7 @@ function clean(s, max) { return String(s ?? '').trim().slice(0, max); }
 function num(v, fallback = 0) { const n = Number(v); return Number.isFinite(n) ? n : fallback; }
 function clamp(n, lo, hi) { return Math.max(lo, Math.min(hi, n)); }
 
-function viewerOf(req) { return { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '', viewAs: req.viewAs?.id || null }; }
+function viewerOf(req) { return { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '', viewAs: req.viewAs?.id || null, lobbyId: req.lobby.id }; }
 
 /** Accepts an array or comma-separated string of nation names; returns a JSON string or null. */
 function parseVisibleTo(v) {
@@ -183,6 +184,7 @@ function scheduleSupply(lobbyId) {
 function commitChange(req, entity, action, before, after, reverts = null) {
   const subject = after || before;
   if ((entity === 'marker' && ['unit', 'town'].includes(subject.type)) || (entity === 'shape' && subject.kind === 'rail')) scheduleSupply(req.lobby.id);
+  if (entity === 'marker' && ['unit', 'hero', 'town'].includes(subject.type)) vision.schedulePush(req.lobby.id);   // fog of war: sight moved
   const entry = hist.record({
     lobbyId: req.lobby.id, userId: req.user.id, entity, entityId: (after || before).id, action, before, after, reverts,
   });
@@ -329,7 +331,7 @@ function afterMove(req, unit) {
   if (r.owners && r.owners.length) hub.broadcast(req.lobby.id, { type: 'provinceOwners', owners: r.owners });
   const ownerName = r.owner === territory.NEUTRAL ? 'neutral' : (factions.find(f => f.id === r.owner)?.name || 'enemy');
   const what = r.cities.length ? `takes ${r.cities.join(', ')} and the surrounding ${ownerName} territory` : `advances into ${ownerName} territory`;
-  logEvent(req.lobby.id, req.user.id, 'system', `${unit.name} (${r.mine.name}) ${what}`);
+  logEvent(req.lobby.id, req.user.id, 'system', vision.on(req.lobby.id) ? `${r.mine.name} ${what}` : `${unit.name} (${r.mine.name}) ${what}`);
   return r.cities.length ? `${unit.name} takes ${r.cities.join(', ')}!` : null;
 }
 
@@ -765,7 +767,7 @@ router.delete('/:id/members/:userId', (req, res) => {
 // ---- Markers ---------------------------------------------------------------------------
 router.get('/:id/markers', (req, res) => {
   const v = viewerOf(req);
-  res.json({ markers: q.markers.all(req.lobby.id).map(access.serializeMarker).filter(m => access.canSee(m, v)) });
+  res.json({ markers: q.markers.all(req.lobby.id).map(access.serializeMarker).filter(m => access.canSee(m, v)).map(m => vision.redact(m, v)) });
 });
 
 function canEditMarker(req, m) { return access.canControl(m, viewerOf(req)); }
@@ -1192,7 +1194,7 @@ router.get('/:id/history', (req, res) => {
   const entityId = num(req.query.entityId, 0);
   const limit = clamp(num(req.query.limit, 100), 1, 300);
   const entries = hist.listFor(req.lobby.id, { entity, entityId, limit })
-    .filter(e => v.role === 'gm' || access.canSee(e.after || e.before, v));
+    .filter(e => v.role === 'gm' || (access.canSee(e.after || e.before, v) && vision.sameSide(v, e.after || e.before)));
   res.json({ entries });
 });
 
@@ -1428,8 +1430,12 @@ router.get('/:id/battles', (req, res) => {
   const g = game.get(req.lobby.id);
   const gm = req.lobbyRole === 'gm';
   const mine = b => gm || !b.hidden || b.user_id === req.user.id;
+  // Fog of war: a fight is seen by the two sides in it (and the GM), not by everyone.
+  const side = !gm && vision.on(req.lobby.id) ? new Set((vision.sideNames(req.lobby.id, req.member?.nation) || []).map(n => n.toLowerCase())) : null;
+  const nationOf = side ? (() => { const by = new Map(q.markers.all(req.lobby.id).map(r => [r.id, String(access.safeJson(r.data).nation || '').toLowerCase()])); return id => by.get(id) || ''; })() : null;
+  const ours = b => !side || b.user_id === req.user.id || side.has(nationOf(b.attacker_id)) || side.has(nationOf(b.defender_id));
   res.json({
-    battles: qb.all.all(req.lobby.id, g.turn, Date.now()).filter(mine).map(b => serializeBattle(b, req.lobby)),
+    battles: qb.all.all(req.lobby.id, g.turn, Date.now()).filter(b => mine(b) && ours(b)).map(b => serializeBattle(b, req.lobby)),
     craters: qb.craters.all(req.lobby.id, g.turn, Date.now()).filter(mine).map(serializeCrater),
   });
 });
@@ -1457,6 +1463,13 @@ router.post('/:id/combat', (req, res) => {
   const rangeError = game.checkRange(req.lobby, g, req.lobbyRole === 'gm', a, d);
   if (rangeError) return res.status(409).json({ error: rangeError });
   if (g.enabled) a.data = { ...a.data, apUsed: num(a.data.apUsed) + 1 };   // spent even if the attack is repelled
+  // Fog of war: the fight is news only to the two sides, and firing gives the attacker away: the defender's
+  // side sees it until End turn (the same reveal a spy's recon gives).
+  const fogSides = vision.on(req.lobby.id) ? [...new Set([...(vision.sideNames(req.lobby.id, a.data?.nation) || []), ...(vision.sideNames(req.lobby.id, d.data?.nation) || [])])] : null;
+  if (fogSides && d.data?.nation) {
+    const seenBy = vision.sideNames(req.lobby.id, d.data.nation) || [];
+    a.data = { ...a.data, revealTo: [...new Set([...(Array.isArray(a.data.revealTo) ? a.data.revealTo : []), ...seenBy])] };
+  }
 
   const cfg = access.serializeLobby(req.lobby, 'player').settings.combat;
   const research = require('../research');
@@ -1518,13 +1531,15 @@ router.post('/:id/combat', (req, res) => {
     `${fmt(d, losses[d.id])}; ${fmt(a, losses[a.id])}`;
   const hidden = !!(a.adminOnly || d.adminOnly || a.visibleTo || d.visibleTo);
   const data = { attackerId: a.id, defenderId: d.id, aRoll, dRoll, aTotal, dTotal, margin, outcome, losses, hidden };
-  const event = logEvent(req.lobby.id, req.user.id, 'combat', text, data,
-    hidden ? (ws => ws.lobbyRole === 'gm' || ws.user.id === req.user.id) : null);
+  const fogSet = fogSides && !hidden ? new Set(fogSides.map(n => n.toLowerCase())) : null;
+  if (fogSet) data.audience = { nations: fogSides, users: [req.user.id] };
+  const audience = hidden ? (ws => ws.lobbyRole === 'gm' || ws.user.id === req.user.id)
+    : fogSet ? (ws => ws.lobbyRole === 'gm' || ws.user.id === req.user.id || fogSet.has(String(ws.nation || '').toLowerCase())) : null;
+  const event = logEvent(req.lobby.id, req.user.id, 'combat', text, data, audience);
   // The fight stays on the map for the rest of the turn: gunfire between the two, or shells around the target.
   const catA = UnitTypes.resolve(a.data?.unitType)?.cat;
   const kind = catA === 'Artillery' || catA === 'Naval' ? 'shells' : 'gunfire';
   const bid = qb.insert.run(req.lobby.id, g.turn, a.id, d.id, kind, a.x, a.y, d.x, d.y, hidden ? 1 : 0, req.user.id, g.enabled ? null : Date.now() + 5 * 60000, now()).lastInsertRowid;
-  const audience = hidden ? (ws => ws.lobbyRole === 'gm' || ws.user.id === req.user.id) : null;
   hub.broadcast(req.lobby.id, { type: 'battle', battle: serializeBattle(qb.one.get(bid), req.lobby) }, audience);
   // A bombardment leaves four or five craters around the target, for ten turns.
   if (kind === 'shells') {

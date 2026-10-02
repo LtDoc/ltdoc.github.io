@@ -86,6 +86,8 @@ tab as that nation's player:
   heroes (by the unit's nation, not by who created it); other nations' units are refused.
 - **How it looks.** The 👁 button turns gold with the nation's flag and name, a gold frame runs round the map, and a
   "Viewing as …" tag sits at its top. People online still show them as GM.
+- **Fog of war.** With the rule on, the view includes the nation's fog: shaded land out of its sight and the faded
+  "last seen" markers of enemy units (docs/FOG-OF-WAR.md). The GM's own view has no fog.
 
 It is per tab (`?as=<faction id>` in the address), so a GM can keep one tab as GM and another as a nation; opening
 the campaign from the list starts in the GM view. `access.viewAsFaction`, `viewerFor` and `canControl` in

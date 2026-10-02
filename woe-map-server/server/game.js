@@ -205,6 +205,7 @@ function relationStatus(lobbyId, a, b) {
 function setRelation(lobbyId, a, b, status, turn) {
   const [x, y] = pair(Number(a), Number(b));
   q.setRelation.run(lobbyId, x, y, status, turn || 1);
+  require('./vision').schedulePush(lobbyId);   // allies share sight
 }
 function relations(lobbyId) { return q.relations.all(lobbyId).map(r => ({ a: r.a, b: r.b, status: r.status, sinceTurn: r.since_turn })); }
 function serializeDiplomacy(d) {

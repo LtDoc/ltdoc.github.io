@@ -10,7 +10,8 @@
  *     far side), then each change rebuilds one border mesh from the segments whose two sides have different
  *     owners: a dark core with a band of each owner's colour on its side, a fixed width in screen pixels;
  *   - edges: hairlines between all provinces, shown when zoomed in;
- *   - labels: each faction's name on every sizeable connected group of its provinces.
+ *   - labels: each faction's name on every sizeable connected group of its provinces;
+ *   - fog of war: a second mesh over the same triangles darkens the provinces out of the player's sight.
  *
  * Ownership arrives as [[provinceId, factionId], ...] (0 = neutral).
  */
@@ -105,10 +106,11 @@ const ProvinceLayer = (() => {
       this._buildFill();
       this._buildSegments();
       this._buildEdges();
+      if (this.fogIds) this._paintFog();
       this.r.invalidate();
     }
     destroyMeshes() {
-      for (const k of ['fill', 'border', 'edges']) if (this[k]) { this.container.removeChild(this[k]); this[k].destroy(); this[k] = null; }
+      for (const k of ['fill', 'fog', 'border', 'edges']) if (this[k]) { this.container.removeChild(this[k]); this[k].destroy(); this[k] = null; }
       for (const t of this.labels) t.destroy();
       this.labels = [];
     }
@@ -165,6 +167,7 @@ const ProvinceLayer = (() => {
         p.v1 = v;
       }
       this.fillPos = new Float32Array(pos);
+      this.fillIdx = new Uint32Array(idx);
       this.fillCol = new Float32Array(v * 4);
       const geometry = new PIXI.Geometry({
         attributes: { aPosition: { buffer: this.fillPos, format: 'float32x2' }, aColor: { buffer: this.fillCol, format: 'float32x4' } },
@@ -184,6 +187,34 @@ const ProvinceLayer = (() => {
     _paint(i) {
       const p = this.list[i], [r, g, b, a] = this._rgba(this.owner[i]), c = this.fillCol;
       for (let v = p.v0; v < p.v1; v++) { const o = v * 4; c[o] = r; c[o + 1] = g; c[o + 2] = b; c[o + 3] = a; }
+    }
+
+    // ---- Fog of war: provinces out of sight are darkened (ids in sight from server/vision.js; null = no fog) ----
+    setFog(ids) {
+      this.fogIds = ids ? new Set(ids) : null;
+      if (!this.list.length) return;
+      if (!this.fogIds) { if (this.fog) this.fog.visible = false; this.r.invalidate(); return; }
+      this._paintFog();
+      this.r.invalidate();
+    }
+    _paintFog() {
+      if (!this.fog) {
+        this.fogCol = new Float32Array(this.fillCol.length);
+        const geometry = new PIXI.Geometry({
+          attributes: { aPosition: { buffer: this.fillPos, format: 'float32x2' }, aColor: { buffer: this.fogCol, format: 'float32x4' } },
+          indexBuffer: new Uint32Array(this.fillIdx),
+        });
+        this.fog = new PIXI.Mesh({ geometry, shader: new PIXI.Shader({ glProgram: fillProgram, resources: {} }) });
+        this.fog.eventMode = 'none';
+        this.container.addChildAt(this.fog, this.container.children.indexOf(this.fill) + 1);
+      }
+      const a = 0.5, r = 0x12 / 255 * a, g = 0x18 / 255 * a, b = 0x20 / 255 * a, c = this.fogCol;   // premultiplied slate
+      for (const p of this.list) {
+        const dark = !this.fogIds.has(p.id);
+        for (let v = p.v0; v < p.v1; v++) { const o = v * 4; c[o] = dark ? r : 0; c[o + 1] = dark ? g : 0; c[o + 2] = dark ? b : 0; c[o + 3] = dark ? a : 0; }
+      }
+      this.fog.geometry.getBuffer('aColor').update();
+      this.fog.visible = true;
     }
 
     // ---- Segments: every province edge once, with the province on each side -----------------------------

@@ -145,6 +145,14 @@ Every marker and drawing has two visibility controls, set by the GM:
 The server applies these rules to the initial load, every WebSocket push, live drag previews, history entries and
 combat reports, so a restricted item never reaches a browser that may not show it.
 
+**Fog of war** (game mode rule, off by default; ⚖ Rules → Fog of war). Players see other nations' units and heroes
+only within sight of their own units, places and ground; allies share sight, and territory, towns and resources
+stay public. On the Earth map sight goes by province, on uploaded maps by distance; ranges are a table by unit type
+(infantry 50 km, cavalry 80, reconnaissance 120, artillery 30, aircraft 150, places 30–100…). The server never sends
+a unit out of sight, so nothing can be read from the browser. Out-of-sight land is shaded, enemy units that slip
+out of view leave a faded "seen turn N" marker where they were last seen, an attacker is revealed to the side it
+attacks until End turn, and battles are news only to the two sides. Details: `docs/FOG-OF-WAR.md`.
+
 **View as player (GM).** The 👁 button in the top bar lets a GM use a tab as one nation's player: they see only
 what that player sees (the same markers, treasuries, diplomacy, trades and log) and play by the player rules (moves
 limited by movement and supply, attacks by action points and range, no GM panels or End turn). They command that

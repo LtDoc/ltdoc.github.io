@@ -131,6 +131,7 @@ function within(lobby, x, y, km, filter = null) {
   return get(lobby.id).list.filter(p => (!filter || filter(p)) && geo.distance(lobby, x, y, p.cx, p.cy) <= km);
 }
 function setOwner(lobbyId, ids, factionId) {
+  require('./vision').schedulePush(lobbyId);   // ownership feeds fog of war
   const t = now(), c = get(lobbyId);
   for (const id of ids) { q.setOwner.run(factionId, t, id, lobbyId); const p = c.byId.get(id); if (p) p.factionId = factionId; }
 }
@@ -435,4 +436,4 @@ async function generate(lobby, opts = {}, progress = () => {}) {
   return { count: rows.length, year, sizeKm, seeds: seeds.length };
 }
 
-module.exports = { CLEAN, nearestOwner, ownerAt, get, list, count, has, at, within, setOwner, ownership, restoreOwnership, clear, give, assignByState, generate, invalidate, unionAll, landTiles };
+module.exports = { GRID, CLEAN, nearestOwner, ownerAt, get, list, count, has, at, within, setOwner, ownership, restoreOwnership, clear, give, assignByState, generate, invalidate, unionAll, landTiles };

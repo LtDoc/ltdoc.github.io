@@ -117,7 +117,9 @@ class MapRenderer extends EventTarget {
     this.unitDots = new PIXI.Graphics();          // zoomed out on the Earth map: one dot per unit instead of its icon
     this.unitDots.eventMode = 'none';
     this.skirmish = window.Skirmish ? new window.Skirmish(this) : null;   // riflemen on infantry firing lines (skirmish.js)
-    this.world.addChild(...[this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.craterLayer, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.skirmish?.layer, this.gunG, this.unitDots].filter(Boolean), this.markerLayer, this.boomLayer, this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
+    this.fogLayer = new PIXI.Container(); this.fogLayer.eventMode = 'none';     // fog of war on image maps (Earth: the province layer)
+    this.ghostLayer = new PIXI.Container(); this.ghostLayer.eventMode = 'none'; // fog of war: last known enemy positions
+    this.world.addChild(...[this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.craterLayer, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.fogLayer, this.skirmish?.layer, this.gunG, this.unitDots, this.ghostLayer].filter(Boolean), this.markerLayer, this.boomLayer, this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
     app.stage.addChild(this.world, this.pingArrows);
 
     app.stage.eventMode = 'static';
@@ -1018,6 +1020,54 @@ class MapRenderer extends EventTarget {
     else if (this.earth.tintLayer) this.earth.tintLayer.visible = !hide;
   }
 
+  // ---- Fog of war (docs/FOG-OF-WAR.md) ------------------------------------------------------------
+  /**
+   * The viewer's sight from the server (server/vision.js): { on, provinces?: [ids], circles?: [[x, y, rx, ry]],
+   * own?: [faction ids], ghosts: [...] }. The Earth map darkens the provinces out of sight; image maps get a dark
+   * layer with the circles and the side's own territory cut out. Ghosts mark where enemy units were last seen.
+   */
+  setFog(v) {
+    this.fog = v && v.on ? v : null;
+    if (this.provinceLayer) this.provinceLayer.setFog(this.fog && this.fog.provinces ? this.fog.provinces : null);
+    this._drawImageFog();
+    this._drawGhosts();
+    this.invalidate();
+  }
+  _drawImageFog() {
+    for (const c of this.fogLayer.removeChildren()) c.destroy({ children: true });
+    const f = this.fog;
+    if (!f || !f.circles) return;
+    const dark = new PIXI.Graphics().rect(0, 0, this.mapSize.w, this.mapSize.h).fill({ color: 0x121820, alpha: 0.5 });
+    const sight = new PIXI.Graphics();
+    for (const [x, y, rx, ry] of f.circles) sight.ellipse(x, y, rx, ry).fill(0xffffff);
+    for (const id of f.own || []) {
+      const t = this.territoryViews.get(id);
+      for (const poly of t?.geometry || []) if (poly.length) sight.poly(poly[0].flat()).fill(0xffffff);
+    }
+    this.fogLayer.addChild(dark, sight);
+    dark.setMask({ mask: sight, inverse: true });
+  }
+  _drawGhosts() {
+    for (const c of this.ghostLayer.removeChildren()) c.destroy({ children: true });
+    for (const gh of this.fog?.ghosts || []) {
+      const c = new PIXI.Container(); c.eventMode = 'none';
+      const col = parseInt(String(gh.color || '#888888').slice(1), 16) || 0x888888;
+      const g = new PIXI.Graphics();
+      g.roundRect(-15, -10, 30, 20, 3).fill({ color: 0x1b232c, alpha: 0.55 }).stroke({ width: 1.5, color: col, alpha: 0.85 });
+      c.addChild(g);
+      const type = gh.type === 'unit' && window.UnitTypes ? window.UnitTypes.resolve(gh.unitType) : null;
+      if (type) { const sg = new PIXI.Graphics(); window.UnitTypes.draw(sg, c, type, { x: -11, y: -7, w: 22, h: 14 }); sg.alpha = 0.7; c.addChild(sg); }
+      else c.addChild(Object.assign(new PIXI.Text({ text: gh.type === 'hero' ? '★' : '?', resolution: 3, style: { fontSize: 12, fill: 0xd5dde3, fontWeight: '700' } }), { anchor: { x: 0.5, y: 0.5 } }));
+      const label = new PIXI.Text({ text: `${gh.name} · seen turn ${gh.turn}`, resolution: 2,
+        style: { fontFamily: 'system-ui, sans-serif', fontSize: 10, fontStyle: 'italic', fill: 0xd5dde3, stroke: { color: 0x000000, width: 3 } } });
+      label.anchor.set(0.5, 0); label.position.set(0, 12); label.alpha = 0.85;
+      c.addChild(label);
+      c.alpha = 0.75;
+      c.position.set(gh.x, gh.y);
+      this.ghostLayer.addChild(c);
+    }
+  }
+
   // ---- Provinces (game mode, Earth map) --------------------------------------------------
   /** The province set: [{ id, n, s, x, y, g }], drawn and recoloured by the province layer (public/js/province-layer.js). */
   setProvinces(list) {
@@ -1744,6 +1794,7 @@ class MapRenderer extends EventTarget {
     }
     // Unit icons hide on the Earth map at 100 % zoom and below (dots stand in); tokens off screen are not drawn.
     const hideUnits = this.unitsHidden();
+    if (this.ghostLayer.children.length) { this.ghostLayer.visible = !hideUnits; for (const c of this.ghostLayer.children) c.scale.set(inv * 1.5 * this.tokenScale); }
     const wx = this.world.x, wy = this.world.y, sw = this.app.screen.width, sh = this.app.screen.height, M = 140;
 
     for (const v of this.views.values()) {

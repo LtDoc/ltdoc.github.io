@@ -1,7 +1,32 @@
 # WoE Strategy Map: automatic fog of war
 
-Status: **proposal, 29 Sep 2026. Nothing built yet.** The ⚠ marks are decisions to make before building; section
-10 collects them with a recommendation for each.
+Status: **built 1 Oct 2026** (proposal written 29 Sep 2026). Every recommendation in section 10 was taken; "As built"
+below lists what differs from the proposal. The rest of this document is the design as proposed.
+
+## As built
+
+- **Switch**: ⚖ Rules → *Fog of war* (game mode only, off by default), with the vision range table (`settings.vision`,
+  by unit type or category, places by size, heroes) and how close submarines are spotted (`subSpotKm`).
+- **Server**: `server/vision.js` works out each nation's sight (cached per campaign, rebuilt when units, ownership,
+  relations or rules change) and answers `canSee` (`server/lobbyAccess.js`), so first loads, live updates, history,
+  drag previews and the attack picker all follow it. `schedulePush` sends each player the units that came into or
+  went out of sight, their overlay and their ghosts (WebSocket `vision`; `GET /api/lobbies/:id/game/vision`).
+  Units of other sides arrive without their trail, supply link or travel plans.
+- **Overlay**: Earth maps darken the provinces out of sight (a second mesh in `public/js/province-layer.js`); image
+  maps get a dark layer with the sight circles and own territory cut out (`MapRenderer.setFog`).
+- **Last known positions** (decision 7): stored per nation in `fog_ghosts`, drawn as faded counters "seen turn N".
+  A ghost appears only when the side's sight leaves the spot (an enemy seen walking away is known not to be there),
+  and goes when the unit is seen again or the spot is back in sight without it.
+- **Battles**: the combat report and the battle on the map go to the two sides (and their allies) and the GM; the
+  attacker is revealed to the defender's side until End turn (`revealTo`, as a spy's recon). Capture lines name the
+  nation, not the unit. Other sides' unit counts are hidden on the Nation panel even with public treasuries.
+- **GM**: sees everything; 👁 View as player (docs/UI.md) shows a nation's view, fog included.
+- **Research**: the `vision` effect (`{ type: 'vision', unit?|cat?|all?, km }`) and one new tech, *Aerial
+  photography* (1915, aircraft +100 km), added to existing campaigns' trees. *Wireless telegraphy* and *Sound
+  ranging* are unchanged.
+- **Not built**: the "Reveal to everyone" checkbox (list every nation under *Visible to* instead), spotted versus
+  identified (decision 6, later if needed), hidden or remembered enemy trenches (trenches stay public, the
+  "always visible" alternative of decision 8), trench concealment.
 
 ## 1. What changes for players
 

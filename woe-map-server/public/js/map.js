@@ -295,6 +295,7 @@
     }
     const role = supportRole(m);
     if (role && gameOn()) rows += stat('Support', role.text + (m.data?.supplied === false ? ' (not while cut off)' : ''));
+    if (gameOn() && state.game?.settings?.fogOfWar) rows += stat('Vision', `${visionKm(m)} km${t?.id === 'submarine' ? ` · spotted only within ${state.game.settings.subSpotKm ?? 20} km` : ''} (plus research)`);
     if (window.Matchups && t) {
       const d = Matchups.describe(t);
       if (d.strong.length || d.weak.length) {
@@ -724,6 +725,15 @@
   }
 
   /** Game mode on the Earth map: the province set (edges and names), fetched once and after regeneration. */
+  /** Fog of war (docs/FOG-OF-WAR.md): what this viewer sees, drawn as a dark overlay, plus last known enemy positions. */
+  async function loadVision() {
+    try { const v = await api.get(`${base}/game/vision`); state.fog = v; renderer.setFog(v); } catch (err) { console.warn('vision', err); }
+  }
+  /** A unit's sight under fog of war (km), from the campaign's table; research can add to it. */
+  function visionKm(m) {
+    const v = state.game?.settings?.vision || {}, t = window.UnitTypes?.resolve(m.data?.unitType);
+    return Number(v[t?.id] ?? v[t?.cat] ?? 50);
+  }
   async function loadProvinces() {
     if (!gameOn() || !isEarth()) { renderer.setProvinces([]); return; }
     try {
@@ -1031,7 +1041,8 @@
         case 'ping': showPing(msg.ping); break;
         case 'battle': renderer.addBattle(msg.battle); break;
         case 'craters': renderer.addCraters(msg.craters); break;
-        case 'reload': if (msg.what === 'markers') await loadMarkers(); break;
+        case 'reload': if (msg.what === 'markers') { await loadMarkers(); loadVision(); } break;
+        case 'vision': renderer.setFog(msg.vision); state.fog = msg.vision; break;
         case 'lobby': {
           state.lobby = { ...msg.lobby, joinCode: msg.lobby.joinCode ?? state.lobby?.joinCode, yourRole: state.role };
           applyLobby(); await applyMap();
@@ -2711,6 +2722,7 @@
     loadProvinces();
     await loadMarkers();
     await loadShapes();
+    loadVision();
     await loadEvents();
     await loadHistory();
     syncTrails();

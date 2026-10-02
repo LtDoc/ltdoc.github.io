@@ -80,6 +80,7 @@ const ResearchUI = (() => {
       case 'cover': return `trench cover +${ef.add}`;
       case 'capacity': return `+${ef.add} builds per site`;
       case 'recover': return `damaged units recover ${ef.add}%/turn`;
+      case 'vision': return `${ef.unit ? unitName(ef.unit) : ef.cat || 'all units'} see ${ef.km > 0 ? '+' : ''}${ef.km} km further (fog of war)`;
       case 'flag': return ef.name;
       default: return ef.type;
     }

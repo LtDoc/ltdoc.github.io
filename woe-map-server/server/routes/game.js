@@ -15,6 +15,7 @@ const zlib = require('node:zlib');
 
 const production = require('../production');
 const research = require('../research');
+const vision = require('../vision');   // fog of war
 const UnitTypes = require('../../public/js/units');
 const geo = require('../geo');
 
@@ -35,10 +36,13 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     return n ? game.q.factions.all(req.lobby.id).find(f => f.name.toLowerCase() === n) || null : null;
   }
   function stateView(req, g, markers) {
+    const fogSide = req.lobbyRole !== 'gm' && vision.on(req.lobby.id) ? new Set((vision.sideNames(req.lobby.id, req.member?.nation) || []).map(n => n.toLowerCase())) : null;
     return game.factionStates(req.lobby.id, g.settings).map(({ faction, state }) => {
       const visible = canSeeState(req, g, faction);
       const units = markers.filter(m => m.type === 'unit' && String(m.data?.nation || '').toLowerCase() === faction.name.toLowerCase());
-      const out = { faction, unitCount: units.length, visible };
+      // Fog of war: another side's army size is not public, even with public treasuries.
+      const counted = !fogSide || fogSide.has(faction.name.toLowerCase());
+      const out = { faction, unitCount: counted ? units.length : null, visible };
       if (visible) {
         out.state = state;
         out.income = game.incomeFor(req.lobby, g, faction, state, markers);
@@ -82,6 +86,10 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     return { ...r, reports: r.reports.map(x => ({ ...x, faction: factions.find(f => f.id === x.factionId) || null }))
       .filter(x => x.faction && canSeeState(req, g, x.faction)) };
   }
+  /** Fog of war: the viewer's overlay (provinces or circles in sight) and last known enemy positions. */
+  router.get('/vision', (req, res) => {
+    res.json(vision.overlay({ role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '', viewAs: req.viewAs?.id || null, lobbyId: req.lobby.id }));
+  });
   router.get('/reports', (req, res) => {
     const g = game.get(req.lobby.id);
     res.json(visibleReports(req, g, game.reports(req.lobby.id, Number(req.query.turn) || undefined)));
@@ -692,6 +700,9 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const setupError = on && req.body?.setup ? startSetup(req, req.body, true) : null;
     // Everyone starts the game with supply worked out (End turn keeps it up to date).
     if (on && saved.settings.supplyEnabled !== false) { const r = game.applySupply(req.lobby, saved.settings); if (r.changed.length) hub.broadcast(req.lobby.id, { type: 'reload', what: 'markers' }); }
+    // Fog of war only applies in game mode: switching it on or off changes what every player sees.
+    if (saved.settings.fogOfWar) { vision.reset(req.lobby.id); hub.broadcast(req.lobby.id, { type: 'reload', what: 'markers' }); }
+    vision.schedulePush(req.lobby.id);
     res.json({ game: saved, setupStarted: !!(on && req.body?.setup && !setupError), setupError });
   });
 
@@ -707,6 +718,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
   router.patch('/', requireGm, (req, res) => {
     const g = game.get(req.lobby.id);
     const b = req.body || {};
+    const fogWas = !!g.settings.fogOfWar;
     if (b.turnStep !== undefined && GameData.TURN_STEPS[b.turnStep]) g.turnStep = b.turnStep;
     if (b.deadline !== undefined) {
       // A date (ISO, from the Game tab's picker) is normalised so the countdown and reminders can parse it; free text is kept as written.
@@ -752,7 +764,12 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
         }
         out.unitCosts = cur;
       }
-      for (const k of ['waiveMovement', 'occupyNeutrals', 'upkeep', 'publicTreasury', 'capturedIdle', 'diplomatsRequired', 'supplyEnabled']) if (s[k] !== undefined) out[k] = !!s[k];
+      for (const k of ['waiveMovement', 'occupyNeutrals', 'upkeep', 'publicTreasury', 'capturedIdle', 'diplomatsRequired', 'supplyEnabled', 'fogOfWar']) if (s[k] !== undefined) out[k] = !!s[k];
+      numIn('subSpotKm', 0, 1000);
+      if (s.vision && typeof s.vision === 'object') {
+        out.vision = { ...(g.settings.vision || {}) };
+        for (const [k, v] of Object.entries(s.vision)) if (Object.hasOwn(GameData.DEFAULT_SETTINGS.vision, k)) out.vision[k] = clamp(num(v, 0), 0, 5000);
+      }
       for (const grp of ['cityIncome', 'factoryIncome', 'townDevIncome', 'startStock']) {
         if (s[grp] && typeof s[grp] === 'object') {
           out[grp] = {};
@@ -766,6 +783,9 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     }
     const saved = game.save(g);
     broadcastGame(req.lobby.id, saved);
+    // Fog of war switched: every player reloads what they may see; ranges changed: vision is worked out again.
+    if (!!saved.settings.fogOfWar !== fogWas) { vision.reset(req.lobby.id); hub.broadcast(req.lobby.id, { type: 'reload', what: 'markers' }); }
+    vision.schedulePush(req.lobby.id);
     res.json({ game: saved });
   });
 
@@ -838,6 +858,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     }
     broadcastGame(req.lobby.id, g);
     hub.broadcast(req.lobby.id, { type: 'reload', what: 'markers' });
+    vision.schedulePush(req.lobby.id);   // fog of war: new positions, reveals cleared
     for (const f of game.q.factions.all(req.lobby.id)) broadcastFaction(req, g, f);
     // Everyone learns the turn ended (toast, chime, report modal); the report itself is fetched per viewer.
     hub.broadcast(req.lobby.id, { type: 'turn', ended: before.turn, turn: g.turn, date: g.date });
@@ -857,6 +878,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     if (provinces.has(req.lobby.id)) broadcastLand(req.lobby.id, { owners: provinces.ownership(req.lobby.id), replace: true });
     broadcastRelations(req.lobby.id);
     for (const f of game.q.factions.all(req.lobby.id)) broadcastFaction(req, g, f);
+    vision.schedulePush(req.lobby.id);
     res.json({ game: g });
   });
 
@@ -947,7 +969,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const g = game.get(req.lobby.id);
     const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
     const hero = markers.find(m => m.id === Number(req.params.mid));
-    const viewer = { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '', viewAs: req.viewAs?.id || null };
+    const viewer = { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '', viewAs: req.viewAs?.id || null, lobbyId: req.lobby.id };
     if (!hero || hero.type !== 'hero' || !access.canSee(hero, viewer)) return res.status(404).json({ error: 'No such hero' });
     const gm = req.lobbyRole === 'gm', action = req.params.action, d = hero.data;
     const place = placeName(req, markers, hero.x, hero.y);
@@ -1076,7 +1098,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
   const crypto = require('node:crypto');
   const unitsLabel = req => geo.isEarth(req.lobby) ? 'km' : (req.lobby.scale_label || 'units');
   function railTarget(req, res) {
-    const viewer = { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '', viewAs: req.viewAs?.id || null };
+    const viewer = { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '', viewAs: req.viewAs?.id || null, lobbyId: req.lobby.id };
     const rail = shapeById(req, Number(req.body?.shapeId));
     if (!rail || rail.kind !== 'rail' || !access.canSee(rail, viewer)) { res.status(404).json({ error: 'No such railway' }); return null; }
     return rail;
@@ -1100,7 +1122,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const rail = railTarget(req, res);
     if (!rail) return;
     const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
-    const viewer = { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '', viewAs: req.viewAs?.id || null };
+    const viewer = { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '', viewAs: req.viewAs?.id || null, lobbyId: req.lobby.id };
     const unit = markers.find(m => m.id === Number(req.body?.unitId));
     if (!unit || !access.canSee(unit, viewer) || unit.type !== 'unit') return res.status(404).json({ error: 'Pick one of your units' });
     if (!canEditMarker(req, unit)) return res.status(403).json({ error: 'You can only attack with units you control' });
@@ -1169,7 +1191,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const place = placeName(req, markers, cut.x, cut.y);
     let who = 'The GM';
     if (!gm || req.body?.unitId) {
-      const viewer = { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '', viewAs: req.viewAs?.id || null };
+      const viewer = { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '', viewAs: req.viewAs?.id || null, lobbyId: req.lobby.id };
       const unit = markers.find(m => m.id === Number(req.body?.unitId));
       if (!unit || !access.canSee(unit, viewer) || !['unit', 'hero'].includes(unit.type)) return res.status(404).json({ error: 'Pick one of your units near the break' });
       if (!canEditMarker(req, unit)) return res.status(403).json({ error: 'You can only repair with units you control' });

@@ -509,7 +509,7 @@ const GameUI = (() => {
     const others = !ctx.isGm() && game.settings.publicTreasury ? (state.gameFactions || []).filter(x => x.visible && x.state) : [];
     const othersHtml = others.length > 1 ? `<div class="box"><h4>All nations <span class="hint">treasuries are public</span></h4>
       <table class="treasury"><thead><tr><th>Faction</th><th class="num">Money</th><th class="num">Men</th><th class="num">RP</th><th class="num">Units</th></tr></thead><tbody>${
-        others.map(x => `<tr${x.faction.id === e.faction.id ? ' class="me"' : ''}><td>${ctx.flagImg(x.faction.name)} ${esc(x.faction.name)}</td><td class="num">${fmt(x.state.money)}</td><td class="num">${fmt(x.state.manpower)}</td><td class="num">${fmt(x.state.rp)}</td><td class="num">${x.unitCount}</td></tr>`).join('')
+        others.map(x => `<tr${x.faction.id === e.faction.id ? ' class="me"' : ''}><td>${ctx.flagImg(x.faction.name)} ${esc(x.faction.name)}</td><td class="num">${fmt(x.state.money)}</td><td class="num">${fmt(x.state.manpower)}</td><td class="num">${fmt(x.state.rp)}</td><td class="num">${x.unitCount ?? '?'}</td></tr>`).join('')
       }</tbody></table></div>` : '';
     el.innerHTML = `
       <div class="box nationcard">
@@ -609,7 +609,7 @@ const GameUI = (() => {
       $('#btnUndoTurn').disabled = !state.canUndo;
       const list = state.gameFactions || [];
       $('#factionTable').innerHTML = list.length ? `<table class="treasury"><thead><tr><th>Faction</th><th class="num">Money</th><th class="num">RP</th><th class="num">Units</th></tr></thead><tbody>${
-        list.map(x => `<tr><td>${ctx.flagImg(x.faction.name)} ${esc(x.faction.name)}</td><td class="num">${x.state ? fmt(x.state.money) : '·'}</td><td class="num">${x.state ? fmt(x.state.rp) : '·'}</td><td class="num">${x.unitCount}</td></tr>`).join('')
+        list.map(x => `<tr><td>${ctx.flagImg(x.faction.name)} ${esc(x.faction.name)}</td><td class="num">${x.state ? fmt(x.state.money) : '·'}</td><td class="num">${x.state ? fmt(x.state.rp) : '·'}</td><td class="num">${x.unitCount ?? '?'}</td></tr>`).join('')
       }</tbody></table>` : '<p class="hint">No factions yet.</p>';
       // Diplomacy queue and relation setter.
       const pending = (state.diplomacy || []).filter(d => d.status === 'pending');
@@ -633,6 +633,8 @@ const GameUI = (() => {
     set('#ruleUpkeepGrain', s.upkeepGrain); set('#ruleUpkeepOil', s.upkeepOil);
     set('#ruleBaseMoney', s.baseMoney); set('#ruleBaseRp', s.baseRp); set('#ruleBaseManpower', s.baseManpower);
     set('#rulePublic', s.publicTreasury); set('#ruleCapturedIdle', s.capturedIdle);
+    set('#ruleFog', s.fogOfWar); set('#ruleSubSpot', s.subSpotKm ?? 20);
+    for (const el of document.querySelectorAll('[data-vis]')) if (document.activeElement !== el) el.value = s.vision?.[el.dataset.vis] ?? '';
     set('#ruleTrenchRange', s.trenchRangeKm); set('#ruleTrenchDug', s.trenchBonusDug); set('#ruleTrenchReinforced', s.trenchBonusReinforced);
     set('#ruleCaptureRadius', s.captureRadiusKm); set('#ruleCityRadius', s.cityRadiusKm); set('#ruleOccupyNeutrals', s.occupyNeutrals);
     set('#ruleSupplyOn', s.supplyEnabled !== false); set('#ruleSupplyTown', s.supplyTownKm); set('#ruleSupplyLink', s.supplyLinkKm); set('#ruleConvoyLink', s.convoyLinkKm ?? 200); set('#ruleAttrition', s.attritionRate ?? 25); set('#ruleDisband', s.attritionDisbandBelow ?? 10); set('#ruleConvoyRange', s.convoyRangeKm ?? 100);
@@ -702,6 +704,8 @@ const GameUI = (() => {
       upkeepGrain: v('#ruleUpkeepGrain'), upkeepOil: v('#ruleUpkeepOil'),
       baseMoney: v('#ruleBaseMoney'), baseRp: v('#ruleBaseRp'), baseManpower: v('#ruleBaseManpower'), publicTreasury: $('#rulePublic').checked,
       capturedIdle: $('#ruleCapturedIdle').checked,
+      fogOfWar: $('#ruleFog').checked, subSpotKm: v('#ruleSubSpot'),
+      vision: Object.fromEntries([...document.querySelectorAll('[data-vis]')].map(el => [el.dataset.vis, Number(el.value) || 0])),
       trenchRangeKm: v('#ruleTrenchRange'), trenchBonusDug: v('#ruleTrenchDug'), trenchBonusReinforced: v('#ruleTrenchReinforced'),
       captureRadiusKm: v('#ruleCaptureRadius'), cityRadiusKm: v('#ruleCityRadius'), occupyNeutrals: $('#ruleOccupyNeutrals').checked,
       supplyEnabled: $('#ruleSupplyOn').checked, supplyTownKm: v('#ruleSupplyTown'), supplyLinkKm: v('#ruleSupplyLink'), convoyLinkKm: v('#ruleConvoyLink'), attritionRate: v('#ruleAttrition'), attritionDisbandBelow: v('#ruleDisband'), convoyRangeKm: v('#ruleConvoyRange'), supplyLinkBySize: { capital: v('#ruleLinkCapital'), city: v('#ruleLinkCity'), village: v('#ruleLinkVillage') }, supplyRangeKm: v('#ruleSupplyRange'),

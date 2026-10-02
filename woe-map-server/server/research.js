@@ -15,6 +15,7 @@
  *   { type: 'cover', add }                               trench cover bonus
  *   { type: 'capacity', add }                            extra parallel builds per site
  *   { type: 'recover', add }                             strength regained per turn by damaged units
+ *   { type: 'vision', unit?|cat?|all?, km }              fog of war: units of that type / category (or all) see further
  *   { type: 'flag', name }                               free-form marker for future rules
  */
 const fs = require('node:fs');
@@ -42,6 +43,7 @@ const q = {
  * once (techs the GM already has under the same key are left alone); a GM can still delete them afterwards.
  */
 const PATCHES = [
+  { id: 'fog-2026-10', keys: ['aerial_photography'] },
   { id: 'economy-2026-09', keys: ['econ_statistics', 'econ_municipal', 'econ_machine_tools', 'econ_savings', 'econ_scientific_management', 'econ_electrification', 'econ_reconstruction'] },
 ];
 const num = (v, f = 0) => { const n = Number(v); return Number.isFinite(n) ? n : f; };
@@ -103,7 +105,7 @@ const STAT_KEYS = ['attack', 'defend', 'movement', 'range', 'ap'];
 function emptyEffects(techs) {
   const gated = new Set();
   for (const t of techs || []) for (const e of t.effects) if (e.type === 'unlockUnit' && e.unit) gated.add(e.unit);
-  return { gated, unlocked: new Set(), statUnit: {}, statCat: {}, cost: [], buildTime: [], income: {}, removeCost: new Set(), cover: 0, capacity: 0, recover: 0, flags: new Set() };
+  return { gated, unlocked: new Set(), statUnit: {}, statCat: {}, cost: [], buildTime: [], income: {}, removeCost: new Set(), cover: 0, capacity: 0, recover: 0, flags: new Set(), vision: [] };
 }
 /** Aggregate the effects of the unlocked techs. */
 function effectsFor(techs, unlockedKeys) {
@@ -126,6 +128,7 @@ function effectsFor(techs, unlockedKeys) {
         case 'cover': fx.cover += num(e.add); break;
         case 'capacity': fx.capacity += Math.round(num(e.add)); break;
         case 'recover': fx.recover += num(e.add); break;
+        case 'vision': fx.vision.push({ unit: e.unit, cat: e.cat, all: !!e.all || (!e.unit && !e.cat), km: num(e.km) }); break;
         case 'flag': if (e.name) fx.flags.add(e.name); break;
         default: break;
       }

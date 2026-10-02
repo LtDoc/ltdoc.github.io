@@ -88,6 +88,12 @@ const GameData = (() => {
     railGuardKm: 30,          // railways: the holder's land units this close to a section guard it
     railRepairKm: 30,         // railways: a unit this close to a break can repair it (uses its action)
     railJoinKm: 5,            // railways: rails whose ends or vertices are this close are joined
+    fogOfWar: false,          // fog of war (docs/FOG-OF-WAR.md): other sides' units are seen only within sight
+    subSpotKm: 20,            // fog of war: submarines are spotted only this close to a vision source
+    // Fog of war: how far each unit sees (km), by type where listed, else by category; places by size; heroes.
+    vision: { Infantry: 50, Support: 50, Artillery: 30, 'Mounted & mobile': 80, Naval: 80, Air: 150,
+      reconnaissance: 120, tank: 40, armouredtrain: 40, submarine: 30, reconair: 250, airship: 250, balloon: 100,
+      hero: 50, capital: 100, city: 60, village: 30 },
   };
 
   // ---- Deadlines ---------------------------------------------------------------------------

@@ -326,6 +326,23 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_chat_messages_channel ON chat_messages(channel_id, id);
+
+-- Fog of war (docs/FOG-OF-WAR.md): where each nation last saw an enemy unit that is now out of its sight.
+CREATE TABLE IF NOT EXISTS fog_ghosts (
+  lobby_id    INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  nation      TEXT NOT NULL,                        -- the nation that saw it (lower case)
+  marker_id   INTEGER NOT NULL,
+  x           REAL NOT NULL,
+  y           REAL NOT NULL,
+  name        TEXT NOT NULL DEFAULT '',
+  type        TEXT NOT NULL DEFAULT 'unit',
+  unit_type   TEXT NOT NULL DEFAULT '',
+  color       TEXT NOT NULL DEFAULT '#888888',
+  flag_nation TEXT NOT NULL DEFAULT '',             -- the unit's own nation
+  turn        INTEGER NOT NULL DEFAULT 1,
+  seen_at     INTEGER NOT NULL,
+  PRIMARY KEY (lobby_id, nation, marker_id)
+);
 `);
 
 // ---- Lightweight migrations for databases created by earlier versions -------------
