@@ -287,7 +287,8 @@ picture, so the small craft share it.
 - **Torpedoes:** destroyers, torpedo boats and submarines loose them now and then. A short pale track runs out to the
   enemy and ends in a column of water, sometimes with a hit.
 - **Losses:** one ship per share of the unit's strength (a two-ship squadron loses one at 50 %). The ship lists,
-  burns, smokes, settles and goes down, leaving a ring of foam. Repairs bring a ship back.
+  burns, smokes, settles and goes down, leaving a ring of foam and an oil slick that spreads, burns for two minutes
+  and fades over a quarter of an hour, wreckage drifting in it. Repairs bring a ship back.
 - **Gun lines:** naval units' tokens draw no rifle-fire line; their ships do the fighting.
 
 Atlas: `public/assets/ships.png`, cut by `node scripts/build-ships.js "rob assets"` (sheets split into ships at the

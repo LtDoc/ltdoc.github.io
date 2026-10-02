@@ -653,6 +653,7 @@ hoofprints where cavalry rode, small shell holes where guns and tanks firing ove
 quarter of an hour (they are drawn in the browser, not saved).
 A section hit hard **routs** back behind its line and rallies; one destroyed **surrenders**: its last men are
 marched off under a white flag. **Stretcher bearers** carry the wounded back to the aid post.
+A ship that goes down leaves an **oil slick**, burning at first, with wreckage drifting in it.
 
 **Machine-gun companies** and **trench mortars** go in as four gun-and-crew teams, left empty when their crew are
 down. Other **artillery** shows four guns of its type, each worked by two men (guns recoil and smoke, shells leave

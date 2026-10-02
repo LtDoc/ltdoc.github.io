@@ -694,7 +694,11 @@
           roll += sh.sink.dir * 0.35 * k; y += 5 * k / s; alpha *= 1 - k * k;
           if (nowMs - (sh.smokeAt || 0) > 140 && k < 0.9) { sh.smokeAt = nowMs; q.puffs.push({ x: x + (Math.random() - 0.5) * L * 0.5 / s, y: y - L * 0.08 / s, t0: nowMs, dark: true, big: true }); }
           if (Math.random() < 0.08 && k < 0.7) this._flash(g, x + (Math.random() - 0.5) * L * 0.6 / s, y - 2 / s, 2.2 * boost / s);
-          if (k >= 1) { sh.gone = true; sp.visible = false; q.foam.push({ x, y, t0: nowMs, ring: true, r: L * 0.4 }); continue; }
+          if (k >= 1) {
+            sh.gone = true; sp.visible = false; q.foam.push({ x, y, t0: nowMs, ring: true, r: L * 0.4 });
+            if (!sub || Math.random() < 0.6) this._mark('slick', x, y, Math.random() * Math.PI, L / s * 0.3);   // her oil, burning, and wreckage
+            continue;
+          }
         }
         if (sh.risen) { const k = Math.min(1, (nowMs - sh.risen) / 1200); alpha *= k; if (k >= 1) sh.risen = 0; }
         sp.visible = true;
@@ -1378,7 +1382,8 @@
     }
     /**
      * A mark left on the ground (world units): 'track' (a stretch of tank track, width w, length len, heading a),
-     * 'hoof' (a pair of hoofprints), 'hole' (a small shell hole, radius w). They fade over a quarter of an hour; the
+     * 'hoof' (a pair of hoofprints), 'hole' (a small shell hole, radius w), 'slick' (a sunk ship's oil, radius w).
+     * They fade over a quarter of an hour; the
      * oldest go first when there are too many.
      */
     _mark(kind, x, y, a, w, len = 0) {
@@ -1399,6 +1404,26 @@
               m.x + ox + c * hl + s * hw, m.y + oy + s * hl - c * hw, m.x + ox - c * hl + s * hw, m.y + oy - s * hl - c * hw]);
           }
           g.fill({ color: 0x3f3327, alpha: 0.45 * fade });
+        } else if (m.kind === 'slick') {
+          // A sunk ship's oil: a dark sheen spreading over the water (half as big again in five minutes), a rainbow
+          // edge, burning for the first two minutes, and wreckage drifting in it.
+          const age = (nowMs - m.t0) / 1000, r = m.w * (1 + 0.6 * Math.min(1, age / 300)), wob = m.a;
+          const blob = (rr, n = 14) => { const p = []; for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2, q = rr * (1 + 0.22 * Math.sin(a * 3 + wob) + 0.12 * Math.sin(a * 5 + wob * 2)); p.push(m.x + Math.cos(a) * q, m.y + Math.sin(a) * q * 0.7); } return p; };
+          g.poly(blob(r * 1.08)).fill({ color: 0x6d5f8f, alpha: 0.18 * fade });
+          g.poly(blob(r)).fill({ color: 0x1b1918, alpha: 0.4 * fade });
+          for (let i = 0; i < 6; i++) {
+            const a = wob * 3 + i * 1.7, d = r * (0.2 + 0.12 * i) + Math.sin(nowMs / 4000 + i) * r * 0.05;
+            const wx = m.x + Math.cos(a) * d, wy = m.y + Math.sin(a) * d * 0.7, wl = m.w * (0.08 + (i % 3) * 0.04);
+            g.poly([wx - wl, wy - wl * 0.25, wx + wl, wy - wl * 0.2, wx + wl * 0.9, wy + wl * 0.25, wx - wl, wy + wl * 0.2]).fill({ color: 0x6b5238, alpha: 0.85 * fade });
+          }
+          if (age < 120) {
+            const burn = 1 - age / 120;
+            for (let i = 0; i < 5; i++) {
+              const a = wob + i * 1.3, d = r * 0.45 * ((i * 0.37) % 1), fl = 0.6 + 0.4 * Math.sin(nowMs / 90 + i * 2.1);
+              const fx = m.x + Math.cos(a) * d, fy = m.y + Math.sin(a) * d * 0.7;
+              g.circle(fx, fy, m.w * 0.16 * fl * burn).fill({ color: 0xff7a1a, alpha: 0.55 }).circle(fx, fy, m.w * 0.08 * fl * burn).fill({ color: 0xffd860, alpha: 0.8 });
+            }
+          }
         } else if (m.kind === 'hoof') {
           g.circle(m.x - s * m.w * 1.4, m.y + c * m.w * 1.4, m.w).circle(m.x + s * m.w * 1.4 + c * m.w * 2, m.y - c * m.w * 1.4 + s * m.w * 2, m.w);
           g.fill({ color: 0x4a3c2c, alpha: 0.4 * fade });
