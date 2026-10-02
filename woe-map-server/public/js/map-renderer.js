@@ -1667,6 +1667,16 @@ class MapRenderer extends EventTarget {
       weight += w; panSum += dx * w; count++;
       if (b.kind === 'shells') shells += w;
     }
+    // Cavalry in view charging or wheeling: the drum of hooves, louder the more riders and the nearer the middle.
+    let hooves = 0, hPan = 0;
+    for (const q of this.skirmish?.squads.values() || []) {
+      if (q.kind !== 'horse' || !q.shown) continue;
+      const riding = q.men.filter(m => !m.dead && m.leg);
+      if (!riding.length) continue;
+      const hx = riding.reduce((a, m) => a + m.sp.x, 0) / riding.length, hy = riding.reduce((a, m) => a + m.sp.y, 0) / riding.length;
+      const dx = (hx * s + this.world.x - W) / W, dy = (hy * s + this.world.y - H) / H, w = Math.max(0, 1 - Math.hypot(dx, dy) / 1.4) * riding.length / 8;
+      hooves += w; hPan += dx * w;
+    }
     const near = Math.max(0, Math.min(1, (s - 6) / 6)), far = Math.max(0, Math.min(1, (5 - s) / 2));
     const level = Math.min(1, weight / 1.5);
     S.scene({
@@ -1674,6 +1684,7 @@ class MapRenderer extends EventTarget {
       trench: count ? Math.min(1, weight) * (1 - far) * (near ? 0.7 : 1) : 0,
       distant: count ? Math.min(1, 0.4 + count / 6) * far : 0,
       pan: weight ? panSum / weight : 0,
+      hooves: Math.min(1, hooves), hoovesPan: hooves ? hPan / hooves : 0,
     });
   }
   /** Replace the battles shown (from GET /battles). */

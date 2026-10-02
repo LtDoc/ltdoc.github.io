@@ -661,9 +661,9 @@ autumn, drawn over the view from 400 % zoom; from autumn to spring the mud round
 **Battle sounds** (🎧 in the top bar, off until switched on, remembered per browser; `public/js/sound.js`), from
 recordings in `public/assets/sounds`: looping beds faded in and out with the fights in view (close in, from 800 %,
 the gunfire of the nearest fights over the din of the battlefield; at middling zoom the din; zoomed out, a
-bombardment far off), panned towards them; and an incoming shell's whistle for each shell, bomb or splash on
+bombardment far off; the drum of hooves while cavalry in view charge or wheel), panned towards them; and an incoming shell's whistle for each shell, bomb or splash on
 screen, timed so its burst lands with the explosion. The recordings are from Pixabay (freesound_community,
-soundreality, fronbondi_skegs), under the Pixabay Content License.
+soundreality, fronbondi_skegs, pwlpl), under the Pixabay Content License.
 
 **Machine-gun companies** and **trench mortars** go in as four gun-and-crew teams, left empty when their crew are
 down. Other **artillery** shows four guns of its type, each worked by two men (guns recoil and smoke, shells leave

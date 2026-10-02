@@ -2,9 +2,9 @@
 
 /**
  * Battle sounds, from recordings in public/assets/sounds:
- *   - three looping beds, faded in and out with what is on screen: gunfire.mp3 (rifles and machine guns, close in, over
- *     fights in view from 800 % zoom), trench.mp3 (the battlefield, under it and at middling zoom) and distant.mp3
- *     (a bombardment far off, zoomed out over fights); the renderer sets their levels and pan (scene) a few times a
+ *   - four looping beds, faded in and out with what is on screen: gunfire.mp3 (rifles and machine guns, close in, over
+ *     fights in view from 800 % zoom), trench.mp3 (the battlefield, under it and at middling zoom), distant.mp3
+ *     (a bombardment far off, zoomed out over fights) and hooves.mp3 (cavalry in view charging or wheeling); the renderer sets their levels and pan (scene) a few times a
  *     second, and they glide to them;
  *   - incoming.mp3 one-shots (two of them) for each shell, bomb or splash on screen: a whistle ending in the burst,
  *     started so its loudest moment lands with the explosion on screen, panned by where it is.
@@ -17,10 +17,12 @@ const BattleSound = (() => {
     gunfire: { file: 'gunfire.mp3', loop: [0, 48] },
     trench: { file: 'trench.mp3', loop: [0.2, 55] },
     distant: { file: 'distant.mp3', loop: [0.3, 32.4] },
+    hooves: { file: 'hooves.mp3', loop: [0.05, 8.05] },
     incoming1: { file: 'incoming-1.mp3', burst: 0.6 },
     incoming2: { file: 'incoming-2.mp3', burst: 0.9 },
   };
-  const BEDS = ['gunfire', 'trench', 'distant'];
+  const BEDS = ['gunfire', 'trench', 'distant', 'hooves'];
+  const BED_GAIN = { gunfire: 0.54, trench: 0.36, distant: 0.85, hooves: 0.7 };
   let ctx = null, master = null, enabled = false, loading = null;
   const buffers = {}, beds = {};
   let shots = [];   // times of recent one-shots, to keep a heavy bombardment from piling up
@@ -64,14 +66,14 @@ const BattleSound = (() => {
   document.addEventListener('visibilitychange', () => { if (ctx) master.gain.setTargetAtTime(document.hidden ? 0 : 0.8, ctx.currentTime, 0.2); });
 
   /** The beds' levels (0..1) and pan (-1..1), from what is on screen; they glide there over about a second. */
-  function scene({ gunfire = 0, trench = 0, distant = 0, pan = 0 }) {
+  function scene({ gunfire = 0, trench = 0, distant = 0, hooves = 0, pan = 0, hoovesPan = pan }) {
     if (!enabled || !ctx || ctx.state !== 'running') return;
-    const t = ctx.currentTime, lv = { gunfire, trench, distant };
+    const t = ctx.currentTime, lv = { gunfire, trench, distant, hooves };
     for (const k of BEDS) {
       const b = beds[k];
       if (!b) continue;
-      b.g.gain.setTargetAtTime(Math.max(0, Math.min(1, lv[k])) * (k === 'gunfire' ? 0.54 : k === 'trench' ? 0.36 : 0.85), t, 0.35);
-      b.p.pan.setTargetAtTime(Math.max(-0.8, Math.min(0.8, pan * (k === 'distant' ? 0.4 : 0.7))), t, 0.35);
+      b.g.gain.setTargetAtTime(Math.max(0, Math.min(1, lv[k])) * BED_GAIN[k], t, k === 'hooves' ? 0.25 : 0.35);
+      b.p.pan.setTargetAtTime(Math.max(-0.8, Math.min(0.8, (k === 'hooves' ? hoovesPan : pan) * (k === 'distant' ? 0.4 : 0.7))), t, 0.35);
     }
   }
   /**
@@ -89,7 +91,7 @@ const BattleSound = (() => {
     const k = Math.random() < 0.5 ? 'incoming1' : 'incoming2', buf = buffers[k];
     if (!buf) return;
     const src = ctx.createBufferSource(); src.buffer = buf; src.playbackRate.value = 0.92 + Math.random() * 0.16;
-    const g = ctx.createGain(); g.gain.value = Math.max(0, 1 - off * 0.45) * (0.35 + 0.65 * near) * 0.8;
+    const g = ctx.createGain(); g.gain.value = Math.max(0, 1 - off * 0.45) * (0.35 + 0.65 * near) * 0.48;
     const p = ctx.createStereoPanner(); p.pan.value = Math.max(-0.85, Math.min(0.85, dx * 0.8));
     src.connect(g).connect(p).connect(master);
     const lead = CLIPS[k].burst / src.playbackRate.value;
