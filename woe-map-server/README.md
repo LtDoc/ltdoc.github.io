@@ -653,7 +653,12 @@ shell with a fading trail over a faint dotted trajectory) to where it lands, so 
 when the battery's counter hides its muzzle; shells and flashes draw above the tokens. Each bombardment also leaves
 **4–5 craters** around the target (on land only: shells that fall in the sea leave none), picked from the crater sheet (`rob assets/tile-B-04.png`, atlas `misc-04`;
 plain, dark and scorched), 1.2–2.3 map px across and shown from 400 % zoom. Craters are static sprites stored in
-the `craters` table and stay for **ten turns** (End turn removes the old ones; outside game mode, a day). Both follow the units if
+the `craters` table and stay for **ten turns** (End turn removes the old ones; outside game mode, a day). Each
+crater lies in a scar of **churned mud** about three times its size (generated in the renderer: ragged wet and dry
+earth, scorched dark round the hole, a few standing puddles, clods and pale subsoil thrown out; shown from 250 %), so
+ground shelled again and again goes dark and battle-worn. Craters weather over their ten turns, scar and hole fading
+as the grass comes back, and this turn's craters still **smoke** (grey wisps drifting up, now and then a smouldering
+glow). Both follow the units if
 they move and sleep when off screen. Shells that land in water raise a **splash** instead of an earth burst (drawn by
 the renderer: a white column that leaps and collapses, thrown spray, a churned patch and two foam rings); with
 provinces each landing point is tested, otherwise the server says whether the target is at sea.

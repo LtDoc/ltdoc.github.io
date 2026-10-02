@@ -86,9 +86,13 @@ class MapRenderer extends EventTarget {
     this.factionInfo = new Map();                // factionId -> { color, name }
     this.sceneryLayer = new PIXI.Container();   // buildings, trenches, craters: scale with the map
     this.sceneryLayer.sortableChildren = true;
+    this.scarLayer = new PIXI.Container();      // churned, darkened ground around shell craters, under everything built
+    this.scarLayer.eventMode = 'none';
     this.craterLayer = new PIXI.Container();    // shell craters (static sprites, ten turns), under trenches and tokens
     this.craterLayer.eventMode = 'none';
-    this.craters = new Map();                    // id -> sprite
+    this.craters = new Map();                    // id -> sprite (its ground scar: sprite.scar)
+    this.craterSmokeG = new PIXI.Graphics();     // smoke still rising from this turn's craters
+    this.craterSmokeG.eventMode = 'none';
     this.trenchLayer = new PIXI.Container();    // dug earthworks (ribbon meshes), under drawings and tokens
     this.railLayer = new PIXI.Container();      // railway track, trains and smoke over cut sections
     this.railLayer.eventMode = 'none';
@@ -121,7 +125,7 @@ class MapRenderer extends EventTarget {
     this.ghostLayer = new PIXI.Container(); this.ghostLayer.eventMode = 'none'; // fog of war: last known enemy positions
     this.rideLayer = new PIXI.Container(); this.rideLayer.eventMode = 'none';   // trains carrying units on a rail trip
     this.rides = new Map();                                                      // unit id -> rail trip being played
-    this.world.addChild(...[this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.craterLayer, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.fogLayer, this.skirmish?.layer, this.gunG, this.unitDots, this.ghostLayer, this.rideLayer].filter(Boolean), this.markerLayer, this.boomLayer, ...(this.skirmish ? [this.skirmish.airLayer] : []), this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
+    this.world.addChild(...[this.mapLayer, this.territoryLayer, this.gridLayer, this.scarLayer, this.sceneryLayer, this.craterLayer, this.craterSmokeG, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.fogLayer, this.skirmish?.layer, this.gunG, this.unitDots, this.ghostLayer, this.rideLayer].filter(Boolean), this.markerLayer, this.boomLayer, ...(this.skirmish ? [this.skirmish.airLayer] : []), this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
     app.stage.addChild(this.world, this.pingArrows);
 
     app.stage.eventMode = 'static';
@@ -1327,18 +1331,35 @@ class MapRenderer extends EventTarget {
   // ---- Shell craters -----------------------------------------------------------------------------
   /** Replace all craters (from GET /battles). */
   setCraters(list) {
-    for (const sp of this.craters.values()) sp.destroy();
+    for (const sp of this.craters.values()) { sp.scar?.destroy(); sp.destroy(); }
     this.craters.clear();
     this.craterLayer.removeChildren();
+    this.scarLayer.removeChildren();
     this.addCraters(list);
   }
-  /** Add craters: single static sprites in map units, drawn under trenches, drawings and tokens. */
+  /**
+   * Add craters: single static sprites in map units, drawn under trenches, drawings and tokens. Each lies in a scar
+   * of churned, darkened mud about three times its size, with earth thrown out around it; where shells fell close
+   * together the scars run into one another and the ground goes dark. Craters weather over their ten turns (the
+   * mud dries and the grass comes back, so scar and hole fade), and this turn's craters still smoke.
+   */
   addCraters(list) {
+    const turn = this.gameTurn?.();
     for (const c of list || []) {
       if (this.craters.has(c.id) || (c.until && c.until <= Date.now())) continue;
+      // Age in turns (in a game); outside one, a crater is fresh for its first hour.
+      const age = turn != null && c.turn != null ? Math.max(0, turn - c.turn) : (c.until && c.until - Date.now() > 23 * 3600000 ? 0 : 3);
+      const wear = Math.min(1, age / 10);
       const sp = new PIXI.Sprite(PIXI.Texture.EMPTY);
       sp.anchor.set(0.5); sp.position.set(c.x, c.y); sp.rotation = (Number(c.rotation) || 0) * Math.PI / 180;
-      sp.eventMode = 'none'; sp.alpha = 0.95; sp.craterSize = Number(c.size) || 1.5;
+      sp.eventMode = 'none'; sp.alpha = 0.95 * (1 - 0.35 * wear); sp.craterSize = Number(c.size) || 1.5;
+      sp.fresh = age === 0; sp.seed = (Number(c.id) * 0.6180339887) % 1;
+      const scars = this._scarTextures(), scar = new PIXI.Sprite(scars[Number(c.id) % scars.length]);
+      scar.anchor.set(0.5); scar.position.set(c.x, c.y); scar.rotation = sp.seed * Math.PI * 2; scar.eventMode = 'none';
+      scar.scale.set(sp.craterSize * 3.3 / scar.texture.width);
+      scar.alpha = 0.9 * (1 - 0.7 * wear);
+      sp.scar = scar;
+      this.scarLayer.addChild(scar);
       this.craters.set(c.id, sp);
       this.craterLayer.addChild(sp);
       if (window.SpriteAtlas) window.SpriteAtlas.texture(c.sprite).then(tex => {
@@ -1351,8 +1372,89 @@ class MapRenderer extends EventTarget {
     this._syncCraterZoom();
     this.invalidate();
   }
-  /** Craters are a few map px across: hide them while they would be specks. */
-  _syncCraterZoom() { this.craterLayer.visible = this.scale >= 4; }
+  /** Craters are a few map px across: hide them while they would be specks (their dark ground shows a little sooner). */
+  _syncCraterZoom() { this.craterLayer.visible = this.scale >= 4; this.scarLayer.visible = this.scale >= 2.5; this.craterSmokeG.visible = this.scale >= 4; }
+  /**
+   * Ground scars, generated once: four variants of a ragged blotch of churned mud (value noise for its edge and
+   * texture: wet dark earth, drier lighter clods, a few standing puddles), scorched dark close round the hole, and
+   * clods and pale subsoil thrown out across it.
+   */
+  _scarTextures() {
+    if (this._scarTex) return this._scarTex;
+    const N = 256, out = [];
+    const lattice = (n, seed) => { const a = new Float32Array(n * n); let s = seed; for (let i = 0; i < a.length; i++) { s = (s * 1664525 + 1013904223) >>> 0; a[i] = (s >>> 8) / 16777216; } return a; };
+    const sample = (a, n, x, y) => {
+      const fx = x * n, fy = y * n, x0 = Math.floor(fx) % n, y0 = Math.floor(fy) % n, x1 = (x0 + 1) % n, y1 = (y0 + 1) % n;
+      const sm = t => t * t * (3 - 2 * t), ux = sm(fx - Math.floor(fx)), uy = sm(fy - Math.floor(fy));
+      return (a[y0 * n + x0] * (1 - ux) + a[y0 * n + x1] * ux) * (1 - uy) + (a[y1 * n + x0] * (1 - ux) + a[y1 * n + x1] * ux) * uy;
+    };
+    const step = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+    const mix = (a, b, t) => a + (b - a) * t;
+    for (let v = 0; v < 4; v++) {
+      const cv = document.createElement('canvas'); cv.width = cv.height = N;
+      const ctx = cv.getContext('2d'), img = ctx.createImageData(N, N);
+      const warp = lattice(5, 11 + v * 101), churn = lattice(14, 57 + v * 37), grit = lattice(48, 301 + v * 13), wet = lattice(9, 777 + v * 7);
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+        const fx = x / N, fy = y / N, dx = fx - 0.5, dy = fy - 0.5, d = Math.hypot(dx, dy) * 2;
+        // Ragged edge: the radius wobbles with low-frequency noise.
+        const m = step(1.0, 0.45, d + (sample(warp, 5, fx, fy) - 0.5) * 0.7);
+        if (m <= 0) continue;
+        const c = 0.6 * sample(churn, 14, fx, fy) + 0.4 * sample(grit, 48, fx, fy);
+        // Wet dark mud where churned, drier lighter earth between; scorched black-brown close to the hole.
+        let r = mix(116, 62, c), g = mix(94, 45, c), b = mix(62, 29, c);
+        const burn = step(0.4, 0.1, d);
+        r = mix(r, 38, burn * 0.75); g = mix(g, 29, burn * 0.75); b = mix(b, 21, burn * 0.75);
+        // Standing water in the hollows: dull grey-green, a little brighter.
+        const pool = step(0.68, 0.76, sample(wet, 9, fx, fy)) * step(0.85, 0.5, d);
+        r = mix(r, 70, pool * 0.8); g = mix(g, 76, pool * 0.8); b = mix(b, 68, pool * 0.8);
+        const i = (y * N + x) * 4;
+        img.data[i] = r; img.data[i + 1] = g; img.data[i + 2] = b;
+        img.data[i + 3] = Math.round(255 * m * Math.min(0.92, 0.5 + 0.45 * c + 0.3 * burn + 0.25 * pool));
+      }
+      ctx.putImageData(img, 0, 0);
+      // Thrown earth: dark clods, and pale chalky subsoil from deep down, thicker near the lip.
+      let s = 4242 + v * 999;
+      const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
+      for (let k = 0; k < 220; k++) {
+        const a = rnd() * Math.PI * 2, rr = N * (0.13 + Math.pow(rnd(), 1.8) * 0.3), size = (0.7 + rnd() * 2.4) * (1.25 - rr / (N * 0.45));
+        const pale = rnd() < 0.22;
+        ctx.fillStyle = pale ? `rgba(158,138,104,${0.45 + rnd() * 0.3})` : `rgba(48,35,24,${0.45 + rnd() * 0.35})`;
+        ctx.beginPath(); ctx.ellipse(N / 2 + Math.cos(a) * rr, N / 2 + Math.sin(a) * rr, size, size * (0.5 + rnd() * 0.5), a, 0, Math.PI * 2); ctx.fill();
+      }
+      const tex = PIXI.Texture.from(cv);
+      tex.source.scaleMode = 'linear';
+      out.push(tex);
+    }
+    return (this._scarTex = out);
+  }
+  /**
+   * Smoke still rising from this turn's craters: a few grey wisps each, swelling and drifting downwind as they
+   * climb and fade, and now and then the glow of something smouldering in the hole. Returns true while drawn.
+   */
+  _tickCraterSmoke(nowMs, vx0, vy0, vx1, vy1) {
+    const g = this.craterSmokeG;
+    g.clear();
+    if (!this.craterSmokeG.visible) return false;
+    const t = nowMs / 1000;
+    let any = false;
+    for (const sp of this.craters.values()) {
+      if (!sp.fresh) continue;
+      const S = sp.craterSize, x = sp.x, y = sp.y;
+      if (x < vx0 - S * 4 || x > vx1 + S * 4 || y < vy0 - S * 6 || y > vy1 + S * 2) continue;
+      any = true;
+      for (let w = 0; w < 4; w++) {
+        const p = ((t * 0.16 + sp.seed + w * 0.25) % 1);
+        const rise = p * S * 3.2, drift = p * p * S * 1.4 + Math.sin(t * 0.7 + w * 2 + sp.seed * 6) * S * 0.12 * p;
+        const r = S * (0.18 + p * 0.55), a = 0.32 * Math.sin(Math.PI * p) * (1 - p * 0.4);
+        // Soft-edged: three discs, the inner ones adding up towards the middle.
+        const col = p < 0.3 ? 0x4a4642 : 0x77736c;
+        for (const k of [1, 0.72, 0.45]) g.circle(x + drift, y - rise, r * k).fill({ color: col, alpha: a * 0.4 });
+      }
+      const glow = Math.max(0, Math.sin(t * 1.3 + sp.seed * 20)) * Math.max(0, Math.sin(t * 3.1 + sp.seed * 7));
+      if (glow > 0.15) g.circle(x, y, S * 0.1).fill({ color: 0xff7a2a, alpha: 0.5 * glow });
+    }
+    return any;
+  }
 
   /** Replace the battles shown (from GET /battles). */
   setBattles(list) { this.battles.clear(); for (const b of list || []) this.addBattle(b); this.invalidate(); }
@@ -1893,6 +1995,10 @@ class MapRenderer extends EventTarget {
       if (this._tickBattles(nowMs, tl.x, tl.y, br.x, br.y)) anim = true;
       if (this.shellsInFlight.length) anim = true;
     }
+    if (this.craters.size && this.scale >= 4) {
+      const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
+      if (this._tickCraterSmoke(nowMs, tl.x, tl.y, br.x, br.y)) anim = true;
+    } else this.craterSmokeG.clear();
     if (this.railLayer.children.length) {
       const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
       const vx0 = tl.x, vy0 = tl.y, vx1 = br.x, vy1 = br.y;

@@ -39,6 +39,7 @@
   $('#rendererLabel').textContent = renderer.rendererType.toUpperCase();
   renderer.canDrag = m => canEdit(m) && !m.locked;
   renderer.gameDate = () => (gameOn() ? state.game.date : null);   // the battle figures dress for the year and season
+  renderer.gameTurn = () => (gameOn() ? state.game.turn : null);   // craters weather and stop smoking as turns pass
   renderer.canEditShape = s => canEditShape(s) && !s.locked;
   renderer.unitsToPx = (x, y, units) => units / (distanceUnits(x, y, x + 1, y) || 1);   // km (or map units) → px, locally
   Object.defineProperty(renderer, 'railCutKm', { get: () => Number(state.game?.settings?.railCutKm) || 10 });
