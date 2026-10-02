@@ -9,12 +9,19 @@
  *   - artillery and machine-gun companies: four guns spread along the line (public/assets/machines.png,
  *     scripts/build-machines.js), each worked by two soldiers; guns recoil, flash and smoke as they fire (an artillery
  *     shell leaves from one of them), and fall silent when both their crew are down;
- *   - tanks: two, rolling out to the line and firing; a knocked-out one goes dark and smokes.
+ *   - tanks: two, rolling out to the line and firing; a knocked-out one goes dark and smokes;
+ *   - cavalry: eight horsemen (public/assets/mounts.png, scripts/build-mounts.js) who form up, charge the enemy's line,
+ *     fight there a moment, ride back and charge again; a fallen rider lies where he fell;
+ *   - aircraft: four planes of one livery, flying over the map with their shadows below. Out of a fight they circle
+ *     their unit; against ground or ships they make strafing runs over the target (bombers drop bombs on it);
+ *     against other aircraft both squadrons mix it up over the fight, each plane chasing an enemy, firing when it
+ *     has one in its sights and breaking hard when it is chased. A plane shot down spins away trailing smoke.
  *
  * Losses follow strength: one man in eight per 12.5 % lost (at 50 %: four standing, four fallen), one tank in two per
- * 50 %. Uniforms follow the nation, so all of a nation's troops look alike: grey, beige or green (chosen on the faction,
- * else guessed from its name), and assault regiments wear the armoured stormtrooper kit; each nation also has its own
- * tank design. The renderer hands over each squad's line every frame (MapRenderer._tickBattles).
+ * 50 %, one plane in four per 25 %. Uniforms follow the nation, so all of a nation's troops look alike: grey, beige or
+ * green (chosen on the faction, else guessed from its name), and assault regiments wear the armoured stormtrooper kit;
+ * each nation also has its own tank design and its own livery of planes (the Central Powers' with crosses, the
+ * others' with roundels). The renderer hands over each squad's line every frame (MapRenderer._tickBattles).
  */
 (function () {
   const SQUAD = 8, GUNS = 4, TANKS = 2;
@@ -26,6 +33,22 @@
   const GUN_PX = { field: 20, heavy: 24, siege: 24, mortar: 11, horse: 24, hmg: 13 };
   const TANK_PX = 32;
   const RUN_PX_S = 34, ROLL_PX_S = 26;   // running and rolling pace, screen px a second
+  // Horsemen (head to tail, lance and all) and planes (wingspan), screen px before the zoom boost.
+  const RIDERS = 8, RIDER_PX = 34, GALLOP_PX_S = 70, TROT_PX_S = 28;
+  const PLANES = 4;
+  const PLANE_PX = { fighter: 30, reconair: 30, seaplane: 32, bomber: 40 };
+  const FLY_PX_S = { fighter: 76, reconair: 64, seaplane: 60, bomber: 48 };   // air speed, screen px a second
+  const TURN = { fighter: 2.7, reconair: 2.2, seaplane: 2.0, bomber: 1.5 };     // turn rate, radians a second
+  const HORSE = new Set(['cavalry', 'dragoons', 'lancers', 'hussars', 'reconnaissance']);
+  const AIR = new Set(['fighter', 'bomber', 'reconair', 'seaplane']);
+  // Liveries for the best-known air arms; other nations take the next free livery of their side, in faction order.
+  const LIVERY_FOR = [
+    [/german|prussia|bavaria|saxon/i, 'grey-cross'], [/austria|hungar|habsburg/i, 'olive-cross'], [/ottoman|turk/i, 'sand-cross'],
+    [/bulgar/i, 'brown-cross'], [/united kingdom|brit|england|scot|canad|austral|new zealand|south africa|india|newfoundland/i, 'olive-roundel'],
+    [/fran[cç]|french/i, 'khaki-tricolour'], [/belgi/i, 'linen-roundel'], [/united states|america|\busa?\b/i, 'silver-roundel'],
+    [/russia/i, 'green-roundel'], [/ital/i, 'splinter'],
+  ];
+  const CENTRAL = /german|prussia|bavaria|saxon|austria|hungar|habsburg|ottoman|turk|bulgar/i;
   const UNIFORMS = ['grey', 'beige', 'green'];
   // Defaults by nation name, keeping the 1914 sides apart at a glance: the Central Powers in field grey, Britain,
   // France and Belgium in khaki, Russia, Italy and the Americas in olive. The GM can choose another on the faction.
@@ -55,9 +78,14 @@
       this.layer = new PIXI.Container(); this.layer.eventMode = 'none';
       this.deadC = new PIXI.Container(); this.machC = new PIXI.Container(); this.aliveC = new PIXI.Container();
       this.layer.addChild(this.deadC, this.machC, this.aliveC);
+      // Aircraft fly above the unit tokens (the renderer puts this layer over them): shadows, planes, then their fire.
+      this.airLayer = new PIXI.Container(); this.airLayer.eventMode = 'none';
+      this.shadowC = new PIXI.Container(); this.planeC = new PIXI.Container(); this.airG = new PIXI.Graphics();
+      this.airLayer.addChild(this.shadowC, this.planeC, this.airG);
       this.squads = new Map();       // unit id -> squad
       this.uniforms = new Map();     // nation (lower case) -> uniform
-      this.tex = null; this.mach = null;
+      this.factions = [];
+      this.tex = null; this.mach = null; this.mounts = null; this._liv = null;
       this._load();
     }
     async _load() {
@@ -80,19 +108,64 @@
         this.mach = { tanks: meta.tanks.map(one), guns: Object.fromEntries(Object.entries(meta.guns).map(([k, f]) => [k, one(f)])) };
         this.r.invalidate();
       } catch (e) { console.warn('Gun and tank sprites not available', e); }
+      try {
+        const meta = await fetch('/assets/mounts.json?v=1').then(r => r.json());
+        const base = await PIXI.Assets.load({ src: '/assets/mounts.png?v=1', loadParser: 'loadTextures' });
+        const one = f => ({ ...f, t: frame(base, f), len: Math.max(f.w, f.h) });
+        this.mounts = { planes: meta.planes.map(one), liveries: meta.liveries,
+          riders: Object.fromEntries(Object.entries(meta.riders).map(([k, f]) => [k, one(f)])) };
+        this._liv = null;
+        this.r.invalidate();
+      } catch (e) { console.warn('Cavalry and aircraft sprites not available', e); }
     }
     /** Faction list from the map page: [{ name, uniform }]. */
     setFactions(list) {
-      this.uniforms = new Map((list || []).map(f => [String(f.name || '').trim().toLowerCase(), uniformFor(f.name, f.uniform)]));
+      this.factions = (list || []).map(f => ({ name: String(f.name || '').trim(), uniform: f.uniform }));
+      this.uniforms = new Map(this.factions.map(f => [f.name.toLowerCase(), uniformFor(f.name, f.uniform)]));
+      this._liv = null;
       for (const q of this.squads.values()) q.kit = null;
     }
-    /** What a unit shows in a fight: 'rifles' (infantry), 'guns' (artillery, machine guns), 'tanks', or null. */
+    /**
+     * Each nation's livery (mounts.json): the best-known air arms get their own, then every other nation takes the
+     * next livery of its side not yet flown (crosses for the Central Powers and field-grey nations, roundels for the
+     * rest, then unmarked ones), so two nations rarely fly look-alike planes.
+     */
+    _liveries() {
+      if (this._liv || !this.mounts) return this._liv;
+      const all = Object.entries(this.mounts.liveries), taken = new Set(), out = new Map();
+      const pool = mark => [...all.filter(([, l]) => l.mark === mark), ...all.filter(([, l]) => l.mark === 'plain')].map(([k]) => k);
+      for (const f of this.factions) {
+        const p = LIVERY_FOR.find(([re]) => re.test(f.name)), key = f.name.toLowerCase();
+        if (p && !taken.has(p[1]) && this.mounts.liveries[p[1]] && !out.has(key)) { out.set(key, p[1]); taken.add(p[1]); }
+      }
+      for (const f of this.factions) {
+        const key = f.name.toLowerCase();
+        if (out.has(key)) continue;
+        const list = pool(CENTRAL.test(f.name) || uniformFor(f.name, f.uniform) === 'grey' ? 'cross' : 'roundel');
+        const l = list.find(k => !taken.has(k)) || list[strHash(key) % list.length];
+        out.set(key, l); taken.add(l);
+      }
+      return (this._liv = out);
+    }
+    /** The plane frames a nation's squadrons fly: all of one livery. */
+    planesFor(nation) {
+      const n = String(nation || '').trim().toLowerCase(), m = this.mounts;
+      let l = this._liveries()?.get(n);
+      if (!l) { const list = Object.keys(m.liveries).filter(k => m.liveries[k].mark !== 'cross'); l = list[strHash(n) % list.length]; }
+      return m.liveries[l].planes.map(i => m.planes[i]);
+    }
+    /**
+     * What a unit shows in a fight: 'rifles' (infantry), 'guns' (artillery, machine guns), 'tanks', 'horse' (cavalry),
+     * 'air' (aeroplanes), or null.
+     */
     static kindOf(m) {
       const t = typeOf(m);
       if (!t) return null;
       if (t.id === 'tank') return 'tanks';
       if (t.cat === 'Artillery' || t.id === 'machinegun') return 'guns';
       if (t.cat === 'Infantry') return 'rifles';
+      if (HORSE.has(t.id)) return 'horse';
+      if (AIR.has(t.id)) return 'air';
       return null;
     }
     static isInfantry(m) { return Skirmish.kindOf(m) === 'rifles'; }
@@ -101,8 +174,9 @@
       const n = String(m?.data?.nation || '').trim().toLowerCase();
       return this.uniforms.get(n) || uniformFor(n, '');
     }
-    clear() { for (const q of this.squads.values()) this._drop(q); this.squads.clear(); }
-    _drop(q) { for (const sp of [...q.men.map(m => m.sp), ...q.machines.map(x => x.sp)]) { sp.parent?.removeChild(sp); sp.destroy(); } }
+    clear() { for (const q of this.squads.values()) this._drop(q); this.squads.clear(); this.airG.clear(); }
+    _sprites(q) { return [...q.men.map(m => m.sp), ...q.machines.flatMap(x => x.sh ? [x.sp, x.sh] : [x.sp])]; }
+    _drop(q) { for (const sp of this._sprites(q)) { sp.parent?.removeChild(sp); sp.destroy(); } }
 
     /**
      * An artillery unit fires a shell (MapRenderer, shelling): one of its working guns recoils and flashes, and the
@@ -121,34 +195,85 @@
 
     /**
      * One frame. `fronts`: unit id -> { view, cx, cy (centre of its line), ux, uy (towards the enemy), front (line
-     * width, world units), backPx (from the line back to the token, screen px), createdAt, kind, shells }.
+     * width, world units), backPx (from the line back to the token, screen px), tx, ty (centre of the enemy's line),
+     * createdAt, kind, shells }. Aircraft instead: { kind: 'air', view, mode ('orbit', 'strafe' or 'dogfight'), ax, ay
+     * (what they fly over: their own token, the target, or the defender in a dogfight), hx, hy (their token), enemyId,
+     * createdAt }.
      * `keep`: every unit still in a battle this turn (squads off screen keep their state). Draws flashes and smoke on
      * `g`. Returns true while a squad is on screen.
      */
     frame(fronts, keep, nowMs, s, g) {
+      this.airG.clear();
       for (const [id, q] of this.squads) if (!keep.has(id)) { this._drop(q); this.squads.delete(id); }
-      for (const [id, q] of this.squads) if (!fronts.has(id)) { q.shown = false; for (const sp of [...q.men.map(m => m.sp), ...q.machines.map(x => x.sp)]) sp.visible = false; }
+      for (const [id, q] of this.squads) if (!fronts.has(id)) { q.shown = false; for (const sp of this._sprites(q)) sp.visible = false; }
       if (!this.tex || !fronts.size) return false;
       const t = nowMs / 1000, boost = Math.min(1.5, Math.max(1, s / 14));
+      let drawn = false;
       for (const [id, f] of fronts) {
         if (f.kind !== 'rifles' && !this.mach) continue;
+        if ((f.kind === 'horse' || f.kind === 'air') && !this.mounts) continue;
         let q = this.squads.get(id);
         if (q && q.kind !== f.kind) { this._drop(q); this.squads.delete(id); q = null; }
-        if (!q) { q = this._make(id, f, nowMs); this.squads.set(id, q); }
-        if (!q.kit) { q.kit = this.kitFor(f.view?.marker); for (const m of q.men) m.pose = null; }
-        q.shown = true;
+        if (!q) { q = this._make(id, f, nowMs, s); this.squads.set(id, q); }
+        if (!q.kit) this._dress(q, f.view?.marker);
+        q.shown = true; drawn = true;
         this._tick(q, f, nowMs, t, s, boost, g);
       }
-      return true;
+      return drawn;
+    }
+    /** Put the squad in its nation's uniform (and, for aircraft, its livery). */
+    _dress(q, m) {
+      q.kit = this.kitFor(m);
+      for (const x of q.men) x.pose = null;
+      if (q.kind === 'air') {
+        const frames = this.planesFor(m?.data?.nation);
+        q.machines.forEach((p, i) => {
+          p.frame = frames[(i + q.id) % frames.length];
+          for (const sp of [p.sp, p.sh]) { sp.texture = p.frame.t; sp.anchor.set(p.frame.ax, p.frame.ay); }
+        });
+      }
     }
 
-    _make(id, f, nowMs) {
+    _make(id, f, nowMs, s) {
       const v = f.view, seed = id * 7.31, kind = f.kind;
       // Just fought: start from the strength before the blow, so the losses fall on screen.
       const drop = v?.strengthDrop && nowMs - v.strengthDrop.at < 8000 ? v.strengthDrop.from : null;
       const before = drop ?? strengthOf(v);
       const fresh = f.createdAt && Date.now() - f.createdAt < 10000;
-      const q = { id, kind, men: [], machines: [], kit: null, nextDeath: 0, puffs: [], shown: false };
+      const q = { id, kind, men: [], machines: [], kit: null, nextDeath: 0, puffs: [], dust: [], tracers: [], shown: false, last: nowMs };
+      if (kind === 'air') {
+        q.type = typeOf(v?.marker)?.id || 'fighter';
+        const alive = aliveFor(before, PLANES);
+        for (let i = 0; i < PLANES; i++) {
+          const p = { i, sp: new PIXI.Sprite(), sh: new PIXI.Sprite(), frame: null, dead: i >= alive, gone: i >= alive, fall: null,
+            x: 0, y: 0, hd: 0, bank: 0, v: (FLY_PX_S[q.type] || 70) * (0.93 + hash(seed, i + 7) * 0.14), st: 'in', ex: null, ey: 0, until: 0,
+            burst: 0, burstAt: 0, nextBurst: 0, flashAt: 0, tgt: null, retarget: 0, jink: 0, jinkUntil: 0, jinkDir: 1, smokeAt: 0 };
+          p.sp.eventMode = p.sh.eventMode = 'none';
+          p.sh.tint = 0x000000; p.sh.alpha = 0.22;
+          this.shadowC.addChild(p.sh); this.planeC.addChild(p.sp);
+          this._launch(p, f, s, fresh && f.mode !== 'orbit', hash(seed, i + 50));
+          q.machines.push(p);
+        }
+        return q;
+      }
+      if (kind === 'horse') {
+        const alive = aliveFor(before);
+        // Just attacked: they ride straight out of the unit at the enemy. Otherwise they start formed up on the line.
+        q.cycle = { st: fresh ? 'charge' : 'form', t0: nowMs, dur: fresh ? 0 : 1500 + hash(seed, 3) * 2000 };
+        q.dustAt = 0;
+        for (let i = 0; i < RIDERS; i++) {
+          const o = (i + 0.5) / RIDERS - 0.5 + (hash(seed, i) - 0.5) * 0.05, d = 3 + hash(seed, i + 20) * 7;
+          const m = { i, o, d, sp: new PIXI.Sprite(), pose: null, dead: i >= alive, fellAt: 0, rot: hash(seed, i + 100) * Math.PI * 2,
+            flip: hash(seed, i + 120) < 0.5, jo: hash(seed, i + 140) - 0.5, jd: hash(seed, i + 160), pace: 0.88 + hash(seed, i + 180) * 0.24,
+            co: o, cd: d, fo: o, fd: d, hd: null, phase: hash(seed, i + 80) * 6 };
+          if (m.dead) { m.co = o + m.jo * 0.1; m.cd = d - m.jd * 30; }
+          else if (fresh) { m.co = m.fo = 0; m.cd = m.fd = f.backPx; }
+          m.sp.eventMode = 'none';
+          (m.dead ? this.deadC : this.aliveC).addChild(m.sp);
+          q.men.push(m);
+        }
+        return q;
+      }
       if (kind === 'tanks') {
         const design = this.mach.tanks[strHash(v?.marker?.data?.nation) % this.mach.tanks.length];
         const alive = aliveFor(before, TANKS);
@@ -192,19 +317,286 @@
     _tick(q, f, nowMs, t, s, boost, g) {
       const kit = this.tex[q.kit] || this.tex.grey;
       const unit = DEAD_PX / kit.dead.len * boost / s;   // world units per soldier-atlas px, for every pose
-      const nx = -f.uy, ny = f.ux, theta = Math.atan2(f.uy, f.ux);
-      const at = (o, d) => [f.cx + nx * o * f.front - f.ux * d / s, f.cy + ny * o * f.front - f.uy * d / s];
-      if (q.kind === 'tanks') this._tickTanks(q, f, nowMs, t, s, boost, g, at, theta);
+      const ux = f.ux || 0, uy = f.uy || 0;
+      if (q.kind === 'air') this._tickAir(q, f, nowMs, t, s, boost);
       else {
-        if (q.kind === 'guns') this._tickGuns(q, f, nowMs, t, s, boost, g, at, theta, unit);
-        this._tickMen(q, f, nowMs, t, s, boost, g, at, theta, unit, kit);
+        const nx = -uy, ny = ux, theta = Math.atan2(uy, ux);
+        const at = (o, d) => [f.cx + nx * o * f.front - ux * d / s, f.cy + ny * o * f.front - uy * d / s];
+        if (q.kind === 'tanks') this._tickTanks(q, f, nowMs, t, s, boost, g, at, theta);
+        else if (q.kind === 'horse') this._tickHorse(q, f, nowMs, t, s, boost, g, at, theta, unit, kit);
+        else {
+          if (q.kind === 'guns') this._tickGuns(q, f, nowMs, t, s, boost, g, at, theta, unit);
+          this._tickMen(q, f, nowMs, t, s, boost, g, at, theta, unit, kit);
+        }
       }
-      // Smoke from shots and wrecks: grey puffs that swell, drift and fade.
+      // Dust thrown up on the ground (hooves, strafing rounds): small brown puffs.
+      q.dust = q.dust.filter(p => nowMs - p.t0 < 700);
+      for (const p of q.dust) {
+        const age = (nowMs - p.t0) / 700;
+        if (age < 0) continue;   // a round still on its way down
+        g.circle(p.x, p.y, (1.6 + age * 3) * boost / s).fill({ color: 0xa08a68, alpha: 0.55 * (1 - age) });
+      }
+      // Smoke from shots and wrecks (and burning planes, drawn up with them): grey puffs that swell, drift and fade.
+      const pg = q.kind === 'air' ? this.airG : g;
       q.puffs = q.puffs.filter(p => nowMs - p.t0 < 1400);
       for (const p of q.puffs) {
         const age = (nowMs - p.t0) / 1400, r = (p.big ? 5 : 3.2) * boost / s * (1 + age * 2.2);
-        g.circle(p.x - f.ux * age * 4 / s, p.y - f.uy * age * 4 / s - age * 6 / s, r).fill({ color: p.dark ? 0x3a3a3a : 0xd9d6cf, alpha: 0.45 * (1 - age) });
+        pg.circle(p.x - ux * age * 4 / s, p.y - uy * age * 4 / s - age * 6 / s, r).fill({ color: p.dark ? 0x3a3a3a : 0xd9d6cf, alpha: 0.45 * (1 - age) });
       }
+    }
+
+    // ---- Cavalry ---------------------------------------------------------------------------------------------------
+    /**
+     * The troop works in a cycle: form up on its line, charge the enemy's line at the gallop, fight there a moment
+     * (the riders wheel among the enemy, blades flashing), ride back, and again. Positions are on the squad's front:
+     * o across it (fraction of its width), d behind the line in screen px (negative: towards the enemy).
+     */
+    _tickHorse(q, f, nowMs, t, s, boost, g, at, theta, unit, kit) {
+      const rider = this.mounts.riders[q.kit] || this.mounts.riders.beige;
+      const reach = Math.max(24, ((f.tx - f.cx) * f.ux + (f.ty - f.cy) * f.uy) * s);   // own line to theirs, px
+      const living = q.men.filter(m => !m.dead);
+      const want = aliveFor(strengthOf(f.view));
+      if (living.length > want && nowMs >= q.nextDeath) {
+        const m = living[Math.floor(Math.random() * living.length)];
+        m.dead = true; m.fellAt = nowMs; m.pose = null;
+        this.aliveC.removeChild(m.sp); this.deadC.addChild(m.sp);
+        q.nextDeath = nowMs + 260 + Math.random() * 650;
+      } else if (living.length < want) {
+        const m = q.men.find(x => x.dead);
+        if (m) { m.dead = false; m.pose = null; m.co = m.o; m.cd = m.d; this.deadC.removeChild(m.sp); this.aliveC.addChild(m.sp); }
+      }
+      // Where each rider is bound in this part of the cycle.
+      const c = q.cycle;
+      const goal = m => c.st === 'charge' || c.st === 'melee' ? [m.o * 0.85, -reach + 3 + m.jd * 6] : [m.o, m.d];
+      const pace = c.st === 'charge' ? GALLOP_PX_S : c.st === 'back' ? GALLOP_PX_S * 0.85 : TROT_PX_S;
+      if (!c.dur) {
+        // The part lasts until the slowest rider gets there (or, formed up and fighting, a set while).
+        c.dur = Math.max(800, ...living.map(m => { const [o, d] = goal(m); return Math.hypot((o - m.fo) * f.front * s, d - m.fd) / (pace * m.pace) * 1000; }));
+      }
+      if (nowMs >= c.t0 + c.dur) {
+        const next = { form: 'charge', charge: 'melee', melee: 'back', back: 'form' }[c.st];
+        for (const m of q.men) { m.fo = m.co; m.fd = m.cd; }
+        q.cycle = { st: next, t0: nowMs, dur: next === 'melee' ? 2000 + Math.random() * 1500 : next === 'form' ? 2500 + Math.random() * 2500 : 0 };
+        return this._tickHorse(q, f, nowMs, t, s, boost, g, at, theta, unit, kit);
+      }
+      const galloping = c.st === 'charge' || c.st === 'back';
+      for (const m of q.men) {
+        const sp = m.sp;
+        sp.visible = true;
+        if (m.dead) {
+          // Thrown where he fell; the horse is gone.
+          this._pose(m, kit, 'dead');
+          const [x, y] = at(m.co, m.cd), age = nowMs - m.fellAt, k = m.fellAt && age < 320 ? age / 320 : 1;
+          sp.position.set(x, y); sp.rotation = m.rot;
+          const sc = unit * (1.25 - 0.25 * k);
+          sp.scale.set(m.flip ? -sc : sc, sc);
+          sp.alpha = 0.35 + 0.65 * k;
+          continue;
+        }
+        if (m.pose !== 'ride') { sp.texture = rider.t; sp.anchor.set(rider.ax, rider.ay); m.pose = 'ride'; }
+        sp.alpha = 1;
+        const [go, gd] = goal(m);
+        const own = Math.hypot((go - m.fo) * f.front * s, gd - m.fd) / (pace * m.pace) * 1000;
+        const k = Math.min(1, (nowMs - c.t0) / Math.max(1, own));
+        const e = c.st === 'charge' ? k * k * (1.4 - 0.4 * k) : k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;   // a charge gathers pace
+        const po = m.co, pd = m.cd;
+        m.co = m.fo + (go - m.fo) * e; m.cd = m.fd + (gd - m.fd) * e;
+        let wo = 0, wd = 0;
+        if (c.st === 'melee') {
+          // Wheeling among the enemy: small loops, each rider his own.
+          const a = t * 2.6 + m.phase;
+          wo = Math.sin(a) * 9 / (f.front * s); wd = Math.cos(a) * 7;
+        }
+        const [x, y] = at(m.co + wo, m.cd + wd);
+        // Heading: where he is going; standing, towards the enemy.
+        const [x0, y0] = at(po, pd), moving = Math.hypot(x - x0, y - y0) * s > 0.05 || c.st === 'melee';
+        let want = theta;
+        if (c.st === 'melee') { const a = t * 2.6 + m.phase; want = Math.atan2(f.ux * Math.cos(a) * 9 + f.uy * Math.sin(a) * 7, -f.uy * Math.cos(a) * 9 + f.ux * Math.sin(a) * 7); }
+        else if (moving && k < 1) want = Math.atan2(y - y0, x - x0);
+        m.hd = m.hd == null ? want : m.hd + Math.atan2(Math.sin(want - m.hd), Math.cos(want - m.hd)) * Math.min(1, 0.25);
+        sp.position.set(x, y);
+        sp.rotation = m.hd + Math.PI / 2;
+        const sc = RIDER_PX / rider.len * boost / s * (galloping && k < 1 ? 1 + 0.05 * Math.abs(Math.sin(t * 15 + m.i)) : 1);
+        sp.scale.set(sc);
+        if (c.st === 'melee' && Math.random() < 0.012) {
+          // A blade or a lance point catching the light.
+          const r = rider.len * sc * 0.35;
+          g.circle(x + Math.cos(m.hd) * r, y + Math.sin(m.hd) * r, 1.6 * boost / s).fill({ color: 0xffffff, alpha: 0.9 });
+        }
+      }
+      // Dust kicked up behind the galloping troop.
+      if (galloping && nowMs - q.dustAt > 70) {
+        const ms = q.men.filter(m => !m.dead);
+        if (ms.length) {
+          q.dustAt = nowMs;
+          const m = ms[Math.floor(Math.random() * ms.length)], back = RIDER_PX * boost * 0.45;
+          q.dust.push({ x: m.sp.x - Math.cos(m.hd) * back / s, y: m.sp.y - Math.sin(m.hd) * back / s, t0: nowMs });
+        }
+      }
+    }
+
+    // ---- Aircraft --------------------------------------------------------------------------------------------------
+    // Planes live in world units but fly, turn and keep their distances in screen px, like everything else here.
+    /** Put a plane in the air: coming from its unit's token towards the fight, or somewhere on its circle. */
+    _launch(p, f, s, fromHome, r = Math.random()) {
+      p.st = 'in'; p.ex = null; p.tgt = null;
+      if (fromHome) {
+        const dx = f.ax - f.hx, dy = f.ay - f.hy, L = Math.hypot(dx, dy), ux = L > 1e-9 ? dx / L : 1, uy = L > 1e-9 ? dy / L : 0;
+        const back = Math.min(L, 260 / s) + p.i * 14 / s, side = (p.i - 1.5) * 16 / s;   // a loose echelon
+        p.x = f.ax - ux * back - uy * side; p.y = f.ay - uy * back + ux * side; p.hd = Math.atan2(uy, ux);
+      } else {
+        const a = r * Math.PI * 2, R = (40 + (p.i % 2) * 9) / s;
+        p.x = f.ax + Math.cos(a) * R; p.y = f.ay + Math.sin(a) * R; p.hd = a + Math.PI / 2;
+      }
+    }
+    _tickAir(q, f, nowMs, t, s, boost) {
+      const dt = Math.min(0.05, Math.max(0, (nowMs - q.last) / 1000));
+      q.last = nowMs;
+      const px = PLANE_PX[q.type] || 30, air = this.airG;
+      const enemy = f.mode === 'dogfight' ? this.squads.get(f.enemyId) : null;
+      const foes = enemy && enemy.kind === 'air' && enemy.shown ? enemy.machines.filter(p => !p.dead) : [];
+      // Losses: a plane is shot down (one an enemy is chasing, if any: he fires on it) and spins away; healing
+      // brings one back in from out of sight.
+      const flying = q.machines.filter(p => !p.dead), want = aliveFor(strengthOf(f.view), PLANES);
+      if (flying.length > want && nowMs >= q.nextDeath) {
+        const hunted = flying.filter(p => foes.some(e => e.tgt === p));
+        const p = (hunted.length ? hunted : flying)[Math.floor(Math.random() * (hunted.length || flying.length))];
+        for (const e of foes) if (e.tgt === p) { e.burst = Math.max(e.burst, 6); e.nextBurst = nowMs + 1200; }
+        p.dead = true; p.fall = { t0: nowMs, spin: (Math.random() < 0.5 ? -1 : 1) * (2.2 + Math.random() * 1.8) };
+        q.nextDeath = nowMs + 500 + Math.random() * 900;
+      } else if (flying.length < want) {
+        const p = q.machines.find(x => x.gone);
+        if (p) { p.dead = p.gone = false; p.fall = null; this._launch(p, f, s, false); const a = Math.random() * Math.PI * 2; p.x = f.ax + Math.cos(a) * 240 / s; p.y = f.ay + Math.sin(a) * 240 / s; p.hd = a + Math.PI; }
+      }
+      for (const p of q.machines) {
+        if (p.gone) { p.sp.visible = p.sh.visible = false; continue; }
+        if (p.fall) { this._fallPlane(q, p, nowMs, dt, s, boost, px); continue; }
+        // Far off (after a zoom, or a new fight elsewhere): back into the picture, heading in.
+        if (Math.hypot(p.x - f.ax, p.y - f.ay) * s > 700) { const a = Math.random() * Math.PI * 2; p.x = f.ax + Math.cos(a) * 300 / s; p.y = f.ay + Math.sin(a) * 300 / s; p.hd = a + Math.PI; p.st = 'in'; p.ex = null; }
+        let goal;
+        if (f.mode === 'strafe') goal = this._strafe(q, p, f, nowMs, s, boost);
+        else if (f.mode === 'dogfight' && foes.length) goal = this._dogfight(q, p, f, foes, nowMs, s, boost);
+        else goal = this._orbit(p, f, s);
+        this._fly(p, goal[0], goal[1], dt, s, q.type);
+        this._drawPlane(p, s, boost, px, 1);
+        if (nowMs - p.flashAt < 50) { const [mx, my] = this._nose(p, s, boost, px); air.circle(mx, my, 2.4 * boost / s).fill({ color: 0xffe9a0, alpha: 0.9 }); }
+      }
+      // Tracer: short bright streaks flying on from the guns.
+      q.tracers = q.tracers.filter(tr => nowMs - tr.t0 < 280);
+      for (const tr of q.tracers) {
+        const k = (nowMs - tr.t0) / 1000, x = tr.x + tr.vx * k, y = tr.y + tr.vy * k;
+        air.moveTo(x, y).lineTo(x - tr.vx * 0.018, y - tr.vy * 0.018).stroke({ width: 1.3 * boost / s, color: 0xffd76a, alpha: 0.9 * (1 - k * 1000 / 280) });
+      }
+    }
+    /** Turn towards (tx, ty) as fast as the plane can, then fly on; it banks into the turn. */
+    _fly(p, tx, ty, dt, s, type) {
+      const d = Math.atan2(Math.sin(Math.atan2(ty - p.y, tx - p.x) - p.hd), Math.cos(Math.atan2(ty - p.y, tx - p.x) - p.hd));
+      const max = (TURN[type] || 2.4) * dt, turn = Math.max(-max, Math.min(max, d));
+      p.hd += turn;
+      p.bank += ((max ? turn / max : 0) - p.bank) * Math.min(1, dt * 5);
+      const v = p.v / s * dt;
+      p.x += Math.cos(p.hd) * v; p.y += Math.sin(p.hd) * v;
+    }
+    /** Draw a plane (nose up on the sheet) and its shadow; `alt` 1 in flight, falling to 0 as it goes down. */
+    _drawPlane(p, s, boost, px, alt) {
+      const sc = px / p.frame.len * boost / s * (0.55 + 0.45 * alt), roll = 1 - 0.3 * Math.abs(p.bank);
+      p.sp.visible = p.sh.visible = true;
+      p.sp.position.set(p.x, p.y); p.sp.rotation = p.hd + Math.PI / 2; p.sp.scale.set(sc * roll, sc);
+      p.sh.position.set(p.x + 8 * alt * boost / s, p.y + 13 * alt * boost / s); p.sh.rotation = p.sp.rotation; p.sh.scale.set(sc * roll * 0.9, sc * 0.9);
+    }
+    _nose(p, s, boost, px) { const r = px * 0.42 * boost / s; return [p.x + Math.cos(p.hd) * r, p.y + Math.sin(p.hd) * r]; }
+    /** Fire the guns: bursts of a few rounds (call while the target is in the sights). Strafing rounds kick up dust. */
+    _guns(q, p, nowMs, s, boost, px, ground) {
+      if (!p.burst && nowMs >= p.nextBurst) { p.burst = 5 + Math.floor(Math.random() * 6); p.nextBurst = nowMs + 1100 + Math.random() * 1200; }
+      if (!p.burst || nowMs - p.burstAt < 75) return;
+      p.burst--; p.burstAt = p.flashAt = nowMs;
+      const [mx, my] = this._nose(p, s, boost, px), c = Math.cos(p.hd), sn = Math.sin(p.hd), j = (Math.random() - 0.5) * 0.05;
+      q.tracers.push({ x: mx, y: my, vx: Math.cos(p.hd + j) * 430 / s, vy: Math.sin(p.hd + j) * 430 / s, t0: nowMs });
+      if (ground) {
+        const r = (38 + Math.random() * 30) / s, side = (Math.random() - 0.5) * 12 / s;
+        q.dust.push({ x: p.x + c * r - sn * side, y: p.y + sn * r + c * side, t0: nowMs + 120 });
+      }
+    }
+    /** Out of a fight (or with no enemy plane in the sky): circling over the unit, one behind the other. */
+    _orbit(p, f, s) {
+      const R = (40 + (p.i % 2) * 9) / s, a = Math.atan2(p.y - f.ay, p.x - f.ax) + 0.55;
+      return [f.ax + Math.cos(a) * R, f.ay + Math.sin(a) * R];
+    }
+    /**
+     * Strafing: each pass starts from a point about 120 px out, runs straight over the target with the guns going
+     * (a bomber lets its bombs go over it instead), carries on a little, then turns back for the next pass from
+     * another angle.
+     */
+    _strafe(q, p, f, nowMs, s, boost) {
+      const px = PLANE_PX[q.type] || 30;
+      if (p.ex == null) this._newRun(p, f, s, true);
+      if (p.st === 'in') {
+        if (Math.hypot(p.x - p.ex, p.y - p.ey) * s < 26) p.st = 'run';
+        else return [p.ex, p.ey];
+      }
+      if (p.st === 'run') {
+        const rx = f.ax - p.ex, ry = f.ay - p.ey, rl = Math.hypot(rx, ry) || 1;
+        const past = ((p.x - f.ax) * rx + (p.y - f.ay) * ry) / rl * s;   // px beyond the target, along the pass
+        if (past > 14) { p.st = 'out'; p.until = nowMs + 500 + Math.random() * 500; }
+        else {
+          const dist = Math.hypot(f.ax - p.x, f.ay - p.y) * s;
+          const off = Math.atan2(Math.sin(Math.atan2(f.ay - p.y, f.ax - p.x) - p.hd), Math.cos(Math.atan2(f.ay - p.y, f.ax - p.x) - p.hd));
+          if (q.type === 'bomber') { if (dist < 16 && !p.bombed) { p.bombed = true; this._bombs(p, s); } }
+          else if (dist > 10 && dist < 100 && Math.abs(off) < 0.35) this._guns(q, p, nowMs, s, boost, px, true);
+          return [f.ax + rx / rl * 80 / s, f.ay + ry / rl * 80 / s];
+        }
+      }
+      if (nowMs >= p.until) { this._newRun(p, f, s, false); return [p.ex, p.ey]; }
+      return [p.x + Math.cos(p.hd) * 50 / s, p.y + Math.sin(p.hd) * 50 / s];
+    }
+    _newRun(p, f, s, first) {
+      // The heading of the next pass: straight in on the first, then back the way it came, from a new angle.
+      const a = first ? Math.atan2(f.ay - p.y, f.ax - p.x) + (p.i - 1.5) * 0.15 : p.hd + Math.PI + (Math.random() - 0.5) * 1.8;
+      const D = (105 + Math.random() * 40) / s;
+      p.ex = f.ax - Math.cos(a) * D; p.ey = f.ay - Math.sin(a) * D; p.st = 'in'; p.bombed = false;
+    }
+    /** A stick of bombs bursting along the bomber's track. */
+    _bombs(p, s) {
+      const c = Math.cos(p.hd), sn = Math.sin(p.hd);
+      for (let k = 0; k < 3; k++) {
+        const along = (k * 14 + 6) / s, side = (Math.random() - 0.5) * 10 / s;
+        this.r.explode(p.x + c * along - sn * side, p.y + sn * along + c * side, 46 + Math.random() * 18, 350 + k * 160, this.r.shellFrames);
+      }
+    }
+    /**
+     * A dogfight: each plane picks an enemy (the nearest, now and then another) and chases it, aiming a little ahead;
+     * it fires when the enemy is close and in its sights, and when one is on its own tail it now and then breaks hard
+     * to one side. Planes drifting too far from the fight turn back into it.
+     */
+    _dogfight(q, p, f, foes, nowMs, s, boost) {
+      const px = PLANE_PX[q.type] || 30;
+      if (!p.tgt || p.tgt.dead || !foes.includes(p.tgt) || nowMs >= p.retarget) {
+        const near = [...foes].sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y));
+        p.tgt = near[Math.random() < 0.7 ? 0 : Math.min(1, near.length - 1)];
+        p.retarget = nowMs + 3000 + Math.random() * 4000;
+      }
+      if (nowMs >= p.jink) {
+        const chased = foes.some(o => o.tgt === p && Math.hypot(o.x - p.x, o.y - p.y) * s < 70);
+        if (chased && Math.random() < 0.025) { p.jinkUntil = nowMs + 600 + Math.random() * 700; p.jinkDir = Math.random() < 0.5 ? -1 : 1; p.jink = nowMs + 2500; }
+      }
+      if (nowMs < p.jinkUntil) { const a = p.hd + p.jinkDir * 1.4; return [p.x + Math.cos(a) * 40 / s, p.y + Math.sin(a) * 40 / s]; }
+      if (Math.hypot(p.x - f.ax, p.y - f.ay) * s > 140) return [f.ax, f.ay];
+      const e = p.tgt, dist = Math.hypot(e.x - p.x, e.y - p.y) * s, lead = Math.min(0.6, dist / 300);
+      const off = Math.atan2(Math.sin(Math.atan2(e.y - p.y, e.x - p.x) - p.hd), Math.cos(Math.atan2(e.y - p.y, e.x - p.x) - p.hd));
+      if (dist < 85 && Math.abs(off) < 0.22) this._guns(q, p, nowMs, s, boost, px, false);
+      return [e.x + Math.cos(e.hd) * e.v / s * lead, e.y + Math.sin(e.hd) * e.v / s * lead];
+    }
+    /** Shot down: spinning, slowing, trailing black smoke and dropping towards its shadow, then a burst on the ground. */
+    _fallPlane(q, p, nowMs, dt, s, boost, px) {
+      const k = (nowMs - p.fall.t0) / 2400;
+      if (k >= 1) { p.gone = true; p.sp.visible = p.sh.visible = false; p.sp.tint = 0xffffff; this.r.explode(p.x, p.y, 40); return; }
+      p.hd += p.fall.spin * dt;
+      const v = p.v * (1 - 0.6 * k) / s * dt;
+      p.x += Math.cos(p.hd) * v; p.y += Math.sin(p.hd) * v;
+      p.bank = 0.6;
+      this._drawPlane(p, s, boost, px, 1 - k);
+      p.sp.tint = 0x8c8c8c;
+      if (nowMs - p.smokeAt > 70) { p.smokeAt = nowMs; q.puffs.push({ x: p.x, y: p.y, t0: nowMs, dark: true }); }
     }
 
     // ---- Infantry and gun crews ----------------------------------------------------------------------------------

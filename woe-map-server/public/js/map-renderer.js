@@ -121,7 +121,7 @@ class MapRenderer extends EventTarget {
     this.ghostLayer = new PIXI.Container(); this.ghostLayer.eventMode = 'none'; // fog of war: last known enemy positions
     this.rideLayer = new PIXI.Container(); this.rideLayer.eventMode = 'none';   // trains carrying units on a rail trip
     this.rides = new Map();                                                      // unit id -> rail trip being played
-    this.world.addChild(...[this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.craterLayer, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.fogLayer, this.skirmish?.layer, this.gunG, this.unitDots, this.ghostLayer, this.rideLayer].filter(Boolean), this.markerLayer, this.boomLayer, this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
+    this.world.addChild(...[this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.craterLayer, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.fogLayer, this.skirmish?.layer, this.gunG, this.unitDots, this.ghostLayer, this.rideLayer].filter(Boolean), this.markerLayer, this.boomLayer, ...(this.skirmish ? [this.skirmish.airLayer] : []), this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
     app.stage.addChild(this.world, this.pingArrows);
 
     app.stage.eventMode = 'static';
@@ -1376,10 +1376,10 @@ class MapRenderer extends EventTarget {
     g.clear();
     this._drawShells(nowMs);
     const sk = this.skirmish, fronts = new Map(), keep = new Set();
-    if (!this.battles.size) { if (sk && sk.squads.size) sk.clear(); return false; }
+    const gunZoom = s >= 8;
+    if (!this.battles.size && !(gunZoom && sk?.mounts)) { if (sk && sk.squads.size) sk.clear(); return false; }
     let anim = false;
     const t = nowMs / 1000;
-    const gunZoom = s >= 8;
     const onScreen = (x, y, m) => x > vx0 - m && x < vx1 + m && y > vy0 - m && y < vy1 + m;
     for (const [id, e] of this.battles) {
       const b = e.battle;
@@ -1390,8 +1390,9 @@ class MapRenderer extends EventTarget {
       const ux = (dx - ax) / L, uy = (dy - ay) / L, nx = -uy, ny = ux;
       const margin = 60 / s;
       keep.add(b.attackerId); keep.add(b.defenderId);
-      // Men and machines in the fight (skirmish.js): riflemen, gun crews or tanks on a line a little ahead of each
-      // side's token, from 800 % zoom.
+      // Men and machines in the fight (skirmish.js): riflemen, gun crews, tanks or horsemen on a line a little ahead
+      // of each side's token, from 800 % zoom. Aircraft fly over their target instead (strafing it), or, two air units
+      // fighting, both squadrons over the defender.
       const Av = this.views.get(b.attackerId), Dv = this.views.get(b.defenderId);
       const kA = sk ? window.Skirmish.kindOf(Av?.marker) : null, kD = sk ? window.Skirmish.kindOf(Dv?.marker) : null;
       const LINE = 60, pA = kA ? LINE : 14, pD = kD ? LINE : 14;
@@ -1400,8 +1401,14 @@ class MapRenderer extends EventTarget {
         if ((fronts.get(id)?.battleId ?? -1) > b.id) return;   // the unit's latest fight sets its line
         const l = Math.hypot(x1 - x0, y1 - y0), r0 = Math.min(l * 0.3, px / s), r1 = Math.min(l * 0.3, otherPx / s);
         const fux = (x1 - x0) / l, fuy = (y1 - y0) / l;
+        if (kind === 'air') {
+          const dog = (id === b.attackerId ? kD : kA) === 'air';
+          fronts.set(id, { battleId: b.id, view, kind, mode: dog ? 'dogfight' : 'strafe', ax: dog ? dx : x1, ay: dog ? dy : y1, hx: x0, hy: y0,
+            enemyId: id === b.attackerId ? b.defenderId : b.attackerId, createdAt: b.createdAt });
+          return;
+        }
         fronts.set(id, { battleId: b.id, view, kind, shells: b.kind === 'shells' && id === b.attackerId, cx: x0 + fux * r0, cy: y0 + fuy * r0, ux: fux, uy: fuy,
-          front: Math.max(80, Math.min(190, (l - r0 - r1) * s * 0.9)) / s, backPx: r0 * s, createdAt: b.createdAt });
+          front: Math.max(80, Math.min(190, (l - r0 - r1) * s * 0.9)) / s, backPx: r0 * s, tx: x1 - fux * r1, ty: y1 - fuy * r1, createdAt: b.createdAt });
       };
       if (squadsOn) {
         if (kA) addFront(b.attackerId, Av, kA, ax, ay, dx, dy, pA, kD ? LINE : 10);
@@ -1413,8 +1420,11 @@ class MapRenderer extends EventTarget {
         // The attacker's line opens fire; the defender's line answers, a little lighter, while it still stands.
         const live = id => { const v = this.views.get(id); return !v || (!v.dying && Number(v.marker.data?.strength ?? 100) > 0); };
         const aStands = !!Av && live(b.attackerId), dStands = !!Dv && live(b.defenderId);
-        if (aStands) this._drawLineFire(g, ax, ay, dx, dy, e.seed, 1, t, s, pA, kD ? LINE : 10);
-        if (dStands) this._drawLineFire(g, dx, dy, ax, ay, e.seed + 7.77, 0.65, t, s, pD, kA ? LINE : 10);
+        // Planes and horsemen do their own fighting (skirmish.js): no rifle line from their tokens, and none aimed at
+        // a plane's token either (its planes are over the fight).
+        const own = k => (k === 'air' || k === 'horse') && !!sk?.mounts, air = !!sk?.mounts && (kA === 'air' || kD === 'air');
+        if (aStands && !own(kA) && !air) this._drawLineFire(g, ax, ay, dx, dy, e.seed, 1, t, s, pA, kD ? LINE : 10);
+        if (dStands && !own(kD) && !air) this._drawLineFire(g, dx, dy, ax, ay, e.seed + 7.77, 0.65, t, s, pD, kA ? LINE : 10);
       } else {
         // Shelling: visible when the guns or the target are on screen (above 150 %). Each shell leaves the guns
         // with a flash, climbs a slow arc toward where it will land (so players can see where fire comes from),
@@ -1436,6 +1446,17 @@ class MapRenderer extends EventTarget {
           else this.explode(bx, by, 80 + Math.random() * 60, dur, this.shellFrames);
           e.nextShell = nowMs + 900 + Math.random() * 1600;
         }
+      }
+    }
+    // Air units out of a fight, on screen: their planes circle over them.
+    if (gunZoom && sk?.mounts) {
+      const m = 120 / s;
+      for (const [id, v] of this.views) {
+        if (fronts.has(id) || v.dying || v.riding || !onScreen(v.x, v.y, m)) continue;
+        if (v._skType !== v.marker.data?.unitType || v._skKind === undefined) { v._skType = v.marker.data?.unitType; v._skKind = window.Skirmish.kindOf(v.marker); }
+        if (v._skKind !== 'air') continue;
+        fronts.set(id, { view: v, kind: 'air', mode: 'orbit', ax: v.x, ay: v.y, hx: v.x, hy: v.y });
+        keep.add(id);
       }
     }
     if (sk && sk.frame(fronts, keep, nowMs, s, g)) anim = true;
@@ -1857,7 +1878,8 @@ class MapRenderer extends EventTarget {
     const k = 1 - Math.pow(0.001, dt / 700); // movement easing
     let anim = this.fxLayer.children.length > 0 || this.boomLayer.children.length > 0;
     if (this._tickPings(nowMs)) anim = true;
-    if (this.battles.size || this.shellsInFlight.length || this.skirmish?.squads.size) {
+    // From 800 % the planes of air units are up, circling, whether or not they fight (skirmish.js).
+    if (this.battles.size || this.shellsInFlight.length || this.skirmish?.squads.size || (s >= 8 && this.skirmish?.mounts)) {
       const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
       if (this._tickBattles(nowMs, tl.x, tl.y, br.x, br.y)) anim = true;
       if (this.shellsInFlight.length) anim = true;

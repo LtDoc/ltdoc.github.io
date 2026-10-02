@@ -131,6 +131,35 @@ times). Atlas: `public/assets/machines.png`, cut by `node scripts/build-machines
 FieldArtillery.png, HeavyArtilleryBattery.png, SiegeBattery.png, TrenchMortarBattery.png, HorseArtilleryBattery.png
 and HeavyMG.png.
 
+### Cavalry and aircraft in a fight
+
+- **Cavalry** (cavalry, dragoons, lancers/uhlans, hussars, reconnaissance): eight horsemen in the nation's uniform
+  form up on the unit's line, charge the enemy's line at the gallop (kicking up dust), wheel among the enemy there
+  for a few seconds, ride back and charge again. A troop that has just attacked rides straight out of its unit at
+  the enemy. Riders fall like riflemen (one per 12.5 % lost) and lie where they fell. Their tokens fire no rifle
+  line: the charge is their attack.
+- **Aircraft** (fighter, bomber, reconnaissance and seaplane squadrons): four planes flying above the units, each with
+  a shadow on the ground, from 800 % zoom, in or out of a fight.
+  - Out of a fight they circle over their unit, one behind the other.
+  - Against ground units or ships they make strafing runs over the target: in from about 120 px out, guns firing as
+    they close (tracer, and dust where the rounds strike), over the top, then a turn back for another pass from a
+    new angle. Bombers drop a stick of three bombs over the target instead.
+  - Against another air unit both squadrons meet over the defender and dogfight: each plane chases an enemy (aiming
+    a little ahead), fires when it has it close and in its sights, and breaks hard to one side now and then when an
+    enemy is on its tail.
+  - One plane is lost per 25 % of strength: the plane being chased (if any) is shot down, spins away trailing black
+    smoke, drops to its shadow and bursts on the ground. Healing brings one back in from out of sight.
+  - Each nation flies its own livery, every plane in it painted alike. Germany flies grey with crosses, Austria-Hungary
+    olive with crosses, the Ottomans sand with crosses, Britain olive with roundels, France khaki with tricolour
+    roundels, the United States silver, Russia green, Belgium linen and Italy splinter camouflage. Every other nation
+    takes the next livery not yet flown on its side: crosses for the Central Powers and field-grey nations, roundels
+    for the rest, then unmarked schemes. Factions are taken in order, so two nations rarely look alike.
+  - There are no rifle lines in a fight with an air unit; ground units under attack still fire from their squads.
+
+Atlas: `public/assets/mounts.png`, cut by `node scripts/build-mounts.js "rob assets"` from Cavalry.png (recoloured
+into the grey and green uniforms) and Army Assets/PlaneSprites.png. The 36 planes are sorted by eye into 23
+liveries; the table is at the top of the script.
+
 ## Campaign rules
 
 Supply on/off · a place feeds a column within: capital (600 km), city (400 km), village (200 km) · column supplies
