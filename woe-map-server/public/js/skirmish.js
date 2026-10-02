@@ -5,9 +5,9 @@
  * machines hold a line a little ahead of its token, facing the enemy:
  *
  *   - infantry: a section of eight from its army's figures (public/assets/soldiers.png, scripts/build-soldiers.js):
- *     an officer, a sergeant, a light machine-gunner (from 1916, where the army has one), a medic and riflemen, each
- *     lying, kneeling or standing to aim at the enemy; now and then one runs along the line to a new spot, and the
- *     medic goes out to the fallen and kneels by them a while;
+ *     an officer, a sergeant, a light machine-gunner (from 1916, where the army has one), a medic and riflemen,
+ *     spread out ahead of and behind the line, each lying, kneeling or standing to aim at the enemy; now and then
+ *     one rushes forward or back to a new spot, and the medic goes out to the fallen and kneels by them a while;
  *   - machine-gun companies and trench mortars: four teams along the line, each a gun with its crew drawn together
  *     (the Vickers, MG 08, Hotchkiss, Browning, Maxim; the Stokes and the Minenwerfer); a team whose two men are both
  *     down leaves its gun standing empty, its crew lying beside it;
@@ -15,8 +15,9 @@
  *     worked by two men of its army; guns recoil, flash and smoke as
  *     they fire (an artillery shell leaves from one of them), and fall silent when both their crew are down;
  *   - tanks: two, rolling out to the line and firing; a knocked-out one goes dark and smokes;
- *   - cavalry: eight horsemen (public/assets/mounts.png, scripts/build-mounts.js) who form up, charge the enemy's line,
- *     fight there a moment, ride back and charge again; a fallen rider lies where he fell, beside his dead horse;
+ *   - cavalry: eight horsemen (public/assets/mounts.png, scripts/build-mounts.js) who form up in echelon, charge
+ *     through the enemy and on past him, loop wide round a flank back to their places and charge again; a fallen rider
+ *     lies where he fell, beside his dead horse;
  *   - aircraft: four planes of one livery, flying over the map with their shadows below. Out of a fight they circle
  *     their unit; against ground or ships they make strafing runs over the target (bombers drop bombs on it);
  *     against other aircraft both squadrons mix it up over the fight, each plane chasing an enemy, firing when it
@@ -26,6 +27,10 @@
  *     freighters… They lie in loose formation on the water, wakes streaming astern, also out of a fight. In a fight
  *     they turn their bows on the enemy and fire salvoes that raise splashes around him (or burst on land); destroyers,
  *     torpedo boats and submarines (running submerged) loose torpedoes. A ship lost lists, burns and goes down.
+ *
+ * Every round fired leaves the man or gun that fired it as a tracer and flies at one of the enemy's men (or
+ * machines), at the weapon's rate: bolt-action rifles 10–15 rounds a minute, machine guns in bursts at their cyclic
+ * rates (RIFLE_RPM, HMG_RPM, LMG_RPM); guns and tanks firing over open sights send a shell the same way.
  *
  * Losses follow strength: one man in eight per 12.5 % lost (at 50 %: four standing, four fallen), one tank in two per
  * 50 %, one plane in four per 25 %, one ship by its share of the squadron. Each nation fights as one of the armies the
@@ -37,6 +42,7 @@
  */
 (function () {
   const SQUAD = 8, GUNS = 4, TANKS = 2;
+  const DEPTH = [-16, 30];   // an infantry section's spread in depth, screen px behind its line (negative: ahead of it)
   // One scale for every figure, so they keep the art's proportions: a man's torso across on screen, px (before the zoom
   // boost; a man lying full length is then about 20 px).
   const TORSO_PX = 7;
@@ -45,7 +51,14 @@
   const TANK_PX = 32;
   const RUN_PX_S = 34, ROLL_PX_S = 26;   // running and rolling pace, screen px a second
   // Horsemen (head to tail, lance and all) and planes (wingspan), screen px before the zoom boost.
-  const RIDERS = 8, RIDER_PX = 34, GALLOP_PX_S = 70, TROT_PX_S = 28;
+  const RIDERS = 8, RIDER_PX = 34, GALLOP_PX_S = 49, CANTER_PX_S = 40, TROT_PX_S = 20;
+  // Rates of fire, rounds a minute. Bolt-action rifles: aimed fire, 10 to 15 (the trained man's "mad minute" was 15).
+  // Machine guns fire bursts at their cyclic rates: Vickers, MG 08 and Hotchkiss about 450, the Browning M1917 500, the
+  // Russian Maxim 550; light machine guns: Lewis and BAR 550, MG 08/15 500, the Chauchat 240.
+  const RIFLE_RPM = [10, 15];
+  const HMG_RPM = { british: 450, anzac: 450, german: 450, ottoman: 450, french: 450, american: 500, russian: 550, arab: 550 };
+  const LMG_RPM = { british: 550, anzac: 550, german: 500, french: 240, american: 550 };
+  const ROUND_PX_S = 460;   // a round's flight, screen px a second (as the plain firing line's)
   const DEAD_HORSE_PX = 32;   // a dead horse lying on its side, nose to tail (screen px before the zoom boost)
   const CAMELS = new Set(['arab']);   // armies riding camels: no dead horse under their fallen
   // mounts.json riders (with "-2"…: others of the army, taken in turn)
@@ -111,6 +124,20 @@
   // Which gun each artillery type works; machine-gun companies get the Maxim.
   const GUN_FOR = { fieldartillery: 'field', antiaircraft: 'field', horseartillery: 'horse', heavyartillery: 'heavy', siegeartillery: 'siege',
     railwaygun: 'siege', coastal: 'heavy', mortar: 'mortar', machinegun: 'hmg' };
+  // A point on two cubic curves end to end (pts: 7 points, the middle one shared), u from 0 to 1 over both.
+  const bez2 = (pts, u) => {
+    const j = u < 0.5 ? 0 : 3, k = u < 0.5 ? u * 2 : (u - 0.5) * 2, a = 1 - k;
+    const w = [a * a * a, 3 * a * a * k, 3 * a * k * k, k * k * k];
+    return [0, 1].map(c => w[0] * pts[j][c] + w[1] * pts[j + 1][c] + w[2] * pts[j + 2][c] + w[3] * pts[j + 3][c]);
+  };
+  // The curve parameter at fraction k of the way along it, by its table of distances (lut: 41 entries).
+  const arcU = (lut, k) => {
+    const want = k * lut[lut.length - 1];
+    let i = 1;
+    while (i < lut.length - 1 && lut[i] < want) i++;
+    const span = lut[i] - lut[i - 1];
+    return (i - 1 + (span > 0 ? (want - lut[i - 1]) / span : 0)) / (lut.length - 1);
+  };
   const hash = (a, b) => { const v = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453; return v - Math.floor(v); };
   const aliveFor = (strength, n = SQUAD) => Math.max(0, Math.min(n, Math.ceil(Number(strength) / (100 / n) - 1e-9)));
   const strengthOf = v => (!v || v.dying) ? 0 : Number(v.marker?.data?.strength ?? 100);
@@ -365,16 +392,20 @@
       }
       if (kind === 'horse') {
         const alive = aliveFor(before);
-        // Just attacked: they ride straight out of the unit at the enemy. Otherwise they start formed up on the line.
-        q.cycle = { st: fresh ? 'charge' : 'form', t0: nowMs, dur: fresh ? 0 : 1500 + hash(seed, 3) * 2000 };
+        // Formed in echelon: each rider beside the next and a little behind him, the line slanting back to one side;
+        // after each charge the troop wheels away round one flank (q.loop). Just attacked, they ride straight out of
+        // the unit at the enemy; otherwise they stand formed up a moment first.
+        q.ech = hash(seed, 5) < 0.5 ? -1 : 1; q.loop = hash(seed, 6) < 0.5 ? -1 : 1;
+        q.cycle = { st: 'form', until: fresh ? nowMs : nowMs + 1500 + hash(seed, 3) * 2000 };
         q.dustAt = 0;
         for (let i = 0; i < RIDERS; i++) {
-          const o = (i + 0.5) / RIDERS - 0.5 + (hash(seed, i) - 0.5) * 0.05, d = 3 + hash(seed, i + 20) * 7;
+          const rank = q.ech > 0 ? i : RIDERS - 1 - i;
+          const o = ((i + 0.5) / RIDERS - 0.5) * 0.95 + (hash(seed, i) - 0.5) * 0.03, d = 4 + rank * 10 + hash(seed, i + 20) * 3;
           const m = { i, o, d, sp: new PIXI.Sprite(), pose: null, dead: i >= alive, fellAt: 0, rot: hash(seed, i + 100) * Math.PI * 2,
-            flip: hash(seed, i + 120) < 0.5, jo: hash(seed, i + 140) - 0.5, jd: hash(seed, i + 160), pace: 0.88 + hash(seed, i + 180) * 0.24,
-            co: o, cd: d, fo: o, fd: d, hd: null, phase: hash(seed, i + 80) * 6 };
+            flip: hash(seed, i + 120) < 0.5, jo: hash(seed, i + 140) - 0.5, jd: hash(seed, i + 160), pace: 0.92 + hash(seed, i + 180) * 0.16,
+            co: o, cd: d, hd: null, leg: null };
           if (m.dead) { m.co = o + m.jo * 0.1; m.cd = d - m.jd * 30; }
-          else if (fresh) { m.co = m.fo = 0; m.cd = m.fd = f.backPx; }
+          else if (fresh) { m.co = 0; m.cd = f.backPx; }
           m.sp.eventMode = 'none';
           (m.dead ? this.deadC : this.aliveC).addChild(m.sp);
           q.men.push(m);
@@ -416,14 +447,18 @@
         // The first four are the officer, sergeant, gunner and medic (men already down when the section appears are
         // the last ones, so these four are there); their places along the line differ from unit to unit.
         const slot = (i * 3 + id) % SQUAD;
-        const o = crew ? 0 : (slot + 0.5) / SQUAD - 0.5 + (hash(seed, i) - 0.5) * 0.06, d = crew ? 0 : 2 + hash(seed, i + 20) * 6;
+        // Spread out rather than in a line: across the front, and in depth from a little ahead of the line to well
+        // behind it.
+        const o = crew ? 0 : (slot + 0.5) / SQUAD - 0.5 + (hash(seed, i) - 0.5) * 0.09, d = crew ? 0 : DEPTH[0] + hash(seed, i + 20) * (DEPTH[1] - DEPTH[0]);
         let role = crew ? 'crew' : i < 4 ? ROLES[(i + id) % 4] : 'rifle';
         if (role === 'medic' && !this._has(this.kitFor(v?.marker), 'medic.')) role = 'rifle';   // an army drawn without medics
         const r = hash(seed, i + 200);
         const stance = role === 'officer' ? (r < 0.5 ? 'kneel' : 'stand') : role === 'lmg' ? (r < 0.6 ? 'prone' : 'kneel') : stanceOf(r);
+        // Each man's own rate of fire (seconds a round), the officer's slower.
+        const period = 60 / (RIFLE_RPM[0] + hash(seed, i + 60) * (RIFLE_RPM[1] - RIFLE_RPM[0])) * (role === 'officer' ? 1.6 : 1);
         const m = { i, o, d, home: [o, d], role, stance, sp: new PIXI.Sprite(), pose: null, dead: i >= alive, run: null, tend: null,
           gun: crew ? i % GUNS : -1, side: crew ? (i < GUNS ? -1 : 1) : 0,
-          next: nowMs + 2500 + hash(seed, i + 40) * 9000, period: 0.7 + hash(seed, i + 60) * 1.4, phase: hash(seed, i + 80) * 3,
+          next: nowMs + 2500 + hash(seed, i + 40) * 9000, period, nextShot: nowMs + 600 + hash(seed, i + 80) * period * 1000, firedAt: 0, burst: 0,
           rot: hash(seed, i + 100) * Math.PI * 2, flip: hash(seed, i + 120) < 0.5, fellAt: 0, jo: (hash(seed, i + 140) - 0.5), jd: hash(seed, i + 160) };
         m.sp.eventMode = 'none';
         if (!crew && m.dead) { m.o += m.jo * 0.08; m.d += m.jd * 10; }
@@ -449,6 +484,7 @@
           this._tickMen(q, f, nowMs, t, s, boost, g, at, theta, unit);
         }
       }
+      if (g) this._drawRounds(q, nowMs, s, g);
       // Dust thrown up on the ground (hooves, strafing rounds): small brown puffs.
       q.dust = q.dust.filter(p => nowMs - p.t0 < 700);
       for (const p of q.dust) {
@@ -467,9 +503,11 @@
 
     // ---- Cavalry ---------------------------------------------------------------------------------------------------
     /**
-     * The troop works in a cycle: form up on its line, charge the enemy's line at the gallop, fight there a moment
-     * (the riders wheel among the enemy, blades flashing), ride back, and again. Positions are on the squad's front:
-     * o across it (fraction of its width), d behind the line in screen px (negative: towards the enemy).
+     * The troop works in a cycle: formed up in echelon on its line, it charges at the gallop straight through the
+     * enemy's line and on past it, swings round in a wide loop out on one flank, canters back to its place and forms
+     * up again. Positions are on the squad's front: o across it (fraction of its width), d behind the line in screen
+     * px (negative: towards the enemy). Each rider rides his own leg of the cycle (m.leg), laid out in those terms
+     * (across in px) when he sets off.
      */
     _tickHorse(q, f, nowMs, t, s, boost, g, at, theta, unit) {
       if (q.riders?.army !== q.kit.army) {
@@ -478,35 +516,33 @@
         q.riders = { army: q.kit.army, pool: pool.length ? pool : [R.beige] };
       }
       const pool = q.riders.pool;
-      const reach = Math.max(24, ((f.tx - f.cx) * f.ux + (f.ty - f.cy) * f.uy) * s);   // own line to theirs, px
-      const living = q.men.filter(m => !m.dead);
+      const F = f.front * s, reach = Math.max(24, ((f.tx - f.cx) * f.ux + (f.ty - f.cy) * f.uy) * s);   // own line to theirs, px
+      const dt = Math.min(0.1, (nowMs - (q.hLast || nowMs)) / 1000); q.hLast = nowMs;
+      let living = q.men.filter(m => !m.dead);
       const want = aliveFor(strengthOf(f.view));
       if (living.length > want && nowMs >= q.nextDeath) {
         const m = living[Math.floor(Math.random() * living.length)];
-        m.dead = true; m.fellAt = nowMs; m.pose = null;
+        m.dead = true; m.fellAt = nowMs; m.pose = null; m.leg = null;
         m.co += m.jo * 0.12; m.cd += (m.jd - 0.5) * 24;   // the horse goes down a little off his line
         this.aliveC.removeChild(m.sp); this.deadC.addChild(m.sp);
         q.nextDeath = nowMs + 260 + Math.random() * 650;
       } else if (living.length < want) {
         const m = q.men.find(x => x.dead);
-        if (m) { m.dead = false; m.pose = null; m.co = m.o; m.cd = m.d; this.deadC.removeChild(m.sp); this.aliveC.addChild(m.sp); }
+        if (m) { m.dead = false; m.pose = null; m.co = m.o; m.cd = m.d; m.leg = null; this.deadC.removeChild(m.sp); this.aliveC.addChild(m.sp); }
       }
+      living = q.men.filter(m => !m.dead);
       const carcasses = !CAMELS.has(q.kit.army) && this.mounts.dead?.length ? this.mounts.dead : null;
-      // Where each rider is bound in this part of the cycle.
+      // All back in their places: stand a while, then charge again, every rider straight ahead through the enemy's
+      // line to a point well past it (the echelon held, a little closed up).
       const c = q.cycle;
-      const goal = m => c.st === 'charge' || c.st === 'melee' ? [m.o * 0.85, -reach + 3 + m.jd * 6] : [m.o, m.d];
-      const pace = c.st === 'charge' ? GALLOP_PX_S : c.st === 'back' ? GALLOP_PX_S * 0.85 : TROT_PX_S;
-      if (!c.dur) {
-        // The part lasts until the slowest rider gets there (or, formed up and fighting, a set while).
-        c.dur = Math.max(800, ...living.map(m => { const [o, d] = goal(m); return Math.hypot((o - m.fo) * f.front * s, d - m.fd) / (pace * m.pace) * 1000; }));
+      if (c.st === 'go' && living.every(m => !m.leg)) { c.st = 'form'; c.until = nowMs + 2500 + Math.random() * 2500; }
+      if (c.st === 'form' && nowMs >= c.until && living.length) {
+        c.st = 'go';
+        for (const m of living) {
+          const from = [m.co * F, m.cd], to = [m.o * F, -(reach + 115 + m.jd * 15) + (m.d - 4) * 0.5];
+          m.leg = { st: 'charge', t0: nowMs, from, to, dur: Math.max(600, Math.hypot(to[0] - from[0], to[1] - from[1]) / (GALLOP_PX_S * m.pace) * 1000) };
+        }
       }
-      if (nowMs >= c.t0 + c.dur) {
-        const next = { form: 'charge', charge: 'melee', melee: 'back', back: 'form' }[c.st];
-        for (const m of q.men) { m.fo = m.co; m.fd = m.cd; }
-        q.cycle = { st: next, t0: nowMs, dur: next === 'melee' ? 2000 + Math.random() * 1500 : next === 'form' ? 2500 + Math.random() * 2500 : 0 };
-        return this._tickHorse(q, f, nowMs, t, s, boost, g, at, theta, unit);
-      }
-      const galloping = c.st === 'charge' || c.st === 'back';
       for (const m of q.men) {
         const sp = m.sp, rider = pool[m.i % pool.length];
         sp.visible = true;
@@ -533,44 +569,59 @@
         if (m.carcass) m.carcass.visible = false;
         if (m.pose !== 'ride') { sp.texture = rider.t; sp.anchor.set(rider.ax, rider.ay); m.pose = 'ride'; }
         sp.alpha = 1;
-        const [go, gd] = goal(m);
-        const own = Math.hypot((go - m.fo) * f.front * s, gd - m.fd) / (pace * m.pace) * 1000;
-        const k = Math.min(1, (nowMs - c.t0) / Math.max(1, own));
-        const e = c.st === 'charge' ? k * k * (1.4 - 0.4 * k) : k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;   // a charge gathers pace
-        const po = m.co, pd = m.cd;
-        m.co = m.fo + (go - m.fo) * e; m.cd = m.fd + (gd - m.fd) * e;
-        let wo = 0, wd = 0;
-        if (c.st === 'melee') {
-          // Wheeling among the enemy: small loops, each rider his own.
-          const a = t * 2.6 + m.phase;
-          wo = Math.sin(a) * 9 / (f.front * s); wd = Math.cos(a) * 7;
+        let lat = m.co * F, dep = m.cd;
+        const L = m.leg;
+        if (L?.st === 'charge') {
+          // Gathering pace from a canter to a full gallop.
+          const k = Math.min(1, (nowMs - L.t0) / L.dur), e = k * (0.5 + 0.5 * k);
+          lat = L.from[0] + (L.to[0] - L.from[0]) * e; dep = L.from[1] + (L.to[1] - L.from[1]) * e;
+          if (k >= 1) m.leg = this._wheel(q, m, L.to, F, reach, nowMs);
+        } else if (L?.st === 'wheel') {
+          const k = Math.min(1, (nowMs - L.t0) / L.dur);
+          [lat, dep] = bez2(L.pts, arcU(L.lut, k));
+          if (k >= 1) { m.leg = null; lat = m.o * F; dep = m.d; }
+        } else {
+          // In his place, or walking his horse there (back on his feet, or the troop's line moved).
+          const hx = m.o * F, dx = hx - lat, dd = m.d - dep, dist = Math.hypot(dx, dd), step = TROT_PX_S * dt;
+          if (dist > step) { lat += dx / dist * step; dep += dd / dist * step; } else { lat = hx; dep = m.d; }
         }
-        const [x, y] = at(m.co + wo, m.cd + wd);
+        m.co = lat / F; m.cd = dep;
+        const [x, y] = at(m.co, m.cd);
         // Heading: where he is going; standing, towards the enemy.
-        const [x0, y0] = at(po, pd), moving = Math.hypot(x - x0, y - y0) * s > 0.05 || c.st === 'melee';
         let want = theta;
-        if (c.st === 'melee') { const a = t * 2.6 + m.phase; want = Math.atan2(f.ux * Math.cos(a) * 9 + f.uy * Math.sin(a) * 7, -f.uy * Math.cos(a) * 9 + f.ux * Math.sin(a) * 7); }
-        else if (moving && k < 1) want = Math.atan2(y - y0, x - x0);
-        m.hd = m.hd == null ? want : m.hd + Math.atan2(Math.sin(want - m.hd), Math.cos(want - m.hd)) * Math.min(1, 0.25);
+        if (m.wx != null && Math.hypot(x - m.wx, y - m.wy) * s > 0.05) want = Math.atan2(y - m.wy, x - m.wx);
+        m.wx = x; m.wy = y;
+        m.hd = m.hd == null ? want : m.hd + Math.atan2(Math.sin(want - m.hd), Math.cos(want - m.hd)) * 0.2;
         sp.position.set(x, y);
         sp.rotation = m.hd + Math.PI / 2;
-        const sc = RIDER_PX / rider.len * boost / s * (galloping && k < 1 ? 1 + 0.05 * Math.abs(Math.sin(t * 15 + m.i)) : 1);
+        const sc = RIDER_PX / rider.len * boost / s * (m.leg ? 1 + 0.05 * Math.abs(Math.sin(t * 11 + m.i)) : 1);
         sp.scale.set(sc);
-        if (c.st === 'melee' && Math.random() < 0.012) {
-          // A blade or a lance point catching the light.
+        if (m.leg?.st === 'charge' && Math.abs(dep + reach) < 18 && Math.random() < 0.06) {
+          // Riding through the enemy's line: a blade or a lance point catching the light.
           const r = rider.len * sc * 0.35;
           g.circle(x + Math.cos(m.hd) * r, y + Math.sin(m.hd) * r, 1.6 * boost / s).fill({ color: 0xffffff, alpha: 0.9 });
         }
       }
-      // Dust kicked up behind the galloping troop.
-      if (galloping && nowMs - q.dustAt > 70) {
-        const ms = q.men.filter(m => !m.dead);
-        if (ms.length) {
-          q.dustAt = nowMs;
-          const m = ms[Math.floor(Math.random() * ms.length)], back = RIDER_PX * boost * 0.45;
-          q.dust.push({ x: m.sp.x - Math.cos(m.hd) * back / s, y: m.sp.y - Math.sin(m.hd) * back / s, t0: nowMs });
-        }
+      // Dust kicked up behind the riding troop.
+      const riding = q.men.filter(m => !m.dead && m.leg);
+      if (riding.length && nowMs - q.dustAt > 70) {
+        q.dustAt = nowMs;
+        const m = riding[Math.floor(Math.random() * riding.length)], back = RIDER_PX * boost * 0.45;
+        q.dust.push({ x: m.sp.x - Math.cos(m.hd) * back / s, y: m.sp.y - Math.sin(m.hd) * back / s, t0: nowMs });
       }
+    }
+    /**
+     * The way back after a charge: on past the enemy's line, round in a wide loop out beyond the troop's flank (each
+     * rider keeping his place across the troop, roughly), and in to his place from behind, ending facing the enemy.
+     * Two cubic curves, with a table of distance along them so he rides it at an even canter.
+     */
+    _wheel(q, m, from, F, reach, nowMs) {
+      const H = [m.o * F, m.d], sg = q.loop, A = [sg * (F / 2 + 70) + H[0] * 0.35, -reach * 0.45];
+      const pts = [from, [from[0], from[1] - 55], [A[0], A[1] - 75], A, [A[0], A[1] + 75], [H[0] + sg * 25, H[1] + 55], H];
+      const lut = [0];
+      let prev = from, len = 0;
+      for (let i = 1; i <= 40; i++) { const p = bez2(pts, i / 40); len += Math.hypot(p[0] - prev[0], p[1] - prev[1]); lut.push(len); prev = p; }
+      return { st: 'wheel', t0: nowMs, pts, lut, dur: Math.max(800, len / (CANTER_PX_S * m.pace) * 1000) };
     }
 
     // ---- Ships -----------------------------------------------------------------------------------------------------
@@ -914,12 +965,14 @@
           }
           m.next = nowMs + 4000 + Math.random() * 6000;
         } else if (m.role !== 'medic' && !m.run && nowMs >= m.next) {
-          // Now and then a rifleman gets up and runs along the line to a new spot (two at most at a time).
-          if (running >= 2) m.next = nowMs + 1000 + Math.random() * 1500;
+          // Now and then a man gets up and rushes to a new spot, forward or back and across (three at most at a time);
+          // never closer to the enemy than a quarter of the way over.
+          if (running >= 3) m.next = nowMs + 1000 + Math.random() * 1500;
           else {
-            const step = (0.12 + Math.random() * 0.25) * (Math.random() < 0.5 ? -1 : 1);
+            const step = (0.05 + Math.random() * 0.2) * (Math.random() < 0.5 ? -1 : 1);
             let o1 = m.o + step; if (o1 > 0.5 || o1 < -0.5) o1 = m.o - step;
-            m.run = { o0: m.o, d0: m.d, o1: Math.max(-0.5, Math.min(0.5, o1)), d1: 2 + Math.random() * 6, t0: nowMs, dur: 0 };
+            const reach = ((f.tx - f.cx) * f.ux + (f.ty - f.cy) * f.uy) * s, d0 = Math.max(DEPTH[0], -reach * 0.25);
+            m.run = { o0: m.o, d0: m.d, o1: Math.max(-0.5, Math.min(0.5, o1)), d1: d0 + Math.random() * (DEPTH[1] - d0), t0: nowMs, dur: 0 };
           }
         }
         if (m.run) {
@@ -950,14 +1003,22 @@
           if (nowMs >= m.tend.until || !m.tend.to.dead) { m.tend = null; m.run = { o0: m.o, d0: m.d, o1: m.home[0], d1: m.home[1], t0: nowMs, dur: 0, home: true }; }
           continue;
         }
-        // Holding the line: weapon on the enemy, a little sway, a kick and a flash with each shot (the light
-        // machine-gunner in bursts). The medic waits, kneeling.
+        // In position: weapon on the enemy, a little sway, a kick and a flash with each round, which flies at one of
+        // the enemy's men. Riflemen fire aimed rounds at a bolt-action rate; the light machine-gunner fires bursts at
+        // his gun's rate. The medic waits, kneeling.
         const fr = this._pick(q, m.i, m.role === 'medic' ? 'medic.kneel' : `${m.role}.${m.stance}`);
         this._pose(m, fr);
-        const shot = m.role === 'medic' ? false : m.role === 'lmg' && this._has(q.kit, 'lmg.')
-          ? ((t + m.phase) % 3) < 0.9 && (t * 9) % 1 < 0.35
-          : ((t + m.phase) % m.period) / m.period < 0.07;
-        const aim = theta + Math.sin(t * 0.7 + m.phase * 2) * 0.1;
+        if (m.role !== 'medic' && nowMs >= m.nextShot) {
+          const lmg = m.role === 'lmg' && this._has(q.kit, 'lmg.') && LMG_RPM[q.kit.army];
+          if (lmg) {
+            if (!m.burst) m.burst = q.kit.army === 'french' ? 3 + Math.floor(Math.random() * 3) : 4 + Math.floor(Math.random() * 6);
+            m.burst--;
+            m.nextShot = nowMs + (m.burst ? 60000 / lmg : 1500 + Math.random() * 2500);
+          } else m.nextShot = nowMs + m.period * (0.8 + Math.random() * 0.4) * 1000;
+          m.firedAt = nowMs; m.shot = true;
+        }
+        const shot = m.firedAt && nowMs - m.firedAt < 70;
+        const aim = theta + Math.sin(t * 0.7 + m.i * 2) * 0.1;
         const [x, y] = at(m.o, m.d + (shot ? 0.8 : 0));
         sp.position.set(x, y);
         sp.rotation = aim - fr.face;
@@ -966,6 +1027,7 @@
           const reach = fr.len * unit * 0.5, mx = x + Math.cos(aim) * reach, my = y + Math.sin(aim) * reach;
           g.circle(mx, my, 3.2 * boost / s).fill({ color: 0xffc94a, alpha: 0.35 });
           g.circle(mx, my, 1.5 * boost / s).fill({ color: 0xfff6c8, alpha: 0.95 });
+          if (m.shot) { m.shot = false; this._round(q, f, mx, my, nowMs, s); }
         }
       }
     }
@@ -1003,16 +1065,73 @@
         if (!gn.manned) continue;
         // Firing on its own: field guns now and then (shells come through fireGun), machine guns in bursts.
         if (hmg) {
-          if (nowMs >= gn.nextShot) { gn.burst = 7 + Math.floor(Math.random() * 6); gn.nextShot = nowMs + 2200 + Math.random() * 2500; }
-          if (gn.burst > 0 && (!gn.burstAt || nowMs - gn.burstAt > 110)) { gn.burst--; gn.burstAt = nowMs; gn.firedAt = nowMs; this._flash(g, gn.muzzle[0], gn.muzzle[1], 1.8 * boost / s); }
+          this._mgBurst(q, gn, f, nowMs, s, boost, g);
         } else if (!f.shells && nowMs >= gn.nextShot) {
           gn.firedAt = nowMs; gn.nextShot = nowMs + 3000 + Math.random() * 4000;
           q.puffs.push({ x: gn.muzzle[0], y: gn.muzzle[1], t0: nowMs, big: true });
+          this._round(q, f, gn.muzzle[0], gn.muzzle[1], nowMs, s, true);   // over open sights, at the enemy's line
         }
         if (!hmg && gn.firedAt && nowMs - gn.firedAt < 120) this._flash(g, gn.muzzle[0], gn.muzzle[1], 3 * boost / s);
       }
     }
 
+    /** A machine gun firing bursts of 10 to 20 rounds at its cyclic rate, a pause of 2 to 4 s between them. */
+    _mgBurst(q, gn, f, nowMs, s, boost, g) {
+      if (!gn.burst && nowMs >= gn.nextShot) { gn.burst = 10 + Math.floor(Math.random() * 11); gn.nextShot = 0; }
+      if (gn.burst > 0 && nowMs - (gn.burstAt || 0) >= 60000 / (HMG_RPM[q.kit?.army] || 450)) {
+        gn.burst--; gn.burstAt = nowMs; gn.firedAt = nowMs;
+        if (!gn.burst) gn.nextShot = nowMs + 2000 + Math.random() * 2000;
+        this._round(q, f, gn.muzzle[0], gn.muzzle[1], nowMs, s);
+      }
+      if (gn.firedAt && nowMs - gn.firedAt < 60) this._flash(g, gn.muzzle[0], gn.muzzle[1], 1.8 * boost / s);
+    }
+    /**
+     * A round fired from (x, y) at the enemy: at one of his men or machines when his squad is drawn (else somewhere
+     * on his line), a little off. None at aircraft (they are over the fight, not at its line). A shell (`big`) flies
+     * faster and kicks up more dirt.
+     */
+    _round(q, f, x, y, nowMs, s, big = false) {
+      if (f.enemyKind === 'air') return;
+      const foe = f.enemyId != null ? this.squads.get(f.enemyId) : null;
+      let tx = null, ty = null;
+      if (foe?.shown) {
+        const alive = [...foe.men.filter(m => !m.dead && m.sp.visible).map(m => m.sp), ...foe.machines.filter(x => x.sp?.visible && !x.dead).map(x => x.sp)];
+        if (alive.length) { const sp = alive[Math.floor(Math.random() * alive.length)]; tx = sp.x; ty = sp.y; }
+      }
+      if (tx == null) {
+        if (f.tx == null) return;
+        const o = (Math.random() - 0.5) * f.front * 0.7;
+        tx = f.tx - f.uy * o; ty = f.ty + f.ux * o;
+      }
+      const spread = (big ? 6 : 9) / s;
+      tx += (Math.random() - 0.5) * spread * 2; ty += (Math.random() - 0.5) * spread * 2;
+      const T = Math.hypot(tx - x, ty - y) * s / (ROUND_PX_S * (big ? 1.6 : 0.85 + Math.random() * 0.3)) * 1000;
+      (q.rounds ||= []).push({ x0: x, y0: y, x1: tx, y1: ty, t0: nowMs, T, big, hs: Math.random() });
+    }
+    /** Rounds in flight (a tracer streak) and where they landed (a puff of dust). */
+    _drawRounds(q, nowMs, s, g) {
+      if (!q.rounds?.length) return;
+      q.rounds = q.rounds.filter(r => nowMs - r.t0 < r.T + 600);
+      const w = 1.8 / s;
+      for (const r of q.rounds) {
+        const age = nowMs - r.t0, dx = r.x1 - r.x0, dy = r.y1 - r.y0, l = Math.max(1e-6, Math.hypot(dx, dy)), vx = dx / l, vy = dy / l;
+        if (age <= r.T) {
+          const p = age / r.T, seg = (r.big ? 14 : 8 + r.hs * 9) / s, px = r.x0 + dx * p, py = r.y0 + dy * p;
+          const core = r.big ? 0xffe0a0 : r.hs < 0.15 ? 0xffd2a0 : r.hs > 0.9 ? 0xffffff : 0xfff0a0;   // a few redder or whiter rounds
+          g.moveTo(px, py).lineTo(px + vx * seg, py + vy * seg).stroke({ width: w * (r.big ? 4 : 2.6), color: 0xffb347, alpha: 0.2 });   // glow
+          g.moveTo(px, py).lineTo(px + vx * seg, py + vy * seg).stroke({ width: w * (r.big ? 1.6 : 0.8 + r.hs * 0.4), color: core, alpha: 0.95 });
+        } else {
+          const k = (age - r.T) / 600;
+          g.circle(r.x1 + vx * k * 3 / s, r.y1 + vy * k * 3 / s, ((r.big ? 2.5 : 1.2) + k * (r.big ? 9 : 5) * (0.6 + r.hs * 0.8)) / s)
+            .fill({ color: r.big ? 0xb8ab90 : 0xd8d2c4, alpha: (r.big ? 0.6 : 0.45) * (1 - k) });
+        }
+      }
+    }
+    /** Whether units of this kind are drawn here with their own fire (the renderer then draws no firing line for them). */
+    firesOwn(kind) {
+      if (!this.tex) return false;
+      return kind === 'rifles' || ((kind === 'guns' || kind === 'tanks') && !!this.mach) || ((kind === 'air' || kind === 'horse') && !!this.mounts) || (kind === 'ships' && !!this.ships);
+    }
     /** A weapon team: gun and crew in one figure, facing the enemy; left empty (or greyed) when its crew are down. */
     _tickTeam(q, gn, f, nowMs, s, boost, g, at, theta, unit, hmg) {
       const fr = (!gn.manned && this._pick(q, gn.i, q.team + '.empty')) || this._pick(q, gn.i, q.team);
@@ -1028,8 +1147,7 @@
       gn.muzzle = [x + Math.cos(theta) * reach, y + Math.sin(theta) * reach];
       if (!gn.manned) return;
       if (hmg) {
-        if (nowMs >= gn.nextShot) { gn.burst = 7 + Math.floor(Math.random() * 6); gn.nextShot = nowMs + 2200 + Math.random() * 2500; }
-        if (gn.burst > 0 && (!gn.burstAt || nowMs - gn.burstAt > 110)) { gn.burst--; gn.burstAt = nowMs; gn.firedAt = nowMs; this._flash(g, gn.muzzle[0], gn.muzzle[1], 1.8 * boost / s); }
+        this._mgBurst(q, gn, f, nowMs, s, boost, g);
       } else {
         // A mortar: a thump and a puff from the tube now and then (its bombs come through fireGun when it shells).
         if (!f.shells && nowMs >= gn.nextShot) { gn.firedAt = nowMs; gn.nextShot = nowMs + 3000 + Math.random() * 4000; }
@@ -1066,7 +1184,10 @@
           if (nowMs - tk.smokeAt > 260) { tk.smokeAt = nowMs; q.puffs.push({ x: x + (Math.random() - 0.5) * 6 / s, y: y - 4 / s, t0: nowMs, dark: true }); }
           continue;
         }
-        if (!tk.roll && nowMs >= tk.nextShot) { tk.firedAt = nowMs; tk.nextShot = nowMs + 2500 + Math.random() * 2500; const [mx, my] = this._muzzleOf(sp, fr); q.puffs.push({ x: mx, y: my, t0: nowMs }); }
+        if (!tk.roll && nowMs >= tk.nextShot) {
+          tk.firedAt = nowMs; tk.nextShot = nowMs + 2500 + Math.random() * 2500;
+          const [mx, my] = this._muzzleOf(sp, fr); q.puffs.push({ x: mx, y: my, t0: nowMs }); this._round(q, f, mx, my, nowMs, s, true);
+        }
         if (tk.firedAt && nowMs - tk.firedAt < 110) { const [mx, my] = this._muzzleOf(sp, fr); this._flash(g, mx, my, 2.6 * boost / s); }
       }
     }

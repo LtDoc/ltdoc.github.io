@@ -1407,7 +1407,8 @@ class MapRenderer extends EventTarget {
             enemyId: id === b.attackerId ? b.defenderId : b.attackerId, createdAt: b.createdAt });
           return;
         }
-        fronts.set(id, { battleId: b.id, view, kind, shells: b.kind === 'shells' && id === b.attackerId, cx: x0 + fux * r0, cy: y0 + fuy * r0, ux: fux, uy: fuy,
+        const enemyId = id === b.attackerId ? b.defenderId : b.attackerId, enemyKind = id === b.attackerId ? kD : kA;
+        fronts.set(id, { battleId: b.id, view, kind, enemyId, enemyKind, shells: b.kind === 'shells' && id === b.attackerId, cx: x0 + fux * r0, cy: y0 + fuy * r0, ux: fux, uy: fuy,
           front: Math.max(80, Math.min(190, (l - r0 - r1) * s * 0.9)) / s, backPx: r0 * s, tx: x1 - fux * r1, ty: y1 - fuy * r1, createdAt: b.createdAt });
       };
       if (squadsOn) {
@@ -1420,9 +1421,9 @@ class MapRenderer extends EventTarget {
         // The attacker's line opens fire; the defender's line answers, a little lighter, while it still stands.
         const live = id => { const v = this.views.get(id); return !v || (!v.dying && Number(v.marker.data?.strength ?? 100) > 0); };
         const aStands = !!Av && live(b.attackerId), dStands = !!Dv && live(b.defenderId);
-        // Planes, horsemen and ships do their own fighting (skirmish.js): no rifle line from their tokens, and none aimed at
-        // a plane's token either (its planes are over the fight).
-        const own = k => ((k === 'air' || k === 'horse') && !!sk?.mounts) || (k === 'ships' && !!sk?.ships), air = !!sk?.mounts && (kA === 'air' || kD === 'air');
+        // Units drawn as men, machines, horsemen, planes or ships (skirmish.js) fire from where those are: no firing
+        // line from their tokens. Nor is one aimed at a plane's token (its planes are over the fight).
+        const own = k => !!sk?.firesOwn(k), air = !!sk?.mounts && (kA === 'air' || kD === 'air');
         if (aStands && !own(kA) && !air) this._drawLineFire(g, ax, ay, dx, dy, e.seed, 1, t, s, pA, kD ? LINE : 10);
         if (dStands && !own(kD) && !air) this._drawLineFire(g, dx, dy, ax, ay, e.seed + 7.77, 0.65, t, s, pD, kA ? LINE : 10);
       } else {

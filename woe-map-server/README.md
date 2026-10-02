@@ -609,17 +609,19 @@ notes "guns out of reach of the reply"); it still takes the winner's loss when i
 
 **Battles stay on the map for the turn.** Every attack is recorded until End turn (`battles` table,
 `GET /api/lobbies/:id/battles`, WebSocket `battle`; hidden fights only for the GM and the attacking player).
-Infantry and other direct-fire attackers show **gunfire**: a regiment's firing line (a ragged front of riflemen
+Units drawn as men and machines (below) fire from where those are: each round a tracer from the man or gun that
+fired it, at one of the enemy's men, at the weapon's rate (bolt-action rifles 10–15 rounds a minute, machine guns
+in bursts at 450–550). Other direct-fire attackers show **gunfire**: a regiment's firing line (a ragged front of riflemen
 as wide as the gap between the units, 70–190 px on screen) sending tracers at points along the enemy's front,
 with muzzle flashes on each shot, a haze of powder smoke and dust where rounds land. Each round keeps the
 heading it was fired on while sections of the line sweep their aim along the enemy front, fire in bursts and
 lulls at their own cadence, and every 7–11 s loose a volley together; tracer speed, length and colour vary
 shot to shot. The defender's line fires back with about two thirds as many rifles and its own pattern; a side
 that has been destroyed or removed stops firing. Visible from 800 % zoom.
-**Infantry** man a unit's firing line, 60 px ahead of its token.
+**Infantry** fight about a line 60 px ahead of their token.
 - A section of eight runs out from the unit when the fight starts: an officer, a sergeant, a light machine-gunner,
-  a medic and riflemen, lying, kneeling or standing to aim at the enemy, with a flash at each shot.
-- Now and then one runs along the line to a new spot, and the medic goes out to kneel by the fallen.
+  a medic and riflemen, spread out ahead of and behind the line, lying, kneeling or standing to aim at the enemy.
+- Now and then one rushes forward or back to a new spot, and the medic goes out to kneel by the fallen.
 - Each 12.5 % of strength lost leaves one dead on the line, falling one after another when a blow lands (at 50 %:
   four firing, four fallen). Healing brings them back.
 
@@ -628,7 +630,8 @@ German, Ottoman or Russian. Set it on the faction (👥 People → faction → *
 choose from the name.
 - The kit follows the game's date: 1914 dress, steel helmets and the new light machine guns from 1916 (the Ottomans'
   new kit from 1918), greatcoats and winter dress from November to February.
-- Arab cavalry ride camels. A fallen horseman lies beside his dead horse.
+- Cavalry form up in echelon, charge through the enemy and on past him, and loop wide round a flank back to
+  their places. Arab cavalry ride camels. A fallen horseman lies beside his dead horse.
 - Stormtroopers go in as the army's assault troops; French colonial troops go in as zouaves.
 
 **Machine-gun companies** and **trench mortars** go in as four gun-and-crew teams, left empty when their crew are

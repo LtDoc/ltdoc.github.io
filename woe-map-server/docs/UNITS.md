@@ -109,8 +109,9 @@ each rule that applied. "Entrenched" means the defender has trench cover.
 ## Men and machines in a fight
 
 While an infantry unit (any type in the Infantry category: line infantry, conscripts, marines…) is in a battle this
-turn, a section of 8 men holds its firing line on the map from 800 % zoom. Living men = strength ÷ 12.5, rounded up
-(100 % → 8, 74 % → 6, 50 % → 4, 0 → none); the rest lie dead along the line. Purely visual: nothing here changes
+turn, a section of 8 men fights on the map from 800 % zoom, spread out about its line rather than on it: from a
+little ahead of it to well behind. Living men = strength ÷ 12.5, rounded up (100 % → 8, 74 % → 6, 50 % → 4,
+0 → none); the rest lie dead where they were. Purely visual: nothing here changes
 combat. Code: `public/js/skirmish.js`, wired in by `MapRenderer._tickBattles`.
 
 **Armies.** Every faction fights as one of eight armies: **American**, **ANZAC**, **Arab**, **British &
@@ -136,8 +137,19 @@ dress are worn from November to February. American, Arab and Russian kits do not
 **The section.**
 - An officer, a sergeant (or corporal), a light machine-gunner (where the army and year have one, firing in
   bursts), a medic and riflemen. Who is who changes from unit to unit.
-- Each man lies, kneels or stands to aim at the enemy, with a flash at each shot. Now and then one gets up and runs
-  along the line.
+- Each man lies, kneels or stands to aim at the enemy. Now and then one gets up and rushes to a new spot, forward
+  or back and across (three at most at a time, never more than a quarter of the way to the enemy).
+- **Fire comes only from the men and guns.** Each round leaves the muzzle of the man or gun that fired it, with a
+  flash, as a tracer that flies at one of the enemy's men or machines (else at his line) and kicks up dust where it
+  lands. Rates of fire are the weapons' own:
+  - riflemen fire aimed rounds at a bolt-action rate, 10 to 15 a minute each (officers slower);
+  - light machine guns fire bursts of 4 to 9 at their cyclic rates: Lewis and BAR 550 a minute, MG 08/15 500, the
+    Chauchat 240 (bursts of 3 to 5);
+  - machine-gun teams fire bursts of 10 to 20 with 2 to 4 s between them, at 450 a minute (Vickers, MG 08,
+    Hotchkiss), 500 (Browning M1917) or 550 (Russian Maxim);
+  - field guns and tanks firing over open sights send a shell along the same way.
+  Units drawn this way have no other firing line; units drawn without figures keep the plain
+  firing line from their token.
 - The medic kneels on the line until someone falls, then runs out to the fallen, kneels by them a while and
   comes back. The ANZAC medics are stretcher bearers; the Arab and Ottoman art has no medic, so they have none.
 - The Arabs' leader is the fighter in red with a revolver.
@@ -185,9 +197,11 @@ and HeavyMG.png.
 ### Cavalry and aircraft in a fight
 
 - **Cavalry** (cavalry, dragoons, lancers/uhlans, hussars, reconnaissance): eight horsemen of the nation's army
-  form up on the unit's line, charge the enemy's line at the gallop (kicking up dust), wheel among the enemy there
-  for a few seconds, ride back and charge again. A troop that has just attacked rides straight out of its unit at
-  the enemy. Riders fall like riflemen (one per 12.5 % lost) and lie where they fell, as the army's casualties,
+  form up on the unit's line in echelon (each rider beside the next and a little behind him, the line slanting back
+  to one side), then charge: from a canter up to the gallop (about 50 px a second on screen), kicking up dust,
+  straight through the enemy's line and on well past it. Each rider then swings round in a wide loop out beyond the
+  troop's flank and canters back to his place, coming in from behind; when all are back, the troop stands a few
+  seconds and charges again. A troop that has just attacked rides straight out of its unit at the enemy. Riders fall like riflemen (one per 12.5 % lost) and lie where they fell, as the army's casualties,
   each beside his dead horse (one of five, from DeadHorses.png; camel riders fall without one).
   British and ANZAC riders wear khaki, Germans field grey, Americans olive, the French horizon blue and the
   Ottomans their own khaki. Russians ride the Russian set's own horseman. Arabs ride camels, half with rifles and
