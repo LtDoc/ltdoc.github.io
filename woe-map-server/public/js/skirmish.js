@@ -60,7 +60,10 @@
   const HMG_RPM = { british: 450, anzac: 450, german: 450, ottoman: 450, french: 450, american: 500, russian: 550, arab: 550 };
   const LMG_RPM = { british: 550, anzac: 550, german: 500, french: 240, american: 550 };
   const ROUND_PX_S = 460;   // a round's flight, screen px a second (as the plain firing line's)
-  const DEAD_HORSE_PX = 32;   // a dead horse lying on its side, nose to tail (screen px before the zoom boost)
+  const DEAD_HORSE_PX = 32;
+  const LITTER_PX = 22;      // a stretcher, end to end (screen px before the zoom boost): about a man lying full length
+  // Stretchers on the misc-03 sprite sheet (drawn lengthways, left to right): empty, and two with a wounded man on.
+  const LITTERS = { empty: 'sprite:misc-03:85', loaded: ['sprite:misc-03:95', 'sprite:misc-03:103'] };   // a dead horse lying on its side, nose to tail (screen px before the zoom boost)
   const CAMELS = new Set(['arab']);   // armies riding camels: no dead horse under their fallen
   // mounts.json riders (with "-2"…: others of the army, taken in turn)
   const RIDER_FOR = { british: 'beige', anzac: 'beige', german: 'grey', american: 'green', french: 'french', russian: 'russian', ottoman: 'ottoman', arab: 'arab' };
@@ -189,6 +192,11 @@
         this._liv = null;
         this.r.invalidate();
       } catch (e) { console.warn('Cavalry and aircraft sprites not available', e); }
+      if (window.SpriteAtlas) {
+        Promise.all([LITTERS.empty, ...LITTERS.loaded].map(id => window.SpriteAtlas.texture(id))).then(([empty, ...loaded]) => {
+          if (empty && loaded.every(Boolean)) this.litters = { empty, loaded };
+        }).catch(() => {});
+      }
       try {
         const meta = await fetch('/assets/ships.json?v=1').then(r => r.json());
         const base = await PIXI.Assets.load({ src: '/assets/ships.png?v=1', loadParser: 'loadTextures' });
@@ -290,7 +298,9 @@
     /** Machine-gun companies and trench mortars whose army has the art go in as teams (gun and crew in one figure). */
     _teamFor(q) { return q.kind !== 'guns' || !q.kit ? null : (q.type === 'machinegun' && this._frames(q.kit, 'mg')) ? 'mg' : (q.type === 'mortar' && this._frames(q.kit, 'mortar')) ? 'mortar' : null; }
     clear() { for (const q of this.squads.values()) this._drop(q); this.squads.clear(); this.airG.clear(); }
-    _sprites(q) { return [...q.men.flatMap(m => m.carcass ? [m.sp, m.carcass] : [m.sp]), ...q.machines.flatMap(x => x.sh ? [x.sp, x.sh] : [x.sp])]; }
+    _sprites(q) { return [...q.men.flatMap(m => [m.sp, m.carcass, m.litter, m.bearer].filter(Boolean)), ...q.machines.flatMap(x => x.sh ? [x.sp, x.sh] : [x.sp])]; }
+    /** A sprite for a stretcher or a second bearer, among the living. */
+    _extraSprite() { const sp = new PIXI.Sprite(); sp.eventMode = 'none'; this.aliveC.addChild(sp); return sp; }
     /** A dead horse's sprite, under every fallen man. */
     _carcass() { const h = new PIXI.Sprite(); h.eventMode = 'none'; this.deadC.addChildAt(h, 0); return h; }
     _drop(q) { for (const sp of this._sprites(q)) { sp.parent?.removeChild(sp); sp.destroy(); } }
@@ -944,11 +954,14 @@
         const m = pool[Math.floor(Math.random() * pool.length)];
         if (m.run) { const p = this._runPos(m, nowMs); m.o = p.o; m.d = p.d; m.run = null; }
         m.dead = true; m.fellAt = nowMs; m.pose = null; m.tend = null;
+        if (m.drag) { m.drag.to.carried = false; m.drag.to.onLitter = false; m.drag = null; }   // a stretcher bearer hit: his man is left lying
+        if (m.litter) m.litter.visible = false;
+        if (m.bearer) m.bearer.visible = false;
         this.aliveC.removeChild(m.sp); this.deadC.addChild(m.sp);
         q.nextDeath = nowMs + 260 + Math.random() * 650;
       } else if (living.length < want) {
         const m = q.men.find(x => x.dead);
-        if (m) { m.dead = false; m.pose = null; if (!crew) [m.o, m.d] = m.home; this.deadC.removeChild(m.sp); this.aliveC.addChild(m.sp); }
+        if (m) { m.dead = false; m.evac = false; m.carried = false; m.pose = null; if (!crew) [m.o, m.d] = m.home; this.deadC.removeChild(m.sp); this.aliveC.addChild(m.sp); }
       }
       if (crew) {
         // A crew stands either side of its gun, a little behind the breech; the fallen lie beside it. A team's men
@@ -980,6 +993,7 @@
       for (const m of q.men) {
         const sp = m.sp;
         sp.visible = true;
+        if (m.dead && (m.evac || (m.carried && m.onLitter))) { sp.visible = false; continue; }   // on a stretcher, or carried away to the aid post
         if (m.dead) {
           this._pose(m, this._pick(q, m.i, 'dead'));
           const [x, y] = at(m.o, m.d), age = nowMs - m.fellAt;
@@ -1033,7 +1047,7 @@
         }
         // The medic goes out to one of the fallen now and then, kneels by him a while, and comes back.
         if (m.role === 'medic' && !m.run && !m.tend && nowMs >= m.next) {
-          const v = fallen[Math.floor(Math.random() * fallen.length)];
+          const left = fallen.filter(x => !x.evac && !x.carried), v = left[Math.floor(Math.random() * left.length)];
           if (v) {
             const side = Math.random() < 0.5 ? -1 : 1;
             m.run = { o0: m.o, d0: m.d, o1: v.o + side * 7 / (f.front * s), d1: v.d - 2, t0: nowMs, dur: 0, to: v };
@@ -1068,15 +1082,69 @@
             continue;
           } else { sp.visible = false; continue; }   // still waiting to leave the unit
         }
+        if (m.drag) {
+          // The stretcher party: the wounded man on a stretcher, the medic at its head and a second bearer at its foot,
+          // carrying him back to the aid post behind the line (12 px/s); there he is taken off and the medic goes back
+          // to his place. Without the stretcher art, the medic drags him back alone.
+          const d = m.drag, v = d.to, k = Math.min(1, (nowMs - d.t0) / d.dur);
+          const cd = d.d0 + (d.d1 - d.d0) * k, co = d.o0 + (d.o1 - d.o0) * k;
+          const [x0, y0] = at(d.o0, d.d0), [x1, y1] = at(d.o1, d.d1), dir = Math.atan2(y1 - y0, x1 - x0);
+          const [cx, cy] = at(co, cd), fr = this._pick(q, m.i, 'medic.run'), bob = 1 + 0.04 * Math.abs(Math.sin(t * 6 + m.i));
+          if (this.litters) {
+            const lt = d.tex, L = LITTER_PX * boost / s, ls = L / Math.max(lt.width, lt.height);
+            const lit = m.litter || (m.litter = this._extraSprite());
+            lit.visible = true; lit.texture = lt; lit.anchor.set(0.5); lit.position.set(cx, cy);
+            lit.rotation = dir + (lt.width >= lt.height ? 0 : Math.PI / 2); lit.scale.set(ls);
+            v.onLitter = true;
+            const ends = [[1, sp, m.i], [-1, m.bearer || (m.bearer = this._extraSprite()), m.i + 3]];
+            for (const [e, bsp, pick] of ends) {
+              const bf = this._pick(q, pick, 'medic.run');
+              if (bsp.texture !== bf.t) { bsp.texture = bf.t; bsp.anchor.set(bf.ax, bf.ay); }
+              bsp.visible = true;
+              bsp.position.set(cx + Math.cos(dir) * L * 0.62 * e, cy + Math.sin(dir) * L * 0.62 * e);
+              bsp.rotation = dir - bf.face; bsp.scale.set(unit * bob);
+            }
+            m.pose = null;
+          } else {
+            this._pose(m, fr);
+            v.o = co; v.d = cd - 5;
+            sp.position.set(cx, cy); sp.rotation = dir + Math.PI - fr.face; sp.scale.set(unit * bob);
+          }
+          m.o = co; m.d = cd;
+          if (k >= 1 || !v.dead) {
+            m.drag = null; v.carried = false; v.onLitter = false; if (v.dead) v.evac = true;
+            if (m.litter) m.litter.visible = false;
+            if (m.bearer) m.bearer.visible = false;
+            m.run = { o0: m.o, d0: m.d, o1: m.home[0], d1: m.home[1], t0: nowMs + 800, dur: 0, home: true };
+          }
+          continue;
+        }
         if (m.tend) {
-          // Kneeling by the wounded man, facing him; then back to his place on the line.
+          // Kneeling by the wounded man, facing him; then he drags him back behind the line.
           const fr = this._pick(q, m.i, 'medic.kneel');
           this._pose(m, fr);
           const [x, y] = at(m.o, m.d), [vx, vy] = at(m.tend.to.o, m.tend.to.d);
           sp.position.set(x, y);
           sp.rotation = Math.atan2(vy - y, vx - x) - fr.face;
           sp.scale.set(unit);
-          if (nowMs >= m.tend.until || !m.tend.to.dead) { m.tend = null; m.run = { o0: m.o, d0: m.d, o1: m.home[0], d1: m.home[1], t0: nowMs, dur: 0, home: true }; }
+          if (this.litters) {
+            const lt = this.litters.empty, L = LITTER_PX * boost / s, lit = m.litter || (m.litter = this._extraSprite());
+            const ox = (vx - x), oy = (vy - y), n = Math.hypot(ox, oy) || 1;
+            lit.visible = true; lit.texture = lt; lit.anchor.set(0.5);
+            lit.position.set(vx + ox / n * L * 0.45, vy + oy / n * L * 0.45);
+            lit.rotation = Math.atan2(oy, ox) + Math.PI / 2 + (lt.width >= lt.height ? 0 : Math.PI / 2);
+            lit.scale.set(L / Math.max(lt.width, lt.height));
+          }
+          if (nowMs >= m.tend.until || !m.tend.to.dead) {
+            const v = m.tend.to;
+            m.tend = null;
+            if (v.dead) {
+              const d1 = Math.max(v.d, DEPTH[1]) + 30 + Math.random() * 15;
+              v.carried = true;
+              const tex = this.litters ? this.litters.loaded[Math.floor(Math.random() * this.litters.loaded.length)] : null;
+              m.drag = { to: v, tex, o0: v.o, d0: v.d, o1: v.o + (Math.random() - 0.5) * 0.1, d1, t0: nowMs, dur: Math.max(800, Math.abs(d1 - v.d) / 12 * 1000) };
+            } else { m.run = { o0: m.o, d0: m.d, o1: m.home[0], d1: m.home[1], t0: nowMs, dur: 0, home: true }; if (m.litter) m.litter.visible = false; }
+          }
           continue;
         }
         // In position: weapon on the enemy, a little sway, a kick and a flash with each round, which flies at one of

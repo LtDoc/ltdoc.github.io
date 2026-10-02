@@ -163,8 +163,10 @@ dress are worn from November to February. American, Arab and Russian kits do not
   their line hisses out yellow-green gas for a few seconds, and the cloud rolls downwind across to the enemy at
   about 18 px a second, swelling and thinning, lingers over his line and clears; then the cylinders are opened
   again (every 26 s). Men in the cloud take on a sickly cast (masks on) and stop firing until it thins.
-- The medic kneels on the line until someone falls, then runs out to the fallen, kneels by them a while and
-  comes back. The ANZAC medics are stretcher bearers; the Arab and Ottoman art has no medic, so they have none.
+- The medic kneels on the line until someone falls, then runs out to the fallen and kneels by him a while, an
+  empty stretcher laid beside them. Then the stretcher party carries the wounded man back to the aid post behind
+  the line (the medic at the head, a second bearer at the foot, 12 px/s), where he is taken away; the medic goes
+  back to his place. Stretchers from the misc-03 sprite sheet. The ANZAC medics are stretcher bearers; the Arab and Ottoman art has no medic, so they have none.
 - The Arabs' leader is the fighter in red with a revolver.
 - Assault regiments (stormtroopers) go in as the army's assault troops: German stormtroopers with carbines and
   MP 18s, British and American trench raiders, Russian shock troops. French colonial troops go in as zouaves. Where
