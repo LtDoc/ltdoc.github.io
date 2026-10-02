@@ -645,6 +645,8 @@ choose from the name.
 Troops that hold their ground **dig in**: rifle pits and sandbags after a turn, a belt of barbed wire in front after two
 (or at once in a trench line), which slows charging cavalry to a crawl. **Gas troops** attack with a cloud of
 yellow-green gas let out from cylinders, which rolls over the enemy's line; his men mask up and stop firing until it clears.
+Observation balloons float on their tethers (heavy guns shelling put up a spotter), and are shot down in flames;
+airships circle and bomb; anti-aircraft guns fill the sky round enemy planes with black flak bursts.
 
 **Machine-gun companies** and **trench mortars** go in as four gun-and-crew teams, left empty when their crew are
 down. Other **artillery** shows four guns of its type, each worked by two men (guns recoil and smoke, shells leave

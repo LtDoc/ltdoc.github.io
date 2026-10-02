@@ -216,6 +216,13 @@ and HeavyMG.png.
   Ottomans their own khaki. Russians ride the Russian set's own horseman. Arabs ride camels, half with rifles and
   half with sabres. Their tokens fire no rifle
   line: the charge is their attack.
+- **Balloons and airships.** An observation balloon rides on its tether above a winch lorry, swaying, its basket
+  hanging below, with its shadow on the ground (from 800 % zoom, in a fight or not); heavy, siege and railway guns
+  that are shelling put up a spotter balloon behind the battery. A balloon that loses half its strength is shot down
+  in flames: it burns from end to end, drops, and smoulders where it fell. An airship (Zeppelin) slowly circles its
+  unit; attacking, it circles over the target and drops a bomb every few seconds.
+- **Flak.** Anti-aircraft guns fighting aircraft or balloons fire every 1.5–3 s, each shell bursting as a flash and
+  a ball of black smoke in the sky close to one of the enemy's planes.
 - **Aircraft** (fighter, bomber, reconnaissance and seaplane squadrons): four planes flying above the units, each with
   a shadow on the ground, from 800 % zoom, in or out of a fight.
   - Out of a fight they circle over their unit, one behind the other.

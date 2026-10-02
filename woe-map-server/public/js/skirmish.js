@@ -156,6 +156,7 @@
       this.shadowC = new PIXI.Container(); this.planeC = new PIXI.Container(); this.airG = new PIXI.Graphics();
       this.airLayer.addChild(this.shadowC, this.planeC, this.airG);
       this.squads = new Map();       // unit id -> squad
+      this.flak = [];                // anti-aircraft bursts in the sky: { x, y, t0 }
       this.uniforms = new Map();     // nation (lower case) -> uniform
       this.factions = [];
       this.tex = null; this.mach = null; this.mounts = null; this.ships = null; this._liv = null;
@@ -243,6 +244,7 @@
       if (t.cat === 'Infantry') return 'rifles';
       if (HORSE.has(t.id)) return 'horse';
       if (AIR.has(t.id)) return 'air';
+      if (t.id === 'balloon' || t.id === 'airship') return 'balloon';
       if (FLEET[t.id]) return 'ships';
       return null;
     }
@@ -330,7 +332,7 @@
       let drawn = false;
       for (const [id, f] of fronts) {
         if (f.kind !== 'rifles' && !this.mach) continue;
-        if ((f.kind === 'horse' || f.kind === 'air') && !this.mounts) continue;
+        if ((f.kind === 'horse' || f.kind === 'air') && !this.mounts) continue;   // balloons and airships are drawn, no atlas
         if (f.kind === 'ships' && !this.ships) continue;
         let q = this.squads.get(id);
         if (q && q.kind !== f.kind) { this._drop(q); this.squads.delete(id); q = null; }
@@ -340,6 +342,7 @@
         q.shown = true; drawn = true;
         this._tick(q, f, nowMs, t, s, boost, g);
       }
+      if (this._drawFlak(nowMs, s, boost)) drawn = true;
       return drawn;
     }
     /** Put the squad in its nation's uniform (and, for aircraft, its livery). */
@@ -356,12 +359,18 @@
     }
 
     _make(id, f, nowMs, s) {
-      const v = f.view, seed = id * 7.31, kind = f.kind;
+      const v = f.view, seed = (typeof id === 'number' ? id : strHash(id) % 100000) * 7.31, kind = f.kind;
       // Just fought: start from the strength before the blow, so the losses fall on screen.
       const drop = v?.strengthDrop && nowMs - v.strengthDrop.at < 8000 ? v.strengthDrop.from : null;
       const before = drop ?? strengthOf(v);
       const fresh = f.createdAt && Date.now() - f.createdAt < 10000;
       const q = { id, kind, men: [], machines: [], kit: null, nextDeath: 0, puffs: [], dust: [], tracers: [], shown: false, last: nowMs };
+      if (kind === 'balloon') {
+        // An observation balloon on its tether (or a battery's spotter), or an airship cruising; see _tickBalloon.
+        q.type = f.spotter ? 'balloon' : typeOf(v?.marker)?.id || 'balloon';
+        q.fall = null; q.ang = hash(seed, 9) * Math.PI * 2; q.sway = hash(seed, 11) * 10; q.bombAt = nowMs + 2000;
+        return q;
+      }
       if (kind === 'air') {
         q.type = typeOf(v?.marker)?.id || 'fighter';
         const alive = aliveFor(before, PLANES);
@@ -476,6 +485,7 @@
       const unit = TORSO_PX / this.tex.torso * boost / s;   // world units per soldier-atlas px, for every figure
       const ux = f.ux || 0, uy = f.uy || 0;
       if (q.kind === 'air') this._tickAir(q, f, nowMs, t, s, boost);
+      else if (q.kind === 'balloon') this._tickBalloon(q, f, nowMs, t, s, boost);
       else if (q.kind === 'ships') this._tickShips(q, f, nowMs, t, s, boost, g);
       else {
         const nx = -uy, ny = ux, theta = Math.atan2(uy, ux);
@@ -496,7 +506,7 @@
         g.circle(p.x, p.y, (1.6 + age * 3) * boost / s).fill({ color: 0xa08a68, alpha: 0.55 * (1 - age) });
       }
       // Smoke from shots and wrecks (and burning planes, drawn up with them): grey puffs that swell, drift and fade.
-      const pg = q.kind === 'air' ? this.airG : g;
+      const pg = q.kind === 'air' || q.kind === 'balloon' ? this.airG : g;
       q.puffs = q.puffs.filter(p => nowMs - p.t0 < 1400);
       for (const p of q.puffs) {
         const age = (nowMs - p.t0) / 1400, r = (p.big ? 5 : 3.2) * boost / s * (1 + age * 2.2);
@@ -1090,6 +1100,16 @@
         // Firing on its own: field guns now and then (shells come through fireGun), machine guns in bursts.
         if (hmg) {
           this._mgBurst(q, gn, f, nowMs, s, boost, g);
+        } else if (q.type === 'antiaircraft' && (f.enemyKind === 'air' || f.enemyKind === 'balloon')) {
+          // Anti-aircraft: a shell every 1.5–3 s bursting in the sky near one of the enemy's planes.
+          if (nowMs >= gn.nextShot) {
+            gn.firedAt = nowMs; gn.nextShot = nowMs + 1500 + Math.random() * 1500;
+            q.puffs.push({ x: gn.muzzle[0], y: gn.muzzle[1], t0: nowMs });
+            const foe = this.squads.get(f.enemyId), planes = foe ? foe.machines.filter(p => !p.dead && p.sp?.visible) : [];
+            const p = planes[Math.floor(Math.random() * planes.length)], spread = 26 * boost / s;
+            const [tx, ty] = p ? [p.sp.x, p.sp.y] : foe?.sky ? foe.sky : [f.tx ?? gn.muzzle[0], (f.ty ?? gn.muzzle[1]) - 50 / s];
+            this.flak.push({ x: tx + (Math.random() - 0.5) * spread * 2, y: ty + (Math.random() - 0.5) * spread * 2, t0: nowMs + 500 + Math.random() * 400 });
+          }
         } else if (!f.shells && nowMs >= gn.nextShot) {
           gn.firedAt = nowMs; gn.nextShot = nowMs + 3000 + Math.random() * 4000;
           q.puffs.push({ x: gn.muzzle[0], y: gn.muzzle[1], t0: nowMs, big: true });
@@ -1142,6 +1162,100 @@
         g.moveTo(x0, y0).lineTo(x1, y1);
       }
       g.stroke({ width: 1 * boost / s, color: 0x5a4632, alpha: 0.9 });
+    }
+    /**
+     * Balloons and airships, drawn (no atlas), in the sky layer with their shadows on the ground:
+     *   - an observation balloon (or an artillery battery's spotter): a kite balloon riding at the end of its tether
+     *     above a winch lorry, swaying in the wind, its basket hanging below; hit hard (half its strength gone), it
+     *     is shot down in flames: it burns from end to end, drops and leaves a smouldering patch;
+     *   - an airship: a long silver hull with its gondola, slowly circling its unit (or its target, attacking, where
+     *     it drops a bomb every few seconds).
+     */
+    _tickBalloon(q, f, nowMs, t, s, boost) {
+      const g = this.airG, k = boost / s, airship = q.type === 'airship';
+      const hx = f.hx ?? f.cx ?? f.view?.x, hy = f.hy ?? f.cy ?? f.view?.y;
+      if (hx == null) return;
+      const attacking = airship && f.ax != null && f.mode === 'attack';
+      let x, y, alt, a;
+      if (airship) {
+        // Circling slowly (8 px/s on screen, 46 px out), over its target when attacking.
+        const cx = attacking ? f.ax : hx, cy = attacking ? f.ay : hy, w = 8 / 46;
+        q.ang += w * Math.min(0.1, (nowMs - (q.last || nowMs)) / 1000);
+        x = cx + Math.cos(q.ang) * 46 * k; y = cy + Math.sin(q.ang) * 30 * k; alt = 70 * k; a = q.ang + Math.PI / 2;
+      } else {
+        x = hx + 6 * k + Math.sin(t * 0.3 + q.sway) * 2 * k; y = hy; alt = 46 * k; a = -0.35 + Math.sin(t * 0.25 + q.sway) * 0.08;
+      }
+      q.last = nowMs;
+      const down = !q.fall && strengthOf(f.view) <= 50 && !airship;
+      if (down) q.fall = { t0: nowMs };
+      let fallK = 0;
+      if (q.fall) {
+        fallK = Math.min(1, (nowMs - q.fall.t0) / 4500);
+        alt *= 1 - fallK * fallK;
+      }
+      q.sky = [x, y - alt];
+      // Shadow on the ground, and the tether down to the winch.
+      const L = (airship ? 58 : 26) * k, W = (airship ? 11 : 9) * k;
+      if (fallK < 1) g.poly(this._ovalPts(x + alt * 0.25, y, L * 0.5, W * 0.45, a)).fill({ color: 0x000000, alpha: 0.16 });
+      if (!airship) {
+        g.rect(hx - 4 * k, hy - 2 * k, 8 * k, 4 * k).fill({ color: 0x4d4a3c });
+        if (!q.fall) g.moveTo(hx, hy).lineTo(x, y - alt + W * 0.4).stroke({ width: 0.6 * k, color: 0x2e2c28, alpha: 0.7 });
+      }
+      if (fallK >= 1) {
+        // Burnt out on the ground: a dark scorched patch, still smoking.
+        g.circle(x, y, 7 * k).fill({ color: 0x2a2420, alpha: 0.55 });
+        if (Math.random() < 0.2) q.puffs.push({ x: x + (Math.random() - 0.5) * 6 * k, y: y - 2 * k, t0: nowMs, dark: true });
+        return;
+      }
+      const by = y - alt;
+      // The hull: a long envelope, darker underneath, with fins at the tail (kite balloon) or a long gondola (airship).
+      const hull = airship ? 0xc4c3bc : 0xb9b39b, under = airship ? 0x8f8e88 : 0x8c866f;
+      g.poly(this._ovalPts(x, by + W * 0.15, L * 0.5, W * 0.5, a)).fill({ color: under });
+      g.poly(this._ovalPts(x, by, L * 0.5, W * 0.42, a)).fill({ color: hull });
+      const c = Math.cos(a), sn = Math.sin(a), tail = [x - c * L * 0.42, by - sn * L * 0.42];
+      if (airship) {
+        for (let i = -3; i <= 3; i++) { const o = i / 7 * L; g.moveTo(x + c * o - sn * W * 0.4, by + sn * o + c * W * 0.4).lineTo(x + c * o + sn * W * 0.4, by + sn * o - c * W * 0.4); }
+        g.stroke({ width: 0.5 * k, color: 0x7d7c76, alpha: 0.6 });
+        g.poly(this._ovalPts(x + c * L * 0.08, by + W * 0.45, L * 0.12, W * 0.12, a)).fill({ color: 0x3e3d39 });
+        for (const side of [-1, 1]) g.poly(this._ovalPts(tail[0] - sn * side * W * 0.4, tail[1] + c * side * W * 0.4, L * 0.07, W * 0.18, a)).fill({ color: 0x9a9993 });
+      } else {
+        for (const side of [-1, 0, 1]) g.poly(this._ovalPts(tail[0] - sn * side * W * 0.45, tail[1] + c * side * W * 0.45 - (side ? 0 : W * 0.35), L * 0.1, W * 0.2, a)).fill({ color: 0x9b9580 });
+        g.circle(x + c * L * 0.05, by + W * 0.75, 1.2 * k).fill({ color: 0x3a3127 });   // the observers' basket
+      }
+      if (q.fall) {
+        // On fire: flames racing along the envelope, a black trail of smoke as it drops.
+        const burn = Math.min(1, (nowMs - q.fall.t0) / 1200);
+        for (let i = 0; i < 6; i++) {
+          const o = (i / 5 - 0.5) * L * burn, fl = 0.6 + 0.4 * Math.sin(t * 20 + i * 2);
+          g.circle(x + c * o, by + sn * o, W * 0.55 * fl).fill({ color: 0xff7a1a, alpha: 0.6 }).circle(x + c * o, by + sn * o - W * 0.2, W * 0.3 * fl).fill({ color: 0xffd860, alpha: 0.8 });
+        }
+        if (Math.random() < 0.5) q.puffs.push({ x: x + (Math.random() - 0.5) * L * 0.5, y: by, t0: nowMs, dark: true, big: true });
+      }
+      if (attacking && nowMs >= q.bombAt) {
+        // A bomb from the airship: it bursts on the target a moment later.
+        q.bombAt = nowMs + 3500 + Math.random() * 3000;
+        const bx = f.ax + (Math.random() - 0.5) * 30 * k, bY = f.ay + (Math.random() - 0.5) * 20 * k;
+        this.r.explode(bx, bY, 70 + Math.random() * 30, 900, this.r.shellFrames);
+      }
+    }
+    _ovalPts(cx, cy, rx, ry, a, n = 16) {
+      const pts = [], c = Math.cos(a), s = Math.sin(a);
+      for (let i = 0; i < n; i++) { const t = i / n * Math.PI * 2, px = Math.cos(t) * rx, py = Math.sin(t) * ry; pts.push(cx + px * c - py * s, cy + px * s + py * c); }
+      return pts;
+    }
+    /** Anti-aircraft bursts: a flash, then a ball of black smoke that swells, drifts and fades (1.8 s). */
+    _drawFlak(nowMs, s, boost) {
+      if (!this.flak.length) return false;
+      this.flak = this.flak.filter(b => nowMs - b.t0 < 1800);
+      const g = this.airG, k = boost / s;
+      for (const b of this.flak) {
+        const age = (nowMs - b.t0) / 1800;
+        if (age < 0) continue;
+        if (age < 0.06) g.circle(b.x, b.y, 7 * k).fill({ color: 0xffd27a, alpha: 0.95 }).circle(b.x, b.y, 3.5 * k).fill({ color: 0xffffff, alpha: 0.9 });
+        const r = (6 + Math.sqrt(age) * 12) * k, a = 0.9 * (1 - age * age);
+        for (const m of [1, 0.7, 0.42]) g.circle(b.x + age * 6 * k, b.y - age * 4 * k, r * m).fill({ color: 0x171514, alpha: a * 0.42 });
+      }
+      return true;
     }
     /** A machine gun firing bursts of 10 to 20 rounds at its cyclic rate, a pause of 2 to 4 s between them. */
     _mgBurst(q, gn, f, nowMs, s, boost, g) {
@@ -1198,7 +1312,7 @@
     /** Whether units of this kind are drawn here with their own fire (the renderer then draws no firing line for them). */
     firesOwn(kind) {
       if (!this.tex) return false;
-      return kind === 'rifles' || ((kind === 'guns' || kind === 'tanks') && !!this.mach) || ((kind === 'air' || kind === 'horse') && !!this.mounts) || (kind === 'ships' && !!this.ships);
+      return kind === 'rifles' || kind === 'balloon' || ((kind === 'guns' || kind === 'tanks') && !!this.mach) || ((kind === 'air' || kind === 'horse') && !!this.mounts) || (kind === 'ships' && !!this.ships);
     }
     /** A weapon team: gun and crew in one figure, facing the enemy; left empty (or greyed) when its crew are down. */
     _tickTeam(q, gn, f, nowMs, s, boost, g, at, theta, unit, hmg) {

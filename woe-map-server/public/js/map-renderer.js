@@ -1606,6 +1606,12 @@ class MapRenderer extends EventTarget {
         if ((fronts.get(id)?.battleId ?? -1) > b.id) return;   // the unit's latest fight sets its line
         const l = Math.hypot(x1 - x0, y1 - y0), r0 = Math.min(l * 0.3, px / s), r1 = Math.min(l * 0.3, otherPx / s);
         const fux = (x1 - x0) / l, fuy = (y1 - y0) / l;
+        if (kind === 'balloon') {
+          // A balloon stays over its own winch; an airship attacking goes over its target.
+          fronts.set(id, { battleId: b.id, view, kind, mode: id === b.attackerId ? 'attack' : 'hold', ax: x1, ay: y1, hx: x0, hy: y0,
+            enemyId: id === b.attackerId ? b.defenderId : b.attackerId, enemyKind: id === b.attackerId ? kD : kA, createdAt: b.createdAt });
+          return;
+        }
         if (kind === 'air') {
           const dog = (id === b.attackerId ? kD : kA) === 'air';
           fronts.set(id, { battleId: b.id, view, kind, mode: dog ? 'dogfight' : 'strafe', ax: dog ? dx : x1, ay: dog ? dy : y1, hx: x0, hy: y0,
@@ -1617,6 +1623,12 @@ class MapRenderer extends EventTarget {
           front: Math.max(80, Math.min(190, (l - r0 - r1) * s * 0.9)) / s, backPx: r0 * s, tx: x1 - fux * r1, ty: y1 - fuy * r1, createdAt: b.createdAt });
       };
       if (squadsOn) {
+        // Heavy guns shelling get a spotter balloon up behind the battery, its observers directing the fire.
+        if (b.kind === 'shells' && kA === 'guns' && /heavyartillery|siegeartillery|railwaygun/.test(window.UnitTypes?.resolve(Av?.marker?.data?.unitType)?.id || '')) {
+          const key = 'spot' + b.attackerId;
+          fronts.set(key, { view: Av, kind: 'balloon', spotter: true, mode: 'hold', hx: ax - ux * 34 / s + nx * 22 / s, hy: ay - uy * 34 / s + ny * 22 / s });
+          keep.add(key);
+        }
         if (kA) addFront(b.attackerId, Av, kA, ax, ay, dx, dy, pA, kD ? LINE : 10);
         if (kD) addFront(b.defenderId, Dv, kD, dx, dy, ax, ay, pD, kA ? LINE : 10);
       }
@@ -1670,6 +1682,11 @@ class MapRenderer extends EventTarget {
           // Bows the way it last moved (else either way, steady for the unit).
           const tr = v.marker.data?.trail, a = Array.isArray(tr) && tr.length > 1 ? tr[tr.length - 1][0] - tr[tr.length - 2][0] : 0;
           fronts.set(id, { view: v, kind: 'ships', idle: true, cx: v.x, cy: v.y, ux: a ? Math.sign(a) : (id % 2 ? 1 : -1), uy: 0 });
+          keep.add(id);
+          continue;
+        }
+        if (v._skKind === 'balloon') {
+          fronts.set(id, { view: v, kind: 'balloon', mode: 'hold', hx: v.x, hy: v.y });
           keep.add(id);
           continue;
         }
