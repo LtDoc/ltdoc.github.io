@@ -788,6 +788,7 @@
     const seen = new Set();
     for (const m of d.markers) { seen.add(m.id); upsertMarker(m, true); }
     for (const id of [...state.markers.keys()]) if (!seen.has(id)) removeMarker(id);
+    for (const m of state.markers.values()) if (isConvoyM(m)) refreshConvoy(m.id);   // cargo counts once everyone is loaded
   }
 
   async function loadShapes() {
@@ -889,8 +890,9 @@
     const prev = state.markers.get(m.id), isNew = !prev;
     m.flagUrl = flagFor(m);
     state.markers.set(m.id, m);
-    renderer.upsert(m);
+    showMarker(m, prev);
     strengthChanged(prev, m);
+    if ((prev?.data?.aboard || 0) !== (m.data?.aboard || 0)) { refreshConvoy(prev?.data?.aboard); refreshConvoy(m.data?.aboard); }
     if (isNew && !quiet) renderer.pulse(m.x, m.y, colorNum(m.color));
     renderMarkerLists();
     if (state.selectedId === m.id) renderPopup();
@@ -911,6 +913,92 @@
       renderer.floatText(m.id, `−${d}`, { color: gone ? 0xff2d20 : 0xff5a45, size: gone || d >= 25 ? 32 : d >= 12 ? 27 : 23,
         sub: gone ? (m.data?.surrendered ? '⚑ SURRENDERED' : 'DESTROYED') : `${b}% strength`, subColor: gone ? 0xffc2b5 : 0xffffff, delay: 160 });
     } else renderer.floatText(m.id, `+${b - a}`, { color: 0x5ee07a, size: 23, sub: `${b}% strength` });
+  }
+
+  // ---- Convoys (docs/UNITS.md): troops embark on transports and land together ---------------------------------
+  const isConvoyM = m => !!m && m.type === 'unit' && window.UnitTypes?.resolve(m.data?.unitType)?.id === 'transport';
+  const isLandType = m => { const t = window.UnitTypes?.resolve(m.data?.unitType); return !t || ['Infantry', 'Mounted & mobile', 'Artillery', 'Support'].includes(t.cat); };
+  function convoyRules() {
+    const s = state.game?.settings || {};
+    return { cap: Number(s.convoyCapacity ?? 10), board: Number(s.convoyBoardKm ?? 30), land: Number(s.convoyLandKm ?? 100) };
+  }
+  function cargoOf(id) { return [...state.markers.values()].filter(x => Number(x.data?.aboard) === Number(id)); }
+  /** A convoy on the map says how many it carries. */
+  function displayed(m) {
+    if (!isConvoyM(m)) return m;
+    const n = cargoOf(m.id).length;
+    return n ? { ...m, name: `${m.name} · ${n} aboard` } : m;
+  }
+  function refreshConvoy(id) {
+    const c = id && state.markers.get(Number(id));
+    if (!c) return;
+    renderer.upsert(displayed(c));
+    if (state.selectedId === c.id) renderPopup();   // its card lists the cargo
+  }
+  /** Draw a marker: troops aboard a convoy are not on the map (they sail inside it). */
+  function showMarker(m, prev) {
+    if (m.data?.aboard) {
+      if (prev && !prev.data?.aboard && renderer.views.has(m.id)) {
+        renderer.upsert(m);                                          // walks up to the ship…
+        setTimeout(() => { if (state.markers.get(m.id)?.data?.aboard) renderer.remove(m.id); }, 700);   // …and is gone
+      } else renderer.remove(m.id);
+      return;
+    }
+    if (prev?.data?.aboard && !renderer.views.has(m.id)) renderer.upsert({ ...prev, data: { ...prev.data, aboard: 0 } });   // steps off the ship…
+    renderer.upsert(displayed(m));                                   // …and onto the beach
+    if (prev && m.data?.ride && m.data.ride.at !== prev.data?.ride?.at && Date.now() - m.data.ride.at < 20000) renderer.playRide(m.id, m.data.ride);
+  }
+  /** Units and heroes that could board a convoy now: yours, ashore, of its nation, close enough. */
+  function boarders(c) {
+    const { board } = convoyRules(), n = String(c.data?.nation || '').toLowerCase(), gm = state.role === 'gm';
+    return [...state.markers.values()].filter(m => m.id !== c.id && canEdit(m) && !m.data?.aboard
+      && (m.type === 'hero' ? !['captured', 'travelling'].includes(m.data?.status) : m.type === 'unit' && !isConvoyM(m) && isLandType(m) && Number(m.data?.strength ?? 100) > 0)
+      && (gm || String(m.data?.nation || '').toLowerCase() === n)
+      && distanceUnits(m.x, m.y, c.x, c.y) <= board);
+  }
+  /** Convoys a unit could board now. */
+  function convoysNear(m) {
+    const { board, cap } = convoyRules(), n = String(m.data?.nation || '').toLowerCase(), gm = state.role === 'gm';
+    return [...state.markers.values()].filter(c => isConvoyM(c) && canEdit(c) && Number(c.data?.strength ?? 100) > 0
+      && (gm || String(c.data?.nation || '').toLowerCase() === n) && distanceUnits(m.x, m.y, c.x, c.y) <= board && cargoOf(c.id).length < cap)
+      .sort((a, b) => distanceUnits(m.x, m.y, a.x, a.y) - distanceUnits(m.x, m.y, b.x, b.y));
+  }
+  function convoyRows(m) {
+    if (m.data?.aboard) { const c = state.markers.get(Number(m.data.aboard)); return stat('Aboard', c ? `${c.name} (lands when it does)` : 'a convoy'); }
+    if (!isConvoyM(m)) return '';
+    const cargo = cargoOf(m.id), { cap } = convoyRules();
+    return stat('Carrying', `${cargo.length}/${cap}${cargo.length ? ': ' + cargo.map(x => esc(x.name)).join(', ') : ' (troops within ' + convoyRules().board + ' km can embark)'}`);
+  }
+  function convoyActions(m) {
+    if (m.data?.aboard) return `<button class="small secondary" data-act="showship">⛴ Show convoy</button>`;
+    const { cap, land } = convoyRules();
+    let h = '';
+    if (isConvoyM(m)) {
+      if (!canEdit(m) || Number(m.data?.strength ?? 100) <= 0) return '';
+      const n = cargoOf(m.id).length, room = cap - n, cand = boarders(m).slice(0, Math.max(0, room));
+      if (cand.length) h += `<button class="small" data-act="embarkall" title="${esc(cand.map(x => x.name).join(', '))}">⛴ Embark nearby (${cand.length})</button>`;
+      if (n) h += `<button class="small" data-act="disembark" title="Everyone aboard lands at once on the nearest beach within ${land} km">⚓ Land troops (${n})</button>`;
+    } else if (canEdit(m) && (m.type === 'hero' || (m.type === 'unit' && isLandType(m)))) {
+      for (const c of convoysNear(m).slice(0, 2)) h += `<button class="small" data-act="board" data-convoy="${c.id}">⛴ Board ${esc(c.name)}</button>`;
+    }
+    return h;
+  }
+  async function convoyAction(act, m, btn) {
+    if (act === 'showship') { const c = state.markers.get(Number(m.data?.aboard)); if (c) { renderer.centerOn(c.x, c.y); renderer.select(c.id); } return; }
+    if (act === 'board' || act === 'embarkall') {
+      const c = act === 'board' ? state.markers.get(Number(btn?.dataset.convoy)) : m;
+      const ids = act === 'board' ? [m.id] : boarders(c).slice(0, convoyRules().cap - cargoOf(c.id).length).map(x => x.id);
+      const d = await api.post(`${base}/convoys/${c.id}/embark`, { unitIds: ids });
+      for (const x of d.embarked) upsertMarker(x);
+      toast(`${d.embarked.length} embarked on ${c.name} (${d.aboard}/${d.capacity})${d.errors.length ? ' · ' + d.errors.join('; ') : ''}`, 5000);
+      renderer.select(c.id);
+      return;
+    }
+    if (act === 'disembark') {
+      const d = await api.post(`${base}/convoys/${m.id}/disembark`, {});
+      for (const x of d.landed) upsertMarker(x);
+      toast(`${d.landed.length} landed${d.note ? ' · ' + d.note : ''}`, 5000);
+    }
   }
 
   function removeMarker(id) {
@@ -1552,7 +1640,7 @@
     el.innerHTML = `<button type="button" class="cardclose" title="Close (Esc)">×</button>${m ? popupHtml(m) : shapePopupHtml(s)}`;
     el.querySelector('.cardclose').onclick = () => renderer.select(null);
     el.style.display = 'block';
-    el.querySelectorAll('[data-act]').forEach(b => b.onclick = () => (m ? popupAction(b.dataset.act, m) : shapeAction(b.dataset.act, s, b)));
+    el.querySelectorAll('[data-act]').forEach(b => b.onclick = () => (m ? popupAction(b.dataset.act, m, b) : shapeAction(b.dataset.act, s, b)));
   }
 
   const stat = (k, v) => (v !== undefined && v !== null && v !== '') ? `<div class="stat"><span class="muted">${k}</span><span>${esc(v)}</span></div>` : '';
@@ -1709,7 +1797,7 @@
       if (cover) body += stat('Cover', `+${cover.bonus} defend (${esc(cover.trench.label || 'trench')})`);
       const gen = generalFor(m);
       if (gen) body += stat('General', `+${gen.bonus} attack and defend (${gen.hero.name})`);
-      body += unitDoctrineRows(m);
+      body += unitDoctrineRows(m) + convoyRows(m);
       if (d.abilities?.length) body += `<div class="stat"><span class="muted">Abilities</span></div><ul style="margin:2px 0 4px 16px;padding:0;font-size:12px">${d.abilities.map(a => `<li>${esc(a)}</li>`).join('')}</ul>`;
     } else if (m.type === 'town') {
       body += stat('Size', d.size) + nationStat(d.nation);
@@ -1733,6 +1821,7 @@
     if (m.type === 'unit' && canEdit(m) && (d.strength ?? 100) > 0) actions += `<button class="small danger" data-act="attack">⚔ Attack…</button>`;
     actions += developButton(m);
     if (m.type === 'hero') actions += heroActionsHtml(m);
+    if (m.type === 'unit' || m.type === 'hero') actions += convoyActions(m);
     actions += `<button class="small secondary" data-act="history">History</button>`;
     if (state.role === 'gm') actions += `<button class="small secondary" data-act="dup">Duplicate</button>`;
     if (canEdit(m)) actions += `<button class="small danger" data-act="del">Delete</button>`;
@@ -1768,9 +1857,10 @@
     return `<h3><span class="dot" style="background:${esc(s.kind === 'rail' ? '#8d8a86' : s.color)}"></span>${esc(shapeName(s))} <span class="badge">${s.kind === 'rail' ? 'Railway' : 'Drawing'}</span>${visBadge(s)}</h3>${body}${hint}<div class="actions">${actions}</div>`;
   }
 
-  async function popupAction(act, m) {
+  async function popupAction(act, m, btn) {
     try {
-      if (act === 'center') renderer.centerOn(m.x, m.y);
+      if (['board', 'embarkall', 'disembark', 'showship'].includes(act)) await convoyAction(act, m, btn);
+      else if (act === 'center') renderer.centerOn(m.x, m.y);
       else if (act === 'edit') openEdit(m);
       else if (act === 'lock') { const d = await api.patch(`${base}/markers/${m.id}`, { locked: !m.locked }); upsertMarker(d.marker); }
       else if (act === 'attack') openCombat(m);

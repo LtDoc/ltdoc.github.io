@@ -87,7 +87,10 @@ const GameData = (() => {
     railDefence: 4,           // railways: added to the line's d20 when attacked (plus its best guard's defend)
     railGuardKm: 30,          // railways: the holder's land units this close to a section guard it
     railRepairKm: 30,         // railways: a unit this close to a break can repair it (uses its action)
-    railJoinKm: 5,            // railways: rails whose ends or vertices are this close are joined
+    railJoinKm: 20,           // railways: a line's end this close to other track joins it (inner points: 5 km; crossings always join)
+    convoyCapacity: 10,       // convoys: units a transport carries
+    convoyBoardKm: 30,        // convoys: units this close to a transport can embark
+    convoyLandKm: 100,        // convoys: troops land on the nearest beach this close, or not at all
     fogOfWar: false,          // fog of war (docs/FOG-OF-WAR.md): other sides' units are seen only within sight
     subSpotKm: 20,            // fog of war: submarines are spotted only this close to a vision source
     // Fog of war: how far each unit sees (km), by type where listed, else by category; places by size; heroes.

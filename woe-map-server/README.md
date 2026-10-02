@@ -563,12 +563,18 @@ off the map. The GM creates heroes from the ➕ Place panel and assigns each an 
 ### Railways
 
 The GM lays railways with the 🛤 tool (R): click points or drag freehand; lines that start or end on other track
-join it. The track is drawn with the pixel-art tile from the train sheet, and trains run back and forth along
-every open stretch. In game mode land units and heroes ride any open track held by their side, an ally or no one
+join it, and lines that cross or end within 20 km of other track are joined into one network. The track is drawn
+with the pixel-art tile from the train sheet, and trains run back and forth along every open stretch. A unit going
+by rail is shown boarding a train in its colours that runs along the line and drops it off (no movement line is
+drawn for the trip). In game mode land units and heroes ride any open track held by their side, an ally or no one
 at 4× their normal pace (selecting a unit highlights the track it can still reach). A unit's **Attack…** list also
 offers railway sections in reach: d20 + attack against d20 + the line's defence and its best guard; a success
 closes 20 km of line, marked with smoke, until the GM or a nearby unit of the holder repairs it. Full rules:
 `docs/RAILWAYS.md`.
+
+**Convoys** (*Transports / convoy*) carry up to 10 land units or heroes: they embark within 30 km, sail with the
+convoy out of sight, and land together on the nearest beach within 100 km (no beach, no landing). A convoy sunk
+or removed takes everyone aboard with it. Details: `docs/UNITS.md`.
 
 ### Dice and combat
 

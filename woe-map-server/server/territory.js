@@ -260,6 +260,26 @@ function shipCourseError(lobby, x0, y0, x1, y1) {
   return null;
 }
 /** The nearest water point to (x, y) within `maxPx` (searching outwards), or null. For launching new ships. */
+/**
+ * The nearest land to a point (a beach to put troops ashore), no further than maxKm, or null. On image maps (no
+ * sea) the point itself.
+ */
+function nearestLand(lobby, x, y, maxKm) {
+  const m = landMask(lobby);
+  if (!m || landAt(lobby, x, y)) return { x, y };
+  for (let rad = m.cell / 2; ; rad += m.cell / 2) {
+    if (geo.distance(lobby, x, y, x + rad, y) > maxKm) return null;      // the ring's nearest side is out of reach
+    let best = null;
+    const n = Math.max(12, Math.round(rad * 1.6));
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * Math.PI * 2, px = x + Math.cos(a) * rad, py = y + Math.sin(a) * rad;
+      if (!landAt(lobby, px, py)) continue;
+      const d = geo.distance(lobby, x, y, px, py);
+      if (d <= maxKm && (!best || d < best.d)) best = { x: Math.round(px * 10) / 10, y: Math.round(py * 10) / 10, d };
+    }
+    if (best) return best;
+  }
+}
 function nearestWater(lobby, x, y, maxPx = 80) {
   const m = landMask(lobby);
   if (!m) return { x, y };
@@ -460,7 +480,7 @@ function trenchCover(lobby, settings, unit, shapes) {
 
 const LAND_CATEGORIES = new Set(['Infantry', 'Mounted & mobile', 'Artillery', 'Support']);
 function isLandUnit(m) {
-  if (m.type !== 'unit') return false;
+  if (m.type !== 'unit' || m.data?.aboard) return false;   // aboard a convoy: at sea, not holding or taking ground
   const t = UnitTypes.resolve(m.data?.unitType);
   return t ? LAND_CATEGORIES.has(t.cat) : true;   // unknown custom types count as land
 }
@@ -531,5 +551,5 @@ function capture(lobby, g, unit, factions, markers, relation) {
   return { held: false, changed, owners, flips, cities: cities.map(c => c.name), owner, mine };
 }
 
-module.exports = { landMask, landAt, nearWater, shipCourseError, nearestWater, NEUTRAL, all, write, clear, carve, circle, landClip, ownerAt, seedFromYear, assignArea, brush, ownershipChanges, capture, isLandUnit, earthYears, clean,
+module.exports = { landMask, landAt, nearWater, shipCourseError, nearestWater, nearestLand, NEUTRAL, all, write, clear, carve, circle, landClip, ownerAt, seedFromYear, assignArea, brush, ownershipChanges, capture, isLandUnit, earthYears, clean,
   trenchOwner, trenchOwnershipChanges, trenchCover, distanceToPath, isLand, isCoastal, landFor, loadGz, world, bboxOf, pointInMulti, overlaps, ownerLookup };

@@ -14,8 +14,11 @@ several times faster on them, and units can attack sections to close them. Built
 The 🛤 button (or **R**) draws a railway: click points or drag freehand; double-click, Enter or Done to finish.
 The line is simplified and its corners lightly rounded when you finish. Clicks within 14 px of existing track
 snap onto it (a vertex first, else the nearest point on the line), so a branch that starts or ends on another
-line is joined to it. Rails whose vertices lie within **Join rails within** (5 km) of another rail are joined
-too. **Extend** in the railway's popup adds track at its end. Points can be dragged like any drawing.
+line is joined to it. When a railway is saved, an end within **Join line ends within** (20 km) of other track is
+snapped onto it (another line's end if one is that close, else the nearest point on the line). The network joins
+lines the same way even where the drawing was not snapped: a line's end within 20 km of other track, an inner
+point within 5 km, and **wherever two lines cross**, vertex or not. (Before 1 Oct 2026 only vertices within 5 km
+joined, so lines that crossed, or ended a little short, carried no through traffic.) **Extend** in the railway's popup adds track at its end. Points can be dragged like any drawing.
 
 While the game is running only the GM lays, edits or removes railways; outside game mode anyone may draw them.
 A **GM only** railway is a plan: it is drawn for the GM but carries no traffic.
@@ -45,6 +48,12 @@ at peace or at war, so captured provinces bring their railways with them.
 Selecting a unit shows its movement ring plus the track it can still reach this turn, in green; clicking on that track sends it by rail. The move
 toast says "went by rail (N km of track)". A formation moved together follows each unit's own route.
 
+**The trip on the map.** Everyone watching sees the unit walk to the track and board a train in its colours, named
+after it ("🚂 4e Infantry Regiment"); the train runs along the line, and the unit gets off and walks on to where it
+was sent (a few seconds, whatever the distance; `data.ride` on the unit, `MapRenderer.playRide`). A rail trip
+draws **no movement line**: the unit's trail for the turn starts again where it got off, instead of tracing the
+track across the map.
+
 ## Attacking a railway
 
 **Attack…** on a unit lists railway sections within its reach under **Railways**: for each line, the nearest
@@ -69,7 +78,7 @@ by France") with **Show** and, when you can, **🛠 Repair**:
 ## Campaign rules (⚖ Rules → Railways)
 
 Speed on rails (4×) · cut closes (10 km each side) · line's defence (4) · guards within (30 km) · repair within
-(30 km) · join rails within (5 km).
+(30 km) · join line ends within (20 km; crossings always join).
 
 ## Notes
 

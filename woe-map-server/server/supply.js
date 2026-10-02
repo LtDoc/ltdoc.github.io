@@ -25,7 +25,7 @@ const typeId = m => typeOf(m)?.id || '';
 const alive = m => num(m.data?.strength, 100) > 0;
 /** Land units need supply (unknown custom types count as land, like the capture rule). */
 function needsSupply(m) {
-  if (m.type !== 'unit') return false;
+  if (m.type !== 'unit' || m.data?.aboard) return false;   // troops aboard a convoy are carried by it
   const t = typeOf(m);
   return t ? LAND.has(t.cat) : true;
 }

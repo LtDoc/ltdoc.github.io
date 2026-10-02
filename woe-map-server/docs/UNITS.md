@@ -19,6 +19,13 @@ Ships, aircraft and heroes do not need supply.
 - **Convoys supply invasions.** A convoy (unit type *Transports / convoy*) is a floating supply base that works
   anywhere, independent of home places: it supplies friendly land units within **100 km** (a beachhead) and
   feeds Supply Columns within **200 km**, which can then chain inland.
+- **Convoys carry troops.** Up to **10** land units or heroes within **30 km** of a convoy embark on it (the
+  convoy's card: **⛴ Embark nearby**; a unit's card: **⛴ Board …**). Aboard they leave the map and sail with it:
+  they cannot move, fight or be attacked, need no supply and hold no ground. **⚓ Land troops** puts everyone ashore
+  at once on the nearest beach within **100 km** of the convoy; with no beach that close they stay aboard. Landing
+  on enemy ground takes it like any advance (defended ground holds). Boarding and landing each use up the units'
+  move for the turn. If the convoy is **sunk or removed, everyone aboard goes down with it**. Rules: ⚖ Rules →
+  Supply & support → Troops at sea (`convoyCapacity`, `convoyBoardKm`, `convoyLandKm`).
 - **Columns chain.** A column within **150 km** of another linked column is linked through it, so a string of
   columns carries supply as far from a place, railhead or convoy as you like (each one supplies its own 100 km).
 - **A linked column supplies** friendly land units within **100 km**: its stretch of front. A column itself is

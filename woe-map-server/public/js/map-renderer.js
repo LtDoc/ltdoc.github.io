@@ -119,7 +119,9 @@ class MapRenderer extends EventTarget {
     this.skirmish = window.Skirmish ? new window.Skirmish(this) : null;   // riflemen on infantry firing lines (skirmish.js)
     this.fogLayer = new PIXI.Container(); this.fogLayer.eventMode = 'none';     // fog of war on image maps (Earth: the province layer)
     this.ghostLayer = new PIXI.Container(); this.ghostLayer.eventMode = 'none'; // fog of war: last known enemy positions
-    this.world.addChild(...[this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.craterLayer, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.fogLayer, this.skirmish?.layer, this.gunG, this.unitDots, this.ghostLayer].filter(Boolean), this.markerLayer, this.boomLayer, this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
+    this.rideLayer = new PIXI.Container(); this.rideLayer.eventMode = 'none';   // trains carrying units on a rail trip
+    this.rides = new Map();                                                      // unit id -> rail trip being played
+    this.world.addChild(...[this.mapLayer, this.territoryLayer, this.gridLayer, this.sceneryLayer, this.craterLayer, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.fogLayer, this.skirmish?.layer, this.gunG, this.unitDots, this.ghostLayer, this.rideLayer].filter(Boolean), this.markerLayer, this.boomLayer, this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
     app.stage.addChild(this.world, this.pingArrows);
 
     app.stage.eventMode = 'static';
@@ -1020,6 +1022,79 @@ class MapRenderer extends EventTarget {
     else if (this.earth.tintLayer) this.earth.tintLayer.visible = !hide;
   }
 
+  // ---- Rail trips (data.ride from the server, docs/RAILWAYS.md) -------------------------------------------
+  /**
+   * Play a unit's rail trip: it walks to the track, boards the train waiting there, the train runs along the
+   * line, and the unit gets off and walks on to where it was sent. Paced on screen, so a long trip still takes
+   * only a few seconds. `ride` = { path: [[x, y]...], on, off }: path[on..off] is the track ridden.
+   */
+  playRide(id, ride) {
+    const v = this.views.get(id);
+    if (!v || !window.Rail || !Array.isArray(ride?.path)) return;
+    const pts = ride.path, on = ride.on ?? 1, off = ride.off ?? pts.length - 2;
+    const track = pts.slice(on, off + 1);
+    if (track.length < 2) return;
+    const final = { x: v.tx, y: v.ty };
+    v.riding = 'walk'; v.x = v.tx = pts[0][0]; v.y = v.ty = pts[0][1];   // back to where it set out from
+    Rail.load().then(() => {
+      const f = Rail.frames();
+      const old = this.rides.get(id);
+      if (old) { old.c.destroy({ children: true }); this.rides.delete(id); }
+      if (!f || this.views.get(id) !== v) { v.riding = false; v.x = v.tx = final.x; v.y = v.ty = final.y; return; }
+      const c = new PIXI.Container(); c.eventMode = 'none';
+      // In the unit's colours (half tinted) and named, so it stands out from the trains that run the line anyway.
+      const col = parseInt(String(v.marker.color || '#888888').slice(1), 16) || 0x888888;
+      const tint = (((col >> 16 & 255) + 255) >> 1 << 16) | (((col >> 8 & 255) + 255) >> 1 << 8) | (((col & 255) + 255) >> 1);
+      const cars = [f.loco, f.tender, f.wagons[0], f.wagons[2]].map(t => { const s = new PIXI.Sprite(t); s.anchor.set(0.5); s.tint = tint; c.addChild(s); return s; });
+      const label = new PIXI.Text({ text: `🚂 ${v.marker.name}`, resolution: 2, style: { fontFamily: 'system-ui, sans-serif', fontSize: 11, fontWeight: '700', fill: 0xffffff, stroke: { color: 0x000000, width: 3 } } });
+      label.anchor.set(0.5, 1); c.addChild(label);
+      this.rideLayer.addChild(c);
+      const cum = Rail.cumulative(track), L = cum[cum.length - 1];
+      const rideMs = Math.max(1600, Math.min(6000, L * this.scale / 0.32));   // about 320 screen px a second
+      const D = { walk: 650, board: 400, ride: rideMs, alight: 400, walkOff: 650 };
+      this.rides.set(id, { v, pts, on, off, track, cum, L, c, cars, label, t0: performance.now(), D, final });
+      this.invalidate();
+    });
+  }
+  _tickRides(nowMs) {
+    if (!this.rides.size) return false;
+    const s = this.scale, k = 10 / 24 / s;                        // cars 10 screen px wide (the art is 24 px)
+    const lerp = (a, b, t) => a + (b - a) * t, ease = t => t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+    for (const [id, r] of this.rides) {
+      const { v, pts, on, off, D } = r;
+      let t = nowMs - r.t0;
+      const start = pts[0], board = pts[on], alight = pts[off];
+      // The train: whole consist on the track behind its head.
+      const gap = 1 / s, lens = r.cars.map(c => c.texture.height * k);
+      const consist = lens.reduce((a, b) => a + b + gap, 0);
+      const head0 = Math.min(r.L, consist), tRide = Math.max(0, Math.min(1, (t - D.walk - D.board) / D.ride));
+      const head = lerp(head0, r.L, ease(tRide));
+      let back = head;
+      r.cars.forEach((car, i) => {
+        const p = Rail.at(r.track, r.cum, back - lens[i] / 2);
+        car.position.set(p.x, p.y); car.rotation = p.a + Math.PI / 2; car.scale.set(k);
+        back -= lens[i] + gap;
+      });
+      r.label.position.set(r.cars[0].x, r.cars[0].y - 16 / s); r.label.scale.set(1 / s);
+      const fadeIn = Math.min(1, t / 300), end = D.walk + D.board + D.ride + D.alight + D.walkOff;
+      r.c.alpha = Math.min(fadeIn, t > end - D.walkOff ? Math.max(0, (end - t) / D.walkOff) : 1);
+      // The unit: walk to the train, ride inside it (hidden), step off and walk on.
+      let x, y, phase;
+      if (t < D.walk) { const u = ease(t / D.walk); x = lerp(start[0], board[0], u); y = lerp(start[1], board[1], u); phase = 'walk'; }
+      else if (t < D.walk + D.board + D.ride) { x = board[0]; y = board[1]; phase = 'aboard'; }
+      else if (t < D.walk + D.board + D.ride + D.alight) { x = alight[0]; y = alight[1]; phase = 'alight'; }
+      else if (t < end) { const u = ease((t - (end - D.walkOff)) / D.walkOff); x = lerp(alight[0], r.final.x, u); y = lerp(alight[1], r.final.y, u); phase = 'walk'; }
+      else {
+        r.c.destroy({ children: true }); this.rides.delete(id);
+        v.riding = false; v.x = v.tx = r.final.x; v.y = v.ty = r.final.y;
+        continue;
+      }
+      v.riding = phase === 'aboard' ? 'aboard' : 'walk';
+      v.x = v.tx = x; v.y = v.ty = y;
+    }
+    return true;
+  }
+
   // ---- Fog of war (docs/FOG-OF-WAR.md) ------------------------------------------------------------
   /**
    * The viewer's sight from the server (server/vision.js): { on, provinces?: [ids], circles?: [[x, y, rx, ry]],
@@ -1793,6 +1868,7 @@ class MapRenderer extends EventTarget {
       }
     }
     // Unit icons hide on the Earth map at 100 % zoom and below (dots stand in); tokens off screen are not drawn.
+    if (this._tickRides(nowMs)) anim = true;
     const hideUnits = this.unitsHidden();
     if (this.ghostLayer.children.length) { this.ghostLayer.visible = !hideUnits; for (const c of this.ghostLayer.children) c.scale.set(inv * 1.5 * this.tokenScale); }
     const wx = this.world.x, wy = this.world.y, sw = this.app.screen.width, sh = this.app.screen.height, M = 140;
@@ -1818,7 +1894,7 @@ class MapRenderer extends EventTarget {
       if (v.marker.type !== 'scenery') {
         const sx = wx + v.x * s, sy = wy + v.y * s;
         const onScreen = sx > -M && sy > -M && sx < sw + M && sy < sh + M;
-        const show = v.dragging || (onScreen && !(hideUnits && v.marker.type === 'unit' && !sel));
+        const show = v.dragging || (onScreen && v.riding !== 'aboard' && !(hideUnits && v.marker.type === 'unit' && !sel));
         if (v.root.visible !== show) v.root.visible = show;
         if (!show) continue;                                 // no animation, no label work for what is not drawn
         if (v._bodyPending) { v._bodyPending = false; v._buildBody(); }

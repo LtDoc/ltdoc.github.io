@@ -347,7 +347,7 @@ const Rail = (() => {
     destroy() { this._dispose(); this.container.destroy({ children: true }); }
   }
 
-  return { load, View, screenWidth, cumulative, at };
+  return { load, View, screenWidth, cumulative, at, frames: () => frames };
 })();
 
 window.Rail = Rail;

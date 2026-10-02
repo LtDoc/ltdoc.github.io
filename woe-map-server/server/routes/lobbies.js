@@ -788,6 +788,36 @@ function extendTrail(before, x, y, path) {
   return cleanTrail([...prev, ...mid, [x, y]]);
 }
 
+/** Units and heroes in transit: data.ride (the last rail trip, for the train animation) and data.aboard (the convoy carrying it). */
+function transitData(d) {
+  const out = {};
+  if (num(d.aboard) > 0) out.aboard = Math.round(num(d.aboard));
+  if (d.ride && typeof d.ride === 'object' && Array.isArray(d.ride.path) && d.ride.path.length >= 2) {
+    const path = d.ride.path.filter(q => Array.isArray(q) && Number.isFinite(Number(q[0])) && Number.isFinite(Number(q[1]))).slice(0, 220)
+      .map(q => [Math.round(Number(q[0]) * 10) / 10, Math.round(Number(q[1]) * 10) / 10]);
+    const on = clamp(Math.round(num(d.ride.on, 1)), 0, path.length - 1), off = clamp(Math.round(num(d.ride.off, path.length - 1)), on, path.length - 1);
+    out.ride = { at: num(d.ride.at), path, on, off };
+  }
+  return out;
+}
+/**
+ * A rail trip as the browser animates it: the route walked, with where the unit boarded and got off. `route` is
+ * the planned trip ([a, boarding, ...track, alighting, b]), `points` what was walked of it (less when movement
+ * ran out). Null when the unit never reached the track (it simply walked).
+ */
+function rideOf(route, points) {
+  if (!route) return null;
+  const full = route.path.map(q => [q[0], q[1]]), n = full.length;
+  const walked = Array.isArray(points) && points.length ? points : full;
+  let off;
+  if (walked.length >= n) off = n - 2;
+  else { const k = walked.length - 1; if (k <= 1) return null; off = Math.min(k, n - 2); }
+  const on = 1;
+  let rail = walked.slice(on, off + 1);
+  if (rail.length > 150) { const step = Math.ceil(rail.length / 150); rail = rail.filter((_, i) => i % step === 0 || i === rail.length - 1); }
+  return { at: Date.now(), path: [...walked.slice(0, on), ...rail, ...walked.slice(off + 1)], on, off: on + rail.length - 1 };
+}
+
 function sanitizeData(type, data) {
   const d = (data && typeof data === 'object') ? data : {};
   const out = { notes: clean(d.notes, 2000) };
@@ -804,6 +834,7 @@ function sanitizeData(type, data) {
     if (d.surrendered === true) out.surrendered = true;
     if (d.supplyFrom && typeof d.supplyFrom === 'object') out.supplyFrom = { id: d.supplyFrom.id == null ? null : num(d.supplyFrom.id), name: clean(d.supplyFrom.name, 60), kind: clean(d.supplyFrom.kind, 12) };
     if (Array.isArray(d.trail)) out.trail = cleanTrail(d.trail);
+    Object.assign(out, transitData(d));
   } else if (type === 'resource') {
     out.kind = GameData.byKey[d.kind] ? d.kind : 'grain';
     out.yield = clamp(num(d.yield, 1), 0, 50);
@@ -834,6 +865,7 @@ function sanitizeData(type, data) {
       movedKm: Math.max(0, num(d.movedKm)), apUsed: Math.max(0, num(d.apUsed)),
     });
     if (Array.isArray(d.trail)) out.trail = cleanTrail(d.trail);
+    Object.assign(out, transitData(d));
     if (out.status === 'posted' && d.postedTo) out.postedTo = num(d.postedTo);
     if (out.status === 'travelling' && d.travel && typeof d.travel === 'object') {
       out.travel = { to: num(d.travel.to), toName: clean(d.travel.toName, 60), x: num(d.travel.x), y: num(d.travel.y), arrives: num(d.travel.arrives), home: !!d.travel.home };
@@ -931,19 +963,27 @@ router.patch('/:id/markers/:mid', (req, res) => {
     for (const k of game.PROTECTED_UNIT_FIELDS) delete b.data[k];
   }
   if (b.data && typeof b.data === 'object' && !isGm) {
-    delete b.data.revealTo;
+    delete b.data.revealTo; delete b.data.aboard; delete b.data.ride;
     if (before.type === 'hero') for (const k of PROTECTED_HERO_FIELDS) delete b.data[k];
   }
   if (before.type === 'hero' && (x !== before.x || y !== before.y)) {
     if (before.data?.status === 'travelling' && !isGm) return res.status(409).json({ error: `${before.name} is travelling and arrives at the end of the turn` });
     if (before.data?.status === 'posted') b.data = { ...(b.data || {}), status: 'active', postedTo: null };
   }
+  if ((x !== before.x || y !== before.y) && before.data?.aboard) {
+    const ship = q.marker.get(Number(before.data.aboard), req.lobby.id);
+    if (!isGm) return res.status(409).json({ error: `${before.name} is aboard ${ship ? ship.name : 'a convoy'}: disembark first` });
+    b.data = { ...(b.data || {}), aboard: 0 };   // the GM lifting a unit off a convoy
+  }
   if (x !== before.x || y !== before.y) {
     const mv = game.checkMove(req.lobby, g, isGm, before, x, y);
     if (mv.error) return res.status(409).json({ error: mv.error });
     x = mv.x; y = mv.y;
     if (mv.movedKm !== undefined) b.data = { ...(b.data || {}), movedKm: mv.movedKm };
-    if (g.enabled && ['unit', 'hero'].includes(before.type)) b.data = { ...(b.data || {}), trail: extendTrail(before, x, y, mv.path) };
+    // By rail: no trail across the map (the train animation shows the trip); the trail starts again where it got off.
+    const ride = rideOf(mv.route, mv.path);
+    if (ride) b.data = { ...(b.data || {}), ride, ...(g.enabled ? { trail: [[x, y]] } : {}) };
+    else if (g.enabled && ['unit', 'hero'].includes(before.type)) b.data = { ...(b.data || {}), trail: extendTrail(before, x, y, mv.path) };
     if (mv.clamped) clampNote = `${before.name} could only move ${Math.round(mv.remaining)} of ${mv.dist} this turn`;
     if (mv.route) railNote = `${before.name} went by rail (${Math.round(mv.route.railKm)} ${geo.isEarth(req.lobby) ? 'km' : (req.lobby.scale_label || 'units')} of track${mv.clamped ? ', stopped short' : ''})`;
   }
@@ -963,6 +1003,8 @@ router.patch('/:id/markers/:mid', (req, res) => {
   q.updateMarker.run(type, name, x, y, iconFile, iconUrl, color, adminOnly, visibleTo, ownerId, JSON.stringify(data), now(), locked, before.id);
   const after = access.serializeMarker(q.marker.get(before.id, req.lobby.id));
   commitChange(req, 'marker', 'update', before, after);
+  if (isConvoy(after) && (x !== before.x || y !== before.y)) moveCargo(req, after);
+  if (isConvoy(after) && num(after.data?.strength, 100) <= 0 && num(before.data?.strength, 100) > 0) sinkCargo(req, after, 'was destroyed');
   const captureNote = (x !== before.x || y !== before.y) ? afterMove(req, after) : null;
   res.json({ marker: after, note: [railNote, clampNote, captureNote].filter(Boolean).join(' · ') || null });
 });
@@ -980,6 +1022,7 @@ router.post('/:id/markers/move', (req, res) => {
     if (!before || !access.canSee(before, v)) { errors.push(`${mv.id}: not found`); continue; }
     if (!canEditMarker(req, before) || before.locked) { errors.push(`${before.name}: not movable`); continue; }
     if (before.type === 'hero' && before.data?.status === 'travelling' && !isGm) { errors.push(`${before.name}: travelling`); continue; }
+    if (before.data?.aboard) { errors.push(`${before.name}: aboard a convoy`); continue; }
     const x = num(mv.x, before.x), y = num(mv.y, before.y);
     if (!inBounds(req, x, y)) { errors.push(`${before.name}: off the map`); continue; }
     if (x === before.x && y === before.y) { out.push(before); continue; }
@@ -1007,12 +1050,15 @@ router.post('/:id/markers/move', (req, res) => {
         const spent = p.chk.cost !== undefined ? p.chk.cost * t : geo.distance(req.lobby, p.before.x, p.before.y, x, y);
         data.movedKm = Math.round((used + spent) * 10) / 10;
       }
-      if (g.enabled && ['unit', 'hero'].includes(p.before.type)) data.trail = extendTrail(p.before, x, y, path);
+      const ride = rideOf(p.chk.route, path);
+      if (ride) { data.ride = ride; if (g.enabled) data.trail = [[x, y]]; }
+      else if (g.enabled && ['unit', 'hero'].includes(p.before.type)) data.trail = extendTrail(p.before, x, y, path);
       q.updateMarker.run(p.before.type, p.before.name, x, y, p.before.iconFile, p.before.iconFile ? null : p.before.iconUrl, p.before.color,
         p.before.adminOnly ? 1 : 0, p.before.visibleTo ? JSON.stringify(p.before.visibleTo) : null, p.before.ownerId, JSON.stringify(data), now(), p.before.locked ? 1 : 0, p.before.id);
     } else q.moveMarker.run(x, y, now(), p.before.id);
     const after = access.serializeMarker(q.marker.get(p.before.id, req.lobby.id));
     commitChange(req, 'marker', 'update', p.before, after);
+    if (isConvoy(after)) moveCargo(req, after);
     out.push(after);
   }
   const notes = out.map(m => afterMove(req, m)).filter(Boolean);
@@ -1066,6 +1112,7 @@ router.delete('/:id/markers/:mid', (req, res) => {
   q.deleteMarker.run(before.id);
   qb.dropFor.run(req.lobby.id, before.id, before.id);   // its fights end with it (ids can be reused later)
   commitChange(req, 'marker', 'delete', before, null);
+  if (isConvoy(before)) sinkCargo(req, before, 'was removed');
   if (!before.adminOnly && !before.visibleTo) logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} removed ${before.name}`);
   res.json({ ok: true });
 });
@@ -1135,8 +1182,9 @@ router.post('/:id/shapes', (req, res) => {
   const kind = ['line', 'area', 'trench', 'rail'].includes(b.kind) ? b.kind : null;
   if (!kind) return res.status(400).json({ error: 'Drawing must be a line, an area, a trench or a railway' });
   if (kind === 'rail' && !isGm && game.get(req.lobby.id).enabled) return res.status(403).json({ error: 'Only the GM lays railways while the game is running' });
-  const points = parsePoints(req, kind, b.points);
+  let points = parsePoints(req, kind, b.points);
   if (!points) return res.status(400).json({ error: 'Bad points (need 2+ for a line, 3+ for an area, all on the map)' });
+  if (kind === 'rail') points = rails.snapEnds(req.lobby, game.get(req.lobby.id).settings, points, null);
   const label = clean(b.label, 60);
   const color = COLOR_RE.test(b.color || '') ? b.color : (req.member?.color || '#f1c40f');
   const width = kind === 'trench' ? clamp(num(b.width, 0.5), 0.05, 50) : clamp(num(b.width, 3), 1, 20);
@@ -1158,8 +1206,9 @@ router.patch('/:id/shapes/:sid', (req, res) => {
   const b = req.body || {};
   const isGm = req.lobbyRole === 'gm';
   if (before.kind === 'rail' && !isGm && game.get(req.lobby.id).enabled) return res.status(403).json({ error: 'Only the GM changes railways while the game is running' });
-  const points = b.points !== undefined ? parsePoints(req, before.kind, b.points) : before.points;
+  let points = b.points !== undefined ? parsePoints(req, before.kind, b.points) : before.points;
   if (!points) return res.status(400).json({ error: 'Bad points' });
+  if (before.kind === 'rail' && b.points !== undefined) points = rails.snapEnds(req.lobby, game.get(req.lobby.id).settings, points, before.id);
   if (before.locked && b.points !== undefined && b.locked !== false) {
     return res.status(409).json({ error: `${before.label || 'That drawing'} is locked; unlock it first` });
   }
@@ -1425,6 +1474,115 @@ function serializeBattle(b, lobby) {
   const sea = lobby ? !require('../territory').landAt(lobby, b.dx, b.dy) : false;
   return { id: b.id, turn: b.turn, attackerId: b.attacker_id, defenderId: b.defender_id, kind: b.kind, ax: b.ax, ay: b.ay, dx: b.dx, dy: b.dy, sea, until: b.until_ms, createdAt: b.created_at };
 }
+// ---- Convoys: troops embark on transports, sail, and land together (docs/UNITS.md) ---------------------------
+const isConvoy = m => !!m && m.type === 'unit' && UnitTypes.resolve(m.data?.unitType)?.id === 'transport';
+function cargoOf(lobbyId, convoyId) {
+  return q.markers.all(lobbyId).map(access.serializeMarker).filter(m => Number(m.data?.aboard) === Number(convoyId));
+}
+/** A line in the log for a nation's side only under fog of war (everyone otherwise). */
+function sideLog(req, nation, message) {
+  const names = vision.on(req.lobby.id) ? vision.sideNames(req.lobby.id, nation) : null;
+  if (!names) return logEvent(req.lobby.id, req.user.id, 'system', message);
+  const set = new Set(names.map(n => n.toLowerCase()));
+  return logEvent(req.lobby.id, req.user.id, 'system', message, { audience: { nations: names, users: [req.user.id] } },
+    ws => ws.lobbyRole === 'gm' || ws.user.id === req.user.id || set.has(String(ws.nation || '').toLowerCase()));
+}
+/** Troops aboard sail with their convoy. */
+function moveCargo(req, convoy) {
+  for (const m of cargoOf(req.lobby.id, convoy.id)) {
+    if (m.x === convoy.x && m.y === convoy.y) continue;
+    q.moveMarker.run(convoy.x, convoy.y, now(), m.id);
+    commitChange(req, 'marker', 'update', m, access.serializeMarker(q.marker.get(m.id, req.lobby.id)));
+  }
+}
+/** A convoy sunk or removed: everyone aboard goes down with it. */
+function sinkCargo(req, convoy, why) {
+  const lost = cargoOf(req.lobby.id, convoy.id);
+  for (const m of lost) {
+    q.deleteMarker.run(m.id);
+    qb.dropFor.run(req.lobby.id, m.id, m.id);
+    commitChange(req, 'marker', 'delete', m, null);
+  }
+  if (lost.length) sideLog(req, convoy.data?.nation, `⚓ ${convoy.name} ${why}: ${lost.map(m => m.name).join(', ')} went down with it`);
+  return lost;
+}
+function nearestTownName(lobbyId, x, y) {
+  let best = null, bd = Infinity;
+  for (const r of q.markers.all(lobbyId)) { if (r.type !== 'town') continue; const d = (r.x - x) ** 2 + (r.y - y) ** 2; if (d < bd) { bd = d; best = r.name; } }
+  return best;
+}
+function loadConvoy(req, res) {
+  const row = q.marker.get(Number(req.params.cid), req.lobby.id);
+  const c = row && access.serializeMarker(row);
+  if (!c || !access.canSee(c, viewerOf(req)) || !isConvoy(c)) { res.status(404).json({ error: 'No such convoy' }); return null; }
+  if (!canEditMarker(req, c)) { res.status(403).json({ error: `You do not command ${c.name}` }); return null; }
+  if (num(c.data?.strength, 100) <= 0) { res.status(409).json({ error: `${c.name} has been destroyed` }); return null; }
+  return c;
+}
+/** Spent for the turn (game mode): boarding or landing takes the rest of a unit's move. */
+function spentMove(g, m) { return Math.max(num(m.data?.movedKm), (num(m.data?.movement) + 10) * num(g.settings.kmPerMove, 50)); }
+
+/** Embark land units (and heroes) next to a convoy: up to convoyCapacity aboard at once. */
+router.post('/:id/convoys/:cid/embark', (req, res) => {
+  const convoy = loadConvoy(req, res);
+  if (!convoy) return;
+  const g = game.get(req.lobby.id), s = g.settings, gm = req.lobbyRole === 'gm', v = viewerOf(req);
+  const cap = num(s.convoyCapacity, 10), boardKm = num(s.convoyBoardKm, 30);
+  let aboard = cargoOf(req.lobby.id, convoy.id).length;
+  const ids = Array.isArray(req.body?.unitIds) ? req.body.unitIds.slice(0, 50) : [];
+  const done = [], errors = [];
+  const territory = require('../territory');
+  for (const id of ids) {
+    const row = q.marker.get(Number(id), req.lobby.id);
+    const m = row && access.serializeMarker(row);
+    if (!m || !access.canSee(m, v)) { errors.push(`${id}: not found`); continue; }
+    if (!canEditMarker(req, m)) { errors.push(`${m.name}: not yours`); continue; }
+    const land = m.type === 'hero' ? !['captured', 'travelling'].includes(m.data?.status) : territory.isLandUnit(m);
+    if (!land) { errors.push(`${m.name}: only land units and heroes embark`); continue; }
+    if (m.data?.aboard) { errors.push(`${m.name}: already aboard`); continue; }
+    if (m.type === 'unit' && num(m.data?.strength, 100) <= 0) { errors.push(`${m.name}: destroyed`); continue; }
+    if (!gm && String(m.data?.nation || '').toLowerCase() !== String(convoy.data?.nation || '').toLowerCase()) { errors.push(`${m.name}: not of ${convoy.data?.nation || 'the convoy'}'s nation`); continue; }
+    if (geo.distance(req.lobby, m.x, m.y, convoy.x, convoy.y) > boardKm) { errors.push(`${m.name}: more than ${boardKm} ${geo.isEarth(req.lobby) ? 'km' : (req.lobby.scale_label || 'units')} from ${convoy.name}`); continue; }
+    if (aboard >= cap) { errors.push(`${convoy.name} is full (${cap})`); break; }
+    const data = { aboard: convoy.id, supplied: true, unsuppliedTurns: 0, trail: [[convoy.x, convoy.y]] };
+    if (g.enabled) data.movedKm = spentMove(g, m);
+    done.push(writeMarker(req, m, { x: convoy.x, y: convoy.y, data }));
+    aboard++;
+  }
+  if (done.length) sideLog(req, convoy.data?.nation, `⛴ ${done.map(m => m.name).join(', ')} embarked on ${convoy.name} (${aboard}/${cap} aboard)`);
+  if (!done.length) return res.status(409).json({ error: errors.join('; ') || 'Nobody to embark' });
+  res.json({ embarked: done, errors, aboard, capacity: cap });
+});
+
+/** Land everyone aboard at once on the nearest beach within convoyLandKm; with none in reach they stay aboard. */
+router.post('/:id/convoys/:cid/disembark', (req, res) => {
+  const convoy = loadConvoy(req, res);
+  if (!convoy) return;
+  const g = game.get(req.lobby.id), s = g.settings, landKm = num(s.convoyLandKm, 100);
+  const cargo = cargoOf(req.lobby.id, convoy.id);
+  if (!cargo.length) return res.status(400).json({ error: `Nobody is aboard ${convoy.name}` });
+  const territory = require('../territory');
+  const beach = territory.nearestLand(req.lobby, convoy.x, convoy.y, landKm);
+  if (!beach) return res.status(409).json({ error: `No beach within ${landKm} ${geo.isEarth(req.lobby) ? 'km' : (req.lobby.scale_label || 'units')}: sail ${convoy.name} closer to the coast` });
+  // They come ashore together, spread a little along the beach (on land where possible).
+  const spots = cargo.map((_, i) => {
+    if (i === 0) return beach;
+    const ring = 1 + Math.floor((i - 1) / 6), a = ((i - 1) % 6) / 6 * Math.PI * 2 + ring * 0.5, r = 1.1 * ring;
+    const x = Math.round((beach.x + Math.cos(a) * r) * 10) / 10, y = Math.round((beach.y + Math.sin(a) * r) * 10) / 10;
+    return territory.landAt(req.lobby, x, y) ? { x, y } : beach;
+  });
+  const landed = cargo.map((m, i) => {
+    const data = { aboard: 0, trail: [[spots[i].x, spots[i].y]] };
+    if (g.enabled) data.movedKm = spentMove(g, m);
+    return writeMarker(req, m, { x: spots[i].x, y: spots[i].y, data });
+  });
+  const place = nearestTownName(req.lobby.id, beach.x, beach.y);
+  sideLog(req, convoy.data?.nation, `⚓ ${landed.length} unit${landed.length === 1 ? '' : 's'} landed from ${convoy.name}${place ? ` near ${place}` : ''}: ${landed.map(m => m.name).join(', ')}`);
+  // Landing on enemy ground takes it like any advance (defended ground holds).
+  const notes = landed.map(m => afterMove(req, m)).filter(Boolean);
+  res.json({ landed, beach, note: notes.join(' · ') || null });
+});
+
 /** This turn's battles the viewer may see (hidden ones: the GM and the attacking player). */
 router.get('/:id/battles', (req, res) => {
   const g = game.get(req.lobby.id);
@@ -1449,6 +1607,7 @@ router.post('/:id/combat', (req, res) => {
   if (a.type !== 'unit' || d.type !== 'unit') return res.status(400).json({ error: 'Only units can fight' });
   if (!canEditMarker(req, a)) return res.status(403).json({ error: 'You can only attack with units you control' });
   if ((a.data.strength ?? 100) <= 0) return res.status(400).json({ error: `${a.name} has no strength left` });
+  if (a.data?.aboard || d.data?.aboard) return res.status(400).json({ error: 'Troops aboard a convoy cannot fight: attack the convoy, or land them first' });
   const g = game.get(req.lobby.id);
   // Never your own side: same nation, or an ally while the game is on.
   const nationA = String(a.data?.nation || '').toLowerCase(), nationD = String(d.data?.nation || '').toLowerCase();
@@ -1517,7 +1676,8 @@ router.post('/:id/combat', (req, res) => {
     commitChange(req, 'marker', 'update', m, after);
     return after;
   };
-  const aAfter = apply(a, aLoss); apply(d, dLoss);
+  const aAfter = apply(a, aLoss), dAfter = apply(d, dLoss);
+  for (const m of [aAfter, dAfter]) if (isConvoy(m) && num(m.data?.strength, 100) <= 0) sinkCargo(req, m, 'was sunk');
 
   const fmt = (m, l) => `${m.name} ${l.loss ? `loses ${l.loss}% (${l.from}→${l.to}${l.to === 0 ? ', destroyed' : ''})` : 'is unharmed'}`;
   const notes = [bonusA.attack ? `attacker +${bonusA.attack} tech` : '', genA ? `attacker +${genA.bonus} ${genA.hero.name}` : '',

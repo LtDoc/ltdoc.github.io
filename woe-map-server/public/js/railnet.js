@@ -14,7 +14,7 @@
  * Distances along the track are real distances; a leg by rail costs distance / speed.
  */
 (function (root) {
-  const DEFAULTS = { speed: 4, stepKm: 10, joinKm: 5, cutKm: 10 };
+  const DEFAULTS = { speed: 4, stepKm: 10, joinKm: 20, midJoinKm: 5, cutKm: 10 };
   const flat = () => 1;
 
   /** Nearest point on a polyline to (x, y); d2 is squared (x-squeezed) map distance. */
@@ -52,10 +52,23 @@
     }).filter(Boolean);
   }
 
+  /** Where segments p1-p2 and q1-q2 cross: { x, y, t (along p), u (along q) }, or null. */
+  function crossing(p1, p2, q1, q2) {
+    const rx = p2[0] - p1[0], ry = p2[1] - p1[1], sx = q2[0] - q1[0], sy = q2[1] - q1[1];
+    const den = rx * sy - ry * sx;
+    if (Math.abs(den) < 1e-12) return null;                       // parallel
+    const qx = q1[0] - p1[0], qy = q1[1] - p1[1];
+    const t = (qx * sy - qy * sx) / den, u = (qx * ry - qy * rx) / den;
+    if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+    return { x: p1[0] + rx * t, y: p1[1] + ry * t, t, u };
+  }
+  const bboxOf = pts => pts.reduce((b, [x, y]) => [Math.min(b[0], x), Math.min(b[1], y), Math.max(b[2], x), Math.max(b[3], y)], [Infinity, Infinity, -Infinity, -Infinity]);
+
   /**
-   * Build the network. Rails are joined where a vertex of one lies within joinKm of another rail (end to
-   * end, or a branch meeting a main line part-way). Long segments are split into ≤ stepKm pieces so cuts
-   * and ownership apply to short sections.
+   * Build the network. Rails are joined where an end of one lies within joinKm of another rail (end to end,
+   * or a branch meeting a main line part-way), where an inner vertex lies within midJoinKm of one (so parallel
+   * lines a few km apart stay apart), and wherever two rails cross. Long segments are split into ≤ stepKm
+   * pieces so cuts and ownership apply to short sections.
    */
   function build(rails, opt) {
     const o = { ...DEFAULTS, ...opt };
@@ -66,18 +79,35 @@
     // 1. Junctions: every vertex of every rail against every other rail.
     const inserts = list.map(() => []);                  // per rail: { seg, t, key }
     const links = [];                                     // [keyA, keyB]
+    const midJoin = Math.min(o.joinKm, o.midJoinKm ?? DEFAULTS.midJoinKm);
     list.forEach((a, ai) => {
       a.points.forEach(([x, y], vi) => {
+        const end = vi === 0 || vi === a.points.length - 1;
         list.forEach((b, bi) => {
           if (bi === ai) return;
           const p = project(b.points, x, y, kx);
-          if (!p || dist(x, y, p.x, p.y) > o.joinKm) return;
+          if (!p || dist(x, y, p.x, p.y) > (end ? o.joinKm : midJoin)) return;
           const key = `j${ai}:${vi}>${bi}`;
           inserts[bi].push({ seg: p.i, t: p.t, x: p.x, y: p.y, key });
           links.push([`v${ai}:${vi}`, key]);
         });
       });
     });
+    // Crossings: two lines drawn over each other meet where they cross, vertex or not.
+    const boxes = list.map(r => bboxOf(r.points));
+    for (let ai = 0; ai < list.length; ai++) for (let bi = ai + 1; bi < list.length; bi++) {
+      const A = boxes[ai], B = boxes[bi];
+      if (A[0] > B[2] || B[0] > A[2] || A[1] > B[3] || B[1] > A[3]) continue;
+      const P = list[ai].points, Q = list[bi].points;
+      for (let i = 0; i < P.length - 1; i++) for (let j = 0; j < Q.length - 1; j++) {
+        const hit = crossing(P[i], P[i + 1], Q[j], Q[j + 1]);
+        if (!hit) continue;
+        const key = `x${ai}:${i}:${bi}:${j}`;
+        inserts[ai].push({ seg: i, t: hit.t, x: hit.x, y: hit.y, key: key + 'a' });
+        inserts[bi].push({ seg: j, t: hit.u, x: hit.x, y: hit.y, key: key + 'b' });
+        links.push([key + 'a', key + 'b']);
+      }
+    }
 
     // 2. Each rail's points with junction points spliced in, then densified. Points carry keys for linking.
     const nodes = [], edges = [], keyNode = new Map();

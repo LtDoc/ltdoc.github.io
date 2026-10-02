@@ -98,6 +98,32 @@ function cutAt(lobby, settings, rail, x, y) {
     .find(c => c.from <= s && c.to >= s)?.cut || null;
 }
 
+/**
+ * A railway's ends snapped onto other track within railJoinKm (another line's end if one is in reach, else the
+ * nearest point on it), so lines drawn to meet are stored joined. The network joins them either way.
+ */
+function snapEnds(lobby, settings, points, selfId) {
+  const others = railShapes(lobby.id).filter(r => r.id !== selfId && r.points.length >= 2);
+  if (!others.length || points.length < 2) return points;
+  const m = metric(lobby), joinKm = num(settings?.railJoinKm, 20), r1 = v => Math.round(v * 10) / 10;
+  const out = points.map(q => [q[0], q[1]]);
+  for (const i of [0, out.length - 1]) {
+    const [x, y] = out[i];
+    let end = null, line = null;
+    for (const r of others) {
+      for (const e of [r.points[0], r.points[r.points.length - 1]]) {
+        const d = m.dist(x, y, e[0], e[1]);
+        if (d <= joinKm && (!end || d < end.d)) end = { x: e[0], y: e[1], d };
+      }
+      const q = RailNet.project(r.points, x, y, m.kx);
+      if (q) { const d = m.dist(x, y, q.x, q.y); if (d <= joinKm && (!line || d < line.d)) line = { x: q.x, y: q.y, d }; }
+    }
+    const best = end || line;
+    if (best && best.d > 0) out[i] = [r1(best.x), r1(best.y)];
+  }
+  return out;
+}
+
 /** Track length of a rail drawing in campaign units. */
 function length(lobby, rail) {
   const d = metric(lobby).dist;
@@ -106,4 +132,4 @@ function length(lobby, rail) {
   return s;
 }
 
-module.exports = { network, plan, walk, usableFor, canRide, nearestOn, cutAt, length, metric, railShapes };
+module.exports = { network, plan, walk, usableFor, canRide, nearestOn, cutAt, length, metric, railShapes, snapEnds };

@@ -96,7 +96,7 @@ function rangeOf(m, settings, fx) {
   const v = settings.vision || {};
   if (m.type === 'town') return Number(v[m.data?.size] ?? v.village ?? 30);
   if (m.type === 'hero') return ['captured', 'travelling'].includes(m.data?.status) ? 0 : Number(v.hero ?? DEFAULT_RANGE);
-  if (m.type !== 'unit' || Number(m.data?.strength ?? 100) <= 0 || m.data?.surrendered) return 0;
+  if (m.type !== 'unit' || Number(m.data?.strength ?? 100) <= 0 || m.data?.surrendered || m.data?.aboard) return 0;
   const t = UnitTypes.resolve(m.data?.unitType);
   let r = Number(v[t?.id] ?? v[t?.cat] ?? DEFAULT_RANGE);
   for (const e of fx?.vision || []) if (e.all || (e.unit && e.unit === t?.id) || (e.cat && e.cat === t?.cat)) r += e.km;
@@ -189,6 +189,7 @@ function foreign(viewer, m) {
 /** Vision step of canSee: true unless fog hides this unit from the viewer. */
 function sees(viewer, m) {
   if (!foreign(viewer, m)) return true;
+  if (m.data?.aboard) return false;   // another side's troops aboard a convoy: what it carries is not seen
   const st = state(viewer.lobbyId);
   const sub = m.type === 'unit' && UnitTypes.resolve(m.data?.unitType)?.id === 'submarine';
   return inVision(st, sideOf(st, viewer.nation), m.x, m.y, sub);
@@ -196,7 +197,7 @@ function sees(viewer, m) {
 /** A foreign unit as a viewer may receive it: without the trail, supply link or travel plans that would show where it has been or is going. */
 function redact(m, viewer) {
   if (!foreign(viewer, m) || !m.data) return m;
-  const { trail, supplyFrom, travel, postedTo, ...data } = m.data;
+  const { trail, supplyFrom, travel, postedTo, ride, ...data } = m.data;
   return { ...m, data };
 }
 /** Under fog, does a viewer see this unit's history and drag previews? Only its own side (and the GM) do. */
