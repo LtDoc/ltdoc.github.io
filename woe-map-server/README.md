@@ -626,6 +626,10 @@ Powers in grey; Britain, France and Belgium in khaki; Russia, Italy and the Amer
 regiments (stormtroopers) wear the armoured kit whatever their nation. The figures come from
 `public/assets/soldiers.png`, cut from the soldier sheet by `node scripts/build-soldiers.js "rob assets/soldier+sprites.png"`
 (`public/js/skirmish.js`).
+**Artillery** and **machine-gun companies** show four guns of their type along the line, each worked by two of
+those soldiers (guns recoil and smoke, shells leave from them, a gun whose crew is down falls silent); **tanks**
+roll out two to a unit, one knocked out at 50 % strength. Each nation has its own tank design. Details:
+`docs/UNITS.md`.
 **Artillery** (and ships) **shell** the target instead: bursts from `public/assets/shellburst.png` land at random
 around it every second or two. Each shell leaves the guns with a flash and climbs a slow arc (1–2.4 s, a bright
 shell with a fading trail over a faint dotted trajectory) to where it lands, so the line of fire is clear even

@@ -106,7 +106,7 @@ each rule that applied. "Entrenched" means the defender has trench cover.
 | Destroyers | submarines, torpedo boats | +3 |
 | Capital ships | destroyers, torpedo boats | −1 |
 
-## Riflemen in a firefight
+## Men and machines in a fight
 
 While an infantry unit (any type in the Infantry category: line infantry, conscripts, marines, machine-gunners…)
 is in a gunfire battle this turn, a squad of 8 soldiers holds its firing line on the map from 800 % zoom. Living
@@ -114,6 +114,22 @@ soldiers = strength ÷ 12.5, rounded up (100 % → 8, 74 % → 6, 50 % → 4, 0 
 line. Uniforms: grey, beige or green per faction (chosen on the faction, else from its name), and the armoured
 assault kit for stormtroopers. Purely visual: nothing here changes combat. Code: `public/js/skirmish.js`, wired in
 by `MapRenderer._tickBattles`; atlas built by `scripts/build-soldiers.js`.
+
+Other units in a battle (attacking or attacked, gunfire or shelling) show their own kit on the same line:
+
+- **Artillery** and **machine-gun companies**: four guns spread along the line, each worked by two soldiers in the
+  nation's uniform. Field guns and anti-aircraft use the field gun, heavy and coastal batteries the heavy gun, siege
+  batteries and railway guns the siege gun, trench mortars the mortar, horse artillery the horse-drawn gun and
+  machine-gun companies the Maxim. Guns recoil, flash and smoke as they fire, and a battery's shells leave from one
+  of its guns; machine guns fire in bursts. The eight crew fall like riflemen (one per 12.5 % lost); a gun whose two
+  crew are both down goes grey and silent.
+- **Tanks**: two, rolling out from the unit to the line and firing every few seconds; one is knocked out (dark,
+  smoking) at 50 % strength, both at 0. Each nation has its own tank design from the tank sheet.
+
+Guns and tanks are sized against the soldiers (a field gun about twice a soldier's length, a tank about three
+times). Atlas: `public/assets/machines.png`, cut by `node scripts/build-machines.js "rob assets"` from Tank.png,
+FieldArtillery.png, HeavyArtilleryBattery.png, SiegeBattery.png, TrenchMortarBattery.png, HorseArtilleryBattery.png
+and HeavyMG.png.
 
 ## Campaign rules
 

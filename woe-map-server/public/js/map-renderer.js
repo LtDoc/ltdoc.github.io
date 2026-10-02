@@ -1389,28 +1389,32 @@ class MapRenderer extends EventTarget {
       if (L < 1e-6) continue;
       const ux = (dx - ax) / L, uy = (dy - ay) / L, nx = -uy, ny = ux;
       const margin = 60 / s;
+      keep.add(b.attackerId); keep.add(b.defenderId);
+      // Men and machines in the fight (skirmish.js): riflemen, gun crews or tanks on a line a little ahead of each
+      // side's token, from 800 % zoom.
+      const Av = this.views.get(b.attackerId), Dv = this.views.get(b.defenderId);
+      const kA = sk ? window.Skirmish.kindOf(Av?.marker) : null, kD = sk ? window.Skirmish.kindOf(Dv?.marker) : null;
+      const LINE = 60, pA = kA ? LINE : 14, pD = kD ? LINE : 14;
+      const squadsOn = gunZoom && (onScreen(ax, ay, margin * 3) || onScreen(dx, dy, margin * 3) || onScreen((ax + dx) / 2, (ay + dy) / 2, L / 2 + margin));
+      const addFront = (id, view, kind, x0, y0, x1, y1, px, otherPx) => {
+        if ((fronts.get(id)?.battleId ?? -1) > b.id) return;   // the unit's latest fight sets its line
+        const l = Math.hypot(x1 - x0, y1 - y0), r0 = Math.min(l * 0.3, px / s), r1 = Math.min(l * 0.3, otherPx / s);
+        const fux = (x1 - x0) / l, fuy = (y1 - y0) / l;
+        fronts.set(id, { battleId: b.id, view, kind, shells: b.kind === 'shells' && id === b.attackerId, cx: x0 + fux * r0, cy: y0 + fuy * r0, ux: fux, uy: fuy,
+          front: Math.max(80, Math.min(190, (l - r0 - r1) * s * 0.9)) / s, backPx: r0 * s, createdAt: b.createdAt });
+      };
+      if (squadsOn) {
+        if (kA) addFront(b.attackerId, Av, kA, ax, ay, dx, dy, pA, kD ? LINE : 10);
+        if (kD) addFront(b.defenderId, Dv, kD, dx, dy, ax, ay, pD, kA ? LINE : 10);
+      }
       if (b.kind === 'gunfire') {
-        keep.add(b.attackerId); keep.add(b.defenderId);
-        if (!gunZoom || !(onScreen(ax, ay, margin * 3) || onScreen(dx, dy, margin * 3) || onScreen((ax + dx) / 2, (ay + dy) / 2, L / 2 + margin))) continue;
+        if (!squadsOn) continue;
         anim = true;
         // The attacker's line opens fire; the defender's line answers, a little lighter, while it still stands.
         const live = id => { const v = this.views.get(id); return !v || (!v.dying && Number(v.marker.data?.strength ?? 100) > 0); };
-        const aStands = !!this.views.get(b.attackerId) && live(b.attackerId), dStands = !!this.views.get(b.defenderId) && live(b.defenderId);
-        // Infantry fights from a firing line a little ahead of its token, manned by a squad of riflemen.
-        const Av = this.views.get(b.attackerId), Dv = this.views.get(b.defenderId);
-        const squadA = !!sk && window.Skirmish.isInfantry(Av?.marker), squadD = !!sk && window.Skirmish.isInfantry(Dv?.marker);
-        const LINE = 60, pA = squadA ? LINE : 14, pD = squadD ? LINE : 14;
-        if (aStands) this._drawLineFire(g, ax, ay, dx, dy, e.seed, 1, t, s, pA, squadD ? LINE : 10);
-        if (dStands) this._drawLineFire(g, dx, dy, ax, ay, e.seed + 7.77, 0.65, t, s, pD, squadA ? LINE : 10);
-        const addFront = (id, view, x0, y0, x1, y1, px, otherPx) => {
-          if ((fronts.get(id)?.battleId ?? -1) > b.id) return;   // the unit's latest fight sets its line
-          const l = Math.hypot(x1 - x0, y1 - y0), r0 = Math.min(l * 0.3, px / s), r1 = Math.min(l * 0.3, otherPx / s);
-          const fux = (x1 - x0) / l, fuy = (y1 - y0) / l;
-          fronts.set(id, { battleId: b.id, view, cx: x0 + fux * r0, cy: y0 + fuy * r0, ux: fux, uy: fuy,
-            front: Math.max(80, Math.min(190, (l - r0 - r1) * s * 0.9)) / s, backPx: r0 * s, createdAt: b.createdAt });
-        };
-        if (squadA) addFront(b.attackerId, Av, ax, ay, dx, dy, pA, squadD ? LINE : 10);
-        if (squadD) addFront(b.defenderId, Dv, dx, dy, ax, ay, pD, squadA ? LINE : 10);
+        const aStands = !!Av && live(b.attackerId), dStands = !!Dv && live(b.defenderId);
+        if (aStands) this._drawLineFire(g, ax, ay, dx, dy, e.seed, 1, t, s, pA, kD ? LINE : 10);
+        if (dStands) this._drawLineFire(g, dx, dy, ax, ay, e.seed + 7.77, 0.65, t, s, pD, kA ? LINE : 10);
       } else {
         // Shelling: visible when the guns or the target are on screen (above 150 %). Each shell leaves the guns
         // with a flash, climbs a slow arc toward where it will land (so players can see where fire comes from),
@@ -1420,8 +1424,9 @@ class MapRenderer extends EventTarget {
         if (nowMs >= e.nextShell && this.shellFrames) {
           const a = Math.random() * Math.PI * 2, r = (14 + Math.random() * 40) / s;
           const bx = dx + Math.cos(a) * r, by = dy + Math.sin(a) * r * 0.75;
-          // Leave the token's edge, not its centre, so the launch is not hidden under the counter.
-          const mx = ax + ux * 16 / s, my = ay + uy * 16 / s - 8 / s;
+          // From one of the battery's guns when they are drawn (it recoils and flashes), else the token's edge.
+          const gun = sk ? sk.fireGun(b.attackerId, nowMs) : null;
+          const mx = gun ? gun.x : ax + ux * 16 / s, my = gun ? gun.y : ay + uy * 16 / s - 8 / s;
           const distPx = Math.hypot(bx - mx, by - my) * s;
           const dur = Math.max(1000, Math.min(2400, 700 + distPx * 4));          // slow enough to follow
           const h = Math.max(30, Math.min(160, distPx * 0.35)) / s;                // arc height (up the screen)
