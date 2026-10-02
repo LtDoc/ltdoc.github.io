@@ -201,6 +201,7 @@ class MapRenderer extends EventTarget {
   /** Play an explosion at a world position with a given on-screen size in px. `frames` defaults to the explosion sheet. */
   explode(x, y, screenSize = 72, delayMs = 0, frames = null) {
     this.invalidate();
+    this._sfx('boom', x, y, { size: screenSize / 80, delay: delayMs / 1000 });
     frames = frames || this.explosionFrames;
     if (!frames) return false;
     const sp = new PIXI.AnimatedSprite(frames);
@@ -1634,6 +1635,13 @@ class MapRenderer extends EventTarget {
     return any;
   }
 
+  /** A battle sound at a world point (sound.js): panned and faded by where it is in the view, crisper close in. */
+  _sfx(type, x, y, opts = {}) {
+    const S = window.BattleSound;
+    if (!S || !S.enabled) return;
+    const s = this.scale, W = this.app.screen.width / 2, H = this.app.screen.height / 2;
+    S.play(type, (x * s + this.world.x - W) / W, (y * s + this.world.y - H) / H, { near: Math.max(0, Math.min(1, (s - 2) / 20)), ...opts });
+  }
   /** Replace the battles shown (from GET /battles). */
   setBattles(list) { this.battles.clear(); for (const b of list || []) this.addBattle(b); this.invalidate(); }
   addBattle(b) {
@@ -1742,12 +1750,20 @@ class MapRenderer extends EventTarget {
           const dur = Math.max(1000, Math.min(2400, 700 + distPx * 4));          // slow enough to follow
           const h = Math.max(30, Math.min(160, distPx * 0.35)) / s;                // arc height (up the screen)
           this.shellsInFlight.push({ x0: mx, y0: my, x1: bx, y1: by, t0: nowMs, dur, h });
+          this._sfx('cannon', mx, my, { near: Math.min(1, s / 12) });
+          this._sfx('whistle', bx, by, { dur: dur / 1000 * 0.9, delay: 0.1 });
           this._gunFlash(mx, my, ux, uy);
           if (this._isWater(bx, by, b)) this.splash(bx, by, 80 + Math.random() * 50, dur);
           else this.explode(bx, by, 80 + Math.random() * 60, dur, this.shellFrames);
           e.nextShell = nowMs + 900 + Math.random() * 1600;
         }
       }
+    }
+    // Zoomed out, fights on screen are heard as the distant rumble of guns.
+    if (!gunZoom && window.BattleSound?.enabled && this.battles.size && Math.random() < 0.04) {
+      const on = [...this.battles.values()].filter(e => onScreen(e.battle.dx, e.battle.dy, 0));
+      const e = on[Math.floor(Math.random() * on.length)];
+      if (e) this._sfx('rumble', e.battle.dx, e.battle.dy, { near: 0 });
     }
     // Air and naval units out of a fight, on screen: their planes circle over them, their ships lie around them.
     if (gunZoom && (sk?.mounts || sk?.ships)) {
@@ -1941,6 +1957,7 @@ class MapRenderer extends EventTarget {
    * outwards, a darker patch where the water churned and two foam rings spreading on the surface. ~1.2 s.
    */
   splash(x, y, screenSize = 80, delayMs = 0) {
+    this._sfx('splash', x, y, { delay: delayMs / 1000 });
     this.invalidate();
     const g = new PIXI.Graphics();
     g.eventMode = 'none';

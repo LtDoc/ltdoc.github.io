@@ -639,6 +639,7 @@
       }
       // Dust kicked up behind the riding troop.
       const riding = q.men.filter(m => !m.dead && m.leg);
+      if (riding.length && Math.random() < 0.2) { const m = riding[Math.floor(Math.random() * riding.length)]; this.r._sfx('hoof', m.sp.x, m.sp.y); }
       if (riding.length && nowMs - q.dustAt > 70) {
         q.dustAt = nowMs;
         const m = riding[Math.floor(Math.random() * riding.length)], back = RIDER_PX * boost * 0.45;
@@ -843,6 +844,7 @@
       p.burst--; p.burstAt = p.flashAt = nowMs;
       const [mx, my] = this._nose(p, s, boost, px), c = Math.cos(p.hd), sn = Math.sin(p.hd), j = (Math.random() - 0.5) * 0.05;
       q.tracers.push({ x: mx, y: my, vx: Math.cos(p.hd + j) * 430 / s, vy: Math.sin(p.hd + j) * 430 / s, t0: nowMs });
+      this.r._sfx('mg', mx, my, { near: 0.5 });
       if (ground) {
         const r = (38 + Math.random() * 30) / s, side = (Math.random() - 0.5) * 12 / s;
         q.dust.push({ x: p.x + c * r - sn * side, y: p.y + sn * r + c * side, t0: nowMs + 120 });
@@ -1166,7 +1168,7 @@
             m.burst--;
             m.nextShot = nowMs + (m.burst ? 60000 / lmg : 1500 + Math.random() * 2500);
           } else m.nextShot = nowMs + m.period * (0.8 + Math.random() * 0.4) * 1000;
-          m.firedAt = nowMs; m.shot = true;
+          m.firedAt = nowMs; m.shot = lmg ? 'mg' : 'rifle';
         }
         const shot = m.firedAt && nowMs - m.firedAt < 70;
         const aim = theta + Math.sin(t * 0.7 + m.i * 2) * 0.1;
@@ -1178,7 +1180,7 @@
           const reach = fr.len * unit * 0.5, mx = x + Math.cos(aim) * reach, my = y + Math.sin(aim) * reach;
           g.circle(mx, my, 3.2 * boost / s).fill({ color: 0xffc94a, alpha: 0.35 });
           g.circle(mx, my, 1.5 * boost / s).fill({ color: 0xfff6c8, alpha: 0.95 });
-          if (m.shot) { m.shot = false; this._round(q, f, mx, my, nowMs, s); }
+          if (m.shot) { this.r._sfx(m.shot, mx, my); m.shot = false; this._round(q, f, mx, my, nowMs, s); }
         }
       }
     }
@@ -1231,12 +1233,16 @@
             const foe = this.squads.get(f.enemyId), planes = foe ? foe.machines.filter(p => !p.dead && p.sp?.visible) : [];
             const p = planes[Math.floor(Math.random() * planes.length)], spread = 26 * boost / s;
             const [tx, ty] = p ? [p.sp.x, p.sp.y] : foe?.sky ? foe.sky : [f.tx ?? gn.muzzle[0], (f.ty ?? gn.muzzle[1]) - 50 / s];
-            this.flak.push({ x: tx + (Math.random() - 0.5) * spread * 2, y: ty + (Math.random() - 0.5) * spread * 2, t0: nowMs + 500 + Math.random() * 400 });
+            const fb = { x: tx + (Math.random() - 0.5) * spread * 2, y: ty + (Math.random() - 0.5) * spread * 2, t0: nowMs + 500 + Math.random() * 400 };
+            this.flak.push(fb);
+            this.r._sfx('cannon', gn.muzzle[0], gn.muzzle[1], { near: 0.4 });
+            this.r._sfx('flak', fb.x, fb.y, { delay: (fb.t0 - nowMs) / 1000 });
           }
         } else if (!f.shells && nowMs >= gn.nextShot) {
           gn.firedAt = nowMs; gn.nextShot = nowMs + 3000 + Math.random() * 4000;
           q.puffs.push({ x: gn.muzzle[0], y: gn.muzzle[1], t0: nowMs, big: true });
           this._round(q, f, gn.muzzle[0], gn.muzzle[1], nowMs, s, true);   // over open sights, at the enemy's line
+          this.r._sfx('cannon', gn.muzzle[0], gn.muzzle[1]);
         }
         if (!hmg && gn.firedAt && nowMs - gn.firedAt < 120) this._flash(g, gn.muzzle[0], gn.muzzle[1], 3 * boost / s);
       }
@@ -1440,6 +1446,7 @@
         gn.burst--; gn.burstAt = nowMs; gn.firedAt = nowMs;
         if (!gn.burst) gn.nextShot = nowMs + 2000 + Math.random() * 2000;
         this._round(q, f, gn.muzzle[0], gn.muzzle[1], nowMs, s);
+        this.r._sfx('mg', gn.muzzle[0], gn.muzzle[1]);
       }
       if (gn.firedAt && nowMs - gn.firedAt < 60) this._flash(g, gn.muzzle[0], gn.muzzle[1], 1.8 * boost / s);
     }
@@ -1552,6 +1559,7 @@
         if (!tk.roll && nowMs >= tk.nextShot) {
           tk.firedAt = nowMs; tk.nextShot = nowMs + 2500 + Math.random() * 2500;
           const [mx, my] = this._muzzleOf(sp, fr); q.puffs.push({ x: mx, y: my, t0: nowMs }); this._round(q, f, mx, my, nowMs, s, true);
+          this.r._sfx('cannon', mx, my);
         }
         if (tk.firedAt && nowMs - tk.firedAt < 110) { const [mx, my] = this._muzzleOf(sp, fr); this._flash(g, mx, my, 2.6 * boost / s); }
       }

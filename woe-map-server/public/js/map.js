@@ -1209,6 +1209,15 @@
       try { new Notification(`${state.lobby?.name || 'WoE'}: ${title}`, { body: String(body).slice(0, 140), silent: true }); } catch { /* ignore */ }
     }
   }
+  // Battle sounds (sound.js): off until switched on, remembered per browser.
+  function renderBattleSoundButton() {
+    const on = !!window.BattleSound?.enabled;
+    $('#btnBattleSound').classList.toggle('active', on);
+    $('#btnBattleSound').style.opacity = on ? '' : '0.55';
+    $('#btnBattleSound').title = `Battle sounds are ${on ? 'on' : 'off'}: gunfire, shells and hooves where you are looking (click to turn ${on ? 'off' : 'on'})`;
+  }
+  $('#btnBattleSound').onclick = () => { if (window.BattleSound) window.BattleSound.enabled = !window.BattleSound.enabled; renderBattleSoundButton(); };
+  renderBattleSoundButton();
   function renderNotifyButton() {
     $('#btnNotify').textContent = notifyPref.enabled ? '🔊' : '🔇';
     $('#btnNotify').classList.toggle('active', notifyPref.enabled);
