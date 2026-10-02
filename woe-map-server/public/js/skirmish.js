@@ -16,7 +16,7 @@
  *     they fire (an artillery shell leaves from one of them), and fall silent when both their crew are down;
  *   - tanks: two, rolling out to the line and firing; a knocked-out one goes dark and smokes;
  *   - cavalry: eight horsemen (public/assets/mounts.png, scripts/build-mounts.js) who form up, charge the enemy's line,
- *     fight there a moment, ride back and charge again; a fallen rider lies where he fell;
+ *     fight there a moment, ride back and charge again; a fallen rider lies where he fell, beside his dead horse;
  *   - aircraft: four planes of one livery, flying over the map with their shadows below. Out of a fight they circle
  *     their unit; against ground or ships they make strafing runs over the target (bombers drop bombs on it);
  *     against other aircraft both squadrons mix it up over the fight, each plane chasing an enemy, firing when it
@@ -46,6 +46,8 @@
   const RUN_PX_S = 34, ROLL_PX_S = 26;   // running and rolling pace, screen px a second
   // Horsemen (head to tail, lance and all) and planes (wingspan), screen px before the zoom boost.
   const RIDERS = 8, RIDER_PX = 34, GALLOP_PX_S = 70, TROT_PX_S = 28;
+  const DEAD_HORSE_PX = 32;   // a dead horse lying on its side, nose to tail (screen px before the zoom boost)
+  const CAMELS = new Set(['arab']);   // armies riding camels: no dead horse under their fallen
   // mounts.json riders (with "-2"…: others of the army, taken in turn)
   const RIDER_FOR = { british: 'beige', anzac: 'beige', german: 'grey', american: 'green', french: 'french', russian: 'russian', ottoman: 'ottoman', arab: 'arab' };
   const PLANES = 4;
@@ -148,11 +150,11 @@
         this.r.invalidate();
       } catch (e) { console.warn('Gun and tank sprites not available', e); }
       try {
-        const meta = await fetch('/assets/mounts.json?v=3').then(r => r.json());
-        const base = await PIXI.Assets.load({ src: '/assets/mounts.png?v=3', loadParser: 'loadTextures' });
+        const meta = await fetch('/assets/mounts.json?v=4').then(r => r.json());
+        const base = await PIXI.Assets.load({ src: '/assets/mounts.png?v=4', loadParser: 'loadTextures' });
         const one = f => ({ ...f, t: frame(base, f), len: Math.max(f.w, f.h) });
         this.mounts = { planes: meta.planes.map(one), liveries: meta.liveries,
-          riders: Object.fromEntries(Object.entries(meta.riders).map(([k, f]) => [k, one(f)])) };
+          riders: Object.fromEntries(Object.entries(meta.riders).map(([k, f]) => [k, one(f)])), dead: (meta.dead || []).map(one) };
         this._liv = null;
         this.r.invalidate();
       } catch (e) { console.warn('Cavalry and aircraft sprites not available', e); }
@@ -256,7 +258,9 @@
     /** Machine-gun companies and trench mortars whose army has the art go in as teams (gun and crew in one figure). */
     _teamFor(q) { return q.kind !== 'guns' || !q.kit ? null : (q.type === 'machinegun' && this._frames(q.kit, 'mg')) ? 'mg' : (q.type === 'mortar' && this._frames(q.kit, 'mortar')) ? 'mortar' : null; }
     clear() { for (const q of this.squads.values()) this._drop(q); this.squads.clear(); this.airG.clear(); }
-    _sprites(q) { return [...q.men.map(m => m.sp), ...q.machines.flatMap(x => x.sh ? [x.sp, x.sh] : [x.sp])]; }
+    _sprites(q) { return [...q.men.flatMap(m => m.carcass ? [m.sp, m.carcass] : [m.sp]), ...q.machines.flatMap(x => x.sh ? [x.sp, x.sh] : [x.sp])]; }
+    /** A dead horse's sprite, under every fallen man. */
+    _carcass() { const h = new PIXI.Sprite(); h.eventMode = 'none'; this.deadC.addChildAt(h, 0); return h; }
     _drop(q) { for (const sp of this._sprites(q)) { sp.parent?.removeChild(sp); sp.destroy(); } }
 
     /**
@@ -480,12 +484,14 @@
       if (living.length > want && nowMs >= q.nextDeath) {
         const m = living[Math.floor(Math.random() * living.length)];
         m.dead = true; m.fellAt = nowMs; m.pose = null;
+        m.co += m.jo * 0.12; m.cd += (m.jd - 0.5) * 24;   // the horse goes down a little off his line
         this.aliveC.removeChild(m.sp); this.deadC.addChild(m.sp);
         q.nextDeath = nowMs + 260 + Math.random() * 650;
       } else if (living.length < want) {
         const m = q.men.find(x => x.dead);
         if (m) { m.dead = false; m.pose = null; m.co = m.o; m.cd = m.d; this.deadC.removeChild(m.sp); this.aliveC.addChild(m.sp); }
       }
+      const carcasses = !CAMELS.has(q.kit.army) && this.mounts.dead?.length ? this.mounts.dead : null;
       // Where each rider is bound in this part of the cycle.
       const c = q.cycle;
       const goal = m => c.st === 'charge' || c.st === 'melee' ? [m.o * 0.85, -reach + 3 + m.jd * 6] : [m.o, m.d];
@@ -505,15 +511,26 @@
         const sp = m.sp, rider = pool[m.i % pool.length];
         sp.visible = true;
         if (m.dead) {
-          // Thrown where he fell; the horse is gone.
+          // His horse dead where he fell, and he thrown off it, lying just off its back (the top edge of the art).
           this._pose(m, this._pick(q, m.i, 'dead'));
           const [x, y] = at(m.co, m.cd), age = nowMs - m.fellAt, k = m.fellAt && age < 320 ? age / 320 : 1;
-          sp.position.set(x, y); sp.rotation = m.rot;
+          let mx = x, my = y;
+          const hf = carcasses && carcasses[(m.i + q.id) % carcasses.length];
+          if (hf) {
+            const h = m.carcass || (m.carcass = this._carcass());
+            if (h.texture !== hf.t) { h.texture = hf.t; h.anchor.set(hf.ax, hf.ay); }
+            const hs = DEAD_HORSE_PX / hf.w * boost / s;
+            h.visible = true; h.position.set(x, y); h.rotation = m.rot; h.scale.set(m.flip ? -hs : hs, hs); h.alpha = k;
+            const lx = m.jo * 0.6 * hf.w * hs, ly = -(hf.ay * hf.h * hs + (3 + m.jd * 4) * boost / s);
+            mx = x + lx * Math.cos(m.rot) - ly * Math.sin(m.rot); my = y + lx * Math.sin(m.rot) + ly * Math.cos(m.rot);
+          } else if (m.carcass) m.carcass.visible = false;
+          sp.position.set(mx, my); sp.rotation = m.rot + (hf ? (m.jd - 0.5) * 2.4 : 0);
           const sc = unit * (1.25 - 0.25 * k);
           sp.scale.set(m.flip ? -sc : sc, sc);
           sp.alpha = 0.35 + 0.65 * k;
           continue;
         }
+        if (m.carcass) m.carcass.visible = false;
         if (m.pose !== 'ride') { sp.texture = rider.t; sp.anchor.set(rider.ax, rider.ay); m.pose = 'ride'; }
         sp.alpha = 1;
         const [go, gd] = goal(m);

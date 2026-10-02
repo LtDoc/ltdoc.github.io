@@ -187,7 +187,8 @@ and HeavyMG.png.
 - **Cavalry** (cavalry, dragoons, lancers/uhlans, hussars, reconnaissance): eight horsemen of the nation's army
   form up on the unit's line, charge the enemy's line at the gallop (kicking up dust), wheel among the enemy there
   for a few seconds, ride back and charge again. A troop that has just attacked rides straight out of its unit at
-  the enemy. Riders fall like riflemen (one per 12.5 % lost) and lie where they fell, as the army's casualties.
+  the enemy. Riders fall like riflemen (one per 12.5 % lost) and lie where they fell, as the army's casualties,
+  each beside his dead horse (one of five, from DeadHorses.png; camel riders fall without one).
   British and ANZAC riders wear khaki, Germans field grey, Americans olive, the French horizon blue and the
   Ottomans their own khaki. Russians ride the Russian set's own horseman. Arabs ride camels, half with rifles and
   half with sabres. Their tokens fire no rifle
@@ -212,7 +213,8 @@ and HeavyMG.png.
 
 Atlas: `public/assets/mounts.png`, cut by `node scripts/build-mounts.js "rob assets"` from Cavalry.png (recoloured
 into field grey, olive, horizon blue and Ottoman khaki), the Russian Infantry folder's cavalryman, the Arab Infantry
-folder's two camel riders (turned to face up the page like the horses), and Army Assets/PlaneSprites.png. The 36 planes are sorted by eye into 23
+folder's two camel riders (turned to face up the page like the horses), the five dead horses of DeadHorses.png
+(at full size, lying on their sides, saddle up), and Army Assets/PlaneSprites.png. The 36 planes are sorted by eye into 23
 liveries; the table is at the top of the script.
 
 ### Ships in a fight

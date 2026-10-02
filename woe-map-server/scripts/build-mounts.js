@@ -1,8 +1,8 @@
 'use strict';
 // Cuts the horsemen and aircraft for the battle scenes (docs/UNITS.md, "Cavalry and aircraft in a fight") out of the
 // user's art into one small atlas: the rider from Cavalry.png in each army's uniform (the Russians ride their own, from
-// Russian Infantry/…-Cavalry.png, and the Arabs their camels, from Arab Infantry/…mounted….png), and the 36
-// biplanes of PlaneSprites.png,
+// Russian Infantry/…-Cavalry.png, and the Arabs their camels, from Arab Infantry/…mounted….png), the dead horses
+// of DeadHorses.png, and the 36 biplanes of PlaneSprites.png,
 // sorted into liveries (planes painted alike, with the same national markings) so a squadron flies matching planes.
 // Usage: node scripts/build-mounts.js "rob assets"
 // Output: public/assets/mounts.png and public/assets/mounts.json
@@ -128,12 +128,25 @@ function rotate(img, a) {
   return { w: n, h: n, px };
 }
 
-const packed = P.pack([planes.slice(0, 12), planes.slice(12, 24), planes.slice(24), riders]);
+// Dead horses, lying on their sides in profile (saddle up, legs down), one a row on the sheet, at full size.
+const deadFile = path.join(dir, 'DeadHorses.png'), dead = [];
+if (fs.existsSync(deadFile)) {
+  const img = P.decodePng(fs.readFileSync(deadFile)), lab = P.blobs(img);
+  // The horses, top to bottom: their big blobs, each with the small bits (a dropped sword) overlapping its rows.
+  const big = lab.boxes.slice(1).filter((b, i) => lab.area[i + 1] >= 400).sort((a, b) => a[1] - b[1]);
+  for (const b of big) {
+    const parts = lab.boxes.slice(1).filter(o => o === b || (o[1] < b[1] + b[3] && o[1] + o[3] > b[1] && !big.includes(o)));
+    dead.push(P.cut(img, parts, 1));
+  }
+}
+
+const packed = P.pack([planes.slice(0, 12), planes.slice(12, 24), planes.slice(24), riders, ...(dead.length ? [dead] : [])]);
 const frame = f => { const p = packed.place.find(q => q.f === f); return { x: p.x, y: p.y, w: f.w, h: f.h, ax: +(f.cx / f.w).toFixed(3), ay: +(f.cy / f.h).toFixed(3) }; };
 fs.writeFileSync(path.join(OUT, 'mounts.png'), P.encodePng(packed.w, packed.h, packed.px));
 fs.writeFileSync(path.join(OUT, 'mounts.json'), JSON.stringify({
   planes: planes.map(frame),
   liveries: Object.fromEntries(Object.entries(LIVERIES).map(([k, [mark, ids]]) => [k, { mark, planes: ids }])),
   riders: Object.fromEntries(riders.map(r => [r.key, frame(r)])),
+  dead: dead.map(frame),
 }, null, 1));
-console.log(`mounts.png ${packed.w}×${packed.h}: ${planes.length} planes in ${Object.keys(LIVERIES).length} liveries, ${riders.length} riders`);
+console.log(`mounts.png ${packed.w}×${packed.h}: ${planes.length} planes in ${Object.keys(LIVERIES).length} liveries, ${riders.length} riders, ${dead.length} dead horses`);

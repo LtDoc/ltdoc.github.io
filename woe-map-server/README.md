@@ -628,7 +628,7 @@ German, Ottoman or Russian. Set it on the faction (👥 People → faction → *
 choose from the name.
 - The kit follows the game's date: 1914 dress, steel helmets and the new light machine guns from 1916 (the Ottomans'
   new kit from 1918), greatcoats and winter dress from November to February.
-- Arab cavalry ride camels.
+- Arab cavalry ride camels. A fallen horseman lies beside his dead horse.
 - Stormtroopers go in as the army's assault troops; French colonial troops go in as zouaves.
 
 **Machine-gun companies** and **trench mortars** go in as four gun-and-crew teams, left empty when their crew are
