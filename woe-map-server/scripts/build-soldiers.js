@@ -1,139 +1,187 @@
 'use strict';
-// Cuts the infantry figures out of the soldier sheet into a small atlas for the battle skirmishers
-// (docs/UNITS.md, "Riflemen in a firefight").
-// Usage: node scripts/build-soldiers.js "rob assets/soldier+sprites.png"
+// Builds the infantry atlas for the battle scenes (docs/UNITS.md, "Men and machines in a fight") from the user's
+// figure folders, one per army: American, Commonwealth (British), French, German and Russian infantry, each a folder
+// of top-down figures, one per file, named for who and what they are ("German rifleman prone aiming 1916 .png").
+// Usage: node scripts/build-soldiers.js "rob assets"
 // Output: public/assets/soldiers.png and public/assets/soldiers.json
+//
+// Every file is sorted by its name into a kit and a role:
+//   - kits: per army and, where the art has them, per year (1914 or 1916 kit) and season (winter dress or
+//     greatcoats): "german-1916w"; plus assault troops ("german-assault": stormtroopers, trench raiders, Russian
+//     shock troops) and the French zouaves ("french-zouave");
+//   - roles: rifle.prone / rifle.kneel / rifle.stand (aiming lying, kneeling, standing), rifle.run (advancing),
+//     the same for officer.*, nco.* (sergeants, corporals) and lmg.* (Lewis, Chauchat, BAR, MG 08/15 gunners),
+//     medic.*, dead (casualties), crew (men working a gun: observers, loaders, crouching men), and the crewed weapons
+//     with their abandoned counterparts: mg / mg.empty, mortar / mortar.empty.
+// A kit takes for each role the files of its own year and season, else the undated ones, else the other season,
+// else the other year (light machine guns never move back to 1914).
+//
+// Scale: the art is drawn to roughly one scale per army, but not quite the same between armies, so each army is
+// brought to one size by its riflemen's torsos (the widest solid part of a figure, its largest inscribed circle);
+// within an army every figure keeps its size against the others. Each frame records its pivot (the torso's
+// centre; a team weapon's middle) and which way it faces. The art draws everyone facing up the page, so that is the
+// facing, except for men aiming a rifle (they face along it: towards the figure's farthest point, the muzzle), the
+// Vickers and MG 08 (barrel up and to the right), and the corrections in FACING.
 const fs = require('node:fs');
 const path = require('node:path');
-const zlib = require('node:zlib');
+const P = require('./png');
 
-const src = process.argv[2];
-if (!src) { console.error('Usage: node scripts/build-soldiers.js <soldier sheet .png>'); process.exit(1); }
+const root = process.argv[2];
+if (!root) { console.error('Usage: node scripts/build-soldiers.js <folder holding "German Infantry" etc.>'); process.exit(1); }
 const OUT = path.join(__dirname, '..', 'public', 'assets');
-const SCALE = 4;   // shrink factor: the figures are drawn ~16 px tall on the map, so a quarter is plenty
+const TORSO = 16;   // a rifleman's torso across, atlas px (the map shows about half that, so retina screens stay sharp)
 
-// Where each figure sits on the 2500 × 1826 source sheet: [x, y, w, h] boxes (several boxes are joined,
-// e.g. a fallen soldier and his helmet). Four uniforms: beige (khaki), green (olive), grey (blue-grey field
-// uniform) and assault (armoured stormtroopers, bottom right). Top-down poses: aim (rifle levelled), up (rifle
-// held upright: advancing or running), crawl, hands (surrender); front views: back, stand, wounded, dead.
-const SETS = {
-  beige: { aim: [[19, 90, 237, 218]], up: [[314, 80, 191, 237]], crawl: [[537, 118, 238, 199]], hands: [[808, 71, 238, 237]], bayonet: [[1101, 30, 176, 317]],
-    back: [[103, 347, 239, 548]], stand: [[342, 430, 245, 458]], wounded: [[616, 428, 252, 460]], dead: [[891, 396, 303, 480]] },
-  green: { aim: [[1351, 58, 237, 223]], up: [[1638, 25, 211, 252]], hands: [[1876, 24, 238, 253]], crawl: [[2140, 58, 243, 202]],
-    back: [[1351, 337, 216, 547]], stand: [[1632, 410, 254, 451]], wounded: [[1906, 407, 253, 446]], dead: [[2184, 430, 285, 452], [2333, 407, 87, 82]] },
-  grey: { aim: [[78, 979, 238, 213]], up: [[367, 956, 200, 236]], hands: [[603, 955, 238, 237]], crawl: [[876, 994, 226, 198]],
-    dead: [[85, 1367, 286, 436], [248, 1350, 115, 58]], stand: [[370, 1329, 263, 478]], wounded: [[632, 1338, 263, 478]], back: [[894, 1276, 217, 531]] },
-  assault: { aim: [[1336, 971, 252, 230]], up: [[1628, 918, 194, 277]], hands: [[1859, 955, 237, 240]], crawl: [[2130, 997, 239, 198]],
-    back: [[1320, 1209, 219, 560]], stand: [[1562, 1321, 246, 445]], wounded: [[1831, 1321, 253, 448]], dead: [[2108, 1322, 284, 447], [2248, 1291, 90, 87]] },
+const ARMIES = {
+  american: { dir: 'American Infantry', kits: [[null, false]] },
+  british: { dir: 'Commonwealth Infantry', kits: [['1914', false], ['1916', false], ['1914', true], ['1916', true]] },
+  french: { dir: 'French Infantry', kits: [['1914', false], ['1916', false]] },
+  german: { dir: 'German Infantry', kits: [['1914', false], ['1916', false], ['1914', true], ['1916', true]] },
+  russian: { dir: 'Russian Infantry', kits: [[null, false]] },
 };
 
-// ---- PNG in and out (8-bit RGBA, non-interlaced) ---------------------------------------------------
-function decodePng(buf) {
-  const w = buf.readUInt32BE(16), h = buf.readUInt32BE(20), depth = buf[24], ct = buf[25];
-  if (depth !== 8 || ct !== 6 || buf[28] !== 0) throw new Error('expected an 8-bit RGBA PNG');
-  const idat = [];
-  for (let p = 8; p < buf.length;) {
-    const len = buf.readUInt32BE(p), type = buf.toString('ascii', p + 4, p + 8);
-    if (type === 'IDAT') idat.push(buf.subarray(p + 8, p + 8 + len));
-    p += 12 + len;
+// Which way a frame faces (radians, 0 = right, image y down) where the rules above get it wrong; by file name
+// (without its number).
+const UP = -Math.PI / 2;
+const FACING = {
+  'British officer prone aiming winter 1916': -1.0, 'British trench raider sawn-off rifle': UP,
+  'German stormtrooper carbine crouched aiming': -0.8, 'German stormtrooper mp-18 crouched aiming': -0.8,
+  'Riflemen prone': -1.95, 'Riflemen grenadier': -1.2,
+};
+const AIMED = /^(rifle|nco|lmg)\.(prone|kneel|stand)$|^officer\.prone$/;
+const nameOf = file => file.replace(/^\d+-/, '').replace(/\s*\.png$/i, '').replace(/\s+/g, ' ').trim();
+
+/** Who and what a file is: { set, role, era, winter } or null when it is not used. */
+function classify(file) {
+  const n = file.toLowerCase().replace(/^\d+-/, '').replace(/\.png$/, '').replace(/\s+/g, ' ').trim();
+  const era = /1914/.test(n) ? '1914' : /1916/.test(n) || /mg 08-15|chauchat|lewis/.test(n) && !/us marine/.test(n) ? '1916' : null;
+  const winter = /winter|greatcoat/.test(n);
+  const at = (set, role) => ({ set, role, era, winter });
+  // Crewed weapons and abandoned ones.
+  if (/maxim base \d/.test(n)) return null;   // the carriage alone
+  if (/decrewed|maxim gun/.test(n)) return at('line', /mortar/.test(n) ? 'mortar.empty' : 'mg.empty');
+  if (/^field gun/.test(n)) return null;   // drawn to scale, far bigger than the map's guns: those stay
+  if (/mortar/.test(n)) return at('line', 'mortar');
+  if (/vickers gunner|mg 08 crew|hotchkiss crew|browning m1917 crewed|hotchkiss crewed|maxim crew|maxim baseless crew|maxim prone baseless crew/.test(n)) return at('line', 'mg');
+  if (/maxi[mn] (prone )?baseless 1-man/.test(n)) return at('line', 'mg');
+  if (/cavalry|bagpiper|t-gewehr|wex|highlander|sniper|mg 08 (19|greatcoat)|french hotchkiss 19/.test(n)) return null;
+  // Loaders and lookouts work the guns.
+  if (/observer|second number|hotchkiss #2|lewis gun #2/.test(n)) return at('line', 'crew');
+  const pose = /prone/.test(n) ? (/advanc/.test(n) ? null : 'prone') : /crouch/.test(n) ? (/aim/.test(n) ? 'kneel' : 'crouch')
+    : /aim|grenadier|sawn-off/.test(n) ? 'stand' : /advanc/.test(n) ? 'run' : /bayonet|melee/.test(n) ? 'charge' : /idle/.test(n) ? 'idle' : null;
+  if (/casualty|wounded/.test(n)) return at('line', 'dead');
+  if (/medic/.test(n)) return pose === 'crouch' ? at('line', 'medic.kneel') : !pose || pose === 'run' || pose === 'idle' ? at('line', 'medic.run') : null;
+  if (/trench raider|stormtrooper|shocktrooper/.test(n)) {
+    if (/trench raider prone$/.test(n)) return at('assault', 'rifle.prone');
+    if (/prone advanc/.test(n)) return null;
+    const p = pose || 'stand';   // the Russian shock trooper standing
+    return at('assault', 'rifle.' + (p === 'crouch' ? 'kneel' : p === 'idle' ? 'stand' : p));
   }
-  const raw = zlib.inflateSync(Buffer.concat(idat)), stride = w * 4, px = Buffer.alloc(h * stride);
-  for (let y = 0; y < h; y++) {
-    const f = raw[y * (stride + 1)], s = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
-    const cur = px.subarray(y * stride, (y + 1) * stride), prev = y ? px.subarray((y - 1) * stride, y * stride) : null;
-    for (let i = 0; i < stride; i++) {
-      const a = i >= 4 ? cur[i - 4] : 0, b = prev ? prev[i] : 0, c = prev && i >= 4 ? prev[i - 4] : 0;
-      let v = s[i];
-      if (f === 1) v += a; else if (f === 2) v += b; else if (f === 3) v += (a + b) >> 1;
-      else if (f === 4) { const pa = Math.abs(b - c), pb = Math.abs(a - c), pc = Math.abs(a + b - 2 * c); v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c; }
-      cur[i] = v & 255;
-    }
-  }
-  return { w, h, px };
-}
-const CRC = new Int32Array(256).map((_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c; });
-function crc32(b) { let c = -1; for (const x of b) c = CRC[(c ^ x) & 255] ^ (c >>> 8); return (c ^ -1) >>> 0; }
-function chunk(type, data) {
-  const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
-  const td = Buffer.concat([Buffer.from(type, 'ascii'), data]);
-  const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(td));
-  return Buffer.concat([len, td, crc]);
-}
-function encodePng(w, h, px) {
-  const raw = Buffer.alloc(h * (w * 4 + 1));
-  for (let y = 0; y < h; y++) px.copy(raw, y * (w * 4 + 1) + 1, y * w * 4, (y + 1) * w * 4);
-  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 6;
-  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw, { level: 9 })), chunk('IEND', Buffer.alloc(0))]);
+  if (!pose) return null;
+  const set = /zouave/.test(n) ? 'zouave' : 'line';
+  const who = /officer/.test(n) ? 'officer' : /sergeant|corporal/.test(n) ? 'nco' : /bar gunner|chauchat|lewis gunner|mg 08-15/.test(n) ? 'lmg' : 'rifle';
+  if (pose === 'crouch') return who === 'rifle' ? at(set, 'crew') : null;
+  if (pose === 'idle') return at(set, who === 'officer' ? 'officer.stand' : 'rifle.idle');
+  return at(set, `${who}.${pose}`);
 }
 
-// ---- Cut, shrink, pack ------------------------------------------------------------------------------
-const img = decodePng(fs.readFileSync(src));
-// Label the opaque blobs so a figure's box never picks up a piece of its neighbour (a rifle poking in).
-const { w: W, h: H, px } = img;
-const label = new Int32Array(W * H), area = [0];
-{
-  const stack = new Int32Array(W * H);
-  for (let s = 0; s < W * H; s++) {
-    if (px[s * 4 + 3] < 24 || label[s]) continue;
-    const id = area.length; area.push(0);
-    let sp = 0; stack[sp++] = s; label[s] = id;
-    while (sp) {
-      const i = stack[--sp], x = i % W, y = (i - x) / W; area[id]++;
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const yy = y + dy, xx = x + dx; if (yy < 0 || yy >= H || xx < 0 || xx >= W) continue;
-        const j = yy * W + xx; if (px[j * 4 + 3] >= 24 && !label[j]) { label[j] = id; stack[sp++] = j; }
-      }
-    }
+// ---- Measure: torso (largest inscribed circle, exact distance transform), pivot, facing ----
+function edt1(f, n) {
+  const d = new Float64Array(n), v = new Int32Array(n), z = new Float64Array(n + 1);
+  let k = 0; v[0] = 0; z[0] = -Infinity; z[1] = Infinity;
+  for (let q = 1; q < n; q++) {
+    let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    while (s <= z[k]) { k--; s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); }
+    k++; v[k] = q; z[k] = s; z[k + 1] = Infinity;
+  }
+  k = 0;
+  for (let q = 0; q < n; q++) { while (z[k + 1] < q) k++; d[q] = (q - v[k]) ** 2 + f[v[k]]; }
+  return d;
+}
+function measure(img) {
+  const { w, h, px } = img, g = new Float64Array(w * h), col = new Float64Array(h), row = new Float64Array(w);
+  for (let i = 0; i < w * h; i++) g[i] = px[i * 4 + 3] > 128 ? 1e12 : 0;
+  for (let x = 0; x < w; x++) { for (let y = 0; y < h; y++) col[y] = g[y * w + x]; const d = edt1(col, h); for (let y = 0; y < h; y++) g[y * w + x] = d[y]; }
+  let best = 0, cx = 0, cy = 0, x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) row[x] = g[y * w + x];
+    const d = edt1(row, w);
+    for (let x = 0; x < w; x++) if (d[x] > best) { best = d[x]; cx = x; cy = y; }
+  }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (px[(y * w + x) * 4 + 3] > 40) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  return { r: Math.sqrt(best), cx, cy, box: [x0, y0, x1 - x0 + 1, y1 - y0 + 1] };
+}
+function farthest(img, px0, py0) {
+  let best = -1, fx = px0, fy = py0 - 1;
+  for (let y = 0; y < img.h; y++) for (let x = 0; x < img.w; x++) if (img.px[(y * img.w + x) * 4 + 3] > 128) {
+    const d = (x - px0) ** 2 + (y - py0) ** 2; if (d > best) { best = d; fx = x; fy = y; }
+  }
+  return Math.atan2(fy - py0, fx - px0);
+}
+
+// ---- Sort every file ----
+const files = [];   // { army, file, src, set, role, era, winter }
+for (const [army, a] of Object.entries(ARMIES)) {
+  for (const file of fs.readdirSync(path.join(root, a.dir)).filter(f => /\.png$/i.test(f))) {
+    const c = classify(file);
+    if (c) files.push({ army, file, src: path.join(root, a.dir, file), ...c });
   }
 }
-const BIG = 3000;   // blobs this size are figures (or helmets); smaller ones are blood drops and specks
-function cut(boxes) {
-  const x0 = Math.min(...boxes.map(b => b[0])) - 4, y0 = Math.min(...boxes.map(b => b[1])) - 4;
-  const x1 = Math.max(...boxes.map(b => b[0] + b[2])) + 4, y1 = Math.max(...boxes.map(b => b[1] + b[3])) + 4;
-  // The figure's own big blobs: those whose pixels fall inside its boxes' centres.
-  const own = new Set();
-  for (const [bx, by, bw, bh] of boxes) for (let y = by; y < by + bh; y++) for (let x = bx; x < bx + bw; x++) {
-    const l = label[y * W + x]; if (l && area[l] >= BIG) own.add(l);
+const TEAM = /^(mg|mortar)/;
+// Which files each kit uses for each role.
+const kits = {};
+const pick = (army, set, era, winter, role) => {
+  const all = files.filter(f => f.army === army && f.set === set && f.role === role);
+  const tiers = era ? [
+    f => f.era === era && f.winter === winter, f => !f.era && f.winter === winter,
+    f => f.era === era, f => !f.era,
+    ...(role.startsWith('lmg') && era === '1914' ? [] : [f => f.winter === winter, () => true]),
+  ] : [f => f.winter === winter, () => true];
+  for (const t of tiers) { const got = all.filter(t); if (got.length) return got; }
+  return [];
+};
+const ROLES = [...new Set(files.map(f => f.role))];
+for (const [army, a] of Object.entries(ARMIES)) {
+  for (const [era, winter] of a.kits) {
+    const key = army + (era ? '-' + era : '') + (winter ? 'w' : '');
+    kits[key] = {};
+    for (const role of ROLES) { const got = pick(army, 'line', era, winter, role); if (got.length) kits[key][role] = got; }
   }
-  // Keep the largest own blob per box (the figure) plus every small speck; drop other figures' pieces.
-  const sw = Math.ceil((x1 - x0) / SCALE), sh = Math.ceil((y1 - y0) / SCALE), out = Buffer.alloc(sw * sh * 4);
-  let cx = 0, cy = 0, ca = 0;
-  for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
-    let r = 0, g = 0, b = 0, a = 0;
-    for (let yy = 0; yy < SCALE; yy++) for (let xx = 0; xx < SCALE; xx++) {
-      const X = x0 + x * SCALE + xx, Y = y0 + y * SCALE + yy;
-      if (X < 0 || Y < 0 || X >= W || Y >= H) continue;
-      const i = Y * W + X, l = label[i];
-      if (!l || (area[l] >= BIG && !own.has(l))) continue;
-      const al = px[i * 4 + 3];
-      r += px[i * 4] * al; g += px[i * 4 + 1] * al; b += px[i * 4 + 2] * al; a += al;
-    }
-    const o = (y * sw + x) * 4;
-    if (a) { out[o] = Math.round(r / a); out[o + 1] = Math.round(g / a); out[o + 2] = Math.round(b / a); out[o + 3] = Math.round(a / (SCALE * SCALE)); }
-    cx += x * out[o + 3]; cy += y * out[o + 3]; ca += out[o + 3];
+  for (const set of ['assault', 'zouave']) {
+    const roles = {};
+    for (const role of ROLES) { const got = pick(army, set, '1916', false, role); if (got.length) roles[role] = got; }
+    if (Object.keys(roles).length) kits[`${army}-${set}`] = roles;
   }
-  return { w: sw, h: sh, px: out, cx: ca ? cx / ca : sw / 2, cy: ca ? cy / ca : sh / 2 };
 }
-const frames = {}, rows = [];
-for (const [set, poses] of Object.entries(SETS)) {
-  const row = [];
-  for (const [pose, boxes] of Object.entries(poses)) row.push({ set, pose, ...cut(boxes) });
-  rows.push(row);
+
+// ---- Cut the frames used ----
+const used = [...new Set(Object.values(kits).flatMap(k => Object.values(k).flat()))];
+const meas = new Map();
+for (const f of used) { const img = P.decodePng(fs.readFileSync(f.src)); meas.set(f, { img, ...measure(img) }); }
+// Each army's scale: by the median torso of its riflemen (out of winter dress).
+const median = a => { const s = [...a].sort((p, q) => p - q); return s[Math.floor(s.length / 2)]; };
+const shrinkBy = {};
+for (const army of Object.keys(ARMIES)) {
+  const rs = used.filter(f => f.army === army && /^rifle\.(prone|kneel|stand)$/.test(f.role) && !f.winter).map(f => meas.get(f).r);
+  shrinkBy[army] = 2 * median(rs) / TORSO;
 }
-const GAP = 2;
-const sheetW = Math.max(...rows.map(r => r.reduce((s, f) => s + f.w + GAP, GAP)));
-const sheetH = rows.reduce((s, r) => s + Math.max(...r.map(f => f.h)) + GAP, GAP);
-const sheet = Buffer.alloc(sheetW * sheetH * 4);
-let y = GAP;
-for (const row of rows) {
-  let x = GAP;
-  for (const f of row) {
-    for (let yy = 0; yy < f.h; yy++) f.px.copy(sheet, ((y + yy) * sheetW + x) * 4, yy * f.w * 4, (yy + 1) * f.w * 4);
-    (frames[f.set] = frames[f.set] || {})[f.pose] = { x, y, w: f.w, h: f.h, ax: +(f.cx / f.w).toFixed(3), ay: +(f.cy / f.h).toFixed(3) };
-    x += f.w + GAP;
-  }
-  y += Math.max(...row.map(f => f.h)) + GAP;
-}
-fs.writeFileSync(path.join(OUT, 'soldiers.png'), encodePng(sheetW, sheetH, sheet));
-fs.writeFileSync(path.join(OUT, 'soldiers.json'), JSON.stringify({ source: path.basename(src), scale: 1 / SCALE, w: sheetW, h: sheetH, frames }, null, 1));
-console.log(`soldiers.png ${sheetW}×${sheetH}, ${rows.flat().length} figures`);
+const frames = used.map(f => {
+  const m = meas.get(f), k = shrinkBy[f.army], team = TEAM.test(f.role);
+  const pvx = team ? m.box[0] + m.box[2] / 2 : m.cx, pvy = team ? m.box[1] + m.box[3] / 2 : m.cy;
+  const s = P.shrink(m.img, m.box, k);
+  const name = nameOf(f.file);
+  const face = FACING[name] ?? (f.role === 'dead' ? 0 : /vickers|mg 08 (crew|decrewed)/i.test(name) ? -Math.PI / 4
+    : AIMED.test(f.role) && f.army !== 'russian' ? farthest(m.img, pvx, pvy) : UP);
+  return { ...s, f, ax: ((pvx - m.box[0]) / k + s.ox) / s.w, ay: ((pvy - m.box[1]) / k + s.oy) / s.h, face };
+});
+const packed = P.packShelves(frames, 1600);
+const index = new Map(frames.map((fr, i) => [fr.f, i]));
+fs.writeFileSync(path.join(OUT, 'soldiers.png'), P.encodePng(packed.w, packed.h, packed.px));
+fs.writeFileSync(path.join(OUT, 'soldiers.json'), JSON.stringify({
+  torso: TORSO,
+  // [x, y, w, h, pivot x, pivot y (fractions of the frame), facing (radians)]
+  frames: frames.map(fr => { const p = packed.place.find(q => q.f === fr); return [p.x, p.y, fr.w, fr.h, +fr.ax.toFixed(3), +fr.ay.toFixed(3), +fr.face.toFixed(3)]; }),
+  names: frames.map(fr => nameOf(fr.f.file)),
+  kits: Object.fromEntries(Object.entries(kits).map(([k, roles]) => [k, Object.fromEntries(Object.entries(roles).map(([r, fs_]) => [r, fs_.map(f => index.get(f))]))])),
+}));
+console.log(`soldiers.png ${packed.w}×${packed.h}: ${frames.length} figures in ${Object.keys(kits).length} kits`);
+for (const [k, roles] of Object.entries(kits)) console.log(' ', k.padEnd(16), Object.entries(roles).map(([r, l]) => `${r} ${l.length}`).join(', '));

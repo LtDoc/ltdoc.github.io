@@ -108,21 +108,64 @@ each rule that applied. "Entrenched" means the defender has trench cover.
 
 ## Men and machines in a fight
 
-While an infantry unit (any type in the Infantry category: line infantry, conscripts, marines, machine-gunners…)
-is in a gunfire battle this turn, a squad of 8 soldiers holds its firing line on the map from 800 % zoom. Living
-soldiers = strength ÷ 12.5, rounded up (100 % → 8, 74 % → 6, 50 % → 4, 0 → none); the rest lie dead along the
-line. Uniforms: grey, beige or green per faction (chosen on the faction, else from its name), and the armoured
-assault kit for stormtroopers. Purely visual: nothing here changes combat. Code: `public/js/skirmish.js`, wired in
-by `MapRenderer._tickBattles`; atlas built by `scripts/build-soldiers.js`.
+While an infantry unit (any type in the Infantry category: line infantry, conscripts, marines…) is in a battle this
+turn, a section of 8 men holds its firing line on the map from 800 % zoom. Living men = strength ÷ 12.5, rounded up
+(100 % → 8, 74 % → 6, 50 % → 4, 0 → none); the rest lie dead along the line. Purely visual: nothing here changes
+combat. Code: `public/js/skirmish.js`, wired in by `MapRenderer._tickBattles`.
+
+**Armies.** Every faction fights as one of five armies: **American**, **British & Commonwealth**, **French**,
+**German** or **Russian**. The GM picks it on the faction (👥 People → faction → *Army*); left on *Automatic* it
+comes from the name:
+- German: the Central Powers (Ottomans and Bulgaria too) and the northern neutrals.
+- British: the Empire and the Dominions, Japan, Portugal, Egypt and Arabia.
+- French: France, Belgium and French North Africa.
+- Russian: Russia, Italy, the Balkans, Greece, China and Persia.
+- American: the Americas, the Philippines and Liberia.
+
+Factions saved with the old colours read grey as German, beige as British and green as American.
+
+The kit follows the game's date. Before 1916 the men wear 1914 dress: soft caps, the pickelhaube, French blue
+coats. From 1916 they wear steel helmets and horizon blue, and the Lewis gun, Chauchat and MG 08/15 appear.
+German greatcoats and British winter dress are worn from November to February. American and Russian kits do not
+change.
+
+**The section.**
+- An officer, a sergeant (or corporal), a light machine-gunner (where the army and year have one, firing in
+  bursts), a medic and riflemen. Who is who changes from unit to unit.
+- Each man lies, kneels or stands to aim at the enemy, with a flash at each shot. Now and then one gets up and runs
+  along the line.
+- The medic kneels on the line until someone falls, then runs out to the fallen, kneels by them a while and
+  comes back.
+- Assault regiments (stormtroopers) go in as the army's assault troops: German stormtroopers with carbines and
+  MP 18s, British and American trench raiders, Russian shock troops. French colonial troops go in as zouaves. Where
+  the army has no such figures, they fight in its line kit.
+
+**Machine-gun companies and trench mortars** go in as four teams along the line, each gun drawn with its crew: the
+Vickers, MG 08, Hotchkiss, Browning and Maxim; the Stokes, the French mortar and the Minenwerfer. Machine guns fire
+in bursts and mortars thump and smoke (a mortar battery's bombs leave from its teams). Two men per team fall like
+riflemen and lie beside the gun. When both are down the gun is left standing empty, as the abandoned-gun art, and
+falls silent. The Russians have no mortar team, so theirs is the mortar from the gun sheet, crewed by Russians.
+
+**The figures.** Atlas: `public/assets/soldiers.png`, built by `node scripts/build-soldiers.js "rob assets"` from
+the folders American Infantry, Commonwealth Infantry, French Infantry, German Infantry and Russian Infantry.
+- The script sorts each file by its name into a kit (army, year, season, or the assault/zouave set) and a role
+  (rifleman lying/kneeling/standing/advancing, officer, NCO, light machine-gunner, medic, casualty, gun crew, MG or
+  mortar team crewed/empty). Where a kit lacks a role, the next best figure stands in.
+- Scale: each army's figures keep their sizes against each other. The armies are brought to one size by their
+  riflemen's torsos, so a man is about 7 px across and about 20 px lying full length (before the zoom boost).
+- Facing: figures face up the page, as drawn. Aimed rifles face along the rifle. The Vickers and MG 08 point their
+  barrels up and to the right. The few exceptions are listed in the script.
+- Not used: snipers, highlanders, the bagpipers, the anti-tank rifle, the flamethrower, and the Russian field gun.
+  The field gun is drawn to true scale, far bigger than the map's guns.
 
 Other units in a battle (attacking or attacked, gunfire or shelling) show their own kit on the same line:
 
-- **Artillery** and **machine-gun companies**: four guns spread along the line, each worked by two soldiers in the
-  nation's uniform. Field guns and anti-aircraft use the field gun, heavy and coastal batteries the heavy gun, siege
-  batteries and railway guns the siege gun, trench mortars the mortar, horse artillery the horse-drawn gun and
-  machine-gun companies the Maxim. Guns recoil, flash and smoke as they fire, and a battery's shells leave from one
-  of its guns; machine guns fire in bursts. The eight crew fall like riflemen (one per 12.5 % lost); a gun whose two
-  crew are both down goes grey and silent.
+- **Artillery**: four guns spread along the line, each worked by two men of the nation's army. Field guns and
+  anti-aircraft use the field gun, heavy and coastal batteries the heavy gun, siege batteries and railway guns the
+  siege gun, horse artillery the horse-drawn gun (and trench mortars and machine guns, for an army without teams, the
+  mortar and the Maxim). Guns recoil, flash and smoke as they fire, and a battery's shells leave from one of its
+  guns. The eight crew fall like riflemen (one per 12.5 % lost); a gun whose two crew are both down goes grey and
+  silent.
 - **Tanks**: two, rolling out from the unit to the line and firing every few seconds; one is knocked out (dark,
   smoking) at 50 % strength, both at 0. Each nation has its own tank design from the tank sheet.
 
@@ -133,10 +176,12 @@ and HeavyMG.png.
 
 ### Cavalry and aircraft in a fight
 
-- **Cavalry** (cavalry, dragoons, lancers/uhlans, hussars, reconnaissance): eight horsemen in the nation's uniform
+- **Cavalry** (cavalry, dragoons, lancers/uhlans, hussars, reconnaissance): eight horsemen of the nation's army
   form up on the unit's line, charge the enemy's line at the gallop (kicking up dust), wheel among the enemy there
   for a few seconds, ride back and charge again. A troop that has just attacked rides straight out of its unit at
-  the enemy. Riders fall like riflemen (one per 12.5 % lost) and lie where they fell. Their tokens fire no rifle
+  the enemy. Riders fall like riflemen (one per 12.5 % lost) and lie where they fell, as the army's casualties.
+  British riders wear khaki, Germans field grey, Americans olive and the French horizon blue. Russians ride the
+  Russian set's own horseman. Their tokens fire no rifle
   line: the charge is their attack.
 - **Aircraft** (fighter, bomber, reconnaissance and seaplane squadrons): four planes flying above the units, each with
   a shadow on the ground, from 800 % zoom, in or out of a fight.
@@ -157,7 +202,7 @@ and HeavyMG.png.
   - There are no rifle lines in a fight with an air unit; ground units under attack still fire from their squads.
 
 Atlas: `public/assets/mounts.png`, cut by `node scripts/build-mounts.js "rob assets"` from Cavalry.png (recoloured
-into the grey and green uniforms) and Army Assets/PlaneSprites.png. The 36 planes are sorted by eye into 23
+into field grey, olive and horizon blue), the Russian Infantry folder's cavalryman, and Army Assets/PlaneSprites.png. The 36 planes are sorted by eye into 23
 liveries; the table is at the top of the script.
 
 ## Campaign rules

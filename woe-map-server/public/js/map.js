@@ -38,6 +38,7 @@
   window.woe = { renderer, state }; // handy for debugging from the console
   $('#rendererLabel').textContent = renderer.rendererType.toUpperCase();
   renderer.canDrag = m => canEdit(m) && !m.locked;
+  renderer.gameDate = () => (gameOn() ? state.game.date : null);   // the battle figures dress for the year and season
   renderer.canEditShape = s => canEditShape(s) && !s.locked;
   renderer.unitsToPx = (x, y, units) => units / (distanceUnits(x, y, x + 1, y) || 1);   // km (or map units) → px, locally
   Object.defineProperty(renderer, 'railCutKm', { get: () => Number(state.game?.settings?.railCutKm) || 10 });
@@ -1493,8 +1494,10 @@
     $('#facId').value = f ? f.id : '';
     $('#facName').value = f ? f.name : '';
     $('#facColor').value = f ? f.color : PALETTE[state.factions.length % PALETTE.length];
-    $('#facUniform').value = f?.uniform || '';
-    $('#facUniform').options[0].textContent = `Automatic (${window.Skirmish ? window.Skirmish.uniformFor(f ? f.name : '', '') : 'from the name'})`;
+    // Factions saved with the old colours (grey, beige, green) show the army they now stand for.
+    $('#facUniform').value = f?.uniform && window.Skirmish ? window.Skirmish.uniformFor('', f.uniform) : (f?.uniform || '');
+    const auto = window.Skirmish ? window.Skirmish.uniformFor(f ? f.name : '', '') : '';
+    $('#facUniform').options[0].textContent = `Automatic (${[...$('#facUniform').options].find(o => o.value === auto)?.textContent || 'from the name'})`;
     $('#facFlagAsset').value = f ? (f.flagAsset || '') : '';
     $('#facFlagFile').value = '';
     $('#facDelete').hidden = !f;

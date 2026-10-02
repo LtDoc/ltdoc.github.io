@@ -616,20 +616,27 @@ heading it was fired on while sections of the line sweep their aim along the ene
 lulls at their own cadence, and every 7–11 s loose a volley together; tracer speed, length and colour vary
 shot to shot. The defender's line fires back with about two thirds as many rifles and its own pattern; a side
 that has been destroyed or removed stops firing. Visible from 800 % zoom.
-**Riflemen** man an **infantry** unit's firing line (60 px ahead of its token): a squad of eight small soldiers
-that run out from the unit when the fight starts, aim at the enemy with a flash at each shot, and now and then
-get up and run along the line to a new spot. Each 12.5 % of strength lost leaves one dead on the line, falling one
-after another when a blow lands (at 50 %: four firing, four fallen); healing brings them back. Every nation's
-infantry wears one uniform: grey, beige (khaki) or green (olive), set on the faction (👥 People → faction →
-*Infantry uniform*) or, left on *Automatic*, guessed from its name so the 1914 sides stand apart (the Central
-Powers in grey; Britain, France and Belgium in khaki; Russia, Italy and the Americas in olive). Assault
-regiments (stormtroopers) wear the armoured kit whatever their nation. The figures come from
-`public/assets/soldiers.png`, cut from the soldier sheet by `node scripts/build-soldiers.js "rob assets/soldier+sprites.png"`
-(`public/js/skirmish.js`).
-**Artillery** and **machine-gun companies** show four guns of their type along the line, each worked by two of
-those soldiers (guns recoil and smoke, shells leave from them, a gun whose crew is down falls silent); **tanks**
-roll out two to a unit, one knocked out at 50 % strength. Each nation has its own tank design. Details:
-`docs/UNITS.md`.
+**Infantry** man a unit's firing line, 60 px ahead of its token.
+- A section of eight runs out from the unit when the fight starts: an officer, a sergeant, a light machine-gunner,
+  a medic and riflemen, lying, kneeling or standing to aim at the enemy, with a flash at each shot.
+- Now and then one runs along the line to a new spot, and the medic goes out to kneel by the fallen.
+- Each 12.5 % of strength lost leaves one dead on the line, falling one after another when a blow lands (at 50 %:
+  four firing, four fallen). Healing brings them back.
+
+**Armies.** Every faction fights as one of five armies: American, British & Commonwealth, French, German or
+Russian. Set it on the faction (👥 People → faction → *Army*), or leave it on *Automatic* to choose from the name.
+- The kit follows the game's date: 1914 dress, steel helmets and the new light machine guns from 1916, greatcoats
+  and winter dress from November to February.
+- Stormtroopers go in as the army's assault troops; French colonial troops go in as zouaves.
+
+**Machine-gun companies** and **trench mortars** go in as four gun-and-crew teams, left empty when their crew are
+down. Other **artillery** shows four guns of its type, each worked by two men (guns recoil and smoke, shells leave
+from them, a gun whose crew is down falls silent).
+
+**Tanks** roll out two to a unit, one knocked out at 50 % strength. Each nation has its own tank design.
+
+The figures come from `public/assets/soldiers.png`, built from the army folders by
+`node scripts/build-soldiers.js "rob assets"` (`public/js/skirmish.js`). Details: `docs/UNITS.md`.
 **Artillery** (and ships) **shell** the target instead: bursts from `public/assets/shellburst.png` land at random
 around it every second or two. Each shell leaves the guns with a flash and climbs a slow arc (1–2.4 s, a bright
 shell with a fading trail over a faint dotted trajectory) to where it lands, so the line of fire is clear even

@@ -655,8 +655,11 @@ router.get('/:id/factions', (req, res) => {
   res.json({ factions: q.factions.all(req.lobby.id).map(access.serializeFaction) });
 });
 
-/** Infantry uniforms for the battle figures ('' = chosen from the faction's name, public/js/skirmish.js). */
-const UNIFORMS = ['grey', 'beige', 'green'];
+/**
+ * The army a faction's battle figures come from ('' = chosen from the faction's name, public/js/skirmish.js). Factions
+ * saved earlier may still hold grey, beige or green, which the map reads as German, British and American.
+ */
+const UNIFORMS = ['american', 'british', 'french', 'german', 'russian'];
 
 function factionFlagAsset(v) {
   if (v === undefined) return undefined;

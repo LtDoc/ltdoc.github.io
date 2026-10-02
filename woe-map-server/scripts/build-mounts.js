@@ -1,6 +1,7 @@
 'use strict';
 // Cuts the horsemen and aircraft for the battle scenes (docs/UNITS.md, "Cavalry and aircraft in a fight") out of the
-// user's art into one small atlas: the rider from Cavalry.png in each uniform, and the 36 biplanes of PlaneSprites.png,
+// user's art into one small atlas: the rider from Cavalry.png in each army's uniform (the Russians ride their own, from
+// Russian Infantry/…-Cavalry.png), and the 36 biplanes of PlaneSprites.png,
 // sorted into liveries (planes painted alike, with the same national markings) so a squadron flies matching planes.
 // Usage: node scripts/build-mounts.js "rob assets"
 // Output: public/assets/mounts.png and public/assets/mounts.json
@@ -63,7 +64,7 @@ const lum = i => 0.3 * cav.px[i * 4] + 0.59 * cav.px[i * 4 + 1] + 0.11 * cav.px[
 let sum = 0, n = 0;
 for (let i = 0; i < cav.w * cav.h; i++) if (isKit(i)) { sum += lum(i); n++; }
 const mean = sum / n;
-const TINTS = { beige: null, grey: [104, 107, 99], green: [108, 110, 68] };   // field grey; olive drab
+const TINTS = { beige: null, grey: [104, 107, 99], green: [108, 110, 68], french: [112, 132, 160] };   // field grey; olive drab; horizon blue
 const riders = Object.entries(TINTS).map(([key, rgb]) => {
   const px = Buffer.from(cav.px);
   if (rgb) for (let i = 0; i < cav.w * cav.h; i++) if (isKit(i)) {
@@ -73,6 +74,18 @@ const riders = Object.entries(TINTS).map(([key, rgb]) => {
   const img = { w: cav.w, h: cav.h, px };
   return { ...P.cut(img, [[0, 0, cav.w, cav.h]], 3), key };
 });
+
+// The Russian horseman, brought to the same height as the others.
+const ruDir = path.join(dir, 'Russian Infantry'), ruFile = fs.existsSync(ruDir) && fs.readdirSync(ruDir).find(f => /cavalry.png$/i.test(f));
+if (ruFile) {
+  const img = P.decodePng(fs.readFileSync(path.join(ruDir, ruFile)));
+  let x0 = img.w, y0 = img.h, x1 = -1, y1 = -1;
+  for (let y = 0; y < img.h; y++) for (let x = 0; x < img.w; x++) if (img.px[(y * img.w + x) * 4 + 3] > 40) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  const box = [x0, y0, x1 - x0 + 1, y1 - y0 + 1], r = P.shrink(img, box, box[3] / (riders[0].h - 8));
+  let cx = 0, cy = 0, ca = 0;
+  for (let i = 0; i < r.w * r.h; i++) { const a = r.px[i * 4 + 3]; cx += (i % r.w) * a; cy += Math.floor(i / r.w) * a; ca += a; }
+  riders.push({ ...r, cx: cx / ca, cy: cy / ca, key: 'russian' });
+}
 
 const packed = P.pack([planes.slice(0, 12), planes.slice(12, 24), planes.slice(24), riders]);
 const frame = f => { const p = packed.place.find(q => q.f === f); return { x: p.x, y: p.y, w: f.w, h: f.h, ax: +(f.cx / f.w).toFixed(3), ay: +(f.cy / f.h).toFixed(3) }; };

@@ -96,6 +96,30 @@ function cut(img, boxes, scale, lab = null, big = 3000) {
   return { w: sw, h: sh, px: out, cx: ca ? cx / ca : sw / 2, cy: ca ? cy / ca : sh / 2 };
 }
 
+/**
+ * Cut the box [x, y, w, h] out of an image, shrunk by any factor `k` (> 1: output px = input px / k), averaging
+ * the covered area (premultiplied), with a 2 px transparent margin. Returns { w, h, px, ox, oy } where (ox, oy) is
+ * where the box's top-left corner lands in the output (to map points across: out = (in - box) / k + o).
+ */
+function shrink(img, box, k) {
+  const { w: W, h: H, px } = img, [bx, by, bw, bh] = box, M = 2;
+  const sw = Math.ceil(bw / k) + 2 * M, sh = Math.ceil(bh / k) + 2 * M, out = Buffer.alloc(sw * sh * 4);
+  for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
+    const x0 = bx + (x - M) * k, y0 = by + (y - M) * k, x1 = x0 + k, y1 = y0 + k;
+    let r = 0, g = 0, b = 0, a = 0;
+    for (let Y = Math.max(0, Math.floor(y0)); Y < Math.min(H, Math.ceil(y1)); Y++) {
+      const wy = Math.min(Y + 1, y1) - Math.max(Y, y0);
+      for (let X = Math.max(0, Math.floor(x0)); X < Math.min(W, Math.ceil(x1)); X++) {
+        const wgt = (Math.min(X + 1, x1) - Math.max(X, x0)) * wy, i = (Y * W + X) * 4, al = px[i + 3] * wgt;
+        r += px[i] * al; g += px[i + 1] * al; b += px[i + 2] * al; a += al;
+      }
+    }
+    const o = (y * sw + x) * 4;
+    if (a > 0) { out[o] = Math.round(r / a); out[o + 1] = Math.round(g / a); out[o + 2] = Math.round(b / a); out[o + 3] = Math.min(255, Math.round(a / (k * k))); }
+  }
+  return { w: sw, h: sh, px: out, ox: M, oy: M };
+}
+
 /** Pack frames ({ w, h, px, ... }) into rows on one sheet; returns { w, h, px, place: [{ x, y }] }. */
 function pack(rows, gap = 2) {
   const W = Math.max(...rows.map(r => r.reduce((s, f) => s + f.w + gap, gap)));
@@ -114,4 +138,16 @@ function pack(rows, gap = 2) {
   return { w: W, h: H, px, place };
 }
 
-module.exports = { decodePng, encodePng, blobs, cut, pack };
+/** Pack frames into a sheet about `width` px wide, tallest first, in shelves. Same result shape as pack(). */
+function packShelves(frames, width, gap = 2) {
+  const order = [...frames].sort((a, b) => b.h - a.h), rows = [];
+  let row = [], x = gap;
+  for (const f of order) {
+    if (row.length && x + f.w + gap > width) { rows.push(row); row = []; x = gap; }
+    row.push(f); x += f.w + gap;
+  }
+  if (row.length) rows.push(row);
+  return pack(rows, gap);
+}
+
+module.exports = { decodePng, encodePng, blobs, cut, shrink, pack, packShelves };
