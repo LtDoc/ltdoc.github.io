@@ -918,10 +918,26 @@
 
     // ---- Infantry and gun crews ----------------------------------------------------------------------------------
     _tickMen(q, f, nowMs, t, s, boost, g, at, theta, unit) {
-      const crew = q.kind === 'guns';
-      const living = q.men.filter(m => !m.dead);
+      const crew = q.kind === 'guns', drop = f.view?.strengthDrop, strength = strengthOf(f.view);
+      // Destroyed: the last men (three at most) give up rather than fall, and are marched off (m.pow).
+      if (!crew && strength <= 0 && !q.surrendered && drop && nowMs - drop.at < 3000) {
+        q.surrendered = true;
+        q.men.filter(m => !m.dead).slice(0, 3).forEach((m, k) => { m.pow = { t0: nowMs + 400 + k * 250, flag: k === 0 }; m.run = null; m.tend = null; });
+      }
+      // Broken by a heavy blow (a quarter of its strength or more at once): the survivors fall back in disorder, out
+      // behind the line, and after a few seconds work their way back to their places.
+      if (!crew && drop && strength > 0 && drop.from - strength >= 25 && nowMs - drop.at < 2000 && q.routFor !== drop.at) {
+        q.routFor = drop.at; q.routUntil = nowMs + 6000 + Math.random() * 3000;
+        for (const m of q.men) {
+          if (m.dead || m.pow || m.role === 'medic') continue;
+          const [o0, d0] = m.run ? (p => [p.o, p.d])(this._runPos(m, nowMs)) : [m.o, m.d];
+          m.o = o0; m.d = d0; m.tend = null; m.away = true;
+          m.run = { o0, d0, o1: Math.max(-0.6, Math.min(0.6, o0 + (Math.random() - 0.5) * 0.2)), d1: d0 + 40 + Math.random() * 35, t0: nowMs + Math.random() * 500, dur: 0, rout: true };
+        }
+      }
+      const living = q.men.filter(m => !m.dead && !m.pow);
       // Casualties follow strength: one man per 12.5 % lost, falling one after another; healing brings them back.
-      const want = aliveFor(strengthOf(f.view));
+      const want = aliveFor(strength);
       if (living.length > want && nowMs >= q.nextDeath) {
         // The medic is hit last but two, so he is about to tend the fallen.
         const pool = living.length > 2 ? living.filter(x => x.role !== 'medic') : living;
@@ -988,6 +1004,33 @@
           sp.scale.set(unit);
           continue;
         }
+        if (m.pow) {
+          // A prisoner: standing a moment (one waving a white rag on a stick), then marched off towards the enemy's
+          // line at a walk, fading from sight.
+          const age = nowMs - m.pow.t0;
+          if (age < 0) continue;
+          const reach = ((f.tx - f.cx) * f.ux + (f.ty - f.cy) * f.uy) * s, walk = Math.max(0, age - 1800) / 1000 * 14;
+          const d1 = -reach * 0.85, o1 = m.o * 0.3, k = Math.min(1, walk / Math.max(1, Math.abs(m.d - d1)));
+          const [x0, y0] = at(m.o, m.d), [x, y] = at(m.o + (o1 - m.o) * k, m.d + (d1 - m.d) * k);
+          const fr = this._pick(q, m.i, walk > 0 ? 'rifle.run' : 'crew');
+          this._pose(m, fr);
+          sp.position.set(x, y);
+          sp.rotation = (walk > 0 ? Math.atan2(y - y0, x - x0) || theta : theta) - fr.face;
+          sp.scale.set(unit * (walk > 0 ? 1 + 0.04 * Math.abs(Math.sin(t * 7 + m.i)) : 1));
+          sp.alpha = Math.max(0, Math.min(1, (12000 - age) / 3000));
+          if (sp.alpha <= 0) { sp.visible = false; continue; }
+          if (m.pow.flag && g) {
+            const fx = x - (f.ux || 0) * 3 * boost / s, fy = y - 9 * boost / s, wave = Math.sin(t * 6) * 1.2 * boost / s;
+            g.moveTo(x, y).lineTo(fx, fy).stroke({ width: 0.7 * boost / s, color: 0x5b4632, alpha: sp.alpha });
+            g.poly([fx, fy, fx + 6 * boost / s, fy + wave, fx + 6 * boost / s, fy + 4 * boost / s + wave, fx, fy + 4 * boost / s]).fill({ color: 0xf2f0ea, alpha: sp.alpha });
+          }
+          continue;
+        }
+        // Rallying after a rout: back to his place.
+        if (m.away && !m.run && nowMs >= (q.routUntil || 0)) {
+          m.away = false; m.next = nowMs + 5000 + Math.random() * 6000;
+          m.run = { o0: m.o, d0: m.d, o1: m.home[0], d1: m.home[1], t0: nowMs + Math.random() * 1200, dur: 0, home: true };
+        }
         // The medic goes out to one of the fallen now and then, kneels by him a while, and comes back.
         if (m.role === 'medic' && !m.run && !m.tend && nowMs >= m.next) {
           const v = fallen[Math.floor(Math.random() * fallen.length)];
@@ -1014,6 +1057,7 @@
             m.o = r.o1; m.d = r.d1; m.run = null; m.next = nowMs + 3500 + Math.random() * 8000;
             if (r.to) m.tend = { to: r.to, until: nowMs + 4000 + Math.random() * 3000 };
             if (r.home) m.next = nowMs + 5000 + Math.random() * 6000;
+            if (r.rout) m.next = Infinity;   // holds back there until the section rallies
           } else if (nowMs >= r.t0) {
             const p = this._runPos(m, nowMs), [x, y] = at(p.o, p.d), [x0, y0] = at(r.o0, r.d0), [x1, y1] = at(r.o1, r.d1);
             const fr = this._pick(q, m.i, m.role === 'rifle' ? 'rifle.run' : m.role + '.run');

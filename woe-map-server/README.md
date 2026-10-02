@@ -651,6 +651,8 @@ A haze of **battle smoke** drifts over every fight, thickening the longer it has
 under a bombardment it is dust and smoke over the target. Fights **mark the ground**: tank tracks churned behind the tanks,
 hoofprints where cavalry rode, small shell holes where guns and tanks firing over open sights hit; they fade over a
 quarter of an hour (they are drawn in the browser, not saved).
+A section hit hard **routs** back behind its line and rallies; one destroyed **surrenders**: its last men are
+marched off under a white flag.
 
 **Machine-gun companies** and **trench mortars** go in as four gun-and-crew teams, left empty when their crew are
 down. Other **artillery** shows four guns of its type, each worked by two men (guns recoil and smoke, shells leave
