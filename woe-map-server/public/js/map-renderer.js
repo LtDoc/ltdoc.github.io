@@ -201,7 +201,7 @@ class MapRenderer extends EventTarget {
   /** Play an explosion at a world position with a given on-screen size in px. `frames` defaults to the explosion sheet. */
   explode(x, y, screenSize = 72, delayMs = 0, frames = null) {
     this.invalidate();
-    this._sfx('boom', x, y, { size: screenSize / 80, delay: delayMs / 1000 });
+    this._incoming(x, y, delayMs / 1000);
     frames = frames || this.explosionFrames;
     if (!frames) return false;
     const sp = new PIXI.AnimatedSprite(frames);
@@ -1635,12 +1635,43 @@ class MapRenderer extends EventTarget {
     return any;
   }
 
-  /** A battle sound at a world point (sound.js): panned and faded by where it is in the view, crisper close in. */
-  _sfx(type, x, y, opts = {}) {
+  /** An incoming shell's whistle and burst (sound.js), landing `inSec` from now at a world point: panned and faded by
+   * where it is in the view. Only from 200 % zoom (further out the distant bombardment covers it). */
+  _incoming(x, y, inSec) {
     const S = window.BattleSound;
-    if (!S || !S.enabled) return;
+    if (!S || !S.enabled || this.scale < 2) return;
     const s = this.scale, W = this.app.screen.width / 2, H = this.app.screen.height / 2;
-    S.play(type, (x * s + this.world.x - W) / W, (y * s + this.world.y - H) / H, { near: Math.max(0, Math.min(1, (s - 2) / 20)), ...opts });
+    S.incoming((x * s + this.world.x - W) / W, (y * s + this.world.y - H) / H, inSec, Math.max(0, Math.min(1, (s - 2) / 20)));
+  }
+  /**
+   * The sound beds for what is on screen (sound.js), a few times a second: the fights in view, each counting for
+   * more the nearer it is to the middle. Close in (800 % and more) the gunfire of the nearest fights, over the
+   * battlefield's din; at middling zoom the din; zoomed out, a bombardment far off. Panned towards where they are.
+   */
+  _soundScene(nowMs) {
+    const S = window.BattleSound;
+    if (!S || !S.enabled || nowMs - (this._sceneAt || 0) < 250) return;
+    this._sceneAt = nowMs;
+    const s = this.scale, W = this.app.screen.width / 2, H = this.app.screen.height / 2;
+    let weight = 0, panSum = 0, shells = 0, count = 0;
+    for (const e of this.battles.values()) {
+      const b = e.battle;
+      if (b.until && b.until <= Date.now()) continue;
+      const mx = ((b.ax + b.dx) / 2) * s + this.world.x, my = ((b.ay + b.dy) / 2) * s + this.world.y;
+      const dx = (mx - W) / W, dy = (my - H) / H, off = Math.hypot(dx, dy);
+      if (off > 1.4) continue;
+      const w = Math.max(0, 1 - off / 1.4);
+      weight += w; panSum += dx * w; count++;
+      if (b.kind === 'shells') shells += w;
+    }
+    const near = Math.max(0, Math.min(1, (s - 6) / 6)), far = Math.max(0, Math.min(1, (5 - s) / 2));
+    const level = Math.min(1, weight / 1.5);
+    S.scene({
+      gunfire: level * near * Math.min(1, (weight - shells * 0.7) / 1.2 + 0.2),
+      trench: count ? Math.min(1, weight) * (1 - far) * (near ? 0.7 : 1) : 0,
+      distant: count ? Math.min(1, 0.4 + count / 6) * far : 0,
+      pan: weight ? panSum / weight : 0,
+    });
   }
   /** Replace the battles shown (from GET /battles). */
   setBattles(list) { this.battles.clear(); for (const b of list || []) this.addBattle(b); this.invalidate(); }
@@ -1750,20 +1781,12 @@ class MapRenderer extends EventTarget {
           const dur = Math.max(1000, Math.min(2400, 700 + distPx * 4));          // slow enough to follow
           const h = Math.max(30, Math.min(160, distPx * 0.35)) / s;                // arc height (up the screen)
           this.shellsInFlight.push({ x0: mx, y0: my, x1: bx, y1: by, t0: nowMs, dur, h });
-          this._sfx('cannon', mx, my, { near: Math.min(1, s / 12) });
-          this._sfx('whistle', bx, by, { dur: dur / 1000 * 0.9, delay: 0.1 });
           this._gunFlash(mx, my, ux, uy);
           if (this._isWater(bx, by, b)) this.splash(bx, by, 80 + Math.random() * 50, dur);
           else this.explode(bx, by, 80 + Math.random() * 60, dur, this.shellFrames);
           e.nextShell = nowMs + 900 + Math.random() * 1600;
         }
       }
-    }
-    // Zoomed out, fights on screen are heard as the distant rumble of guns.
-    if (!gunZoom && window.BattleSound?.enabled && this.battles.size && Math.random() < 0.04) {
-      const on = [...this.battles.values()].filter(e => onScreen(e.battle.dx, e.battle.dy, 0));
-      const e = on[Math.floor(Math.random() * on.length)];
-      if (e) this._sfx('rumble', e.battle.dx, e.battle.dy, { near: 0 });
     }
     // Air and naval units out of a fight, on screen: their planes circle over them, their ships lie around them.
     if (gunZoom && (sk?.mounts || sk?.ships)) {
@@ -1957,7 +1980,7 @@ class MapRenderer extends EventTarget {
    * outwards, a darker patch where the water churned and two foam rings spreading on the surface. ~1.2 s.
    */
   splash(x, y, screenSize = 80, delayMs = 0) {
-    this._sfx('splash', x, y, { delay: delayMs / 1000 });
+    this._incoming(x, y, delayMs / 1000);
     this.invalidate();
     const g = new PIXI.Graphics();
     g.eventMode = 'none';
@@ -2271,6 +2294,7 @@ class MapRenderer extends EventTarget {
     }
     this._syncWeather();
     if (this._tickWeather(nowMs)) anim = true;
+    if (window.BattleSound?.enabled) this._soundScene(nowMs);
     if ((this.craters.size || this.towns.size) && this.scale >= 1.5) {
       const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
       if (this._tickTowns(tl.x, tl.y, br.x, br.y)) anim = true;

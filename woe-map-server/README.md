@@ -658,10 +658,12 @@ A ship that goes down leaves an **oil slick**, burning at first, with wreckage d
 (on the vector Earth: from about 43° north in January to 55° in November and March, deepening northwards), and each
 turn has its weather from its date, snow falling on some winter turns and rain on some turns all year, most in
 autumn, drawn over the view from 400 % zoom; from autumn to spring the mud round shell craters is darker.
-**Battle sounds** (🎧 in the top bar, off until switched on, remembered per browser): rifle cracks, machine guns at
-their rates, cannon, shell whistles and bursts, flak, hoofbeats and splashes where you are looking, panned across
-the speakers and fading with distance; zoomed out, the distant rumble of guns. All synthesised in the browser
-(`public/js/sound.js`), no sound files.
+**Battle sounds** (🎧 in the top bar, off until switched on, remembered per browser; `public/js/sound.js`), from
+recordings in `public/assets/sounds`: looping beds faded in and out with the fights in view (close in, from 800 %,
+the gunfire of the nearest fights over the din of the battlefield; at middling zoom the din; zoomed out, a
+bombardment far off), panned towards them; and an incoming shell's whistle for each shell, bomb or splash on
+screen, timed so its burst lands with the explosion. The recordings are from Pixabay (freesound_community,
+soundreality, fronbondi_skegs), under the Pixabay Content License.
 
 **Machine-gun companies** and **trench mortars** go in as four gun-and-crew teams, left empty when their crew are
 down. Other **artillery** shows four guns of its type, each worked by two men (guns recoil and smoke, shells leave
