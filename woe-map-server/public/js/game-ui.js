@@ -42,6 +42,9 @@ const GameUI = (() => {
     $('#btnWorldSetup').onclick = () => generateProvinces(true);
     $('#btnCosts').onclick = () => CostEditor.open(ctx.state.lobby, { settings: g().settings, onSaved: game => { ctx.state.game = game; refresh(); loadProduction(); } });
     $('#btnSeedCities').onclick = seedCities;
+    $('#btnHistAssign').onclick = assignHistory;
+    $('#histFaction').onchange = () => { $('#histName').value = ''; $('#histName').placeholder = $('#histFaction').selectedOptions[0]?.textContent || 'e.g. Mexico'; };
+    $('#histName').onfocus = () => { if (!$('#histNames').options.length) loadHistoryNames(); };
     $('#btnGenResources').onclick = generateResources;
     $('#buildFilter').oninput = renderBuildList;
     $('#btnTurnReports').onclick = () => openReports();
@@ -187,6 +190,29 @@ const GameUI = (() => {
       toast(`${d.assigned.length} states assigned, ${d.unassigned.length} neutral${d.flipped ? `, ${d.flipped} places changed hands` : ''}`, 4000);
       await ctx.loadTerritories();
     } catch (err) { toast(err.message); }
+  }
+  /** Give one faction its historical land, leaving the other borders alone. */
+  async function assignHistory() {
+    const { $, state } = ctx;
+    const fid = Number($('#histFaction').value), f = (state.factions || []).find(x => x.id === fid);
+    if (!f) { toast('Pick a faction'); return; }
+    const names = ($('#histName').value.trim() || f.name).split(',').map(s => s.trim()).filter(Boolean);
+    const onlyNeutral = $('#histNeutral').checked;
+    if (!onlyNeutral && !confirm(`Give ${f.name} all the land of ${names.join(', ')}, taking it from whoever holds it now?`)) return;
+    try {
+      const d = await api.post(`${ctx.base}/game/territory/assign-history`, { factionId: fid, names, onlyNeutral, colonies: $('#histColonies').checked, year: Number($('#terrYear').value) || 1914 });
+      toast(d.taken ? `${f.name} gets ${d.taken} of ${d.matched} provinces of ${names.join(', ')}${d.flipped ? `, ${d.flipped} places changed hands` : ''}`
+        : `Nothing to give: the ${d.matched} provinces of ${names.join(', ')} are ${onlyNeutral ? 'already held by someone (untick "Unclaimed land only" to take them)' : 'already ' + f.name + "'s"}`, 6000);
+      await ctx.loadTerritories();
+    } catch (err) { toast(err.message); }
+  }
+  /** Suggestions for "Land of": the states and powers the provinces (or the year's map) know. */
+  async function loadHistoryNames() {
+    const { $ } = ctx;
+    try {
+      const d = await api.get(`${ctx.base}/game/territory/history-names?year=${Number($('#terrYear').value) || 1914}`);
+      $('#histNames').innerHTML = d.names.map(n => `<option value="${esc(n.name)}">${n.provinces ? `${n.provinces} provinces` : ''}</option>`).join('');
+    } catch { /* not the GM */ }
   }
   async function assignDrawing() {
     const { $, state } = ctx;
@@ -616,7 +642,7 @@ const GameUI = (() => {
       $('#diploQueue').innerHTML = pending.length ? pending.map(d => `<div class="diplo"><span class="grow">${esc(factionName(d.from))} → ${esc(factionName(d.to))}: ${KIND_LABEL[d.kind]}${d.note ? ` <span class="hint">${esc(d.note)}</span>` : ''}</span><button class="small" data-diplo="approve:${d.id}">Approve</button><button class="small secondary" data-diplo="block:${d.id}">Block</button></div>`).join('')
         : '<p class="hint">No proposals waiting for you. Players queue declarations and offers from their 🤝 Diplomacy panel.</p>';
       const opts = list.map(x => `<option value="${x.faction.id}">${esc(x.faction.name)}</option>`).join('');
-      for (const id of ['#relA', '#relB', '#terrAssignFaction', '#terrBrushFaction']) {
+      for (const id of ['#relA', '#relB', '#terrAssignFaction', '#terrBrushFaction', '#histFaction']) {
         const sel = $(id), cur = sel.value;
         sel.innerHTML = (id === '#terrAssignFaction' || id === '#terrBrushFaction' ? '<option value="0">neutral</option>' : '') + opts;
         if ([...sel.options].some(o => o.value === cur)) sel.value = cur;

@@ -128,6 +128,30 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     res.json({ assigned: r.assigned, unassigned: r.unassigned, flipped: flipped.length, game: g });
   });
 
+  /** Historical states and powers a faction can be given (the datalist for "Give a faction its historical land"). */
+  router.get('/territory/history-names', requireGm, (req, res) => {
+    res.json({ names: territory.historyNames(req.lobby, Number(req.query.year) || 1914) });
+  });
+  /**
+   * Give one faction its historical land without touching anyone else's borders: the provinces (or, without
+   * provinces, the state outlines) of the named states or powers. `onlyNeutral` takes unclaimed land only.
+   */
+  router.post('/territory/assign-history', requireGm, (req, res) => {
+    const fid = Number(req.body?.factionId);
+    const f = fid && game.q.faction.get(fid, req.lobby.id);
+    if (!f) return res.status(404).json({ error: 'Pick a faction' });
+    const names = (Array.isArray(req.body?.names) ? req.body.names : [req.body?.names]).map(n => clean(n, 80)).filter(Boolean).slice(0, 20);
+    if (!names.length) names.push(f.name);
+    const onlyNeutral = req.body?.onlyNeutral !== false;
+    let r;
+    try { r = territory.assignHistory(req.lobby, Number(req.body?.year) || 1914, f.id, names, onlyNeutral, !!req.body?.colonies); } catch (e) { return res.status(400).json({ error: e.message }); }
+    if (!r.matched) return res.status(404).json({ error: `No historical land called ${names.join(' or ')}` });
+    broadcastLand(req.lobby.id, r);
+    const flipped = r.taken ? applyOwnership(req) : [];
+    if (r.taken) logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} gave ${f.name} the historical land of ${names.join(', ')}${req.body?.colonies ? ' and its colonies' : ''}${onlyNeutral ? ' (unclaimed ground only)' : ''}`);
+    res.json({ matched: r.matched, taken: r.taken, flipped: flipped.length, onlyNeutral });
+  });
+
   router.post('/territory/assign', requireGm, (req, res) => {
     const shape = shapeById(req, Number(req.body?.shapeId));
     if (!shape || shape.kind !== 'area') return res.status(400).json({ error: 'Pick an area drawing' });

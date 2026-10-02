@@ -387,6 +387,38 @@ function seedFreeForm(lobby, year, factions) {
   }
   return { territories: out, assigned: [...new Set(assigned)], unassigned: [...new Set(unassigned)] };
 }
+/**
+ * One faction's historical land, leaving every other border alone (docs/GAME-DESIGN.md §5.1): with provinces, the
+ * provinces of those states or powers; without, the states' outlines of `year` carved out for it (from neutral
+ * ground only when `onlyNeutral`). Returns { territories, owners, matched, taken }.
+ */
+function assignHistory(lobby, year, factionId, names, onlyNeutral, colonies = false) {
+  if (provinces().has(lobby.id)) return { territories: [], ...provinces().assignHistory(lobby, factionId, names, onlyNeutral, colonies) };
+  const w = world(year);
+  if (!w) throw new Error('No borders bundled for that year');
+  const W = lobby.map_width, H = lobby.map_height, want = (names || []).filter(Boolean);
+  const isState = n => w.countries.some(c => Powers.same(n, c.state));
+  const hit = w.countries.filter(c => want.some(n => Powers.same(n, c.state) || ((colonies || !isState(n)) && Powers.same(n, c.power))));
+  if (!hit.length) return { territories: [], owners: [], matched: 0, taken: 0 };
+  let multi = [];
+  const polys = hit.flatMap(c => c.p.map(poly => poly.map(ring => ring.map(q => { const [x, y] = geo.project(q[0], q[1], W, H); return [r1(x), r1(y)]; }))));
+  for (let i = 0; i < polys.length; i += 40) multi = pc.union(multi, polys.slice(i, i + 40));
+  if (onlyNeutral) {
+    const held = all(lobby.id).filter(t => t.factionId && t.factionId !== factionId).map(t => t.geometry).filter(g => g && g.length);
+    for (const g of held) multi = pc.difference(multi, g);
+  }
+  const territories = carve(lobby.id, factionId, multi);
+  return { territories, owners: [], matched: hit.length, taken: territories.length ? hit.length : 0 };
+}
+/** Names a faction can take its land from: the states and powers of the provinces, or of the year's map. */
+function historyNames(lobby, year) {
+  if (provinces().has(lobby.id)) return provinces().historyNames(lobby);
+  const w = world(year);
+  if (!w) return [];
+  const names = new Set();
+  for (const c of w.countries) for (const n of [c.state, c.power]) if (n) names.add(n);
+  return [...names].sort((a, b) => a.localeCompare(b)).map(name => ({ name }));
+}
 function assignArea(lobby, factionId, points) {
   const ring = points.map(p => [r1(p[0]), r1(p[1])]);
   if (provinces().has(lobby.id)) {
@@ -551,5 +583,5 @@ function capture(lobby, g, unit, factions, markers, relation) {
   return { held: false, changed, owners, flips, cities: cities.map(c => c.name), owner, mine };
 }
 
-module.exports = { landMask, landAt, nearWater, shipCourseError, nearestWater, nearestLand, NEUTRAL, all, write, clear, carve, circle, landClip, ownerAt, seedFromYear, assignArea, brush, ownershipChanges, capture, isLandUnit, earthYears, clean,
+module.exports = { assignHistory, historyNames, landMask, landAt, nearWater, shipCourseError, nearestWater, nearestLand, NEUTRAL, all, write, clear, carve, circle, landClip, ownerAt, seedFromYear, assignArea, brush, ownershipChanges, capture, isLandUnit, earthYears, clean,
   trenchOwner, trenchOwnershipChanges, trenchCover, distanceToPath, isLand, isCoastal, landFor, loadGz, world, bboxOf, pointInMulti, overlaps, ownerLookup };

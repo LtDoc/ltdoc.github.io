@@ -199,6 +199,18 @@
                       <button type="button" id="btnTerrSeed" class="small secondary" title="Give each faction the provinces (or, without provinces, the states) of that year that carry its name; the rest becomes neutral">Assign that year's borders</button>
                     </div>
                     <span id="provProgress" class="hint" hidden></span>
+                    <p class="hint">These redo every faction's borders. To add one nation without touching the others, use the tool below.</p>
+                  </div>
+                  <div class="sub">Give a faction its historical land</div>
+                  <div class="toolrow">
+                    <label class="tight">Faction<select id="histFaction"></select></label>
+                    <label class="tight" title="A historical state or power (the faction's own name by default); several can be separated with commas">Land of<input id="histName" list="histNames" placeholder="e.g. Mexico, Texas"></label>
+                    <datalist id="histNames"></datalist>
+                  </div>
+                  <div class="toolrow">
+                    <label class="inline"><input type="checkbox" id="histNeutral" checked> Unclaimed land only</label>
+                    <label class="inline" title="Also every colony, protectorate and dependency the power held"><input type="checkbox" id="histColonies"> Include its colonies</label>
+                    <button type="button" id="btnHistAssign" class="small secondary" title="Hand the faction the provinces of that state or power; other factions' borders stay as they are">Give land</button>
                   </div>
                   <div class="sub">Hand ground to a faction</div>
                   <div class="toolrow">

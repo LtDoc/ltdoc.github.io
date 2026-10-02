@@ -156,13 +156,13 @@ function give(lobby, ids, factionId) {
   try { setOwner(lobby.id, provs.map(p => p.id), factionId); db.exec('COMMIT'); } catch (e) { db.exec('ROLLBACK'); throw e; }
   return provs.map(p => [p.id, factionId]);
 }
-/** Assign every province to the faction named like its state (or its state's overlord); the rest is neutral. */
-function assignByState(lobby, factions) {
-  const lobbyId = lobby.id;
-  const assigned = new Set(), unassigned = new Set();
-  const byFaction = new Map(), memo = new Map();
-  const list = get(lobbyId).list;
-  // Provinces cut before stateless coastal land adopted a state: borrow the nearest province that has one.
+/**
+ * (province) → { state, power } it belonged to in its seed year. Provinces cut before stateless coastal land adopted
+ * a state borrow the nearest province that has one. The power comes from the holdings table first (fixes rows cut
+ * before it existed), then the stored overlord, then the state itself.
+ */
+function historyOf(lobby) {
+  const list = get(lobby.id).list, memo = new Map();
   const stated = list.filter(p => p.state);
   const pxY = 150 * lobby.map_height / 20037;
   const stateOf = p => {
@@ -175,25 +175,63 @@ function assignByState(lobby, factions) {
     }
     return best || p;
   };
+  return p0 => {
+    const p = stateOf(p0), key = `${p.year}|${p.state}|${p.subject}`;
+    if (!memo.has(key)) memo.set(key, { state: p.state || '', power: p.state ? Powers.display(Powers.overlordOf(p.year, p.state, p.subject) || p.state) : '' });
+    return memo.get(key);
+  };
+}
+/** Assign every province to the faction named like its state (or its state's overlord); the rest is neutral. */
+function assignByState(lobby, factions) {
+  const lobbyId = lobby.id;
+  const assigned = new Set(), unassigned = new Set();
+  const byFaction = new Map(), memo = new Map();
+  const list = get(lobbyId).list, hist = historyOf(lobby);
   for (const p0 of list) {
-    const p = stateOf(p0);
-    // The province's power: the holdings table first (fixes rows cut before it existed), then the stored overlord,
-    // then the state itself; matched to a faction under any of its names ("British Empire" = "United Kingdom…").
-    const key = `${p.year}|${p.state}|${p.subject}`;
-    if (!memo.has(key)) {
-      const power = p.state ? Powers.display(Powers.overlordOf(p.year, p.state, p.subject) || p.state) : '';
-      memo.set(key, power ? (factions.find(f => Powers.same(f.name, power))?.id ?? 0) : 0);
-    }
-    const fid = memo.get(key);
-    if (p.state) (fid ? assigned : unassigned).add(p.state);
-    const p1 = p0;
+    // Matched to a faction under any of its names ("British Empire" = "United Kingdom…").
+    const { state, power } = hist(p0);
+    if (!memo.has(power)) memo.set(power, power ? (factions.find(f => Powers.same(f.name, power))?.id ?? 0) : 0);
+    const fid = memo.get(power);
+    if (state) (fid ? assigned : unassigned).add(state);
     if (!byFaction.has(fid)) byFaction.set(fid, []);
-    byFaction.get(fid).push(p1.id);
+    byFaction.get(fid).push(p0.id);
   }
   db.exec('BEGIN');
   try { for (const [fid, ids] of byFaction) setOwner(lobbyId, ids, fid); db.exec('COMMIT'); } catch (e) { db.exec('ROLLBACK'); throw e; }
   territory.clear(lobbyId);   // free-form territories are not used once a campaign has provinces
   return { owners: ownership(lobbyId), replace: true, territories: [], assigned: [...assigned], unassigned: [...unassigned] };
+}
+
+/**
+ * One faction's historical land, leaving every other border alone: the provinces of the states called one of
+ * `names` (any alias). `colonies` (or a name that is only a power, like "British Empire") adds every state the power
+ * held. `onlyNeutral`: take only unclaimed provinces, not other factions'.
+ * Returns { owners: changed [[id, fid]], matched, taken } (matched: provinces of those names; taken: changed hands).
+ */
+function assignHistory(lobby, factionId, names, onlyNeutral, colonies = false) {
+  const hist = historyOf(lobby), want = (names || []).filter(Boolean), list = get(lobby.id).list;
+  const isState = n => list.some(p => Powers.same(n, hist(p).state));
+  const byPower = new Set(want.filter(n => colonies || !isState(n)).map(n => n));
+  const ids = [];
+  let matched = 0;
+  for (const p of list) {
+    const h = hist(p);
+    if (!want.some(n => Powers.same(n, h.state) || (byPower.has(n) && Powers.same(n, h.power)))) continue;
+    matched++;
+    if (onlyNeutral && p.factionId) continue;
+    if (p.factionId !== factionId) ids.push(p.id);
+  }
+  const owners = give(lobby, ids, factionId);
+  return { owners, matched, taken: owners.length };
+}
+/** The historical states and powers the provinces were cut from, with how many provinces each covers. */
+function historyNames(lobby) {
+  const hist = historyOf(lobby), count = new Map();
+  for (const p of get(lobby.id).list) {
+    const { state, power } = hist(p);
+    for (const n of new Set([state, power].filter(Boolean))) count.set(n, (count.get(n) || 0) + 1);
+  }
+  return [...count].map(([name, provinces]) => ({ name, provinces })).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**
@@ -436,4 +474,4 @@ async function generate(lobby, opts = {}, progress = () => {}) {
   return { count: rows.length, year, sizeKm, seeds: seeds.length };
 }
 
-module.exports = { GRID, CLEAN, nearestOwner, ownerAt, get, list, count, has, at, within, setOwner, ownership, restoreOwnership, clear, give, assignByState, generate, invalidate, unionAll, landTiles };
+module.exports = { GRID, CLEAN, nearestOwner, ownerAt, get, list, count, has, at, within, setOwner, ownership, restoreOwnership, clear, give, assignByState, assignHistory, historyNames, generate, invalidate, unionAll, landTiles };

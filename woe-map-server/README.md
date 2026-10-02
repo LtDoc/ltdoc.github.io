@@ -520,7 +520,15 @@ Details and numbers: `docs/ECONOMY.md`.
   lists their owners per bundled year, and splits 1914 New Guinea into German New Guinea and British Papua.
   Dominions count as British up to 1920 but not in 1938. Port cities that sit just outside the coarse
   historical borders, or a little offshore on the coastline data, take the owner of the nearest province.
-  The faction seeder lists each power once under that name ("British Empire", with its flag). The Earth layer's own
+  The faction seeder lists each power once under that name ("British Empire", with its flag).
+  That assignment redoes every faction's borders. To **add one nation without touching the others** (an alt-history
+  map whose borders the GM has already reshaped), use **Give a faction its historical land** on the 👑 GM panel's
+  World page: pick the faction and the historical state it should get ("Land of", its own name by default;
+  several separated by commas, with suggestions), and **Give land**. By default it takes only **unclaimed**
+  (neutral) provinces of that state, so every faction's existing ground stays as it is; untick *Unclaimed land
+  only* to take the state from whoever holds it. It gives the state itself ("United Kingdom" is Great Britain and
+  Ireland); tick *Include its colonies* for every colony and dependency the power held. Provinces are not re-cut.
+  The Earth layer's own
   political borders, tint and labels hide while territories exist. On any map the GM can **assign a selected area
   drawing** to a faction (or to neutral), paint with a **brush** (pick a faction and a radius, then click
   the map; each click gives that circle, or the provinces whose centre is inside it, to the faction) or
