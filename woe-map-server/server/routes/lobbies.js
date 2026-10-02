@@ -659,7 +659,7 @@ router.get('/:id/factions', (req, res) => {
  * The army a faction's battle figures come from ('' = chosen from the faction's name, public/js/skirmish.js). Factions
  * saved earlier may still hold grey, beige or green, which the map reads as German, British and American.
  */
-const UNIFORMS = ['american', 'british', 'french', 'german', 'russian'];
+const UNIFORMS = ['american', 'anzac', 'arab', 'british', 'french', 'german', 'ottoman', 'russian'];
 
 function factionFlagAsset(v) {
   if (v === undefined) return undefined;

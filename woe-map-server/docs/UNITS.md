@@ -113,11 +113,14 @@ turn, a section of 8 men holds its firing line on the map from 800 % zoom. Livin
 (100 % → 8, 74 % → 6, 50 % → 4, 0 → none); the rest lie dead along the line. Purely visual: nothing here changes
 combat. Code: `public/js/skirmish.js`, wired in by `MapRenderer._tickBattles`.
 
-**Armies.** Every faction fights as one of five armies: **American**, **British & Commonwealth**, **French**,
-**German** or **Russian**. The GM picks it on the faction (👥 People → faction → *Army*); left on *Automatic* it
-comes from the name:
-- German: the Central Powers (Ottomans and Bulgaria too) and the northern neutrals.
-- British: the Empire and the Dominions, Japan, Portugal, Egypt and Arabia.
+**Armies.** Every faction fights as one of eight armies: **American**, **ANZAC**, **Arab**, **British &
+Commonwealth**, **French**, **German**, **Ottoman** or **Russian**. The GM picks it on the faction (👥 People →
+faction → *Army*); left on *Automatic* it comes from the name:
+- German: Germany, Austria-Hungary, Bulgaria and the northern neutrals.
+- Ottoman: the Ottoman Empire (Turkey).
+- British: the Empire and the other Dominions, Japan, Portugal and Egypt.
+- ANZAC: Australia and New Zealand.
+- Arab: Arabia (Hejaz, Nejd, Yemen, Oman, the Gulf), and the Senussi.
 - French: France, Belgium and French North Africa.
 - Russian: Russia, Italy, the Balkans, Greece, China and Persia.
 - American: the Americas, the Philippines and Liberia.
@@ -125,9 +128,10 @@ comes from the name:
 Factions saved with the old colours read grey as German, beige as British and green as American.
 
 The kit follows the game's date. Before 1916 the men wear 1914 dress: soft caps, the pickelhaube, French blue
-coats. From 1916 they wear steel helmets and horizon blue, and the Lewis gun, Chauchat and MG 08/15 appear.
-German greatcoats and British winter dress are worn from November to February. American and Russian kits do not
-change.
+coats, the ANZACs' slouch hats and lemon-squeezers (Australians and New Zealanders together, in shirtsleeves as at
+Gallipoli). From 1916 they wear steel helmets and horizon blue, and the Lewis gun, Chauchat and MG 08/15 appear.
+The Ottomans keep their early-war kit until 1918, then wear their 1918 kit. German greatcoats and British winter
+dress are worn from November to February. American, Arab and Russian kits do not change.
 
 **The section.**
 - An officer, a sergeant (or corporal), a light machine-gunner (where the army and year have one, firing in
@@ -135,7 +139,8 @@ change.
 - Each man lies, kneels or stands to aim at the enemy, with a flash at each shot. Now and then one gets up and runs
   along the line.
 - The medic kneels on the line until someone falls, then runs out to the fallen, kneels by them a while and
-  comes back.
+  comes back. The ANZAC medics are stretcher bearers; the Arab and Ottoman art has no medic, so they have none.
+- The Arabs' leader is the fighter in red with a revolver.
 - Assault regiments (stormtroopers) go in as the army's assault troops: German stormtroopers with carbines and
   MP 18s, British and American trench raiders, Russian shock troops. French colonial troops go in as zouaves. Where
   the army has no such figures, they fight in its line kit.
@@ -144,10 +149,13 @@ change.
 Vickers, MG 08, Hotchkiss, Browning and Maxim; the Stokes, the French mortar and the Minenwerfer. Machine guns fire
 in bursts and mortars thump and smoke (a mortar battery's bombs leave from its teams). Two men per team fall like
 riflemen and lie beside the gun. When both are down the gun is left standing empty, as the abandoned-gun art, and
-falls silent. The Russians have no mortar team, so theirs is the mortar from the gun sheet, crewed by Russians.
+falls silent. The Russians have no mortar team, so theirs is the mortar from the gun sheet, crewed by Russians;
+nor do the ANZACs, Arabs and Ottomans. Their machine-gun teams have no
+abandoned art, so an uncrewed one goes grey.
 
 **The figures.** Atlas: `public/assets/soldiers.png`, built by `node scripts/build-soldiers.js "rob assets"` from
-the folders American Infantry, Commonwealth Infantry, French Infantry, German Infantry and Russian Infantry.
+the folders American Infantry, Anzac Infantry, Arab Infantry, Commonwealth Infantry, French Infantry, German
+Infantry, Ottoman Infantry and Russian Infantry.
 - The script sorts each file by its name into a kit (army, year, season, or the assault/zouave set) and a role
   (rifleman lying/kneeling/standing/advancing, officer, NCO, light machine-gunner, medic, casualty, gun crew, MG or
   mortar team crewed/empty). Where a kit lacks a role, the next best figure stands in.
@@ -180,8 +188,9 @@ and HeavyMG.png.
   form up on the unit's line, charge the enemy's line at the gallop (kicking up dust), wheel among the enemy there
   for a few seconds, ride back and charge again. A troop that has just attacked rides straight out of its unit at
   the enemy. Riders fall like riflemen (one per 12.5 % lost) and lie where they fell, as the army's casualties.
-  British riders wear khaki, Germans field grey, Americans olive and the French horizon blue. Russians ride the
-  Russian set's own horseman. Their tokens fire no rifle
+  British and ANZAC riders wear khaki, Germans field grey, Americans olive, the French horizon blue and the
+  Ottomans their own khaki. Russians ride the Russian set's own horseman. Arabs ride camels, half with rifles and
+  half with sabres. Their tokens fire no rifle
   line: the charge is their attack.
 - **Aircraft** (fighter, bomber, reconnaissance and seaplane squadrons): four planes flying above the units, each with
   a shadow on the ground, from 800 % zoom, in or out of a fight.
@@ -202,7 +211,8 @@ and HeavyMG.png.
   - There are no rifle lines in a fight with an air unit; ground units under attack still fire from their squads.
 
 Atlas: `public/assets/mounts.png`, cut by `node scripts/build-mounts.js "rob assets"` from Cavalry.png (recoloured
-into field grey, olive and horizon blue), the Russian Infantry folder's cavalryman, and Army Assets/PlaneSprites.png. The 36 planes are sorted by eye into 23
+into field grey, olive, horizon blue and Ottoman khaki), the Russian Infantry folder's cavalryman, the Arab Infantry
+folder's two camel riders (turned to face up the page like the horses), and Army Assets/PlaneSprites.png. The 36 planes are sorted by eye into 23
 liveries; the table is at the top of the script.
 
 ### Ships in a fight

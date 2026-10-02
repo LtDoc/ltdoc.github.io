@@ -623,10 +623,12 @@ that has been destroyed or removed stops firing. Visible from 800 % zoom.
 - Each 12.5 % of strength lost leaves one dead on the line, falling one after another when a blow lands (at 50 %:
   four firing, four fallen). Healing brings them back.
 
-**Armies.** Every faction fights as one of five armies: American, British & Commonwealth, French, German or
-Russian. Set it on the faction (👥 People → faction → *Army*), or leave it on *Automatic* to choose from the name.
-- The kit follows the game's date: 1914 dress, steel helmets and the new light machine guns from 1916, greatcoats
-  and winter dress from November to February.
+**Armies.** Every faction fights as one of eight armies: American, ANZAC, Arab, British & Commonwealth, French,
+German, Ottoman or Russian. Set it on the faction (👥 People → faction → *Army*), or leave it on *Automatic* to
+choose from the name.
+- The kit follows the game's date: 1914 dress, steel helmets and the new light machine guns from 1916 (the Ottomans'
+  new kit from 1918), greatcoats and winter dress from November to February.
+- Arab cavalry ride camels.
 - Stormtroopers go in as the army's assault troops; French colonial troops go in as zouaves.
 
 **Machine-gun companies** and **trench mortars** go in as four gun-and-crew teams, left empty when their crew are

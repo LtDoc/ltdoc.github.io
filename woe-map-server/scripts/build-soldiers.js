@@ -1,13 +1,14 @@
 'use strict';
 // Builds the infantry atlas for the battle scenes (docs/UNITS.md, "Men and machines in a fight") from the user's
-// figure folders, one per army: American, Commonwealth (British), French, German and Russian infantry, each a folder
+// figure folders, one per army: American, ANZAC, Arab, Commonwealth (British), French, German, Ottoman and Russian
+// infantry, each a folder
 // of top-down figures, one per file, named for who and what they are ("German rifleman prone aiming 1916 .png").
 // Usage: node scripts/build-soldiers.js "rob assets"
 // Output: public/assets/soldiers.png and public/assets/soldiers.json
 //
 // Every file is sorted by its name into a kit and a role:
-//   - kits: per army and, where the art has them, per year (1914 or 1916 kit) and season (winter dress or
-//     greatcoats): "german-1916w"; plus assault troops ("german-assault": stormtroopers, trench raiders, Russian
+//   - kits: per army and, where the art has them, per year (the 1914 kit; 1916, or the Ottomans' 1918) and season
+//     (winter dress or greatcoats): "german-1916w"; plus assault troops ("german-assault": stormtroopers, trench raiders, Russian
 //     shock troops) and the French zouaves ("french-zouave");
 //   - roles: rifle.prone / rifle.kneel / rifle.stand (aiming lying, kneeling, standing), rifle.run (advancing),
 //     the same for officer.*, nco.* (sergeants, corporals) and lmg.* (Lewis, Chauchat, BAR, MG 08/15 gunners),
@@ -33,9 +34,12 @@ const TORSO = 16;   // a rifleman's torso across, atlas px (the map shows about 
 
 const ARMIES = {
   american: { dir: 'American Infantry', kits: [[null, false]] },
+  anzac: { dir: 'Anzac Infantry', kits: [['1914', false], ['1916', false]] },
+  arab: { dir: 'Arab Infantry', kits: [[null, false]] },
   british: { dir: 'Commonwealth Infantry', kits: [['1914', false], ['1916', false], ['1914', true], ['1916', true]] },
   french: { dir: 'French Infantry', kits: [['1914', false], ['1916', false]] },
   german: { dir: 'German Infantry', kits: [['1914', false], ['1916', false], ['1914', true], ['1916', true]] },
+  ottoman: { dir: 'Ottoman Infantry', kits: [['1914', false], ['1918', false]] },
   russian: { dir: 'Russian Infantry', kits: [[null, false]] },
 };
 
@@ -46,6 +50,7 @@ const FACING = {
   'British officer prone aiming winter 1916': -1.0, 'British trench raider sawn-off rifle': UP,
   'German stormtrooper carbine crouched aiming': -0.8, 'German stormtrooper mp-18 crouched aiming': -0.8,
   'Riflemen prone': -1.95, 'Riflemen grenadier': -1.2,
+  'ANZAC aussie officer aiming prone': UP,
 };
 const AIMED = /^(rifle|nco|lmg)\.(prone|kneel|stand)$|^officer\.prone$/;
 const nameOf = file => file.replace(/^\d+-/, '').replace(/\s*\.png$/i, '').replace(/\s+/g, ' ').trim();
@@ -53,7 +58,8 @@ const nameOf = file => file.replace(/^\d+-/, '').replace(/\s*\.png$/i, '').repla
 /** Who and what a file is: { set, role, era, winter } or null when it is not used. */
 function classify(file) {
   const n = file.toLowerCase().replace(/^\d+-/, '').replace(/\.png$/, '').replace(/\s+/g, ' ').trim();
-  const era = /1914/.test(n) ? '1914' : /1916/.test(n) || /mg 08-15|chauchat|lewis/.test(n) && !/us marine/.test(n) ? '1916' : null;
+  const era = /1914|early war|anzac (aussie|kiwi) (?!casualty)/.test(n) ? '1914' : /1918/.test(n) ? '1918'
+    : /1916|^anzac (rifleman|officer|melee)/.test(n) || /mg 08-15|chauchat|lewis/.test(n) && !/us marine/.test(n) ? '1916' : null;
   const winter = /winter|greatcoat/.test(n);
   const at = (set, role) => ({ set, role, era, winter });
   // Crewed weapons and abandoned ones.
@@ -62,14 +68,15 @@ function classify(file) {
   if (/^field gun/.test(n)) return null;   // drawn to scale, far bigger than the map's guns: those stay
   if (/mortar/.test(n)) return at('line', 'mortar');
   if (/vickers gunner|mg 08 crew|hotchkiss crew|browning m1917 crewed|hotchkiss crewed|maxim crew|maxim baseless crew|maxim prone baseless crew/.test(n)) return at('line', 'mg');
+  if (/machine gun crew|machine gunner|fighter machine gun/.test(n)) return at('line', 'mg');
   if (/maxi[mn] (prone )?baseless 1-man/.test(n)) return at('line', 'mg');
-  if (/cavalry|bagpiper|t-gewehr|wex|highlander|sniper|mg 08 (19|greatcoat)|french hotchkiss 19/.test(n)) return null;
+  if (/cavalry|mounted|bagpiper|t-gewehr|wex|highlander|sniper|mg 08 (19|greatcoat)|french hotchkiss 19/.test(n)) return null;
   // Loaders and lookouts work the guns.
   if (/observer|second number|hotchkiss #2|lewis gun #2/.test(n)) return at('line', 'crew');
   const pose = /prone/.test(n) ? (/advanc/.test(n) ? null : 'prone') : /crouch/.test(n) ? (/aim/.test(n) ? 'kneel' : 'crouch')
     : /aim|grenadier|sawn-off/.test(n) ? 'stand' : /advanc/.test(n) ? 'run' : /bayonet|melee/.test(n) ? 'charge' : /idle/.test(n) ? 'idle' : null;
   if (/casualty|wounded/.test(n)) return at('line', 'dead');
-  if (/medic/.test(n)) return pose === 'crouch' ? at('line', 'medic.kneel') : !pose || pose === 'run' || pose === 'idle' ? at('line', 'medic.run') : null;
+  if (/medic|stretcher/.test(n)) return pose === 'crouch' ? at('line', 'medic.kneel') : !pose || pose === 'run' || pose === 'idle' ? at('line', 'medic.run') : null;
   if (/trench raider|stormtrooper|shocktrooper/.test(n)) {
     if (/trench raider prone$/.test(n)) return at('assault', 'rifle.prone');
     if (/prone advanc/.test(n)) return null;
@@ -78,7 +85,7 @@ function classify(file) {
   }
   if (!pose) return null;
   const set = /zouave/.test(n) ? 'zouave' : 'line';
-  const who = /officer/.test(n) ? 'officer' : /sergeant|corporal/.test(n) ? 'nco' : /bar gunner|chauchat|lewis gunner|mg 08-15/.test(n) ? 'lmg' : 'rifle';
+  const who = /officer|revolver/.test(n) ? 'officer' : /sergeant|corporal/.test(n) ? 'nco' : /bar gunner|chauchat|lewis gunner|mg 08-15/.test(n) ? 'lmg' : 'rifle';
   if (pose === 'crouch') return who === 'rifle' ? at(set, 'crew') : null;
   if (pose === 'idle') return at(set, who === 'officer' ? 'officer.stand' : 'rifle.idle');
   return at(set, `${who}.${pose}`);

@@ -28,10 +28,10 @@
  *     torpedo boats and submarines (running submerged) loose torpedoes. A ship lost lists, burns and goes down.
  *
  * Losses follow strength: one man in eight per 12.5 % lost (at 50 %: four standing, four fallen), one tank in two per
- * 50 %, one plane in four per 25 %, one ship by its share of the squadron. Each nation fights as one of the armies the art has: American, British, French,
- * German or Russian (chosen on the faction, else guessed from its name), so all of a nation's troops look alike;
- * the kit follows the game's date (1916 helmets and gear from 1916, greatcoats and winter dress from November to
- * February); assault regiments go in as stormtroopers or trench raiders, French colonial troops as zouaves. Each
+ * 50 %, one plane in four per 25 %, one ship by its share of the squadron. Each nation fights as one of the armies the
+ * art has: American, ANZAC, Arab, British, French, German, Ottoman or Russian (chosen on the faction, else guessed from
+ * its name), so all of a nation's troops look alike; the kit follows the game's date (1916 helmets and gear from 1916,
+ * the Ottomans' from 1918, greatcoats and winter dress from November to February); assault regiments go in as stormtroopers or trench raiders, French colonial troops as zouaves. Each
  * nation also has its own tank design and its own livery of planes (the Central Powers' with crosses, the others'
  * with roundels). The renderer hands over each squad's line every frame (MapRenderer._tickBattles).
  */
@@ -46,7 +46,8 @@
   const RUN_PX_S = 34, ROLL_PX_S = 26;   // running and rolling pace, screen px a second
   // Horsemen (head to tail, lance and all) and planes (wingspan), screen px before the zoom boost.
   const RIDERS = 8, RIDER_PX = 34, GALLOP_PX_S = 70, TROT_PX_S = 28;
-  const RIDER_FOR = { british: 'beige', german: 'grey', american: 'green', french: 'french', russian: 'russian' };   // mounts.json riders
+  // mounts.json riders (with "-2"…: others of the army, taken in turn)
+  const RIDER_FOR = { british: 'beige', anzac: 'beige', german: 'grey', american: 'green', french: 'french', russian: 'russian', ottoman: 'ottoman', arab: 'arab' };
   const PLANES = 4;
   // Naval units: [ship class in ships.json, fewest and most ships in the unit, a ship's length on screen in px before
   // the zoom boost (big ships kept short against true scale, as the guns and tanks are), guns firing in a salvo,
@@ -73,17 +74,21 @@
   ];
   const CENTRAL = /german|prussia|bavaria|saxon|austria|hungar|habsburg|ottoman|turk|bulgar/i;
   // The armies the figures come in. Factions saved before them chose a colour: grey, beige or green.
-  const ARMIES = ['american', 'british', 'french', 'german', 'russian'];
+  const ARMIES = ['american', 'anzac', 'arab', 'british', 'french', 'german', 'ottoman', 'russian'];
   const LEGACY = { grey: 'german', beige: 'british', green: 'american' };
-  // Defaults by nation name, keeping the 1914 sides apart at a glance: the Central Powers in German field grey, the
-  // Empire in British khaki, France and Belgium in French blue, Russia, Italy and the Balkans in Russian olive, the
-  // Americas as Americans. The GM can choose another on the faction.
+  // Defaults by nation name, keeping the 1914 sides apart at a glance: the Central Powers in German field grey (the
+  // Ottomans as themselves), the Empire in British khaki (Australia and New Zealand as the ANZACs), France and Belgium
+  // in French blue, Russia, Italy and the Balkans in Russian olive, the Americas as Americans, Arabia as Arab
+  // irregulars. The GM can choose another on the faction.
   const AUTO = [
-    [/german|prussia|bavaria|saxon|w[uü]rttemberg|austria|hungar|habsburg|ottoman|turk|bulgar|swed|norw|denmark|danish|netherland|dutch|swiss|switzerland|finland|poland|polish|czech|luxem|iceland/i, 'german'],
+    [/ottoman|turk/i, 'ottoman'],
+    [/austral|new zealand|anzac/i, 'anzac'],
+    [/arab|nejd|hejaz|hijaz|yemen|\boman\b|kuwait|qatar|trucial|senussi|bedouin|shammar|rashid/i, 'arab'],
+    [/german|prussia|bavaria|saxon|w[uü]rttemberg|austria|hungar|habsburg|bulgar|swed|norw|denmark|danish|netherland|dutch|swiss|switzerland|finland|poland|polish|czech|luxem|iceland/i, 'german'],
     [/united states|america|\busa?\b|brazil|mexic|argentin|chile|peru|venez|colombia|cuba|california|texas|navajo|\butes?\b|philipp|liberia|pacific/i, 'american'],
     [/fran[cç]|french|belgi|spain|spanish|morocc|tunis|tripol|congo|monaco|acadia|quebec/i, 'french'],
     [/russia|soviet|ital|sardinia|serbia|monteneg|romania|ukrain|lithuan|latvia|eston|greece|greek|china|chinese|qing|korea|persia/i, 'russian'],
-    [/brit|england|scot|irish|ireland|wales|united kingdom|\buk\b|australia|new zealand|canad|india|south africa|newfoundland|japan|portug|siam|egypt|afghan|ethiop|abyssin|arab|nejd|hejaz|zanzibar|boer|muslim/i, 'british'],
+    [/brit|england|scot|irish|ireland|wales|united kingdom|\buk\b|canad|india|south africa|newfoundland|japan|portug|siam|egypt|afghan|ethiop|abyssin|zanzibar|boer|muslim/i, 'british'],
   ];
   function uniformFor(name, chosen) {
     if (ARMIES.includes(chosen)) return chosen;
@@ -128,8 +133,8 @@
     async _load() {
       const frame = (base, f) => new PIXI.Texture({ source: base.source, frame: new PIXI.Rectangle(f.x, f.y, f.w, f.h) });
       try {
-        const meta = await fetch('/assets/soldiers.json?v=2').then(r => r.json());
-        const base = await PIXI.Assets.load({ src: '/assets/soldiers.png?v=2', loadParser: 'loadTextures' });
+        const meta = await fetch('/assets/soldiers.json?v=3').then(r => r.json());
+        const base = await PIXI.Assets.load({ src: '/assets/soldiers.png?v=3', loadParser: 'loadTextures' });
         const frames = meta.frames.map(([x, y, w, h, ax, ay, face], i) => ({ t: frame(base, { x, y, w, h }), w, h, ax, ay, face, len: Math.max(w, h), name: meta.names[i] }));
         this.tex = { torso: meta.torso, kits: Object.fromEntries(Object.entries(meta.kits).map(([k, roles]) =>
           [k, Object.fromEntries(Object.entries(roles).map(([r, ids]) => [r, ids.map(i => frames[i])]))])) };
@@ -143,8 +148,8 @@
         this.r.invalidate();
       } catch (e) { console.warn('Gun and tank sprites not available', e); }
       try {
-        const meta = await fetch('/assets/mounts.json?v=2').then(r => r.json());
-        const base = await PIXI.Assets.load({ src: '/assets/mounts.png?v=2', loadParser: 'loadTextures' });
+        const meta = await fetch('/assets/mounts.json?v=3').then(r => r.json());
+        const base = await PIXI.Assets.load({ src: '/assets/mounts.png?v=3', loadParser: 'loadTextures' });
         const one = f => ({ ...f, t: frame(base, f), len: Math.max(f.w, f.h) });
         this.mounts = { planes: meta.planes.map(one), liveries: meta.liveries,
           riders: Object.fromEntries(Object.entries(meta.riders).map(([k, f]) => [k, one(f)])) };
@@ -219,9 +224,12 @@
       const n = String(m?.data?.nation || '').trim().toLowerCase();
       const army = this.uniforms.get(n) || uniformFor(n, '');
       const d = /^(\d{4})-(\d{2})/.exec(this.r.gameDate?.() || ''), y = d ? +d[1] : 1914, mo = d ? +d[2] : 7;
-      const era = y >= 1916 ? '1916' : '1914', winter = mo >= 11 || mo <= 2;
+      const winter = mo >= 11 || mo <= 2;
       const kits = this.tex.kits, has = k => (kits[k] ? k : null);
-      const line = has(`${army}-${era}${winter ? 'w' : ''}`) || has(`${army}-${era}`) || has(army) || has(`${army}-1914`) || Object.keys(kits)[0];
+      // The army's latest kit of the year or before (1914, 1916, 1918), in winter dress if it has one.
+      let line = null;
+      for (const era of ['1918', '1916', '1914']) if (+era <= y && (line = (winter && has(`${army}-${era}w`)) || has(`${army}-${era}`))) break;
+      line = line || has(army) || has(`${army}-1914`) || Object.keys(kits)[0];
       const id = typeOf(m)?.id;
       const special = id === 'stormtroopers' ? has(`${army}-assault`) : id === 'colonial' && army === 'french' ? has('french-zouave') : null;
       return { army, line, special, key: `${line}|${special}`, cache: {} };
@@ -405,7 +413,9 @@
         // the last ones, so these four are there); their places along the line differ from unit to unit.
         const slot = (i * 3 + id) % SQUAD;
         const o = crew ? 0 : (slot + 0.5) / SQUAD - 0.5 + (hash(seed, i) - 0.5) * 0.06, d = crew ? 0 : 2 + hash(seed, i + 20) * 6;
-        const role = crew ? 'crew' : i < 4 ? ROLES[(i + id) % 4] : 'rifle', r = hash(seed, i + 200);
+        let role = crew ? 'crew' : i < 4 ? ROLES[(i + id) % 4] : 'rifle';
+        if (role === 'medic' && !this._has(this.kitFor(v?.marker), 'medic.')) role = 'rifle';   // an army drawn without medics
+        const r = hash(seed, i + 200);
         const stance = role === 'officer' ? (r < 0.5 ? 'kneel' : 'stand') : role === 'lmg' ? (r < 0.6 ? 'prone' : 'kneel') : stanceOf(r);
         const m = { i, o, d, home: [o, d], role, stance, sp: new PIXI.Sprite(), pose: null, dead: i >= alive, run: null, tend: null,
           gun: crew ? i % GUNS : -1, side: crew ? (i < GUNS ? -1 : 1) : 0,
@@ -458,7 +468,12 @@
      * o across it (fraction of its width), d behind the line in screen px (negative: towards the enemy).
      */
     _tickHorse(q, f, nowMs, t, s, boost, g, at, theta, unit) {
-      const rider = this.mounts.riders[RIDER_FOR[q.kit.army]] || this.mounts.riders.beige;
+      if (q.riders?.army !== q.kit.army) {
+        const R = this.mounts.riders, key = RIDER_FOR[q.kit.army] || 'beige';
+        const pool = Object.keys(R).filter(k => k === key || k.startsWith(key + '-')).map(k => R[k]);
+        q.riders = { army: q.kit.army, pool: pool.length ? pool : [R.beige] };
+      }
+      const pool = q.riders.pool;
       const reach = Math.max(24, ((f.tx - f.cx) * f.ux + (f.ty - f.cy) * f.uy) * s);   // own line to theirs, px
       const living = q.men.filter(m => !m.dead);
       const want = aliveFor(strengthOf(f.view));
@@ -487,7 +502,7 @@
       }
       const galloping = c.st === 'charge' || c.st === 'back';
       for (const m of q.men) {
-        const sp = m.sp;
+        const sp = m.sp, rider = pool[m.i % pool.length];
         sp.visible = true;
         if (m.dead) {
           // Thrown where he fell; the horse is gone.
