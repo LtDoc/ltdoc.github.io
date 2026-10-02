@@ -157,6 +157,7 @@
       this.airLayer.addChild(this.shadowC, this.planeC, this.airG);
       this.squads = new Map();       // unit id -> squad
       this.flak = [];                // anti-aircraft bursts in the sky: { x, y, t0 }
+      this.marks = [];               // marks left on the ground: tank tracks, hoofprints, shell holes (see _mark)
       this.uniforms = new Map();     // nation (lower case) -> uniform
       this.factions = [];
       this.tex = null; this.mach = null; this.mounts = null; this.ships = null; this._liv = null;
@@ -323,6 +324,7 @@
     frame(fronts, keep, nowMs, s, g) {
       this.airG.clear();
       this.groundG.clear();
+      this._drawMarks(nowMs);
       for (const [id, q] of this.squads) if (!keep.has(id)) { this._drop(q); this.squads.delete(id); }
       for (const [id, q] of this.squads) if (!fronts.has(id)) { q.shown = false; for (const sp of this._sprites(q)) sp.visible = false; }
       if (!this.tex || !fronts.size) return false;
@@ -605,6 +607,11 @@
         }
         m.co = lat / F; m.cd = dep;
         const [x, y] = at(m.co, m.cd);
+        // Hoofprints: every few px of ground ridden over (a mark from every other horse is enough).
+        if (m.leg && m.i % 2 === 0) {
+          if (m.px == null) { m.px = x; m.py = y; }
+          if (Math.hypot(x - m.px, y - m.py) * s > 7) { this._mark('hoof', x, y, Math.atan2(y - m.py, x - m.px), 1.1 * boost / s); m.px = x; m.py = y; }
+        }
         // Heading: where he is going; standing, towards the enemy.
         let want = theta;
         if (m.wx != null && Math.hypot(x - m.wx, y - m.wy) * s > 0.05) want = Math.atan2(y - m.wy, x - m.wx);
@@ -1257,6 +1264,38 @@
       }
       return true;
     }
+    /**
+     * A mark left on the ground (world units): 'track' (a stretch of tank track, width w, length len, heading a),
+     * 'hoof' (a pair of hoofprints), 'hole' (a small shell hole, radius w). They fade over a quarter of an hour; the
+     * oldest go first when there are too many.
+     */
+    _mark(kind, x, y, a, w, len = 0) {
+      this.marks.push({ kind, x, y, a, w, len, t0: performance.now() });
+      if (this.marks.length > 2600) this.marks.splice(0, 300);
+    }
+    _drawMarks(nowMs) {
+      if (!this.marks.length) return;
+      const LIFE = 15 * 60000, g = this.groundG;
+      if (nowMs - this.marks[0].t0 > LIFE) this.marks = this.marks.filter(m => nowMs - m.t0 < LIFE);
+      for (const m of this.marks) {
+        const fade = 1 - (nowMs - m.t0) / LIFE, c = Math.cos(m.a), s = Math.sin(m.a);
+        if (m.kind === 'track') {
+          // Two bands of churned earth, the width of the tank apart.
+          for (const side of [-0.36, 0.36]) {
+            const ox = -s * m.w * side, oy = c * m.w * side, hl = m.len / 2 + m.w * 0.04, hw = m.w * 0.11;
+            g.poly([m.x + ox - c * hl - s * hw, m.y + oy - s * hl + c * hw, m.x + ox + c * hl - s * hw, m.y + oy + s * hl + c * hw,
+              m.x + ox + c * hl + s * hw, m.y + oy + s * hl - c * hw, m.x + ox - c * hl + s * hw, m.y + oy - s * hl - c * hw]);
+          }
+          g.fill({ color: 0x3f3327, alpha: 0.45 * fade });
+        } else if (m.kind === 'hoof') {
+          g.circle(m.x - s * m.w * 1.4, m.y + c * m.w * 1.4, m.w).circle(m.x + s * m.w * 1.4 + c * m.w * 2, m.y - c * m.w * 1.4 + s * m.w * 2, m.w);
+          g.fill({ color: 0x4a3c2c, alpha: 0.4 * fade });
+        } else {
+          g.circle(m.x, m.y, m.w * 1.5).fill({ color: 0x8c7656, alpha: 0.4 * fade });
+          g.circle(m.x, m.y, m.w).fill({ color: 0x33291f, alpha: 0.7 * fade });
+        }
+      }
+    }
     /** A machine gun firing bursts of 10 to 20 rounds at its cyclic rate, a pause of 2 to 4 s between them. */
     _mgBurst(q, gn, f, nowMs, s, boost, g) {
       if (!gn.burst && nowMs >= gn.nextShot) { gn.burst = 10 + Math.floor(Math.random() * 11); gn.nextShot = 0; }
@@ -1304,6 +1343,7 @@
           g.moveTo(px, py).lineTo(px + vx * seg, py + vy * seg).stroke({ width: w * (r.big ? 1.6 : 0.8 + r.hs * 0.4), color: core, alpha: 0.95 });
         } else {
           const k = (age - r.T) / 600;
+          if (r.big && !r.holed) { r.holed = true; this._mark('hole', r.x1, r.y1, 0, 3.2 * (1 + r.hs * 0.5) / s); }
           g.circle(r.x1 + vx * k * 3 / s, r.y1 + vy * k * 3 / s, ((r.big ? 2.5 : 1.2) + k * (r.big ? 9 : 5) * (0.6 + r.hs * 0.8)) / s)
             .fill({ color: r.big ? 0xb8ab90 : 0xd8d2c4, alpha: (r.big ? 0.6 : 0.45) * (1 - k) });
         }
@@ -1359,6 +1399,12 @@
         const [x, y] = at(o, d + kick);
         sp.visible = !(tk.roll && nowMs < tk.roll.t0);
         sp.position.set(x, y + bob / s);
+        // Tracks churned into the ground behind it as it moves.
+        if (sp.visible && !tk.dead) {
+          if (tk.mx == null) { tk.mx = x; tk.my = y; }
+          const moved = Math.hypot(x - tk.mx, y - tk.my);
+          if (moved * s > 3) { this._mark('track', (x + tk.mx) / 2, (y + tk.my) / 2, Math.atan2(y - tk.my, x - tk.mx), TANK_PX * 0.55 * boost / s, moved); tk.mx = x; tk.my = y; }
+        }
         this._orient(sp, fr, sc, theta, f.ux);
         sp.tint = tk.dead ? 0x4a4a4a : 0xffffff;
         if (tk.dead) {

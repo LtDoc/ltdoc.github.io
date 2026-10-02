@@ -648,7 +648,9 @@ yellow-green gas let out from cylinders, which rolls over the enemy's line; his 
 Observation balloons float on their tethers (heavy guns shelling put up a spotter), and are shot down in flames;
 airships circle and bomb; anti-aircraft guns fill the sky round enemy planes with black flak bursts.
 A haze of **battle smoke** drifts over every fight, thickening the longer it has gone on (full after ten minutes);
-under a bombardment it is dust and smoke over the target.
+under a bombardment it is dust and smoke over the target. Fights **mark the ground**: tank tracks churned behind the tanks,
+hoofprints where cavalry rode, small shell holes where guns and tanks firing over open sights hit; they fade over a
+quarter of an hour (they are drawn in the browser, not saved).
 
 **Machine-gun companies** and **trench mortars** go in as four gun-and-crew teams, left empty when their crew are
 down. Other **artillery** shows four guns of its type, each worked by two men (guns recoil and smoke, shells leave
