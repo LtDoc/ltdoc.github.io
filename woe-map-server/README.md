@@ -642,6 +642,9 @@ choose from the name.
   their places. Arab cavalry ride camels. A fallen horseman lies beside his dead horse.
 - Stormtroopers go in as the army's assault troops; French colonial troops go in as zouaves.
 
+Troops that hold their ground **dig in**: rifle pits and sandbags after a turn, a belt of barbed wire in front after two
+(or at once in a trench line), which slows charging cavalry to a crawl.
+
 **Machine-gun companies** and **trench mortars** go in as four gun-and-crew teams, left empty when their crew are
 down. Other **artillery** shows four guns of its type, each worked by two men (guns recoil and smoke, shells leave
 from them, a gun whose crew is down falls silent).

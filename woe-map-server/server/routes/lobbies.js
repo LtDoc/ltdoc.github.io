@@ -1460,7 +1460,7 @@ router.post('/:id/chat', (req, res) => {
 
 // ---- Battle effects (gunfire, shelling) --------------------------------------------------------
 const qb = {
-  insert: db.prepare('INSERT INTO battles (lobby_id, turn, attacker_id, defender_id, kind, ax, ay, dx, dy, hidden, user_id, until_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+  insert: db.prepare('INSERT INTO battles (lobby_id, turn, attacker_id, defender_id, kind, ax, ay, dx, dy, hidden, user_id, until_ms, created_at, cover) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
   one: db.prepare('SELECT * FROM battles WHERE id = ?'),
   all: db.prepare('SELECT * FROM battles WHERE lobby_id = ? AND turn >= ? AND (until_ms IS NULL OR until_ms > ?) ORDER BY id DESC LIMIT 300'),
   insertCrater: db.prepare('INSERT INTO craters (lobby_id, x, y, size, rotation, sprite, turn, expires_turn, until_ms, hidden, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
@@ -1475,7 +1475,7 @@ function serializeCrater(c) {
 }
 function serializeBattle(b, lobby) {
   const sea = lobby ? !require('../territory').landAt(lobby, b.dx, b.dy) : false;
-  return { id: b.id, turn: b.turn, attackerId: b.attacker_id, defenderId: b.defender_id, kind: b.kind, ax: b.ax, ay: b.ay, dx: b.dx, dy: b.dy, sea, until: b.until_ms, createdAt: b.created_at };
+  return { id: b.id, turn: b.turn, attackerId: b.attacker_id, defenderId: b.defender_id, kind: b.kind, ax: b.ax, ay: b.ay, dx: b.dx, dy: b.dy, sea, cover: !!b.cover, until: b.until_ms, createdAt: b.created_at };
 }
 // ---- Convoys: troops embark on transports, sail, and land together (docs/UNITS.md) ---------------------------
 const isConvoy = m => !!m && m.type === 'unit' && UnitTypes.resolve(m.data?.unitType)?.id === 'transport';
@@ -1841,7 +1841,7 @@ router.post('/:id/combat', (req, res) => {
   // The fight stays on the map for the rest of the turn: gunfire between the two, or shells around the target.
   const catA = UnitTypes.resolve(a.data?.unitType)?.cat;
   const kind = catA === 'Artillery' || catA === 'Naval' ? 'shells' : 'gunfire';
-  const bid = qb.insert.run(req.lobby.id, g.turn, a.id, d.id, kind, a.x, a.y, d.x, d.y, hidden ? 1 : 0, req.user.id, g.enabled ? null : Date.now() + 5 * 60000, now()).lastInsertRowid;
+  const bid = qb.insert.run(req.lobby.id, g.turn, a.id, d.id, kind, a.x, a.y, d.x, d.y, hidden ? 1 : 0, req.user.id, g.enabled ? null : Date.now() + 5 * 60000, now(), cover ? 1 : 0).lastInsertRowid;
   hub.broadcast(req.lobby.id, { type: 'battle', battle: serializeBattle(qb.one.get(bid), req.lobby) }, audience);
   // A bombardment leaves four or five craters around the target, for ten turns.
   if (kind === 'shells') {

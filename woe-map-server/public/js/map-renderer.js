@@ -1613,7 +1613,7 @@ class MapRenderer extends EventTarget {
           return;
         }
         const enemyId = id === b.attackerId ? b.defenderId : b.attackerId, enemyKind = id === b.attackerId ? kD : kA;
-        fronts.set(id, { battleId: b.id, view, kind, enemyId, enemyKind, shells: b.kind === 'shells' && id === b.attackerId, cx: x0 + fux * r0, cy: y0 + fuy * r0, ux: fux, uy: fuy,
+        fronts.set(id, { battleId: b.id, view, kind, enemyId, enemyKind, cover: id === b.defenderId && !!b.cover, shells: b.kind === 'shells' && id === b.attackerId, cx: x0 + fux * r0, cy: y0 + fuy * r0, ux: fux, uy: fuy,
           front: Math.max(80, Math.min(190, (l - r0 - r1) * s * 0.9)) / s, backPx: r0 * s, tx: x1 - fux * r1, ty: y1 - fuy * r1, createdAt: b.createdAt });
       };
       if (squadsOn) {

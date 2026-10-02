@@ -376,6 +376,7 @@ addColumnIfMissing('shapes', 'data', 'TEXT');   // per-kind extras (trench: faci
 addColumnIfMissing('events', 'data', 'TEXT');
 addColumnIfMissing('game', 'deadline_notified', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('factions', 'uniform', "TEXT NOT NULL DEFAULT ''");   // army of the figures in battles: '' (from the name), american, anzac, arab, british, french, german, ottoman, russian (once grey, beige, green)
+addColumnIfMissing('battles', 'cover', 'INTEGER NOT NULL DEFAULT 0');   // the defender fought from trench cover (drawn behind wire)
 addColumnIfMissing('provinces', 'year', 'INTEGER NOT NULL DEFAULT 0');   // borders year the province was cut from (0 = before this column: 1914)   // "<deadline>|<stage>" of the last reminder sent
 
 function now() { return Date.now(); }

@@ -43,6 +43,7 @@
 (function () {
   const SQUAD = 8, GUNS = 4, TANKS = 2;
   const DEPTH = [-16, 30];   // an infantry section's spread in depth, screen px behind its line (negative: ahead of it)
+  const WIRE_D = -32;        // a dug-in unit's barbed-wire belt, screen px behind its line (ahead of its foremost men)
   // One scale for every figure, so they keep the art's proportions: a man's torso across on screen, px (before the zoom
   // boost; a man lying full length is then about 20 px).
   const TORSO_PX = 7;
@@ -148,7 +149,8 @@
       this.r = renderer;
       this.layer = new PIXI.Container(); this.layer.eventMode = 'none';
       this.deadC = new PIXI.Container(); this.machC = new PIXI.Container(); this.aliveC = new PIXI.Container();
-      this.layer.addChild(this.deadC, this.machC, this.aliveC);
+      this.groundG = new PIXI.Graphics();   // dug in: rifle pits, sandbags, gun pits and wire, under the men
+      this.layer.addChild(this.groundG, this.deadC, this.machC, this.aliveC);
       // Aircraft fly above the unit tokens (the renderer puts this layer over them): shadows, planes, then their fire.
       this.airLayer = new PIXI.Container(); this.airLayer.eventMode = 'none';
       this.shadowC = new PIXI.Container(); this.planeC = new PIXI.Container(); this.airG = new PIXI.Graphics();
@@ -318,6 +320,7 @@
      */
     frame(fronts, keep, nowMs, s, g) {
       this.airG.clear();
+      this.groundG.clear();
       for (const [id, q] of this.squads) if (!keep.has(id)) { this._drop(q); this.squads.delete(id); }
       for (const [id, q] of this.squads) if (!fronts.has(id)) { q.shown = false; for (const sp of this._sprites(q)) sp.visible = false; }
       if (!this.tex || !fronts.size) return false;
@@ -532,6 +535,7 @@
       }
       living = q.men.filter(m => !m.dead);
       const carcasses = !CAMELS.has(q.kit.army) && this.mounts.dead?.length ? this.mounts.dead : null;
+      const foe = f.enemyId != null ? this.squads.get(f.enemyId) : null;
       // All back in their places: stand a while, then charge again, every rider straight ahead through the enemy's
       // line to a point well past it (the echelon held, a little closed up).
       const c = q.cycle;
@@ -572,9 +576,13 @@
         let lat = m.co * F, dep = m.cd;
         const L = m.leg;
         if (L?.st === 'charge') {
-          // Gathering pace from a canter to a full gallop.
-          const k = Math.min(1, (nowMs - L.t0) / L.dur), e = k * (0.5 + 0.5 * k);
+          // Gathering pace from a canter to a full gallop; slowed to a struggle through the enemy's wire, if he has any
+          // (his belt lies WIRE_D ahead of his line, so that far short of it on this side).
+          const wire = foe?.wireAt && Math.abs(dep - (-reach - WIRE_D)) < 9;
+          L.k = Math.min(1, (L.k || 0) + dt * 1000 / L.dur * (wire ? 0.22 : 1));
+          const k = L.k, e = k * (0.5 + 0.5 * k);
           lat = L.from[0] + (L.to[0] - L.from[0]) * e; dep = L.from[1] + (L.to[1] - L.from[1]) * e;
+          if (wire) lat += Math.sin(t * 17 + m.i * 3) * 0.6;   // horses balking, riders hacking at the wire
           if (k >= 1) m.leg = this._wheel(q, m, L.to, F, reach, nowMs);
         } else if (L?.st === 'wheel') {
           const k = Math.min(1, (nowMs - L.t0) / L.dur);
@@ -929,6 +937,13 @@
       }
       const running = q.men.filter(m => m.run).length;
       const fallen = q.men.filter(m => m.dead);
+      const dug = this._dug(q, f);
+      if (dug && !crew) {
+        // Dug in: each man in his own rifle pit (the fallen in theirs), the spoil thrown up in front of it and
+        // topped with sandbags; after a second turn, a belt of wire out in front.
+        for (const m of q.men) { if (m.run && !m.dead) continue; const [x, y] = at(m.o, m.d); this._pit(x, y, f, s, boost, 1); }
+        if (dug > 1) this._wire(q, f, at, s, boost);
+      }
       for (const m of q.men) {
         const sp = m.sp;
         sp.visible = true;
@@ -964,7 +979,7 @@
             m.run = { o0: m.o, d0: m.d, o1: v.o + side * 7 / (f.front * s), d1: v.d - 2, t0: nowMs, dur: 0, to: v };
           }
           m.next = nowMs + 4000 + Math.random() * 6000;
-        } else if (m.role !== 'medic' && !m.run && nowMs >= m.next) {
+        } else if (m.role !== 'medic' && !m.run && !dug && nowMs >= m.next) {
           // Now and then a man gets up and rushes to a new spot, forward or back and across (three at most at a time);
           // never closer to the enemy than a quarter of the way over.
           if (running >= 3) m.next = nowMs + 1000 + Math.random() * 1500;
@@ -1051,6 +1066,12 @@
     }
     _tickGuns(q, f, nowMs, t, s, boost, g, at, theta, unit) {
       const hmg = q.machines[0]?.key === 'hmg' || q.team === 'mg';
+      const dug = this._dug(q, f);
+      if (dug) {
+        // Dug in: each gun in a pit walled with sandbags (open at the back); wire out in front after a second turn.
+        for (const gn of q.machines) { const [x, y] = at(gn.o, gn.d); this._pit(x, y, f, s, boost, q.team || hmg ? 1.6 : 1.8, true); }
+        if (dug > 1) this._wire(q, f, at, s, boost);
+      }
       for (const gn of q.machines) {
         if (q.team) { this._tickTeam(q, gn, f, nowMs, s, boost, g, at, theta, unit, hmg); continue; }
         const sc = this._gunScale(gn, boost, s);
@@ -1075,6 +1096,50 @@
       }
     }
 
+    /**
+     * How far a squad has dug in: 0 not at all; 1 rifle and gun pits with sandbags (it has held its ground a turn);
+     * 2 wire as well (two turns or more, or fighting from a trench line). Infantry and guns only.
+     */
+    _dug(q, f) {
+      if (q.kind !== 'rifles' && q.kind !== 'guns') return 0;
+      const held = Number(f.view?.marker?.data?.heldTurns) || 0, level = Math.max(Math.min(2, held), f.cover ? 2 : 0);
+      q.wireAt = level > 1 ? WIRE_D : 0;   // where cavalry charging it are held up
+      return level;
+    }
+    /**
+     * A pit at (x, y) (world units), `size` times a rifle pit: dark earth, the spoil heaped on the enemy side and
+     * sandbags along its top; a gun pit (`ring`) walled with sandbags all round but the back.
+     */
+    _pit(x, y, f, s, boost, size, ring = false) {
+      const g = this.groundG, k = boost / s * size * 1.3, ux = f.ux || 0, uy = f.uy || 0, rot = Math.atan2(uy, ux);
+      const oval = (cx, cy, rx, ry, a, n = 12) => { const pts = []; for (let i = 0; i < n; i++) { const t = i / n * Math.PI * 2; pts.push(cx + Math.cos(t) * rx * Math.cos(a) - Math.sin(t) * ry * Math.sin(a), cy + Math.cos(t) * rx * Math.sin(a) + Math.sin(t) * ry * Math.cos(a)); } return pts; };
+      // Spoil heaped up on the enemy side (the pit is long across the front).
+      g.poly(oval(x + ux * 3 * k, y + uy * 3 * k, 4.2 * k, 7.5 * k, rot)).fill({ color: 0x86704f, alpha: 0.85 });
+      g.poly(oval(x, y, 4 * k, 7 * k, rot)).fill({ color: 0x3f3122, alpha: 0.9 });
+      // Sandbags: a row along the forward lip, or round a gun pit.
+      const bags = ring ? 9 : 4, span = ring ? Math.PI * 1.5 : Math.PI * 0.75;
+      for (let i = 0; i < bags; i++) {
+        const a = rot - span / 2 + span * (i + 0.5) / bags, r = ring ? 7.6 * k : 6 * k;
+        const bx = x + Math.cos(a) * r * (ring ? 1 : 0.75), by = y + Math.sin(a) * r * (ring ? 1 : 0.75) * (ring ? 1 : 1.3);
+        g.poly(oval(bx, by, 1.5 * k / (ring ? size / 1.6 : 1), 2.6 * k / (ring ? size / 1.6 : 1), a, 8)).fill({ color: 0xb6a57a }).stroke({ width: 0.4 * boost / s, color: 0x6f6448, alpha: 0.8 });
+      }
+    }
+    /** A belt of concertina wire across the squad's front, WIRE_D ahead of its line, on pickets. */
+    _wire(q, f, at, s, boost) {
+      const g = this.groundG, step = 4.5 / (f.front * s), r = 2.6 * boost / s;
+      for (const row of [0, 1]) {
+        for (let o = -0.6 + row * step / 2; o <= 0.6; o += step) {
+          const [x, y] = at(o, WIRE_D - row * 4 + Math.sin(o * 37 + q.id) * 1.5);
+          g.circle(x, y, r);
+        }
+      }
+      g.stroke({ width: 0.55 * boost / s, color: 0x37332e, alpha: 0.85 });
+      for (let o = -0.6; o <= 0.6; o += step * 3) {
+        const [x0, y0] = at(o, WIRE_D - 6), [x1, y1] = at(o, WIRE_D + 2);
+        g.moveTo(x0, y0).lineTo(x1, y1);
+      }
+      g.stroke({ width: 1 * boost / s, color: 0x5a4632, alpha: 0.9 });
+    }
     /** A machine gun firing bursts of 10 to 20 rounds at its cyclic rate, a pause of 2 to 4 s between them. */
     _mgBurst(q, gn, f, nowMs, s, boost, g) {
       if (!gn.burst && nowMs >= gn.nextShot) { gn.burst = 10 + Math.floor(Math.random() * 11); gn.nextShot = 0; }

@@ -28,7 +28,11 @@ const q = {
   markers: db.prepare('SELECT * FROM markers WHERE lobby_id = ?'),
   clearBattles: db.prepare('DELETE FROM battles WHERE lobby_id = ? AND turn <= ?'),
   clearCraters: db.prepare('DELETE FROM craters WHERE lobby_id = ? AND expires_turn <= ?'),
-  resetUnits: db.prepare(`UPDATE markers SET data = json_remove(json_set(data, '$.movedKm', 0, '$.apUsed', 0), '$.trail', '$.ride'), updated_at = ? WHERE lobby_id = ? AND type IN ('unit', 'hero')`),
+  // New turn: movement and action points back; heldTurns counts the turns a unit has stayed put (it digs in: rifle
+  // pits, then wire, in the battle scenes).
+  resetUnits: db.prepare(`UPDATE markers SET data = json_remove(json_set(data, '$.movedKm', 0, '$.apUsed', 0, '$.heldTurns',
+    CASE WHEN COALESCE(json_extract(data, '$.movedKm'), 0) > 0 OR json_extract(data, '$.ride') IS NOT NULL THEN 0 ELSE COALESCE(json_extract(data, '$.heldTurns'), 0) + 1 END),
+    '$.trail', '$.ride'), updated_at = ? WHERE lobby_id = ? AND type IN ('unit', 'hero')`),
   clearReveals: db.prepare(`UPDATE markers SET data = json_remove(data, '$.revealTo'), updated_at = ? WHERE lobby_id = ? AND json_extract(data, '$.revealTo') IS NOT NULL`),
   setStrength: db.prepare(`UPDATE markers SET data = json_set(data, '$.strength', ?), updated_at = ? WHERE id = ?`),
   markerOne: db.prepare('SELECT * FROM markers WHERE id = ?'),
@@ -579,7 +583,7 @@ function checkAttack(g, isGm, marker) {
 }
 
 /** Fields a player may not change on their own unit while the game is running. */
-const PROTECTED_UNIT_FIELDS = ['attack', 'defend', 'ap', 'range', 'movement', 'strength', 'unitType', 'nation', 'movedKm', 'apUsed', 'trail', 'supplied', 'supplyFrom', 'unsuppliedTurns', 'surrendered', 'aboard', 'ride'];
+const PROTECTED_UNIT_FIELDS = ['attack', 'defend', 'ap', 'range', 'movement', 'strength', 'unitType', 'nation', 'movedKm', 'apUsed', 'trail', 'supplied', 'supplyFrom', 'unsuppliedTurns', 'surrendered', 'aboard', 'ride', 'heldTurns'];
 
 module.exports = {
   get, save, serializeGame, ensureState, serializeState, writeState, factionStates, incomeFor, endTurn, undoTurn, reports,

@@ -150,6 +150,11 @@ dress are worn from November to February. American, Arab and Russian kits do not
   - field guns and tanks firing over open sights send a shell along the same way.
   Units drawn this way have no other firing line; units drawn without figures keep the plain
   firing line from their token.
+- **Dug in.** A unit that stays put digs in: End turn counts the turns it has held its ground (`heldTurns`, reset
+  when it moves). After one turn each man fights from his own rifle pit, the spoil heaped up in front and topped with
+  sandbags, and stays in it (no more rushing about); guns sit in sandbagged pits, machine guns and mortars behind a
+  ring of sandbags. After two turns, or when the defender fights from a trench line, a belt of concertina wire on
+  pickets runs across its front, and cavalry charging it slow to a struggle while they get through the wire.
 - The medic kneels on the line until someone falls, then runs out to the fallen, kneels by them a while and
   comes back. The ANZAC medics are stretcher bearers; the Arab and Ottoman art has no medic, so they have none.
 - The Arabs' leader is the fighter in red with a revolver.
