@@ -1629,7 +1629,13 @@ class MapRenderer extends EventTarget {
         // Units drawn as men, machines, horsemen, planes or ships (skirmish.js) fire from where those are: no firing
         // line from their tokens. Nor is one aimed at a plane's token (its planes are over the fight).
         const own = k => !!sk?.firesOwn(k), air = !!sk?.mounts && (kA === 'air' || kD === 'air');
-        if (aStands && !own(kA) && !air) this._drawLineFire(g, ax, ay, dx, dy, e.seed, 1, t, s, pA, kD ? LINE : 10);
+        // Gas troops release a cloud instead of firing (its men are drawn masked, and stop firing, while it covers them).
+        const gas = window.UnitTypes?.resolve(Av?.marker?.data?.unitType)?.id === 'gas';
+        if (gas && aStands) {
+          const cover = this._drawGas(g, e, ax, ay, dx, dy, t, s, pA, kD ? LINE : 10);
+          const fd = fronts.get(b.defenderId);
+          if (fd) fd.gas = cover;
+        } else if (aStands && !own(kA) && !air) this._drawLineFire(g, ax, ay, dx, dy, e.seed, 1, t, s, pA, kD ? LINE : 10);
         if (dStands && !own(kD) && !air) this._drawLineFire(g, dx, dy, ax, ay, e.seed + 7.77, 0.65, t, s, pD, kA ? LINE : 10);
       } else {
         // Shelling: visible when the guns or the target are on screen (above 150 %). Each shell leaves the guns
@@ -1674,6 +1680,39 @@ class MapRenderer extends EventTarget {
     }
     if (sk && sk.frame(fronts, keep, nowMs, s, g)) anim = true;
     return anim;
+  }
+  /**
+   * A gas attack: a row of cylinders on the gas troops' line hisses out a yellow-green cloud, which rolls downwind
+   * across to the enemy and over him, swelling and thinning, and lingers before it clears; then they open the
+   * cylinders again (a 26 s cycle). Each puff is a blob with its own release time, drift and spread, drawn soft.
+   * Returns how thickly it lies on the enemy's line now (0..1).
+   */
+  _drawGas(g, e, ax, ay, dx, dy, t, s, ownPx, targetPx) {
+    const L = Math.hypot(dx - ax, dy - ay);
+    if (L < 1e-6) return 0;
+    const ux = (dx - ax) / L, uy = (dy - ay) / L, nx = -uy, ny = ux, seed = e.seed;
+    const r0 = Math.min(L * 0.3, ownPx / s), r1 = Math.min(L * 0.3, targetPx / s);
+    const sx = ax + ux * r0, sy = ay + uy * r0, span = Math.max(1e-6, L - r0 - r1) * s;   // px from their line to the enemy's
+    const front = Math.max(80, Math.min(190, span * 0.9)) / s, P = 26, cyc = ((t + seed * 7) % P + P) % P;
+    // The cylinders: a row of little grey bottles along the line, hissing while the cloud is let out.
+    for (let i = 0; i < 9; i++) {
+      const o = ((i + 0.5) / 9 - 0.5) * front, x = sx + nx * o, y = sy + ny * o;
+      g.rect(x - 1.2 / s, y - 2.5 / s, 2.4 / s, 5 / s).fill({ color: 0x55595c });
+      if (cyc < 7) g.circle(x + ux * 4 / s, y + uy * 4 / s, (2 + Math.random() * 2) / s).fill({ color: 0xd6d48a, alpha: 0.5 });
+    }
+    // The cloud: puffs let out over the first 7 s, drifting at 14–22 px/s, spreading and thinning for 19 s.
+    let onLine = 0;
+    for (let i = 0; i < 64; i++) {
+      const k1 = hash01(seed, i * 5 + 1), k2 = hash01(seed, i * 5 + 2), k3 = hash01(seed, i * 5 + 3);
+      const age = cyc - k1 * 7;
+      if (age < 0 || age > 19) continue;
+      const v = 14 + k2 * 8, d = Math.min(span + 40, age * v), o = ((k3 - 0.5) * 1.15 + Math.sin(age * 0.3 + i) * 0.08) * front;
+      const x = sx + ux * d / s + nx * o, y = sy + uy * d / s + ny * o;
+      const r = (7 + age * 1.9) / s, a = 0.42 * Math.min(1, age / 1.5) * Math.min(1, (19 - age) / 6);
+      g.circle(x, y, r).fill({ color: 0xbfc35a, alpha: a * 0.45 }).circle(x, y, r * 0.65).fill({ color: 0xc9cc68, alpha: a * 0.5 }).circle(x, y, r * 0.35).fill({ color: 0xa9b04c, alpha: a * 0.5 });
+      if (Math.abs(d - span) < 30 && a > 0.12) onLine++;
+    }
+    return Math.min(1, onLine / 10);
   }
   /**
    * One side's fire in a firefight, from (ax, ay) at (dx, dy). `intensity` (0..1) thins the line (return fire

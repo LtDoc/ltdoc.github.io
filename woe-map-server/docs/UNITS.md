@@ -155,6 +155,10 @@ dress are worn from November to February. American, Arab and Russian kits do not
   sandbags, and stays in it (no more rushing about); guns sit in sandbagged pits, machine guns and mortars behind a
   ring of sandbags. After two turns, or when the defender fights from a trench line, a belt of concertina wire on
   pickets runs across its front, and cavalry charging it slow to a struggle while they get through the wire.
+- **Gas.** Gas troops (Gas / chemical troops) attack with a cloud instead of a firing line: a row of cylinders on
+  their line hisses out yellow-green gas for a few seconds, and the cloud rolls downwind across to the enemy at
+  about 18 px a second, swelling and thinning, lingers over his line and clears; then the cylinders are opened
+  again (every 26 s). Men in the cloud take on a sickly cast (masks on) and stop firing until it thins.
 - The medic kneels on the line until someone falls, then runs out to the fallen, kneels by them a while and
   comes back. The ANZAC medics are stretcher bearers; the Arab and Ottoman art has no medic, so they have none.
 - The Arabs' leader is the fighter in red with a revolver.

@@ -1023,6 +1023,9 @@
         // his gun's rate. The medic waits, kneeling.
         const fr = this._pick(q, m.i, m.role === 'medic' ? 'medic.kneel' : `${m.role}.${m.stance}`);
         this._pose(m, fr);
+        // In a gas cloud: masks on, a sickly cast to them, and no aimed fire until it clears.
+        sp.tint = f.gas > 0.3 ? 0xd3dc9a : 0xffffff;
+        if (f.gas > 0.5) m.nextShot = Math.max(m.nextShot, nowMs + 600);
         if (m.role !== 'medic' && nowMs >= m.nextShot) {
           const lmg = m.role === 'lmg' && this._has(q.kit, 'lmg.') && LMG_RPM[q.kit.army];
           if (lmg) {
