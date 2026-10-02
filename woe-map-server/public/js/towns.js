@@ -191,7 +191,18 @@ const TownArt = (() => {
     // ---- Fields: a patchwork on a rough polar grid with shared corners, so neighbouring fields meet; each ring of
     // corners turned a little from the last, so the fields lean every way rather than all pointing at the town. They
     // start where the houses stop (any field with a house on it is left out) and fray out at the far edge. ----
-    const r0 = R * K.fields[0], r1 = R * K.fields[1], rings = Math.max(2, Math.round((r1 - r0) / 0.8));
+    // Farmland is not a ring: how far it reaches varies round the town in a few broad lobes, furthest out along the
+    // roads (farms follow them), so its edge wanders and the town sits off-centre in its fields.
+    const lobes = [1, 2, 3, 5].map(n => ({ n, amp: (0.5 + rnd()) / n, ph: rnd() * Math.PI * 2 }));
+    const roadDirs = streets.filter(st => st.type === 'country').map(st => { const p = st.pts[st.pts.length - 1]; return Math.atan2(p[1], p[0]); });
+    const reachAt = a => {
+      let v = 0;
+      for (const l of lobes) v += Math.sin(a * l.n + l.ph) * l.amp;
+      let road = 0;
+      for (const d of roadDirs) { const x = Math.atan2(Math.sin(a - d), Math.cos(a - d)); road = Math.max(road, Math.exp(-x * x / 0.08)); }
+      return Math.max(0.1, 0.42 + v * 0.3 + road * 0.5);   // fraction of the way out to the far limit
+    };
+    const r0 = R * K.fields[0], r1 = R * K.fields[1] * 1.2, rings = Math.max(2, Math.round((r1 - r0) / 0.8));
     const sectors = Math.max(10, Math.round(Math.PI * (r0 + r1) / 0.9)), dr = (r1 - r0) / rings, da = Math.PI * 2 / sectors;
     const lat = [];
     let turn = 0;
@@ -207,8 +218,11 @@ const TownArt = (() => {
       const c = [lat[k][j], lat[k][(j + 1) % sectors], lat[k + 1][(j + 1) % sectors], lat[k + 1][j]];
       const mid = lerp2(c, 0.5, 0.5);
       if ([...c, mid].some(p => near(taken, p[0], p[1], 0.08, 0.4)) || !c.every(p => land(p[0], p[1]))) continue;
-      if (rnd() < 0.07 + Math.pow((k + 1) / rings, 3) * 0.55) continue;   // rough ground here and there; a ragged outer edge
-      const wood = rnd() < 0.07;
+      // Beyond the farmland's reach in this direction: open country (a field or two still straggles out).
+      const out = (Math.hypot(mid[0], mid[1]) - r0) / (r1 - r0), lim = reachAt(Math.atan2(mid[1], mid[0]));
+      if (out > lim + (rnd() - 0.5) * 0.15 && rnd() > 0.04) continue;
+      if (rnd() < 0.16) continue;   // rough ground here and there
+      const wood = rnd() < 0.1;
       // Some are divided into strips, as old open fields were.
       // Wide fields (out where the grid's wedges open up) are always divided, so none is too big.
       const across = Math.hypot(c[2][0] - c[3][0], c[2][1] - c[3][1]);

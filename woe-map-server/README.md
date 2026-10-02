@@ -212,7 +212,7 @@ view. Details: `docs/UI.md`.
   procedurally from its name (`public/js/towns.js`), so it always looks the same: main roads out of the centre,
   bending as they go, ring boulevards, a dense web of side streets and lanes, houses packed several rows deep in the
   old centre and thinning out along the roads, a square and a cathedral or church, parks, and a patchwork of hedged
-  fields, woods and farms round it. Capitals are very large (about 20 map px across), cities large (10), villages
+  fields, woods and farms round it, spreading out unevenly (furthest along the roads) rather than in a ring. Capitals are very large (about 20 map px across), cities large (10), villages
   small (3) in the middle of their fields. Shown from 150 % zoom, in full detail from 500 %. Shelled towns show the
   damage: houses near a crater are burnt-out shells or rubble, and this turn's hits set them burning, with flames
   and tall smoke columns.
