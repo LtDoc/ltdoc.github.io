@@ -163,6 +163,31 @@
       this._dropChunks();
       this.r.invalidate();
     }
+    /** How far inside a painted area a point is, 0 at its edge to 1 at its deepest (its spine): the area's height. */
+    _paintedDepth(a, x, y) {
+      let d = Infinity;
+      for (let i = 0, j = a.pts.length - 1; i < a.pts.length; j = i++) {
+        const [x1, y1] = a.pts[j], [x2, y2] = a.pts[i], dx = x2 - x1, dy = y2 - y1, l2 = dx * dx + dy * dy;
+        const t = l2 ? Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / l2)) : 0;
+        d = Math.min(d, Math.hypot(x - x1 - dx * t, y - y1 - dy * t));
+      }
+      if (!a.depth) a.depth = 0.3 * Math.min(a.bbox[2] - a.bbox[0], a.bbox[3] - a.bbox[1]);   // about the spine of a blob-shaped range
+      return Math.min(1, d / Math.max(1e-6, a.depth));
+    }
+    _paintedArea(x, y) {
+      let hit = null;
+      for (const a of this.areas.values()) {
+        const b = a.bbox;
+        if ((hit && a.cls <= hit.cls) || x < b[0] || x > b[2] || y < b[1] || y > b[3]) continue;
+        let inside = false;
+        for (let i = 0, j = a.pts.length - 1; i < a.pts.length; j = i++) {
+          const [xi, yi] = a.pts[i], [xj, yj] = a.pts[j];
+          if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+        }
+        if (inside) hit = a;
+      }
+      return hit;
+    }
     _paintedAt(x, y) {
       let c = Terrain.FLAT;
       for (const a of this.areas.values()) {
@@ -250,8 +275,9 @@
           if (c === Terrain.MOUNTAINS) snow = snowAt(grid, gx, gy);
         }
         if (this.areas.size && c < Terrain.MOUNTAINS) {
-          const p = this._paintedAt(x, y);
-          if (p > c) { c = p; e = -1; }   // painted: no height (sized at random below)
+          // Painted ground has no heights: the depth inside the area stands for one (its spine is the crest).
+          const a = this._paintedArea(x, y);
+          if (a && a.cls > c) { c = a.cls; const d = this._paintedDepth(a, x, y); e = -1 - d; snow = c === Terrain.MOUNTAINS ? smooth((d - 0.55) / 0.35) : 0; }
         }
         return { c, e, snow };
       };
@@ -266,7 +292,7 @@
           if (g.c === Terrain.FLAT) continue;
           const r = hash(i, j, 3), r2 = hash(i, j, 4);
           if (g.c === Terrain.MOUNTAINS) {
-            const t = g.e < 0 ? 0.35 + r * 0.45 : Math.min(1, Math.max(0, (g.e - 500) / 2800)) ** 0.85;
+            const t = g.e < 0 ? Math.min(1, 0.15 + (-1 - g.e) * 0.95) : Math.min(1, Math.max(0, (g.e - 500) / 2800)) ** 0.85;
             const w = (SIZE.mtnMin + (SIZE.mtnMax - SIZE.mtnMin) * t) * (0.82 + 0.36 * r2) * K;
             cands.push({ x, y, w, cls: Terrain.MOUNTAINS, pr: (g.e < 0 ? t * 3000 : g.e) + r * 450, snow: g.snow, e: g.e, pick: hash(i, j, 5), alt: hash(i, j, 6) });
           } else {

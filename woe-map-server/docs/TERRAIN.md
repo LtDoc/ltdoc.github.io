@@ -134,4 +134,5 @@ under towns, drawings and units:
     Maritime Alps) instead of a patchwork.
   - Built per 64 px chunk (with a margin so neighbouring chunks agree), ten new chunks a frame at most, a few hundred
     kept; about 5000 sprites in view at 350 % still draw at full frame rate. On image maps sizes, spacing and chunks are
-    three times larger, to suit their bigger map pixels.
+    three times larger, to suit their bigger map pixels. Painted areas have no heights, so the depth inside the
+    area stands in for one: its spine is the crest (the biggest, snow-capped peaks), its edges the foothills.
