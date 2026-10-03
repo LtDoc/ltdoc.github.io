@@ -1814,7 +1814,9 @@ router.post('/:id/combat', (req, res) => {
   const typeA = UnitTypes.resolve(a.data?.unitType), typeD = UnitTypes.resolve(d.data?.unitType);
   const match = Matchups.matchup(typeA, typeD, { entrenched: !!cover });
   const atk = num(a.data.attack) + bonusA.attack + (genA ? genA.bonus : 0) + supA.attack + match.mod;
-  const def = num(d.data.defend) + bonusD.defend + (cover ? cover.bonus : 0) + (genD ? genD.bonus : 0) + supD.defend;
+  // Higher ground (hills, mountains) favours the defender attacked from below.
+  const ground = require('../terrain').heightBonus(req.lobby, g.settings, a, d);
+  const def = num(d.data.defend) + bonusD.defend + (cover ? cover.bonus : 0) + (genD ? genD.bonus : 0) + supD.defend + ground.bonus;
   // Cut off from supply, the defender breaks more easily: a successful attack does double damage.
   const cutOffD = g.enabled && g.settings.supplyEnabled !== false && d.data?.supplied === false && UnitTypes.resolve(d.data?.unitType)?.cat !== 'Emplacements';
   const aRoll = crypto.randomInt(1, cfg.die + 1), dRoll = crypto.randomInt(1, cfg.die + 1);
@@ -1848,7 +1850,7 @@ router.post('/:id/combat', (req, res) => {
 
   const fmt = (m, l) => `${m.name} ${l.loss ? `loses ${l.loss}% (${l.from}→${l.to}${l.to === 0 ? ', destroyed' : ''})` : 'is unharmed'}`;
   const notes = [bonusA.attack ? `attacker +${bonusA.attack} tech` : '', genA ? `attacker +${genA.bonus} ${genA.hero.name}` : '',
-    bonusD.defend ? `defender +${bonusD.defend} tech` : '', genD ? `defender +${genD.bonus} ${genD.hero.name}` : '', cover ? `+${cover.bonus} trench cover` : '',
+    bonusD.defend ? `defender +${bonusD.defend} tech` : '', genD ? `defender +${genD.bonus} ${genD.hero.name}` : '', cover ? `+${cover.bonus} trench cover` : '', ground.text,
     ...supA.notes.map(n => `attacker ${n}`), ...supD.notes.filter(n => !/spotting/.test(n)).map(n => `defender ${n}`), ...(supD.defendNotes || []).map(n => `defender ${n}`),
     ...match.notes.map(n => `${n.mod > 0 ? '+' : ''}${n.mod} ${n.text}`),
     cutOffD ? `${d.name} is out of supply${outcome === 'attacker' ? ': double losses' : ''}` : '',

@@ -633,6 +633,10 @@
                 <label>Mountains cost <span class="hint">(× distance)</span><input id="ruleMountains" type="number" step="any" min="1" max="50"></label>
                 <label>Mountain troops in mountains <span class="hint">(× distance; hills: 1)</span><input id="ruleMountainTroops" type="number" step="any" min="1" max="20"></label>
               </div>
+              <div class="grid2">
+                <label>Higher ground: hills <span class="hint">(+defend, attacked from flat ground)</span><input id="ruleHillsDefend" type="number" step="any" min="0" max="10"></label>
+                <label>Higher ground: mountains <span class="hint">(+defend from flat; from hills the difference)</span><input id="ruleMountainsDefend" type="number" step="any" min="0" max="10"></label>
+              </div>
               <label class="inline"><input type="checkbox" id="ruleWaive"> Waive movement and range limits</label>
             </section>
             <section data-page="r-economy" hidden>

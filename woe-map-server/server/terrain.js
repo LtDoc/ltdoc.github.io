@@ -102,4 +102,25 @@ function moveMult(settings, kind, cls) {
   return 1;
 }
 
-module.exports = { FLAT, HILLS, MOUNTAINS, earthGrid, painted, lookup, classAt, enabled, moveKind, moveMult, inside };
+/**
+ * The defender's edge from higher ground (docs/TERRAIN.md): each class's value (flat 0, hills settings.hillsDefend,
+ * mountains settings.mountainsDefend) at the defender's position minus the value at the attacker's, when positive.
+ * Attacking downhill brings nothing extra. Not for aircraft (attacking or attacked) or ships attacked at sea; a ship
+ * attacking from the sea stands on flat ground. Returns { bonus, text } (bonus 0 when there is none).
+ */
+function heightBonus(lobby, settings, attacker, defender) {
+  const none = { bonus: 0, text: '' };
+  if (!enabled(settings)) return none;
+  const tA = UnitTypes.resolve(attacker.data?.unitType), tD = UnitTypes.resolve(defender.data?.unitType);
+  if (tA?.cat === 'Air' || tD?.cat === 'Air' || tD?.cat === 'Naval') return none;
+  const look = lookup(lobby);
+  if (!look.any) return none;
+  const s = settings || {};
+  const value = c => (c === MOUNTAINS ? num(s.mountainsDefend, 2) : c === HILLS ? num(s.hillsDefend, 1) : 0);
+  const cD = look.classAt(defender.x, defender.y), cA = tA?.cat === 'Naval' ? FLAT : look.classAt(attacker.x, attacker.y);
+  const bonus = Math.round((value(cD) - value(cA)) * 10) / 10;
+  if (bonus <= 0) return none;
+  return { bonus, text: `defender +${bonus} on higher ground (${Terrain.NAMES[cD]} above ${Terrain.NAMES[cA]})` };
+}
+
+module.exports = { FLAT, HILLS, MOUNTAINS, earthGrid, painted, lookup, classAt, enabled, moveKind, moveMult, inside, heightBonus };

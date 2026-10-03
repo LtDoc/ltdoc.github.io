@@ -59,6 +59,21 @@ Ships, aircraft and units aboard a convoy ignore the ground. Heroes walk like in
   into the mountains).
 - The move's note says what slowed it: "slowed by the hills and the mountains".
 
+## Combat: higher ground
+
+The defender gains the height of its ground over the attacker's (`terrain.heightBonus`, added to defend like trench
+cover and shown in the combat line, e.g. "defender +2 on higher ground (mountains above flat)"):
+
+| Attacker on | Defender on | Defender gets |
+|---|---|---|
+| Flat | Hills | +1 (*Higher ground: hills*) |
+| Flat | Mountains | +2 (*Higher ground: mountains*) |
+| Hills | Mountains | +1 (the difference) |
+| Higher than the defender, or level | — | nothing (attacking downhill brings no bonus of its own) |
+
+It counts for artillery firing from range too. Aircraft (attacking or attacked) and ships attacked at sea ignore it;
+a ship bombarding the shore attacks from flat ground, so a battery on hills or cliffs gains it.
+
 ## How it looks
 
 `public/js/relief.js` draws the ground over the land and the territory colours (so it reads whoever holds it) and
