@@ -764,7 +764,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       numIn('convoyCapacity', 1, 50); numIn('convoyBoardKm', 0, 1000); numIn('convoyLandKm', 0, 2000);
       numIn('railSpeed', 1, 50); numIn('railCutKm', 1, 500); numIn('railDefence', -10, 50); numIn('railGuardKm', 0, 1000); numIn('railRepairKm', 0, 1000); numIn('railJoinKm', 0, 200);
       numIn('heroAuraKm', 0, 5000); numIn('spySecurity', -10, 30); numIn('spyCounterKm', 0, 5000); numIn('spyStealPerStar', 0, 1000);
-      numIn('kmPerMove', 1, 100000); numIn('kmPerRange', 1, 100000); numIn('noMansLandCost', 1, 20); numIn('hillsMoveCost', 1, 20); numIn('mountainMoveCost', 1, 50); numIn('mountainTroopsCost', 1, 20); numIn('hillsDefend', 0, 10); numIn('mountainsDefend', 0, 10); numIn('supplyMountainKm', 0, 2000); numIn('mountainTroopsSupplyKm', 0, 2000); numIn('captureRadiusKm', 1, 5000); numIn('cityRadiusKm', 1, 5000);
+      numIn('kmPerMove', 1, 100000); numIn('kmPerRange', 1, 100000); numIn('noMansLandCost', 1, 20); numIn('captureRadiusKm', 1, 5000); numIn('cityRadiusKm', 1, 5000);
       numIn('researchLead', 0, 50); numIn('baseMoney', -1000, 100000); numIn('baseRp', -1000, 100000); numIn('baseManpower', -1000, 100000);
       numIn('upkeepGrain', 0, 100); numIn('upkeepOil', 0, 100);
       numIn('trenchRangeKm', 0, 1000); numIn('trenchBonusDug', 0, 50); numIn('trenchBonusReinforced', 0, 50);
@@ -789,7 +789,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
         }
         out.unitCosts = cur;
       }
-      for (const k of ['waiveMovement', 'occupyNeutrals', 'upkeep', 'publicTreasury', 'capturedIdle', 'diplomatsRequired', 'supplyEnabled', 'fogOfWar', 'terrain']) if (s[k] !== undefined) out[k] = !!s[k];
+      for (const k of ['waiveMovement', 'occupyNeutrals', 'upkeep', 'publicTreasury', 'capturedIdle', 'diplomatsRequired', 'supplyEnabled', 'fogOfWar']) if (s[k] !== undefined) out[k] = !!s[k];
       numIn('subSpotKm', 0, 1000);
       if (s.vision && typeof s.vision === 'object') {
         out.vision = { ...(g.settings.vision || {}) };

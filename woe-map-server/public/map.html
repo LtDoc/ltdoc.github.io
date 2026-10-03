@@ -313,8 +313,6 @@
         <div id="nmlFields" hidden>
           <label class="inline"><input type="checkbox" id="shapeNoMansLand"> No Man's Land</label>
           <p class="hint">Churned mud, shell holes, wire and the dead between the lines. Walking across it costs several times the distance (⚖ Rules → Movement); while the game is running only the GM can set this.</p>
-          <label>Ground <select id="shapeTerrain"><option value="">As the map</option><option value="hills">Hills</option><option value="mountains">Mountains</option></select></label>
-          <p class="hint">Hills and mountains for maps without elevation (Earth maps have their own): slow movement, and tanks and artillery cannot enter mountains except by rail (⚖ Rules → Movement).</p>
         </div>
         <p id="railFields" class="hint" hidden>Land units and heroes move several times faster along open track (⚖ Rules → Railways). Rails whose ends touch are joined; start or end a line on other track to branch off it. GM-only railways are plans: nothing runs on them.</p>
         <div id="shapeGmFields">
@@ -627,16 +625,6 @@
                 <label>Attack reach per range point <span class="hint">(infantry 1, cavalry 2, artillery 3)</span><input id="ruleKmPerRange" type="number" step="any" min="1"></label>
               </div>
               <label>No Man's Land movement cost <span class="hint">(× distance walked inside areas tagged No Man's Land)</span><input id="ruleNoMansLand" type="number" step="any" min="1" max="20"></label>
-              <label class="inline"><input type="checkbox" id="ruleTerrain"> Hills and mountains <span class="hint">(slow movement; tanks and artillery cannot enter mountains except by rail)</span></label>
-              <div class="grid3">
-                <label>Hills cost <span class="hint">(× distance)</span><input id="ruleHills" type="number" step="any" min="1" max="20"></label>
-                <label>Mountains cost <span class="hint">(× distance)</span><input id="ruleMountains" type="number" step="any" min="1" max="50"></label>
-                <label>Mountain troops in mountains <span class="hint">(× distance; hills: 1)</span><input id="ruleMountainTroops" type="number" step="any" min="1" max="20"></label>
-              </div>
-              <div class="grid2">
-                <label>Higher ground: hills <span class="hint">(+defend, attacked from flat ground)</span><input id="ruleHillsDefend" type="number" step="any" min="0" max="10"></label>
-                <label>Higher ground: mountains <span class="hint">(+defend from flat; from hills the difference)</span><input id="ruleMountainsDefend" type="number" step="any" min="0" max="10"></label>
-              </div>
               <label class="inline"><input type="checkbox" id="ruleWaive"> Waive movement and range limits</label>
             </section>
             <section data-page="r-economy" hidden>
@@ -687,7 +675,6 @@
               <div class="section">A place feeds a Supply Column within (by size)</div>
               <div class="grid3"><label>Capital<input id="ruleLinkCapital" type="number" step="any" min="0"></label><label>City<input id="ruleLinkCity" type="number" step="any" min="0"></label><label>Village<input id="ruleLinkVillage" type="number" step="any" min="0"></label></div>
               <div class="section">Columns, railheads and convoys</div>
-              <div class="grid2"><label>Supply lines may cross mountains for <span class="hint">(km; railways carry supply through regardless)</span><input id="ruleSupplyMountain" type="number" step="any" min="0"></label><label>… to mountain troops <span class="hint">(km)</span><input id="ruleSupplyMountainTroops" type="number" step="any" min="0"></label></div>
               <div class="grid3"><label>Column supplies within<input id="ruleSupplyRange" type="number" step="any" min="0"></label><label>Railhead / column chain<input id="ruleSupplyLink" type="number" step="any" min="0"></label><label>Garrison within a place<input id="ruleSupplyTown" type="number" step="any" min="0"></label></div>
               <div class="grid2"><label>Convoy feeds columns within<input id="ruleConvoyLink" type="number" step="any" min="0"></label><label>Convoy supplies units within<input id="ruleConvoyRange" type="number" step="any" min="0"></label></div>
               <div class="section">Troops at sea</div>
@@ -760,8 +747,6 @@
   <script src="/js/stats-editor.js"></script>
   <script src="/js/powers.js"></script>
   <script src="/js/earth.js"></script>
-  <script src="/js/terrain.js"></script>
-  <script src="/js/relief.js"></script>
   <script src="/js/province-layer.js"></script>
   <script src="/js/trench.js"></script>
   <script src="/js/towns.js"></script>

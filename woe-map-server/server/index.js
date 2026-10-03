@@ -34,15 +34,6 @@ app.get('/earth/:name.json.gz', (req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=604800');
   res.sendFile(file, err => { if (err) res.status(404).end(); });
 });
-// The elevation grid (public/js/terrain.js), also pre-gzipped: binary, inflated by the browser.
-app.get('/earth/:name.bin.gz', (req, res) => {
-  if (!/^[a-z0-9_]+$/.test(req.params.name)) return res.status(404).end();
-  const file = path.join(config.root, 'public', 'earth', `${req.params.name}.bin.gz`);
-  res.setHeader('Content-Type', 'application/octet-stream');
-  res.setHeader('Content-Encoding', 'gzip');
-  res.setHeader('Cache-Control', 'public, max-age=604800');
-  res.sendFile(file, err => { if (err) res.status(404).end(); });
-});
 app.use('/vendor/pixi', express.static(path.join(config.root, 'node_modules', 'pixi.js', 'dist'), { maxAge: '7d', index: false }));
 
 // Pages: every /js and /css URL gets ?v=<build> so browsers fetch fresh code after a restart; pages are never cached.

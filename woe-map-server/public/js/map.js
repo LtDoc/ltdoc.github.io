@@ -1873,7 +1873,7 @@
 
   function shapePopupHtml(s) {
     const creator = s.createdBy && state.members.find(x => x.userId === s.createdBy);
-    let body = stat('Kind', s.kind === 'area' ? (s.data?.noMansLand ? "No Man's Land" : s.data?.terrain === 'mountains' ? 'Mountains' : s.data?.terrain === 'hills' ? 'Hills' : 'Area') : s.kind === 'trench' ? 'Trench' : s.kind === 'rail' ? 'Railway' : 'Line') + (s.kind === 'rail' ? '' : stat('Points', s.points.length));
+    let body = stat('Kind', s.kind === 'area' ? (s.data?.noMansLand ? "No Man's Land" : 'Area') : s.kind === 'trench' ? 'Trench' : s.kind === 'rail' ? 'Railway' : 'Line') + (s.kind === 'rail' ? '' : stat('Points', s.points.length));
     if (s.kind === 'rail') body += railPopupRows(s);
     if (s.kind === 'trench') {
       body += stat('State', { plan: 'planned', dug: 'dug', reinforced: 'reinforced' }[s.data?.state] || 'dug') + stat('Width', `${s.width} ${state.lobby?.scaleLabel || ''}`) + nationStat(s.data?.nation);
@@ -1882,12 +1882,6 @@
       if (bonus) body += stat('Cover', `+${bonus} defend for ${esc(s.data?.nation || 'any')} units within ${g?.trenchRangeKm ?? 20} ${state.lobby?.scaleLabel || 'km'}`);
     }
     if (s.data?.noMansLand) body += stat('Movement', `walking across it costs ${state.game?.settings?.noMansLandCost ?? 3}× the distance`);
-    if (s.data?.terrain && state.game?.settings?.terrain !== false) {
-      const gs = state.game?.settings || {};
-      body += stat('Movement', s.data.terrain === 'mountains'
-        ? `${gs.mountainMoveCost ?? 4}× the distance (mountain troops ${gs.mountainTroopsCost ?? 1}×); tanks and artillery cannot enter`
-        : `${gs.hillsMoveCost ?? 1.5}× the distance (mountain troops 1×)`);
-    }
     if (creator) body += stat('Drawn by', creator.displayName);
     if (s.visibleTo && s.visibleTo.length) body += stat('Visible to', s.visibleTo.join(', '));
     if (s.kind !== 'area') {
@@ -2443,8 +2437,6 @@
     $('#nmlFields').hidden = kind !== 'area';
     $('#shapeNoMansLand').checked = !!shape?.data?.noMansLand;
     $('#shapeNoMansLand').disabled = gameOn() && state.role !== 'gm';
-    $('#shapeTerrain').value = shape?.data?.terrain || '';
-    $('#shapeTerrain').disabled = gameOn() && state.role !== 'gm';
     $('#trenchZigWrap').hidden = !trench || !!shape;                 // traverses are applied when the trench is first dug
     if (trench) {
       $('#trenchState').value = shape ? (shape.data?.state || 'dug') : 'dug';
@@ -2464,7 +2456,7 @@
       visibleTo: $('#shapeVisibleTo').value, adminOnly: $('#shapeAdminOnly').checked,
     };
     const editing = state.editingShapeId ? state.shapes.get(state.editingShapeId) : null;
-    if ((editing && editing.kind === 'area') || state.pendingShape?.kind === 'area') body.data = { noMansLand: $('#shapeNoMansLand').checked, terrain: $('#shapeTerrain').value };
+    if ((editing && editing.kind === 'area') || state.pendingShape?.kind === 'area') body.data = { noMansLand: $('#shapeNoMansLand').checked };
     if ((editing && editing.kind === 'trench') || state.pendingShape?.kind === 'trench') {
       body.data = { state: $('#trenchState').value, facing: $('#trenchFacing').value, zigzag: $('#trenchZigzag').checked };
     }

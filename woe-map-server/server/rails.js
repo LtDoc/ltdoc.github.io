@@ -69,31 +69,12 @@ function canRide(marker) {
   return require('./territory').isLandUnit(marker);
 }
 
-/**
- * The cheaper-than-walking rail trip for a marker, or null. { cost, railKm, walkKm, path }
- * `walkCost`: what walking straight there costs (game.walkCost: rough ground, No Man's Land; Infinity when the unit
- * cannot get there on foot), the bar the train must beat. The walks to and from the track pay for their ground
- * too, and a walk the unit cannot make (tanks and artillery into mountains) rules the trip out; the track itself
- * runs through hills and mountains at its usual speed.
- */
-function plan(lobby, settings, marker, x, y, walkCost) {
+/** The cheaper-than-walking rail trip for a marker, or null. { cost, railKm, walkKm, path } */
+function plan(lobby, settings, marker, x, y) {
   if (!canRide(marker)) return null;
   const net = network(lobby, settings);
   if (!net.edges.length) return null;
-  const speed = num(settings.railSpeed, 4);
-  const r = RailNet.route(net, { x: marker.x, y: marker.y }, { x, y }, { usable: usableFor(lobby, marker.data?.nation), speed, direct: walkCost });
-  if (!r) return null;
-  const game = require('./game'), path = r.path, last = path.length - 1;
-  const leg = (a, b, leave) => game.walkCost(lobby, settings, a[0], a[1], b[0], b[1], marker, { leave });
-  const on = leg(path[0], path[1], true), off = leg(path[last - 1], path[last], false);
-  if (!Number.isFinite(on.cost) || !Number.isFinite(off.cost)) return null;
-  const cost = on.cost + off.cost + r.railKm / speed;
-  if (walkCost !== undefined && cost >= walkCost) return null;
-  // The walking legs' cost per km, so a trip cut short stops in the right place.
-  const per = (l, a, b) => { const d = geo.distance(lobby, a[0], a[1], b[0], b[1]); return d > 0 ? l.cost / d : 1; };
-  const out = path.map(p => p.slice());
-  out[1][2] = per(on, path[0], path[1]); out[last][2] = per(off, path[last - 1], path[last]);
-  return { ...r, cost, walkKm: on.cost + off.cost, path: out };
+  return RailNet.route(net, { x: marker.x, y: marker.y }, { x, y }, { usable: usableFor(lobby, marker.data?.nation), speed: num(settings.railSpeed, 4) });
 }
 
 /** Walk a route until the budget runs out. */

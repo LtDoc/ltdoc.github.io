@@ -236,7 +236,7 @@
     if (!on || !off) return null;
     const dist = net.opt.dist;
     const walkKm = on.d + off.d;
-    const direct = opt.direct !== undefined ? opt.direct : dist(a.x, a.y, b.x, b.y);   // the walk to beat (rough ground costs more)
+    const direct = dist(a.x, a.y, b.x, b.y);
     if (walkKm >= direct) return null;                       // walking to and from the track costs more than the trip
     const rf = 1 / speed;
     let railKm, mids = [];

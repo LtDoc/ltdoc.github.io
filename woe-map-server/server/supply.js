@@ -11,10 +11,6 @@
  *   - A convoy (transport ships) is a source anywhere: it supplies land units within convoyRangeKm and links
  *     columns within convoyLinkKm, so an invasion can be supplied far from home.
  *   - Ships, aircraft and heroes do not need supply.
- *   - Mountains cut supply lines (docs/TERRAIN.md): every straight link above (place, column, railhead or convoy to
- *     a unit or column, column to column) may cross at most supplyMountainKm of mountains, mountainTroopsSupplyKm when
- *     it ends at mountain troops. Supply carried along the railway network is not affected, so a line over a range
- *     keeps the far side supplied.
  * Support units (alive and supplied) help friendly units around them: HQ (attack and defend), engineers,
  * pioneers and sappers (defend), signals (artillery attack), field hospitals (heal at End turn).
  */
@@ -68,24 +64,15 @@ function compute(lobby, settings, markers) {
   const dist = (a, b) => geo.distance(lobby, a.x, a.y, b.x, b.y);
   const ref = (m, kind) => ({ id: m.id, name: m.name, kind });
   const friendsOf = friendsResolver(lobby);
-  // Mountains in the way of a link: a line may cross only so much of them (rail carries supply through regardless).
-  const terrain = require('./terrain');
-  const look = terrain.enabled(s) ? terrain.lookup(lobby) : null;
-  const baseMtnKm = num(s.supplyMountainKm, 10), troopsMtnKm = num(s.mountainTroopsSupplyKm, 50);
-  const allowFor = m => (typeId(m) === 'mountain' ? troopsMtnKm : baseMtnKm);
-  const clear = (from, to, allow) => !look || !look.any || terrain.mountainKm(lobby, look, from.x, from.y, to.x, to.y) <= allow + 1e-9;
   const towns = markers.filter(m => m.type === 'town' && m.data?.nation);
   const columns = markers.filter(m => m.type === 'unit' && typeId(m) === 'supply' && alive(m));
   const convoys = markers.filter(m => m.type === 'unit' && typeId(m) === 'transport' && alive(m));
   const out = new Map();
   const byFriends = new Map();   // friends key → context
-  // The nearest of `list` within its reach whose line to m is not cut by mountains.
-  const nearest = (m, list, km, allow = allowFor(m)) => {
-    const near = [];
-    for (const o of list) { if (o.id === m.id) continue; const d = dist(m, o); if (d <= km(o)) near.push([d, o]); }
-    near.sort((p, q) => p[0] - q[0]);
-    for (const [, o] of near) if (clear(o, m, allow)) return o;
-    return null;
+  const nearest = (m, list, km) => {
+    let best = null, bd = Infinity;
+    for (const o of list) { if (o.id === m.id) continue; const d = dist(m, o); if (d <= km(o) && d < bd) { bd = d; best = o; } }
+    return best;
   };
   const ctxFor = nation => {
     const friends = friendsOf(nation);
@@ -123,11 +110,11 @@ function compute(lobby, settings, markers) {
       if (t) { linked.set(c.id, { via: 'town', from: ref(t, 'place') }); queue.push(c); continue; }
       const cv = nearest(c, myConvoys, () => convoyLinkKm);
       if (cv) { linked.set(c.id, { via: 'convoy', from: ref(cv, 'convoy') }); queue.push(c); continue; }
-      if (railNodes.some(n => dist(c, n) <= linkKm && clear(n, c, baseMtnKm))) { linked.set(c.id, { via: 'rail', from: { kind: 'rail', name: 'railhead' } }); queue.push(c); }
+      if (railNodes.some(n => dist(c, n) <= linkKm)) { linked.set(c.id, { via: 'rail', from: { kind: 'rail', name: 'railhead' } }); queue.push(c); }
     }
     while (queue.length) {
       const c = queue.shift();
-      for (const o of mine) if (!linked.has(o.id) && dist(c, o) <= linkKm && clear(c, o, baseMtnKm)) { linked.set(o.id, { via: 'column', from: ref(c, 'column') }); queue.push(o); }
+      for (const o of mine) if (!linked.has(o.id) && dist(c, o) <= linkKm) { linked.set(o.id, { via: 'column', from: ref(c, 'column') }); queue.push(o); }
     }
     const ctx = { friends, myTowns, myConvoys, linked: mine.filter(c => linked.has(c.id)), linkedVia: linked };
     byFriends.set(key, ctx);

@@ -98,9 +98,6 @@ Destroyed units (0 % strength) give no vision.
 - **Submarines** are only seen within 20 km of an enemy vision source (not the full range) unless they
   attacked this turn.
 - ⚠ Later, if wanted: units in reinforced trenches are only seen within half range.
-- **Behind mountains** (built, [TERRAIN.md](TERRAIN.md)): outside its own ground a side sees an enemy only when a
-  source that brings the spot into vision has a line to it that no mountain ridge higher than both ends cuts.
-  Aircraft and balloons see over the mountains.
 
 ### 3.4 Allies ⚠ decision 4
 
