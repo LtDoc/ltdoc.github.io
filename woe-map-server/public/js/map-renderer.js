@@ -18,6 +18,8 @@
 /** Stable pseudo-random number in [0, 1) from two numbers. */
 // Craters are drawn at this share of the size stored with them (and their mud, smoke and damage to towns with them),
 // so they sit better among the towns and counters.
+// A unit out of a fight (from 800 % zoom): its men's line, screen px ahead of its token, and how wide it is.
+const IDLE_AHEAD = 62, IDLE_FRONT = 110;
 const CRATER_SCALE = 0.65;
 function hash01(a, b) { const v = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453; return v - Math.floor(v); }
 /** Smooth wandering value in about [0, 1] (sum of incommensurate sines), for bursts and lulls. */
@@ -1750,7 +1752,12 @@ class MapRenderer extends EventTarget {
     });
   }
   /** Replace the battles shown (from GET /battles). */
-  setBattles(list) { this.battles.clear(); for (const b of list || []) this.addBattle(b); this.invalidate(); }
+  setBattles(list, past) {
+    this.battles.clear();
+    for (const b of list || []) this.addBattle(b);
+    this.skirmish?.setPast(past || []);   // earlier fights: their dead still lie on the field
+    this.invalidate();
+  }
   addBattle(b) {
     if (b.until && b.until <= Date.now()) return;
     this.battles.set(b.id, { battle: b, nextShell: performance.now() + Math.random() * 400, seed: (b.id * 9301 + 49297) % 233280 });
@@ -1772,10 +1779,19 @@ class MapRenderer extends EventTarget {
     this._drawShells(nowMs);
     const sk = this.skirmish, fronts = new Map(), keep = new Set();
     const gunZoom = s >= 8;
-    if (!this.battles.size && !(gunZoom && (sk?.mounts || sk?.ships))) { if (sk && sk.squads.size) sk.clear(); return false; }
+    if (sk) sk.remainsC.visible = gunZoom;   // the dead of earlier fights lie where they fell (skirmish.js)
+    if (!this.battles.size && !gunZoom) { if (sk && sk.squads.size) sk.clear(); return false; }
     let anim = false;
     const t = nowMs / 1000;
     const onScreen = (x, y, m) => x > vx0 - m && x < vx1 + m && y > vy0 - m && y < vy1 + m;
+    // Each unit's strength before this turn's fighting (its first fight's record): men lost earlier are not drawn
+    // lying on its line again (their bodies lie where they fell).
+    const startOf = new Map();
+    for (const e of [...this.battles.values()].sort((a, b) => b.battle.id - a.battle.id)) {
+      const L = e.battle.losses;
+      if (L?.a) startOf.set(e.battle.attackerId, L.a.from);
+      if (L?.d) startOf.set(e.battle.defenderId, L.d.from);
+    }
     for (const [id, e] of this.battles) {
       const b = e.battle;
       if (b.until && b.until <= Date.now()) { this.battles.delete(id); continue; }
@@ -1809,7 +1825,7 @@ class MapRenderer extends EventTarget {
           return;
         }
         const enemyId = id === b.attackerId ? b.defenderId : b.attackerId, enemyKind = id === b.attackerId ? kD : kA;
-        fronts.set(id, { battleId: b.id, view, kind, enemyId, enemyKind, cover: id === b.defenderId && !!b.cover, shells: b.kind === 'shells' && id === b.attackerId, cx: x0 + fux * r0, cy: y0 + fuy * r0, ux: fux, uy: fuy,
+        fronts.set(id, { battleId: b.id, turn: b.turn, from: startOf.get(id), view, kind, enemyId, enemyKind, cover: id === b.defenderId && !!b.cover, shells: b.kind === 'shells' && id === b.attackerId, cx: x0 + fux * r0, cy: y0 + fuy * r0, ux: fux, uy: fuy,
           front: Math.max(80, Math.min(190, (l - r0 - r1) * s * 0.9)) / s, backPx: r0 * s, tx: x1 - fux * r1, ty: y1 - fuy * r1, createdAt: b.createdAt });
       };
       if (squadsOn) {
@@ -1864,11 +1880,12 @@ class MapRenderer extends EventTarget {
         }
       }
     }
-    // Air and naval units out of a fight, on screen: their planes circle over them, their ships lie around them.
-    if (gunZoom && (sk?.mounts || sk?.ships)) {
+    // Units out of a fight, on screen: their planes circle over them, their ships lie around them, and land units stand
+    // as their men and machines at ease around their tokens, facing the nearest enemy.
+    if (gunZoom && sk) {
       const m = 120 / s;
       for (const [id, v] of this.views) {
-        if (fronts.has(id) || v.dying || v.riding || !onScreen(v.x, v.y, m)) continue;
+        if (fronts.has(id) || keep.has(id) || v.dying || v.riding || v.marker.type !== 'unit' || v.marker.data?.aboard || !onScreen(v.x, v.y, m)) continue;
         if (v._skType !== v.marker.data?.unitType || v._skKind === undefined) { v._skType = v.marker.data?.unitType; v._skKind = window.Skirmish.kindOf(v.marker); }
         if (v._skKind === 'ships' && sk.ships) {
           // Bows the way it last moved (else either way, steady for the unit).
@@ -1882,13 +1899,48 @@ class MapRenderer extends EventTarget {
           keep.add(id);
           continue;
         }
+        if (['rifles', 'guns', 'tanks', 'horse'].includes(v._skKind)) {
+          if (Number(v.marker.data?.strength ?? 100) <= 0) continue;
+          const [ux, uy] = this._facing(v, nowMs);
+          fronts.set(id, { view: v, kind: v._skKind, idle: true, cx: v.x + ux * IDLE_AHEAD / s, cy: v.y + uy * IDLE_AHEAD / s, ux, uy, front: IDLE_FRONT / s, backPx: IDLE_AHEAD });
+          keep.add(id);
+          continue;
+        }
         if (v._skKind !== 'air' || !sk.mounts) continue;
         fronts.set(id, { view: v, kind: 'air', mode: 'orbit', ax: v.x, ay: v.y, hx: v.x, hy: v.y });
         keep.add(id);
       }
     }
-    if (sk && sk.frame(fronts, keep, nowMs, s, g)) anim = true;
+    if (sk && sk.frame(fronts, keep, nowMs, s, g, [vx0, vy0, vx1, vy1])) anim = true;
     return anim;
+  }
+  /**
+   * Which way a unit out of a fight faces (a unit vector): towards the nearest unit of another nation within about
+   * 60 px of map (a front line faces the enemy across it), else the way it last moved, else down the screen. Worked out
+   * again every few seconds.
+   */
+  _facing(v, nowMs) {
+    const c = v._face;
+    if (c && nowMs < c.until && c.x === v.x && c.y === v.y) return c.u;
+    const me = String(v.marker.data?.nation || '').toLowerCase();
+    let best = null, bd = 60 * 60;
+    if (me) {
+      for (const w of this.views.values()) {
+        const n = w.marker.type === 'unit' && String(w.marker.data?.nation || '').toLowerCase();
+        if (!n || n === me || w.dying || w.marker.data?.aboard) continue;
+        const d = (w.x - v.x) ** 2 + (w.y - v.y) ** 2;
+        if (d < bd && d > 1e-6) { bd = d; best = w; }
+      }
+    }
+    let u = null;
+    if (best) { const L = Math.sqrt(bd); u = [(best.x - v.x) / L, (best.y - v.y) / L]; }
+    else {
+      const tr = v.marker.data?.trail, n = Array.isArray(tr) ? tr.length : 0;
+      if (n > 1) { const dx = tr[n - 1][0] - tr[n - 2][0], dy = tr[n - 1][1] - tr[n - 2][1], L = Math.hypot(dx, dy); if (L > 1e-6) u = [dx / L, dy / L]; }
+    }
+    u = u || [0, 1];
+    v._face = { u, x: v.x, y: v.y, until: nowMs + 3000 + Math.random() * 2000 };
+    return u;
   }
   /**
    * Battle smoke: a haze of powder smoke (and, under shellfire, dust) over a fight, thickening the longer it has gone

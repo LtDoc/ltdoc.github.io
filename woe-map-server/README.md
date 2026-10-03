@@ -405,7 +405,9 @@ still can).
   150 km, heavy artillery (4) 200 km, aircraft and battleships further. The attack picker lists only enemy
   units within reach, sorted by distance, and the server refuses anything further. Tech bonuses to range
   count; the GM and the waive switch are not limited.
-- **Action points.** Attacking costs one AP; a unit with none left cannot attack until the next turn.
+- **Action points.** Attacking costs one AP; a unit with none left cannot attack until the next turn. A unit
+  that has attacked (a unit, or a railway) cannot move again until the next turn, so move first, then attack. The
+  GM and the waive switch are not limited.
   Players cannot edit their units' stats, type or faction while game mode is on.
 - **Upkeep** is built in but off: when enabled every unit costs grain per turn and vehicles, aircraft and
   ships cost oil; a faction that runs out has its three strongest units lose 10 % strength.
@@ -605,7 +607,8 @@ Type `/roll 2d6+3 optional note` (or `/r d20`) in the chat, or use the 🎲 butt
 a cryptographic RNG and are logged for everyone, so nobody can fudge them. Up to 20 dice of up to 1000 sides.
 
 A unit's popup has **Attack…** for its owner or a GM. Pick a target (enemy units only, sorted by distance; the
-attacker's own nation and, in game mode, its allies are never offered or accepted) and the server rolls:
+attacker's own nation, destroyed units, troops aboard a convoy and, in game mode, its allies are never offered or
+accepted) and the server rolls:
 each side rolls the campaign's combat die and adds attack or defend. The loser loses *base loss* + *margin ×
 extra per point* of strength, the winner loses the *winner's loss*, ties cost both half the base. The defaults
 (d20, 10 %, 2 %, 5 %) live in campaign settings. Results go to the log, both units shake and an explosion
@@ -631,6 +634,15 @@ heading it was fired on while sections of the line sweep their aim along the ene
 lulls at their own cadence, and every 7–11 s loose a volley together; tracer speed, length and colour vary
 shot to shot. The defender's line fires back with about two thirds as many rifles and its own pattern; a side
 that has been destroyed or removed stops firing. Visible from 800 % zoom.
+**Units stand on the map.** From 800 % zoom every land unit on screen is drawn as its men and machines, in a fight
+or out of it, like the pieces of a board game: out of a fight the section stands at ease a little ahead of its
+token (in its pits behind its wire once dug in), guns with their crews, tanks parked, horsemen formed up, facing the
+nearest unit of another nation (else the way it last moved). When it goes into a fight they run, roll or ride from
+there to its line, and back when the fight ends. Units at ease draw no frames of their own while nobody moves.
+**The dead stay where they fell** for the turn of the fight and the two after it (half an hour outside game mode),
+then are cleared: men, and fallen horsemen beside their dead horses, darkening a little each turn. Each browser
+keeps the ones it saw fall (localStorage, per campaign); fights it did not see have theirs laid out from the server's
+record of the fight (each battle keeps who fell, its `losses`, for those turns: `GET /battles` → `past`).
 **Infantry** fight about a line 60 px ahead of their token.
 - A section of eight runs out from the unit when the fight starts: an officer, a sergeant, a light machine-gunner,
   a medic and riflemen, spread out ahead of and behind the line, lying, kneeling or standing to aim at the enemy.

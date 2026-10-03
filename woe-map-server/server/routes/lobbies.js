@@ -835,6 +835,8 @@ function sanitizeData(type, data) {
     if (d.supplied === false || d.supplied === true) out.supplied = d.supplied;   // set at End turn (docs/UNITS.md)
     if (num(d.unsuppliedTurns) > 0) out.unsuppliedTurns = Math.round(num(d.unsuppliedTurns));
     if (d.surrendered === true) out.surrendered = true;
+    if (num(d.heldTurns) > 0) out.heldTurns = Math.round(num(d.heldTurns));   // turns stood still (dug in)
+    if (d.attacked === true) out.attacked = true;   // game mode: attacked this turn, so cannot move until the next
     if (d.supplyFrom && typeof d.supplyFrom === 'object') out.supplyFrom = { id: d.supplyFrom.id == null ? null : num(d.supplyFrom.id), name: clean(d.supplyFrom.name, 60), kind: clean(d.supplyFrom.kind, 12) };
     if (Array.isArray(d.trail)) out.trail = cleanTrail(d.trail);
     Object.assign(out, transitData(d));
@@ -1113,7 +1115,7 @@ router.delete('/:id/markers/:mid', (req, res) => {
   if (!before) return;
   if (!canEditMarker(req, before)) return res.status(403).json({ error: 'You cannot delete that marker' });
   q.deleteMarker.run(before.id);
-  qb.dropFor.run(req.lobby.id, before.id, before.id);   // its fights end with it (ids can be reused later)
+  qb.dropFor.run(req.lobby.id, before.id, before.id, game.get(req.lobby.id).turn);   // its fights end with it (ids can be reused later); its dead stay
   commitChange(req, 'marker', 'delete', before, null);
   if (isConvoy(before)) sinkCargo(req, before, 'was removed');
   if (!before.adminOnly && !before.visibleTo) logEvent(req.lobby.id, req.user.id, 'system', `${req.user.displayName} removed ${before.name}`);
@@ -1460,12 +1462,15 @@ router.post('/:id/chat', (req, res) => {
 
 // ---- Battle effects (gunfire, shelling) --------------------------------------------------------
 const qb = {
-  insert: db.prepare('INSERT INTO battles (lobby_id, turn, attacker_id, defender_id, kind, ax, ay, dx, dy, hidden, user_id, until_ms, created_at, cover) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+  insert: db.prepare('INSERT INTO battles (lobby_id, turn, attacker_id, defender_id, kind, ax, ay, dx, dy, hidden, user_id, until_ms, created_at, cover, losses) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
   one: db.prepare('SELECT * FROM battles WHERE id = ?'),
   all: db.prepare('SELECT * FROM battles WHERE lobby_id = ? AND turn >= ? AND (until_ms IS NULL OR until_ms > ?) ORDER BY id DESC LIMIT 300'),
+  // Fights over whose dead still lie on the field: earlier turns (game mode), or ended in the last half hour (without).
+  past: db.prepare(`SELECT * FROM battles WHERE lobby_id = ? AND losses IS NOT NULL AND ((until_ms IS NULL AND turn >= ? AND turn < ?)
+    OR (until_ms IS NOT NULL AND until_ms <= ? AND until_ms > ?)) ORDER BY id DESC LIMIT 600`),
   insertCrater: db.prepare('INSERT INTO craters (lobby_id, x, y, size, rotation, sprite, turn, expires_turn, until_ms, hidden, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
   crater: db.prepare('SELECT * FROM craters WHERE id = ?'),
-  dropFor: db.prepare('DELETE FROM battles WHERE lobby_id = ? AND (attacker_id = ? OR defender_id = ?)'),
+  dropFor: db.prepare('DELETE FROM battles WHERE lobby_id = ? AND (attacker_id = ? OR defender_id = ?) AND turn >= ?'),
   craters: db.prepare('SELECT * FROM craters WHERE lobby_id = ? AND expires_turn > ? AND (until_ms IS NULL OR until_ms > ?) ORDER BY id LIMIT 3000'),
 };
 /** Crater sprites on the crater sheet (rob assets/tile-B-04.png → sprite atlas misc-04): plain, dark and scorched. */
@@ -1475,7 +1480,8 @@ function serializeCrater(c) {
 }
 function serializeBattle(b, lobby) {
   const sea = lobby ? !require('../territory').landAt(lobby, b.dx, b.dy) : false;
-  return { id: b.id, turn: b.turn, attackerId: b.attacker_id, defenderId: b.defender_id, kind: b.kind, ax: b.ax, ay: b.ay, dx: b.dx, dy: b.dy, sea, cover: !!b.cover, until: b.until_ms, createdAt: b.created_at };
+  return { id: b.id, turn: b.turn, attackerId: b.attacker_id, defenderId: b.defender_id, kind: b.kind, ax: b.ax, ay: b.ay, dx: b.dx, dy: b.dy, sea, cover: !!b.cover, until: b.until_ms, createdAt: b.created_at,
+    losses: b.losses ? access.safeJson(b.losses) : null };
 }
 // ---- Convoys: troops embark on transports, sail, and land together (docs/UNITS.md) ---------------------------
 const isConvoy = m => !!m && m.type === 'unit' && UnitTypes.resolve(m.data?.unitType)?.id === 'transport';
@@ -1503,7 +1509,7 @@ function sinkCargo(req, convoy, why) {
   const lost = cargoOf(req.lobby.id, convoy.id);
   for (const m of lost) {
     q.deleteMarker.run(m.id);
-    qb.dropFor.run(req.lobby.id, m.id, m.id);
+    qb.dropFor.run(req.lobby.id, m.id, m.id, game.get(req.lobby.id).turn);
     commitChange(req, 'marker', 'delete', m, null);
   }
   if (lost.length) sideLog(req, convoy.data?.nation, `⚓ ${convoy.name} ${why}: ${lost.map(m => m.name).join(', ')} went down with it`);
@@ -1736,6 +1742,8 @@ router.get('/:id/battles', (req, res) => {
   const ours = b => !side || b.user_id === req.user.id || side.has(nationOf(b.attacker_id)) || side.has(nationOf(b.defender_id));
   res.json({
     battles: qb.all.all(req.lobby.id, g.turn, Date.now()).filter(b => mine(b) && ours(b)).map(b => serializeBattle(b, req.lobby)),
+    // Earlier fights whose dead still lie on the field (the map lays them out where the lines stood).
+    past: qb.past.all(req.lobby.id, g.turn - (game.REMAINS_TURNS - 1), g.turn, Date.now(), Date.now() - 30 * 60000).filter(b => mine(b) && ours(b)).map(b => serializeBattle(b)),
     craters: qb.craters.all(req.lobby.id, g.turn, Date.now()).filter(mine).map(serializeCrater),
   });
 });
@@ -1749,6 +1757,7 @@ router.post('/:id/combat', (req, res) => {
   if (a.type !== 'unit' || d.type !== 'unit') return res.status(400).json({ error: 'Only units can fight' });
   if (!canEditMarker(req, a)) return res.status(403).json({ error: 'You can only attack with units you control' });
   if ((a.data.strength ?? 100) <= 0) return res.status(400).json({ error: `${a.name} has no strength left` });
+  if ((d.data.strength ?? 100) <= 0) return res.status(400).json({ error: `${d.name} is already destroyed` });
   if (a.data?.aboard || d.data?.aboard) return res.status(400).json({ error: 'Troops aboard a convoy cannot fight: attack the convoy, or land them first' });
   const g = game.get(req.lobby.id);
   // Never your own side: same nation, or an ally while the game is on.
@@ -1763,7 +1772,8 @@ router.post('/:id/combat', (req, res) => {
   if (apError) return res.status(409).json({ error: apError });
   const rangeError = game.checkRange(req.lobby, g, req.lobbyRole === 'gm', a, d);
   if (rangeError) return res.status(409).json({ error: rangeError });
-  if (g.enabled) a.data = { ...a.data, apUsed: num(a.data.apUsed) + 1 };   // spent even if the attack is repelled
+  // Spent even if the attack is repelled; and having attacked, the unit stays where it is until next turn.
+  if (g.enabled) a.data = { ...a.data, apUsed: num(a.data.apUsed) + 1, attacked: true };
   // Fog of war: the fight is news only to the two sides, and firing gives the attacker away: the defender's
   // side sees it until End turn (the same reveal a spy's recon gives).
   const fogSides = vision.on(req.lobby.id) ? [...new Set([...(vision.sideNames(req.lobby.id, a.data?.nation) || []), ...(vision.sideNames(req.lobby.id, d.data?.nation) || [])])] : null;
@@ -1841,7 +1851,10 @@ router.post('/:id/combat', (req, res) => {
   // The fight stays on the map for the rest of the turn: gunfire between the two, or shells around the target.
   const catA = UnitTypes.resolve(a.data?.unitType)?.cat;
   const kind = catA === 'Artillery' || catA === 'Naval' ? 'shells' : 'gunfire';
-  const bid = qb.insert.run(req.lobby.id, g.turn, a.id, d.id, kind, a.x, a.y, d.x, d.y, hidden ? 1 : 0, req.user.id, g.enabled ? null : Date.now() + 5 * 60000, now(), cover ? 1 : 0).lastInsertRowid;
+  // Who fell, for the dead left lying afterwards (the units may be gone by then).
+  const side = m => ({ from: losses[m.id].from, to: losses[m.id].to, type: m.data?.unitType || '', nation: m.data?.nation || '' });
+  const bid = qb.insert.run(req.lobby.id, g.turn, a.id, d.id, kind, a.x, a.y, d.x, d.y, hidden ? 1 : 0, req.user.id, g.enabled ? null : Date.now() + 5 * 60000, now(), cover ? 1 : 0,
+    JSON.stringify({ a: side(a), d: side(d) })).lastInsertRowid;
   hub.broadcast(req.lobby.id, { type: 'battle', battle: serializeBattle(qb.one.get(bid), req.lobby) }, audience);
   // A bombardment leaves four or five craters around the target, for ten turns.
   if (kind === 'shells') {

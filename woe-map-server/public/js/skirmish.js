@@ -28,6 +28,15 @@
  *     they turn their bows on the enemy and fire salvoes that raise splashes around him (or burst on land); destroyers,
  *     torpedo boats and submarines (running submerged) loose torpedoes. A ship lost lists, burns and goes down.
  *
+ * Out of a fight, from the same zoom, every land unit on screen stands on the map as its men and machines, like the
+ * pieces of a board game: the section at ease around its token, facing the nearest enemy (else the way it last moved),
+ * in its rifle pits behind its wire once it has dug in; guns with their crews, tanks parked, horsemen formed up. When
+ * it goes into a fight they run, roll or ride from there to its line, and when the fight ends, back.
+ *
+ * The dead stay where they fell for the turn of the fight and the next two (REMAINS_TURNS; half an hour without game
+ * mode): men and fallen riders by their dead horses, kept per campaign in this browser (localStorage). Fights this
+ * browser did not see have their dead laid out from the server's record of them (who fell, where the lines were).
+ *
  * Every round fired leaves the man or gun that fired it as a tracer and flies at one of the enemy's men (or
  * machines), at the weapon's rate: bolt-action rifles 10–15 rounds a minute, machine guns in bursts at their cyclic
  * rates (RIFLE_RPM, HMG_RPM, LMG_RPM); guns and tanks firing over open sights send a shell the same way.
@@ -64,7 +73,8 @@
   const LITTER_PX = 22;      // a stretcher, end to end (screen px before the zoom boost): about a man lying full length
   // Stretchers on the misc-03 sprite sheet (drawn lengthways, left to right): empty, and two with a wounded man on.
   const LITTERS = { empty: 'sprite:misc-03:85', loaded: ['sprite:misc-03:95', 'sprite:misc-03:103'] };   // a dead horse lying on its side, nose to tail (screen px before the zoom boost)
-  const CAMELS = new Set(['arab']);   // armies riding camels: no dead horse under their fallen
+  const CAMELS = new Set(['arab']);
+  const REMAINS_TURNS = 3, REMAINS_MS = 30 * 60000, REMAINS_MAX = 1500;   // how long the dead lie, and how many at most   // armies riding camels: no dead horse under their fallen
   // mounts.json riders (with "-2"…: others of the army, taken in turn)
   const RIDER_FOR = { british: 'beige', anzac: 'beige', german: 'grey', american: 'green', french: 'french', russian: 'russian', ottoman: 'ottoman', arab: 'arab' };
   const PLANES = 4;
@@ -119,7 +129,7 @@
   // Where a kit has no figure for a role, the next in its list stands in.
   const STAND_IN = {
     'rifle.run': ['rifle.charge', 'rifle.idle', 'rifle.stand'], 'rifle.prone': ['rifle.kneel', 'rifle.stand'], 'rifle.kneel': ['rifle.stand', 'rifle.prone'],
-    'rifle.stand': ['rifle.kneel', 'rifle.prone'], crew: ['rifle.idle', 'rifle.run', 'rifle.stand'], 'medic.kneel': ['crew'], 'medic.run': ['rifle.run'],
+    'rifle.stand': ['rifle.kneel', 'rifle.prone'], 'rifle.idle': ['rifle.stand', 'rifle.kneel'], crew: ['rifle.idle', 'rifle.run', 'rifle.stand'], 'medic.kneel': ['crew'], 'medic.run': ['rifle.run'],
   };
   for (const who of ['officer', 'nco', 'lmg']) for (const p of ['prone', 'kneel', 'stand', 'run']) STAND_IN[who + '.' + p] = [...(who === 'officer' ? ['officer.stand'] : []), 'rifle.' + p];
   // A rifleman's stance on the line (by hash): lying, kneeling or standing to aim.
@@ -153,7 +163,11 @@
       this.layer = new PIXI.Container(); this.layer.eventMode = 'none';
       this.deadC = new PIXI.Container(); this.machC = new PIXI.Container(); this.aliveC = new PIXI.Container();
       this.groundG = new PIXI.Graphics();   // dug in: rifle pits, sandbags, gun pits and wire, under the men
-      this.layer.addChild(this.groundG, this.deadC, this.machC, this.aliveC);
+      this.remainsC = new PIXI.Container();   // the dead of earlier fights, left lying (see _drawRemains)
+      this.layer.addChild(this.groundG, this.remainsC, this.deadC, this.machC, this.aliveC);
+      this.remains = [];             // the dead this browser saw fall: { key, turn, at, x, y (anchor), ox, oy (boosted px off it), r, sg, f, i }
+      this.past = [];                // earlier fights from the server, for the dead this browser did not see (see _ghosts)
+      this._remSp = [];
       // Aircraft fly above the unit tokens (the renderer puts this layer over them): shadows, planes, then their fire.
       this.airLayer = new PIXI.Container(); this.airLayer.eventMode = 'none';
       this.shadowC = new PIXI.Container(); this.planeC = new PIXI.Container(); this.airG = new PIXI.Graphics();
@@ -171,8 +185,8 @@
       try {
         const meta = await fetch('/assets/soldiers.json?v=3').then(r => r.json());
         const base = await PIXI.Assets.load({ src: '/assets/soldiers.png?v=3', loadParser: 'loadTextures' });
-        const frames = meta.frames.map(([x, y, w, h, ax, ay, face], i) => ({ t: frame(base, { x, y, w, h }), w, h, ax, ay, face, len: Math.max(w, h), name: meta.names[i] }));
-        this.tex = { torso: meta.torso, kits: Object.fromEntries(Object.entries(meta.kits).map(([k, roles]) =>
+        const frames = meta.frames.map(([x, y, w, h, ax, ay, face], i) => ({ t: frame(base, { x, y, w, h }), w, h, ax, ay, face, len: Math.max(w, h), name: meta.names[i], idx: i }));
+        this.tex = { torso: meta.torso, all: frames, kits: Object.fromEntries(Object.entries(meta.kits).map(([k, roles]) =>
           [k, Object.fromEntries(Object.entries(roles).map(([r, ids]) => [r, ids.map(i => frames[i])]))])) };
         this.r.invalidate();
       } catch (e) { console.warn('Soldier sprites not available', e); }
@@ -188,7 +202,7 @@
         const base = await PIXI.Assets.load({ src: '/assets/mounts.png?v=4', loadParser: 'loadTextures' });
         const one = f => ({ ...f, t: frame(base, f), len: Math.max(f.w, f.h) });
         this.mounts = { planes: meta.planes.map(one), liveries: meta.liveries,
-          riders: Object.fromEntries(Object.entries(meta.riders).map(([k, f]) => [k, one(f)])), dead: (meta.dead || []).map(one) };
+          riders: Object.fromEntries(Object.entries(meta.riders).map(([k, f]) => [k, one(f)])), dead: (meta.dead || []).map((f, i) => ({ ...one(f), idx: i })) };
         this._liv = null;
         this.r.invalidate();
       } catch (e) { console.warn('Cavalry and aircraft sprites not available', e); }
@@ -297,7 +311,7 @@
     _pick(q, i, role) { const l = this._frames(q.kit, role); return l ? l[(i + q.id) % l.length] : null; }
     /** Machine-gun companies and trench mortars whose army has the art go in as teams (gun and crew in one figure). */
     _teamFor(q) { return q.kind !== 'guns' || !q.kit ? null : (q.type === 'machinegun' && this._frames(q.kit, 'mg')) ? 'mg' : (q.type === 'mortar' && this._frames(q.kit, 'mortar')) ? 'mortar' : null; }
-    clear() { for (const q of this.squads.values()) this._drop(q); this.squads.clear(); this.airG.clear(); }
+    clear() { for (const q of this.squads.values()) { this._bury(q); this._drop(q); } this.squads.clear(); this.airG.clear(); }
     _sprites(q) { return [...q.men.flatMap(m => [m.sp, m.carcass, m.litter, m.bearer].filter(Boolean)), ...q.machines.flatMap(x => x.sh ? [x.sp, x.sh] : [x.sp])]; }
     /** A sprite for a stretcher or a second bearer, among the living. */
     _extraSprite() { const sp = new PIXI.Sprite(); sp.eventMode = 'none'; this.aliveC.addChild(sp); return sp; }
@@ -331,12 +345,13 @@
      * `keep`: every unit still in a battle this turn (squads off screen keep their state). Draws flashes and smoke on
      * `g`. Returns true while a squad is on screen.
      */
-    frame(fronts, keep, nowMs, s, g) {
+    frame(fronts, keep, nowMs, s, g, view) {
       this.airG.clear();
       this.groundG.clear();
       this._drawMarks(nowMs);
-      for (const [id, q] of this.squads) if (!keep.has(id)) { this._drop(q); this.squads.delete(id); }
+      for (const [id, q] of this.squads) if (!keep.has(id)) { this._bury(q); this._drop(q); this.squads.delete(id); }
       for (const [id, q] of this.squads) if (!fronts.has(id)) { q.shown = false; for (const sp of this._sprites(q)) sp.visible = false; }
+      this._drawRemains(s, view);
       if (!this.tex || !fronts.size) return false;
       const stamp = String(this.r.gameDate?.() || '').slice(0, 7);
       if (stamp !== this._stamp) { this._stamp = stamp; for (const q of this.squads.values()) q.kit = null; }
@@ -351,8 +366,15 @@
         if (!q) { q = this._make(id, f, nowMs, s); this.squads.set(id, q); }
         if (!q.kit) this._dress(q, f.view?.marker);
         if (q.kind === 'guns' && this._teamFor(q) !== q.team) { this._drop(q); q = this._make(id, f, nowMs, s); this.squads.set(id, q); }
-        q.shown = true; drawn = true;
+        // Into a fight from standing at ease, or back out of it: the men make their way from where they are.
+        const idle = !!f.idle;
+        if (q.idle !== undefined && q.idle !== idle) this._shift(q, f, nowMs, s, idle);
+        q.idle = idle;
+        if (!idle) { q.turn = f.turn; q.geo = { x: f.cx - (f.ux || 0) * (f.backPx || 0) / s, y: f.cy - (f.uy || 0) * (f.backPx || 0) / s, s, boost }; }
+        q.shown = true;
         this._tick(q, f, nowMs, t, s, boost, g);
+        // Units standing at ease are still pictures: they only keep the frames coming while someone is on the move.
+        if (!idle || this._busy(q, nowMs)) drawn = true;
       }
       if (this._drawFlak(nowMs, s, boost)) drawn = true;
       return drawn;
@@ -376,6 +398,8 @@
       const drop = v?.strengthDrop && nowMs - v.strengthDrop.at < 8000 ? v.strengthDrop.from : null;
       const before = drop ?? strengthOf(v);
       const fresh = f.createdAt && Date.now() - f.createdAt < 10000;
+      // Men lost before this turn's fighting are gone: their bodies (if any) lie where they fell, not on this line.
+      const gone = aliveFor(f.idle ? before : Math.max(before, Number(f.from ?? 100)));
       const q = { id, kind, men: [], machines: [], kit: null, nextDeath: 0, puffs: [], dust: [], tracers: [], shown: false, last: nowMs };
       if (kind === 'balloon') {
         // An observation balloon on its tether (or a battery's spotter), or an airship cruising; see _tickBalloon.
@@ -425,10 +449,11 @@
         for (let i = 0; i < RIDERS; i++) {
           const rank = q.ech > 0 ? i : RIDERS - 1 - i;
           const o = ((i + 0.5) / RIDERS - 0.5) * 0.95 + (hash(seed, i) - 0.5) * 0.03, d = 4 + rank * 10 + hash(seed, i + 20) * 3;
-          const m = { i, o, d, sp: new PIXI.Sprite(), pose: null, dead: i >= alive, fellAt: 0, rot: hash(seed, i + 100) * Math.PI * 2,
+          const m = { i, o, d, sp: new PIXI.Sprite(), pose: null, dead: i >= alive, gone: i >= gone, fellAt: 0, rot: hash(seed, i + 100) * Math.PI * 2,
             flip: hash(seed, i + 120) < 0.5, jo: hash(seed, i + 140) - 0.5, jd: hash(seed, i + 160), pace: 0.92 + hash(seed, i + 180) * 0.16,
             co: o, cd: d, hd: null, leg: null };
           if (m.dead) { m.co = o + m.jo * 0.1; m.cd = d - m.jd * 30; }
+          else if (f.idle) m.cd = 4 + (d - 4) * 0.3;   // at ease: closed up (see _tickHorse)
           else if (fresh) { m.co = 0; m.cd = f.backPx; }
           m.sp.eventMode = 'none';
           (m.dead ? this.deadC : this.aliveC).addChild(m.sp);
@@ -480,7 +505,7 @@
         const stance = role === 'officer' ? (r < 0.5 ? 'kneel' : 'stand') : role === 'lmg' ? (r < 0.6 ? 'prone' : 'kneel') : stanceOf(r);
         // Each man's own rate of fire (seconds a round), the officer's slower.
         const period = 60 / (RIFLE_RPM[0] + hash(seed, i + 60) * (RIFLE_RPM[1] - RIFLE_RPM[0])) * (role === 'officer' ? 1.6 : 1);
-        const m = { i, o, d, home: [o, d], role, stance, sp: new PIXI.Sprite(), pose: null, dead: i >= alive, run: null, tend: null,
+        const m = { i, o, d, home: [o, d], role, stance, sp: new PIXI.Sprite(), pose: null, dead: i >= alive, gone: i >= gone, run: null, tend: null,
           gun: crew ? i % GUNS : -1, side: crew ? (i < GUNS ? -1 : 1) : 0,
           next: nowMs + 2500 + hash(seed, i + 40) * 9000, period, nextShot: nowMs + 600 + hash(seed, i + 80) * period * 1000, firedAt: 0, burst: 0,
           rot: hash(seed, i + 100) * Math.PI * 2, flip: hash(seed, i + 120) < 0.5, fellAt: 0, jo: (hash(seed, i + 140) - 0.5), jd: hash(seed, i + 160) };
@@ -541,19 +566,19 @@
         q.riders = { army: q.kit.army, pool: pool.length ? pool : [R.beige] };
       }
       const pool = q.riders.pool;
-      const F = f.front * s, reach = Math.max(24, ((f.tx - f.cx) * f.ux + (f.ty - f.cy) * f.uy) * s);   // own line to theirs, px
+      const F = f.front * s, reach = f.idle ? 60 : Math.max(24, ((f.tx - f.cx) * f.ux + (f.ty - f.cy) * f.uy) * s);   // own line to theirs, px
       const dt = Math.min(0.1, (nowMs - (q.hLast || nowMs)) / 1000); q.hLast = nowMs;
       let living = q.men.filter(m => !m.dead);
       const want = aliveFor(strengthOf(f.view));
       if (living.length > want && nowMs >= q.nextDeath) {
         const m = living[Math.floor(Math.random() * living.length)];
-        m.dead = true; m.fellAt = nowMs; m.pose = null; m.leg = null;
+        m.dead = true; m.fellAt = q.fellAt = nowMs; m.pose = null; m.leg = null; m.gone = !!f.idle;   // out of a fight (attrition), no body
         m.co += m.jo * 0.12; m.cd += (m.jd - 0.5) * 24;   // the horse goes down a little off his line
         this.aliveC.removeChild(m.sp); this.deadC.addChild(m.sp);
         q.nextDeath = nowMs + 260 + Math.random() * 650;
       } else if (living.length < want) {
-        const m = q.men.find(x => x.dead);
-        if (m) { m.dead = false; m.pose = null; m.co = m.o; m.cd = m.d; m.leg = null; this.deadC.removeChild(m.sp); this.aliveC.addChild(m.sp); }
+        const m = q.men.find(x => x.gone) || q.men.find(x => x.dead);
+        if (m) { m.dead = m.gone = false; m.pose = null; m.co = m.o; m.cd = m.d; m.leg = null; this.deadC.removeChild(m.sp); this.aliveC.addChild(m.sp); }
       }
       living = q.men.filter(m => !m.dead);
       const carcasses = !CAMELS.has(q.kit.army) && this.mounts.dead?.length ? this.mounts.dead : null;
@@ -562,7 +587,7 @@
       // line to a point well past it (the echelon held, a little closed up).
       const c = q.cycle;
       if (c.st === 'go' && living.every(m => !m.leg)) { c.st = 'form'; c.until = nowMs + 2500 + Math.random() * 2500; }
-      if (c.st === 'form' && nowMs >= c.until && living.length) {
+      if (c.st === 'form' && !f.idle && nowMs >= c.until && living.length) {
         c.st = 'go';
         for (const m of living) {
           const from = [m.co * F, m.cd], to = [m.o * F, -(reach + 115 + m.jd * 15) + (m.d - 4) * 0.5];
@@ -571,6 +596,7 @@
       }
       for (const m of q.men) {
         const sp = m.sp, rider = pool[m.i % pool.length];
+        if (m.gone) { sp.visible = false; if (m.carcass) m.carcass.visible = false; continue; }
         sp.visible = true;
         if (m.dead) {
           // His horse dead where he fell, and he thrown off it, lying just off its back (the top edge of the art).
@@ -580,6 +606,7 @@
           const hf = carcasses && carcasses[(m.i + q.id) % carcasses.length];
           if (hf) {
             const h = m.carcass || (m.carcass = this._carcass());
+            m.hf = hf;
             if (h.texture !== hf.t) { h.texture = hf.t; h.anchor.set(hf.ax, hf.ay); }
             const hs = DEAD_HORSE_PX / hf.w * boost / s;
             h.visible = true; h.position.set(x, y); h.rotation = m.rot; h.scale.set(m.flip ? -hs : hs, hs); h.alpha = k;
@@ -611,15 +638,17 @@
           [lat, dep] = bez2(L.pts, arcU(L.lut, k));
           if (k >= 1) { m.leg = null; lat = m.o * F; dep = m.d; }
         } else {
-          // In his place, or walking his horse there (back on his feet, or the troop's line moved).
-          const hx = m.o * F, dx = hx - lat, dd = m.d - dep, dist = Math.hypot(dx, dd), step = TROT_PX_S * dt;
-          if (dist > step) { lat += dx / dist * step; dep += dd / dist * step; } else { lat = hx; dep = m.d; }
+          // In his place, or walking his horse there (back on his feet, or the troop's line moved); at ease out of a
+          // fight, the echelon closed up.
+          const hx = m.o * F, hd = f.idle ? 4 + (m.d - 4) * 0.3 : m.d, dx = hx - lat, dd = hd - dep, dist = Math.hypot(dx, dd), step = TROT_PX_S * dt;
+          m.walking = dist > step;
+          if (dist > step) { lat += dx / dist * step; dep += dd / dist * step; } else { lat = hx; dep = hd; }
         }
         m.co = lat / F; m.cd = dep;
         const [x, y] = at(m.co, m.cd);
         // Hoofprints: every few px of ground ridden over (a mark from every other horse is enough).
         if (m.leg && m.i % 2 === 0) {
-          if (m.px == null) { m.px = x; m.py = y; }
+          if (m.px == null || m.ps !== s) { m.px = x; m.py = y; m.ps = s; }   // (a zoom moves him on the ground: no prints for that)
           if (Math.hypot(x - m.px, y - m.py) * s > 7) { this._mark('hoof', x, y, Math.atan2(y - m.py, x - m.px), 1.1 * boost / s); m.px = x; m.py = y; }
         }
         // Heading: where he is going; standing, towards the enemy.
@@ -934,13 +963,13 @@
     _tickMen(q, f, nowMs, t, s, boost, g, at, theta, unit) {
       const crew = q.kind === 'guns', drop = f.view?.strengthDrop, strength = strengthOf(f.view);
       // Destroyed: the last men (three at most) give up rather than fall, and are marched off (m.pow).
-      if (!crew && strength <= 0 && !q.surrendered && drop && nowMs - drop.at < 3000) {
+      if (!crew && !f.idle && strength <= 0 && !q.surrendered && drop && nowMs - drop.at < 3000) {
         q.surrendered = true;
         q.men.filter(m => !m.dead).slice(0, 3).forEach((m, k) => { m.pow = { t0: nowMs + 400 + k * 250, flag: k === 0 }; m.run = null; m.tend = null; });
       }
       // Broken by a heavy blow (a quarter of its strength or more at once): the survivors fall back in disorder, out
       // behind the line, and after a few seconds work their way back to their places.
-      if (!crew && drop && strength > 0 && drop.from - strength >= 25 && nowMs - drop.at < 2000 && q.routFor !== drop.at) {
+      if (!crew && !f.idle && drop && strength > 0 && drop.from - strength >= 25 && nowMs - drop.at < 2000 && q.routFor !== drop.at) {
         q.routFor = drop.at; q.routUntil = nowMs + 6000 + Math.random() * 3000;
         for (const m of q.men) {
           if (m.dead || m.pow || m.role === 'medic') continue;
@@ -957,15 +986,15 @@
         const pool = living.length > 2 ? living.filter(x => x.role !== 'medic') : living;
         const m = pool[Math.floor(Math.random() * pool.length)];
         if (m.run) { const p = this._runPos(m, nowMs); m.o = p.o; m.d = p.d; m.run = null; }
-        m.dead = true; m.fellAt = nowMs; m.pose = null; m.tend = null;
+        m.dead = true; m.fellAt = q.fellAt = nowMs; m.pose = null; m.tend = null; m.gone = !!f.idle;   // out of a fight (attrition), no body
         if (m.drag) { m.drag.to.carried = false; m.drag.to.onLitter = false; m.drag = null; }   // a stretcher bearer hit: his man is left lying
         if (m.litter) m.litter.visible = false;
         if (m.bearer) m.bearer.visible = false;
         this.aliveC.removeChild(m.sp); this.deadC.addChild(m.sp);
         q.nextDeath = nowMs + 260 + Math.random() * 650;
       } else if (living.length < want) {
-        const m = q.men.find(x => x.dead);
-        if (m) { m.dead = false; m.evac = false; m.carried = false; m.pose = null; if (!crew) [m.o, m.d] = m.home; this.deadC.removeChild(m.sp); this.aliveC.addChild(m.sp); }
+        const m = q.men.find(x => x.gone) || q.men.find(x => x.dead);
+        if (m) { m.dead = m.gone = false; m.evac = false; m.carried = false; m.pose = null; if (!crew) [m.o, m.d] = m.home; this.deadC.removeChild(m.sp); this.aliveC.addChild(m.sp); }
       }
       if (crew) {
         // A crew stands either side of its gun, a little behind the breech; the fallen lie beside it. A team's men
@@ -986,18 +1015,18 @@
         for (const gn of q.machines) gn.manned = q.men.some(m => m.gun === gn.i && !m.dead);
       }
       const running = q.men.filter(m => m.run).length;
-      const fallen = q.men.filter(m => m.dead);
+      const fallen = q.men.filter(m => m.dead && !m.gone);
       const dug = this._dug(q, f);
       if (dug && !crew) {
         // Dug in: each man in his own rifle pit (the fallen in theirs), the spoil thrown up in front of it and
         // topped with sandbags; after a second turn, a belt of wire out in front.
-        for (const m of q.men) { if (m.run && !m.dead) continue; const [x, y] = at(m.o, m.d); this._pit(x, y, f, s, boost, 1); }
+        for (const m of q.men) { if ((m.run && !m.dead) || m.gone) continue; const [x, y] = at(m.o, m.d); this._pit(x, y, f, s, boost, 1); }
         if (dug > 1) this._wire(q, f, at, s, boost);
       }
       for (const m of q.men) {
         const sp = m.sp;
         sp.visible = true;
-        if (m.dead && (m.evac || (m.carried && m.onLitter))) { sp.visible = false; continue; }   // on a stretcher, or carried away to the aid post
+        if (m.gone || (m.dead && (m.evac || (m.carried && m.onLitter)))) { sp.visible = false; continue; }   // on a stretcher, or carried away to the aid post
         if (m.dead) {
           this._pose(m, this._pick(q, m.i, 'dead'));
           const [x, y] = at(m.o, m.d), age = nowMs - m.fellAt;
@@ -1050,14 +1079,14 @@
           m.run = { o0: m.o, d0: m.d, o1: m.home[0], d1: m.home[1], t0: nowMs + Math.random() * 1200, dur: 0, home: true };
         }
         // The medic goes out to one of the fallen now and then, kneels by him a while, and comes back.
-        if (m.role === 'medic' && !m.run && !m.tend && nowMs >= m.next) {
+        if (m.role === 'medic' && !f.idle && !m.run && !m.tend && nowMs >= m.next) {
           const left = fallen.filter(x => !x.evac && !x.carried), v = left[Math.floor(Math.random() * left.length)];
           if (v) {
             const side = Math.random() < 0.5 ? -1 : 1;
             m.run = { o0: m.o, d0: m.d, o1: v.o + side * 7 / (f.front * s), d1: v.d - 2, t0: nowMs, dur: 0, to: v };
           }
           m.next = nowMs + 4000 + Math.random() * 6000;
-        } else if (m.role !== 'medic' && !m.run && !dug && nowMs >= m.next) {
+        } else if (m.role !== 'medic' && !f.idle && !m.run && !dug && nowMs >= m.next) {
           // Now and then a man gets up and rushes to a new spot, forward or back and across (three at most at a time);
           // never closer to the enemy than a quarter of the way over.
           if (running >= 3) m.next = nowMs + 1000 + Math.random() * 1500;
@@ -1151,6 +1180,18 @@
           }
           continue;
         }
+        if (f.idle) {
+          // At ease: standing about (in their pits, once dug in), looking this way and that; no firing.
+          const fr = this._pick(q, m.i, dug ? (m.role === 'medic' ? 'medic.kneel' : `${m.role}.${m.stance}`)
+            : m.role === 'rifle' ? 'rifle.idle' : m.role === 'medic' ? 'medic.kneel' : m.role === 'lmg' ? 'lmg.kneel' : `${m.role}.stand`);
+          this._pose(m, fr);
+          const [x, y] = at(m.o, m.d);
+          sp.position.set(x, y);
+          sp.rotation = theta + (dug ? m.jo * 0.3 : m.jo * 1.1) - fr.face;
+          sp.scale.set(unit);
+          sp.tint = 0xffffff;
+          continue;
+        }
         // In position: weapon on the enemy, a little sway, a kick and a flash with each round, which flies at one of
         // the enemy's men. Riflemen fire aimed rounds at a bolt-action rate; the light machine-gunner fires bursts at
         // his gun's rate. The medic waits, kneeling.
@@ -1219,7 +1260,7 @@
         this._orient(gn.sp, gn.frame, sc, theta, f.ux);
         gn.sp.tint = gn.manned ? 0xffffff : 0x6f6f6f;
         gn.muzzle = this._muzzleOf(gn.sp, gn.frame);
-        if (!gn.manned) continue;
+        if (!gn.manned || f.idle) continue;
         // Firing on its own: field guns now and then (shells come through fireGun), machine guns in bursts.
         if (hmg) {
           this._mgBurst(q, gn, f, nowMs, s, boost, g);
@@ -1505,7 +1546,7 @@
       gn.sp.tint = gn.manned || this._frames(q.kit, q.team + '.empty') ? 0xffffff : 0x6f6f6f;
       const reach = fr.len * unit * 0.45;
       gn.muzzle = [x + Math.cos(theta) * reach, y + Math.sin(theta) * reach];
-      if (!gn.manned) return;
+      if (!gn.manned || f.idle) return;
       if (hmg) {
         this._mgBurst(q, gn, f, nowMs, s, boost, g);
       } else {
@@ -1532,14 +1573,14 @@
           if (k >= 1) tk.roll = null;
           o = r.o0 + (r.o1 - r.o0) * k; d = r.d0 + (r.d1 - r.d0) * k;
           bob = k > 0 && k < 1 ? Math.sin(nowMs / 70 + tk.i) * 0.5 : 0;
-        } else if (!tk.dead) o += Math.sin(t * 0.4 + tk.i * 2) * 0.01;   // edging along the line
+        } else if (!tk.dead && !f.idle) o += Math.sin(t * 0.4 + tk.i * 2) * 0.01;   // edging along the line
         const since = nowMs - tk.firedAt, kick = tk.firedAt && since < 400 ? (1 - since / 400) * 1.5 * boost : 0;
         const [x, y] = at(o, d + kick);
         sp.visible = !(tk.roll && nowMs < tk.roll.t0);
         sp.position.set(x, y + bob / s);
         // Tracks churned into the ground behind it as it moves.
         if (sp.visible && !tk.dead) {
-          if (tk.mx == null) { tk.mx = x; tk.my = y; }
+          if (tk.mx == null || tk.ms !== s) { tk.mx = x; tk.my = y; tk.ms = s; }   // (a zoom moves it on the ground: no tracks for that)
           const moved = Math.hypot(x - tk.mx, y - tk.my);
           if (moved * s > 3) { this._mark('track', (x + tk.mx) / 2, (y + tk.my) / 2, Math.atan2(y - tk.my, x - tk.mx), TANK_PX * 0.55 * boost / s, moved); tk.mx = x; tk.my = y; }
         }
@@ -1550,7 +1591,7 @@
           if (nowMs - tk.smokeAt > 260) { tk.smokeAt = nowMs; q.puffs.push({ x: x + (Math.random() - 0.5) * 6 / s, y: y - 4 / s, t0: nowMs, dark: true }); }
           continue;
         }
-        if (!tk.roll && nowMs >= tk.nextShot) {
+        if (!tk.roll && !f.idle && nowMs >= tk.nextShot) {
           tk.firedAt = nowMs; tk.nextShot = nowMs + 2500 + Math.random() * 2500;
           const [mx, my] = this._muzzleOf(sp, fr); q.puffs.push({ x: mx, y: my, t0: nowMs }); this._round(q, f, mx, my, nowMs, s, true);
         }
@@ -1558,6 +1599,145 @@
       }
     }
 
+    /** Whether a squad at ease has anything moving: men walking to their places, tanks rolling, a man falling, smoke. */
+    _busy(q, nowMs) {
+      return q.men.some(m => !m.dead && (m.run || m.leg || m.walking)) || q.machines.some(x => x.roll) || nowMs - (q.fellAt || 0) < 400 ||
+        q.puffs.length > 0 || q.dust.length > 0 || !!q.rounds?.length;
+    }
+    /**
+     * The squad's front changed between a fight and standing at ease: each man (or tank, or rider) goes from where he
+     * is now to his place on the new one. Coming out of a fight, its dead are left lying (_bury).
+     */
+    _shift(q, f, nowMs, s, toIdle) {
+      if (toIdle) this._bury(q);
+      const ux = f.ux || 0, uy = f.uy || 0, nx = -uy, ny = ux;
+      const rel = sp => { const dx = sp.x - f.cx, dy = sp.y - f.cy; return [(dx * nx + dy * ny) / f.front, -(dx * ux + dy * uy) * s]; };
+      if (q.kind === 'horse') {
+        for (const m of q.men) { if (m.dead) continue; if (m.sp.visible) [m.co, m.cd] = rel(m.sp); m.leg = null; }
+        q.cycle = { st: 'form', until: nowMs + 2000 + Math.random() * 1500 };
+      } else if (q.kind === 'tanks') {
+        for (const tk of q.machines) { if (tk.dead || !tk.sp.visible) continue; const [o0, d0] = rel(tk.sp); tk.roll = { o0, d0, o1: tk.o, d1: tk.d, t0: nowMs, dur: 0 }; }
+      } else if (q.kind === 'rifles') {
+        for (const m of q.men) {
+          if (m.drag) { m.drag.to.carried = m.drag.to.onLitter = false; m.drag.to.evac = true; m.drag = null; }
+          if (m.litter) m.litter.visible = false;
+          if (m.bearer) m.bearer.visible = false;
+          m.tend = null;
+          if (m.dead || m.pow || !m.sp.visible) continue;
+          const [o0, d0] = rel(m.sp);
+          m.o = o0; m.d = d0; m.away = false;
+          m.run = { o0, d0, o1: m.home[0], d1: m.home[1], t0: nowMs, dur: 0, home: true };
+        }
+      }
+    }
+    /**
+     * A squad leaving its fight (or the map): its dead stay where they fell, as remains (this.remains), each placed
+     * by the unit's token where it stood and an offset in screen px, so they keep with the figures as the zoom changes.
+     */
+    _bury(q) {
+      if (q.idle !== false || !q.geo || q.turn == null) return;
+      const { x, y, s, boost } = q.geo, k = s / boost, key = `${q.turn}:${q.id}`, at = Date.now(), out = [];
+      const add = (sp, f, i) => out.push({ key, turn: q.turn, at, x, y, ox: (sp.x - x) * k, oy: (sp.y - y) * k, r: sp.rotation, sg: Math.sign(sp.scale.x) || 1, f, i });
+      for (const m of q.men) {
+        if (!m.dead || m.gone || m.evac || m.carried || !m.pose || m.pose.idx == null) continue;
+        if (m.carcass?.visible && m.hf) add(m.carcass, 'h', m.hf.idx);
+        add(m.sp, 's', m.pose.idx);
+        m.gone = true; m.sp.visible = false;
+        if (m.carcass) m.carcass.visible = false;
+      }
+      if (!out.length) return;
+      this.remains.push(...out);
+      this._saveRemains();
+    }
+    _remainsLive(r) {
+      const turn = this.r.gameTurn?.();
+      return turn != null ? turn - r.turn < REMAINS_TURNS && turn >= r.turn : Date.now() - r.at < REMAINS_MS;
+    }
+    /** Where this campaign's dead are kept in this browser (map.js), and load them. */
+    setStore(key) {
+      this.storeKey = key;
+      try { const l = JSON.parse(localStorage.getItem(key) || '[]'); this.remains = Array.isArray(l) ? l : []; } catch { this.remains = []; }
+      this._ghostList = null;
+    }
+    _saveRemains() {
+      this.remains = this.remains.filter(r => this._remainsLive(r)).slice(-REMAINS_MAX);
+      this._ghostList = null;
+      if (!this.storeKey) return;
+      try { localStorage.setItem(this.storeKey, JSON.stringify(this.remains)); } catch { /* full or blocked */ }
+    }
+    /** Earlier fights (GET /battles: past), for laying out the dead of those this browser did not see. */
+    setPast(list) { this.past = Array.isArray(list) ? list : []; this._ghostList = null; }
+    /**
+     * The dead of earlier fights this browser did not see fall, laid out from the server's record: on each side's
+     * line as it stood (the lines drawn as at 1000 % zoom), as many men as the losses took, horsemen by their horses
+     * strewn between the lines where they charged.
+     */
+    _ghosts() {
+      if (this._ghostList) return this._ghostList;
+      if (!this.tex || !this.past.length) return [];
+      const seen = new Set(this.remains.map(r => r.key)), out = [], S = 10;
+      for (const b of this.past) {
+        for (const side of ['a', 'd']) {
+          const l = b.losses?.[side], id = side === 'a' ? b.attackerId : b.defenderId, key = `${b.turn}:${id}`;
+          if (!l || seen.has(key)) continue;
+          const mk = { type: 'unit', data: { nation: l.nation, unitType: l.type } }, kind = Skirmish.kindOf(mk);
+          if (kind !== 'rifles' && kind !== 'guns' && kind !== 'horse') continue;
+          if (kind === 'horse' && !this.mounts) continue;
+          const left = aliveFor(l.to), n = aliveFor(l.from) - left;
+          if (n <= 0) continue;
+          const [x0, y0, x1, y1] = side === 'a' ? [b.ax, b.ay, b.dx, b.dy] : [b.dx, b.dy, b.ax, b.ay];
+          const len = Math.hypot(x1 - x0, y1 - y0);
+          if (len < 1e-6) continue;
+          const ux = (x1 - x0) / len, uy = (y1 - y0) / len, nx = -uy, ny = ux, r0 = Math.min(len * 0.3, 60 / S);
+          const F = Math.max(80, Math.min(190, (len - 2 * r0) * S * 0.9)), reach = Math.max(24, (len - 2 * r0) * S);
+          const kit = this.kitFor(mk), dead = this._frames(kit, 'dead'), seed = (typeof id === 'number' ? id : strHash(id) % 100000) * 7.31;
+          if (!dead) continue;
+          const horses = kind === 'horse' && !CAMELS.has(kit.army) && this.mounts.dead?.length ? this.mounts.dead : null;
+          for (let j = 0; j < n; j++) {
+            const i = left + j, jo = hash(seed, i + 140) - 0.5, jd = hash(seed, i + 160), rot = hash(seed, i + 100) * Math.PI * 2, sg = hash(seed, i + 120) < 0.5 ? -1 : 1;
+            let o, d;
+            if (kind === 'horse') { o = ((i + 0.5) / RIDERS - 0.5) * 0.95 + jo * 0.12; d = -reach * (0.15 + hash(seed, i + 30) * 0.95); }
+            else { o = ((i * 3 + id) % SQUAD + 0.5) / SQUAD - 0.5 + (hash(seed, i) - 0.5) * 0.09 + jo * 0.08; d = DEPTH[0] + hash(seed, i + 20) * (DEPTH[1] - DEPTH[0]) + jd * 10; }
+            let ox = ux * r0 * S + nx * o * F - ux * d, oy = uy * r0 * S + ny * o * F - uy * d, rr = rot;
+            const base = { key, turn: b.turn, at: b.until || Date.now(), x: x0, y: y0 };
+            const hf = horses && horses[(i + id) % horses.length];
+            if (hf) {
+              out.push({ ...base, ox, oy, r: rot, sg, f: 'h', i: hf.idx });
+              const hs = DEAD_HORSE_PX / hf.w, lx = jo * 0.6 * hf.w * hs, ly = -(hf.ay * hf.h * hs + 3 + jd * 4);
+              ox += lx * Math.cos(rot) - ly * Math.sin(rot); oy += lx * Math.sin(rot) + ly * Math.cos(rot); rr = rot + (jd - 0.5) * 2.4;
+            }
+            out.push({ ...base, ox, oy, r: rr, sg, f: 's', i: dead[(i + id) % dead.length].idx });
+          }
+        }
+      }
+      return (this._ghostList = out);
+    }
+    /** The dead of earlier fights, from 800 % zoom, older ones a little darker. */
+    _drawRemains(s, view) {
+      const show = s >= 8 && this.tex && view;
+      let n = 0;
+      if (show) {
+        const boost = Math.min(1.5, Math.max(1, s / 14)), k = boost / s, M = 60 / s, turn = this.r.gameTurn?.();
+        const man = TORSO_PX / this.tex.torso * k;
+        for (const list of [this._ghosts(), this.remains]) {
+          for (const r of list) {
+            const x = r.x + r.ox * k, y = r.y + r.oy * k;
+            if (x < view[0] - M || x > view[2] + M || y < view[1] - M || y > view[3] + M || !this._remainsLive(r)) continue;
+            const fr = r.f === 'h' ? this.mounts?.dead?.[r.i] : this.tex.all[r.i];
+            if (!fr) continue;
+            let sp = this._remSp[n];
+            if (!sp) { sp = this._remSp[n] = new PIXI.Sprite(); sp.eventMode = 'none'; this.remainsC.addChild(sp); }
+            n++;
+            if (sp.texture !== fr.t) { sp.texture = fr.t; sp.anchor.set(fr.ax, fr.ay); }
+            const sc = r.f === 'h' ? DEAD_HORSE_PX / fr.w * k : man;
+            sp.visible = true; sp.position.set(x, y); sp.rotation = r.r; sp.scale.set(r.sg * sc, sc);
+            const age = turn != null ? turn - r.turn : 0;
+            sp.tint = age >= 2 ? 0xc4beb4 : age >= 1 ? 0xe2ded6 : 0xffffff;
+          }
+        }
+      }
+      for (let i = n; i < this._remSp.length; i++) this._remSp[i].visible = false;
+    }
     _runPos(m, nowMs) {
       const r = m.run, k = r.dur ? Math.max(0, Math.min(1, (nowMs - r.t0) / r.dur)) : 0;
       return { o: r.o0 + (r.o1 - r.o0) * k, d: r.d0 + (r.d1 - r.d0) * k };

@@ -28,11 +28,11 @@ const q = {
   markers: db.prepare('SELECT * FROM markers WHERE lobby_id = ?'),
   clearBattles: db.prepare('DELETE FROM battles WHERE lobby_id = ? AND turn <= ?'),
   clearCraters: db.prepare('DELETE FROM craters WHERE lobby_id = ? AND expires_turn <= ?'),
-  // New turn: movement and action points back; heldTurns counts the turns a unit has stayed put (it digs in: rifle
+  // New turn: movement and action points back (and units that attacked may move again); heldTurns counts the turns a unit has stayed put (it digs in: rifle
   // pits, then wire, in the battle scenes).
   resetUnits: db.prepare(`UPDATE markers SET data = json_remove(json_set(data, '$.movedKm', 0, '$.apUsed', 0, '$.heldTurns',
     CASE WHEN COALESCE(json_extract(data, '$.movedKm'), 0) > 0 OR json_extract(data, '$.ride') IS NOT NULL THEN 0 ELSE COALESCE(json_extract(data, '$.heldTurns'), 0) + 1 END),
-    '$.trail', '$.ride'), updated_at = ? WHERE lobby_id = ? AND type IN ('unit', 'hero')`),
+    '$.trail', '$.ride', '$.attacked'), updated_at = ? WHERE lobby_id = ? AND type IN ('unit', 'hero')`),
   clearReveals: db.prepare(`UPDATE markers SET data = json_remove(data, '$.revealTo'), updated_at = ? WHERE lobby_id = ? AND json_extract(data, '$.revealTo') IS NOT NULL`),
   setStrength: db.prepare(`UPDATE markers SET data = json_set(data, '$.strength', ?), updated_at = ? WHERE id = ?`),
   markerOne: db.prepare('SELECT * FROM markers WHERE id = ?'),
@@ -409,7 +409,9 @@ function endTurn(lobby, hooks = {}) {
     // Supply for the coming turn, from where everything stands now (new units included).
     if (g.settings.supplyEnabled !== false) applySupply(lobby, g.settings, summaries);
     q.resetUnits.run(now(), lobby.id);
-    q.clearBattles.run(lobby.id, g.turn);   // gunfire and shelling last for the turn they happened in
+    // Gunfire and shelling last for the turn they happened in; the record stays a little longer, for the dead left
+    // lying on the field (the turn of the fight and the next REMAINS_TURNS - 1).
+    q.clearBattles.run(lobby.id, g.turn - (REMAINS_TURNS - 1));
     q.clearReveals.run(now(), lobby.id);   // spies' recon lasts until the end of the turn
     const ended = { turn: g.turn, date: g.date };
     g.turn += 1;
@@ -531,6 +533,9 @@ function undoTurn(lobby) {
  * off is cheaper than going straight (server/rails.js); `cost` is what the move spends, `route` the rail trip.
  * GMs, disabled game mode and the waive switch pass straight through.
  */
+/** Turns the dead of a fight lie on the field: the turn of the fight and the two after it. */
+const REMAINS_TURNS = 3;
+
 function checkMove(lobby, g, isGm, marker, x, y) {
   // Ships stay at sea (or in harbour) for players in any mode; the GM can still place them anywhere.
   if (!isGm && marker.type === 'unit' && UnitTypes.resolve(marker.data?.unitType)?.cat === 'Naval') {
@@ -548,6 +553,7 @@ function checkMove(lobby, g, isGm, marker, x, y) {
     if ((err = wet(true))) return { error: `${marker.name}: ${err}` };
     return { x, y, clamped: false };
   }
+  if (marker.data?.attacked) return { error: `${marker.name} attacked this turn and cannot move until next turn` };
   if (marker.type === 'unit' && marker.data?.supplied === false && g.settings.supplyEnabled !== false) return { error: `${marker.name} is out of supply and cannot move until a Supply Column reaches it` };
   const dist = geo.distance(lobby, marker.x, marker.y, x, y);
   if (dist < 1e-6) return { x, y, clamped: false };
@@ -596,9 +602,10 @@ function checkAttack(g, isGm, marker) {
 }
 
 /** Fields a player may not change on their own unit while the game is running. */
-const PROTECTED_UNIT_FIELDS = ['attack', 'defend', 'ap', 'range', 'movement', 'strength', 'unitType', 'nation', 'movedKm', 'apUsed', 'trail', 'supplied', 'supplyFrom', 'unsuppliedTurns', 'surrendered', 'aboard', 'ride', 'heldTurns'];
+const PROTECTED_UNIT_FIELDS = ['attack', 'defend', 'ap', 'range', 'movement', 'strength', 'unitType', 'nation', 'movedKm', 'apUsed', 'trail', 'supplied', 'supplyFrom', 'unsuppliedTurns', 'surrendered', 'aboard', 'ride', 'heldTurns', 'attacked'];
 
 module.exports = {
+  REMAINS_TURNS,
   get, save, serializeGame, ensureState, serializeState, writeState, factionStates, incomeFor, endTurn, undoTurn, reports,
   checkMove, checkAttack, checkRange, attackRange, PROTECTED_UNIT_FIELDS, emptyResources, q, applySupply, applyAttrition,
   relationStatus, setRelation, relations, diplomacy, serializeDiplomacy, factionEffects,

@@ -40,6 +40,7 @@
   renderer.canDrag = m => canEdit(m) && !m.locked;
   renderer.gameDate = () => (gameOn() ? state.game.date : null);   // the battle figures dress for the year and season
   renderer.gameTurn = () => (gameOn() ? state.game.turn : null);   // craters weather and stop smoking as turns pass
+  renderer.skirmish?.setStore(`woe.remains.${lobbyId}`);   // the dead left on the field, kept in this browser per campaign
   renderer.canEditShape = s => canEditShape(s) && !s.locked;
   renderer.unitsToPx = (x, y, units) => units / (distanceUnits(x, y, x + 1, y) || 1);   // km (or map units) → px, locally
   Object.defineProperty(renderer, 'railCutKm', { get: () => Number(state.game?.settings?.railCutKm) || 10 });
@@ -317,7 +318,7 @@
   }
   renderer.dragAllowed = m => !(rulesOn() && MOVERS.includes(m.type)) || state.role === 'gm';
   function remainingFor(m) {
-    if (cutOff(m)) return 0;
+    if (cutOff(m) || m.data?.attacked) return 0;   // attacked this turn: stays put until the next
     const km = Number(state.game?.settings?.kmPerMove) || 50;
     return Math.max(0, (Number(m.data?.movement) || 0) * km - (Number(m.data?.movedKm) || 0));
   }
@@ -388,7 +389,7 @@
   }
   /** This turn's gunfire and shelling, and craters from the last ten turns (End turn clears old ones on the server). */
   async function loadBattles() {
-    try { const d = await api.get(`${base}/battles`); renderer.setBattles(d.battles); renderer.setCraters(d.craters || []); } catch { /* none */ }
+    try { const d = await api.get(`${base}/battles`); renderer.setBattles(d.battles, d.past); renderer.setCraters(d.craters || []); } catch { /* none */ }
   }
   async function loadPings() {
     try { for (const p of (await api.get(`${base}/pings`)).pings) showPing(p, true); } catch { /* none */ }
@@ -426,7 +427,7 @@
     const units = e.detail.ids.map(id => state.markers.get(id)).filter(m => m && m.type === 'unit');
     if (!units.length) return;
     const km = state.game.settings.kmPerMove;
-    const remaining = Math.min(...units.map(m => Math.max(0, (Number(m.data?.movement) || 0) * km - (Number(m.data?.movedKm) || 0))));
+    const remaining = Math.min(...units.map(m => m.data?.attacked ? 0 : Math.max(0, (Number(m.data?.movement) || 0) * km - (Number(m.data?.movedKm) || 0))));
     const lead = state.markers.get(e.detail.id);
     const perPx = distanceUnits(lead.x, lead.y, lead.x + 1, lead.y) || 1;   // local map units per pixel
     renderer.showRange(lead.x, lead.y, remaining / perPx, remaining <= 0.01);
@@ -1832,7 +1833,7 @@
         + stat('Strength', d.strength !== undefined ? `${d.strength}%${d.strength <= 0 ? ' (destroyed)' : ''}` : '');
       if (gameOn()) {
         const km = state.game.settings.kmPerMove, allow = (Number(d.movement) || 0) * km, used = Number(d.movedKm) || 0;
-        body += stat('This turn', `${fmtNum(Math.max(0, allow - used))} of ${fmtNum(allow)} ${state.lobby?.scaleLabel || 'km'} left · ${Math.max(0, (Number(d.ap) || 0) - (Number(d.apUsed) || 0))}/${Number(d.ap) || 0} AP`);
+        body += stat('This turn', `${d.attacked ? 'attacked, cannot move' : `${fmtNum(Math.max(0, allow - used))} of ${fmtNum(allow)} ${state.lobby?.scaleLabel || 'km'} left`} · ${Math.max(0, (Number(d.ap) || 0) - (Number(d.apUsed) || 0))}/${Number(d.ap) || 0} AP`);
       }
       const cover = trenchCoverFor(m);
       if (cover) body += stat('Cover', `+${cover.bonus} defend (${esc(cover.trench.label || 'trench')})`);
@@ -2504,7 +2505,7 @@
     const reach = limited ? (Number(attacker.data?.range) || 0) * (Number(state.game.settings.kmPerRange) || 50) : Infinity;
     const unitLabel = state.lobby?.scaleLabel || 'km';
     const targets = [...state.markers.values()]
-      .filter(m => m.type === 'unit' && m.id !== attacker.id && !(mine && String(m.data?.nation || '').toLowerCase() === mine) && !allied(m))
+      .filter(m => m.type === 'unit' && m.id !== attacker.id && (Number(m.data?.strength ?? 100)) > 0 && !m.data?.aboard && !(mine && String(m.data?.nation || '').toLowerCase() === mine) && !allied(m))
       .map(m => ({ m, d: distanceUnits(attacker.x, attacker.y, m.x, m.y) })).filter(t => t.d <= reach + 1e-6).sort((a, b) => a.d - b.d);
     const railTargets = railTargetsFor(attacker, reach);
     if (!targets.length && !railTargets.length) { toast(limited ? `No enemy units or railways within ${attacker.name}'s reach (${fmtNum(reach)} ${unitLabel})` : 'No enemy units to attack'); return; }

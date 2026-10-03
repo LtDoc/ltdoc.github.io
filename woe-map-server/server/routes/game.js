@@ -1192,7 +1192,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       text = `💥 ${unit.name} attacked ${railName(rail)} ${place}: ${aRoll}+${atk}=${aRoll + atk} vs ${dRoll}+${def}=${dRoll + def}${notes.length ? ` (${notes.join(', ')})` : ''} → ` +
         (success ? `the line is cut (${Math.round(num(g.settings.railCutKm, 10) * 2)} ${u} of track)` : 'the line holds');
     }
-    if (g.enabled) writeMarker(req, unit, { data: { apUsed: num(unit.data?.apUsed) + 1 } });
+    if (g.enabled) writeMarker(req, unit, { data: { apUsed: num(unit.data?.apUsed) + 1, attacked: true } });
     let after = rail;
     if (success) {
       const cut = { id: crypto.randomBytes(4).toString('hex'), x: Math.round(at.x * 10) / 10, y: Math.round(at.y * 10) / 10, turn: g.turn, by: unit.data?.nation || '', at: new Date().toISOString() };

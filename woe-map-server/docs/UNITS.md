@@ -111,8 +111,28 @@ each rule that applied. "Entrenched" means the defender has trench cover.
 While an infantry unit (any type in the Infantry category: line infantry, conscripts, marines…) is in a battle this
 turn, a section of 8 men fights on the map from 800 % zoom, spread out about its line rather than on it: from a
 little ahead of it to well behind. Living men = strength ÷ 12.5, rounded up (100 % → 8, 74 % → 6, 50 % → 4,
-0 → none); the rest lie dead where they were. Purely visual: nothing here changes
-combat. Code: `public/js/skirmish.js`, wired in by `MapRenderer._tickBattles`.
+0 → none); the rest lie dead where they were (only those lost in this turn's fighting: men lost before lie where
+they fell then). Purely visual: nothing here changes combat. Code: `public/js/skirmish.js`, wired in by
+`MapRenderer._tickBattles`.
+
+**Out of a fight** every land unit on screen (infantry, guns, tanks, cavalry) still stands on the map from 800 %
+zoom: its living men and machines at ease about a line 62 px ahead of its token, 110 px wide, facing the nearest unit
+of another nation within about 60 map px (else the way it last moved, else down the screen). Riflemen stand about,
+looking this way and that (in their pits, behind their wire, once dug in); guns stand with their crews, tanks parked,
+horsemen formed up with the echelon closed up. Nobody fires. Going into a fight, each man runs (a tank rolls, a rider
+walks his horse) from where he stands to his place on the line; when it ends, back. Squads at ease are still pictures:
+they ask for frames only while someone is moving.
+
+**The dead** stay on the field for the turn of the fight and the next two (`REMAINS_TURNS` = 3 in skirmish.js and
+server/game.js; 30 minutes outside game mode), drawn under the living from 800 % zoom, a little darker each turn:
+- When a squad leaves its fight (End turn, the fight over, the unit gone) its dead are left where they lay, men and
+  fallen riders with their dead horses, placed by the unit's token where it stood plus an offset in screen px, so
+  they keep with the figures at every zoom. Each browser keeps them in localStorage (`woe.remains.<campaign>`, 1,500
+  at most).
+- Fights a browser did not see are laid out from the server's record: every battle stores `losses` (each side's
+  strength before and after, unit type and nation) and is kept for those turns (End turn deletes older ones);
+  `GET /api/lobbies/:id/battles` returns them as `past`. Each side loses as many men as its strength crossed
+  12.5 % steps, laid out on its line as it stood (riders strewn between the lines, by their horses).
 
 **Armies.** Every faction fights as one of eight armies: **American**, **ANZAC**, **Arab**, **British &
 Commonwealth**, **French**, **German**, **Ottoman** or **Russian**. The GM picks it on the faction (👥 People →
