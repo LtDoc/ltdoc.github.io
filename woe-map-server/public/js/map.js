@@ -1124,10 +1124,10 @@
           renderLog(true);
           Comms.onEvent(e);
           if (e.kind === 'combat' && e.data) {
-            const { attackerId, defenderId, outcome, losses } = e.data;
+            const { attackerId, defenderId, outcome, losses, returnFire } = e.data;
             const gone = id => !!(losses && losses[id] && losses[id].to === 0 && losses[id].from > 0);
             renderer.hit(defenderId, outcome !== 'defender', gone(defenderId));
-            renderer.hit(attackerId, outcome === 'defender', gone(attackerId));
+            if (!returnFire) renderer.hit(attackerId, outcome === 'defender', gone(attackerId));   // a battery firing back is not hit by it
             // Losses float up from the strength change itself (strengthChanged); a side that lost nothing says so.
             for (const id of [attackerId, defenderId]) if (losses?.[id] && losses[id].loss === 0) renderer.floatText(id, 'No loss', { color: 0xd5dde3, size: 17, delay: 160 });
           }
@@ -2547,7 +2547,8 @@
         }
         const d = await api.post(`${base}/combat`, { attackerId: attacker.id, defenderId: Number(val) });
         closeModals();
-        toast(d.event.message + (d.captureNote ? ` · ${d.captureNote}` : ''), 6000);
+        toast(d.event.message + (d.captureNote ? ` · ${d.captureNote}` : '') + (d.returnFire ? ` · ${d.returnFire.message}` : ''), 8000);
+        if (d.returnFire && !state.events.some(x => x.id === d.returnFire.id)) state.events.push(d.returnFire);
         if (!state.events.some(x => x.id === d.event.id)) { state.events.push(d.event); renderLog(true); }
       } catch (err) { toast(err.message); }
     };

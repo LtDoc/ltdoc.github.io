@@ -1793,7 +1793,7 @@ class MapRenderer extends EventTarget {
     const onScreen = (x, y, m) => x > vx0 - m && x < vx1 + m && y > vy0 - m && y < vy1 + m;
     // Each unit's strength before this turn's fighting (its first fight's record): men lost earlier are not drawn
     // lying on its line again (their bodies lie where they fell).
-    const startOf = new Map();
+    const startOf = new Map(), attacking = new Set([...this.battles.values()].map(e => e.battle.attackerId));
     for (const e of [...this.battles.values()].sort((a, b) => b.battle.id - a.battle.id)) {
       const L = e.battle.losses;
       if (L?.a) startOf.set(e.battle.attackerId, L.a.from);
@@ -1819,7 +1819,8 @@ class MapRenderer extends EventTarget {
         if ((fronts.get(id)?.battleId ?? -1) > b.id) return;   // the unit's latest fight sets its line
         // Holding fire: the target of a bombardment does not shoot back at the distant guns, and artillery attacked
         // does not return fire.
-        const holdFire = id === b.defenderId && (b.kind === 'shells' || window.UnitTypes?.resolve(view?.marker?.data?.unitType)?.cat === 'Artillery');
+        // (A unit that is itself attacking this turn, like a ship a coastal battery fires back at, keeps firing.)
+        const holdFire = id === b.defenderId && !attacking.has(id) && (b.kind === 'shells' || window.UnitTypes?.resolve(view?.marker?.data?.unitType)?.cat === 'Artillery');
         const l = Math.hypot(x1 - x0, y1 - y0), r0 = Math.min(l * 0.3, px / s), r1 = Math.min(l * 0.3, otherPx / s);
         const fux = (x1 - x0) / l, fuy = (y1 - y0) / l;
         if (kind === 'balloon') {

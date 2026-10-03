@@ -1887,11 +1887,44 @@ router.post('/:id/combat', (req, res) => {
     }
     if (made.length) hub.broadcast(req.lobby.id, { type: 'craters', craters: made }, audience);
   }
+  // Coastal guns answer the ships that fire on them: a shot straight back, free (no action point), while both still
+  // stand and the ship is within the battery's reach. It rolls like an attack (the battery's attack, tech, general,
+  // support and matchup against the ship's defend); a hit costs the ship the base loss plus the margin, a miss costs
+  // nothing, and the battery, firing from range, takes nothing in return.
+  let returnFire = null;
+  if (typeD?.id === 'coastal' && typeA?.cat === 'Naval' && num(dAfter.data?.strength, 100) > 0 && num(aAfter.data?.strength, 100) > 0 &&
+      !game.checkRange(req.lobby, g, false, dAfter, aAfter)) {
+    const b = dAfter, s = aAfter, mB = Matchups.matchup(typeD, typeA);
+    const atkB = num(b.data.attack) + bonusD.attack + (genD ? genD.bonus : 0) + supD.attack + mB.mod;
+    const defS = num(s.data.defend) + bonusA.defend + (genA ? genA.bonus : 0) + supA.defend;
+    const r1 = crypto.randomInt(1, cfg.die + 1), r2 = crypto.randomInt(1, cfg.die + 1), m2 = (r1 + atkB) - (r2 + defS);
+    const from = clamp(num(s.data.strength, 100), 0, 100), to = clamp(from - (m2 > 0 ? Math.round(cfg.baseLoss + m2 * cfg.marginMult) : 0), 0, 100);
+    let sAfter = s;
+    if (to !== from) {
+      q.updateMarker.run(s.type, s.name, s.x, s.y, s.iconFile, s.iconFile ? null : s.iconUrl, s.color, s.adminOnly ? 1 : 0,
+        s.visibleTo ? JSON.stringify(s.visibleTo) : null, s.ownerId, JSON.stringify({ ...s.data, strength: to }), now(), s.locked ? 1 : 0, s.id);
+      sAfter = access.serializeMarker(q.marker.get(s.id, req.lobby.id));
+      commitChange(req, 'marker', 'update', s, sAfter);
+      if (isConvoy(sAfter) && to <= 0) sinkCargo(req, sAfter, 'was sunk');
+    }
+    const bStr = clamp(num(b.data.strength, 100), 0, 100);
+    const rLosses = { [s.id]: { name: s.name, from, to, loss: from - to }, [b.id]: { name: b.name, from: bStr, to: bStr, loss: 0 } };
+    const rNotes = [bonusD.attack ? `+${bonusD.attack} tech` : '', genD ? `+${genD.bonus} ${genD.hero.name}` : '', ...mB.notes.map(n => `${n.mod > 0 ? '+' : ''}${n.mod} ${n.text}`)].filter(Boolean);
+    const rText = `🎯 ${b.name} returned fire on ${s.name}: ${r1}+${atkB}=${r1 + atkB} vs ${r2}+${defS}=${r2 + defS}${rNotes.length ? ` (${rNotes.join(', ')})` : ''} → ` +
+      (m2 > 0 ? `hit: ${fmt(s, rLosses[s.id])}` : `missed: ${s.name} is unharmed`);
+    const rEvent = logEvent(req.lobby.id, req.user.id, 'combat', rText, { attackerId: b.id, defenderId: s.id, aRoll: r1, dRoll: r2, aTotal: r1 + atkB, dTotal: r2 + defS,
+      margin: m2, outcome: m2 > 0 ? 'attacker' : 'defender', losses: rLosses, hidden, returnFire: true, ...(data.audience ? { audience: data.audience } : {}) }, audience);
+    // The battery's guns shell the ship for the rest of the turn too.
+    const rid = qb.insert.run(req.lobby.id, g.turn, b.id, s.id, 'shells', b.x, b.y, s.x, s.y, hidden ? 1 : 0, req.user.id, g.enabled ? null : Date.now() + 5 * 60000, now(), 0,
+      JSON.stringify({ a: { from: bStr, to: bStr, type: b.data?.unitType || '', nation: b.data?.nation || '' }, d: { from, to, type: s.data?.unitType || '', nation: s.data?.nation || '' } })).lastInsertRowid;
+    hub.broadcast(req.lobby.id, { type: 'battle', battle: serializeBattle(qb.one.get(rid), req.lobby) }, audience);
+    returnFire = rEvent;
+  }
   // Defended ground falls once its defenders are beaten: an attacker standing on enemy ground that destroys a
   // defender takes the ground now if no other defender holds it (territory.capture).
   let captureNote = null;
   if (g.enabled && losses[d.id].to === 0 && num(aAfter.data?.strength, 100) > 0) captureNote = afterMove(req, aAfter);
-  res.status(201).json({ event, captureNote });
+  res.status(201).json({ event, captureNote, returnFire });
 });
 
 module.exports = router;

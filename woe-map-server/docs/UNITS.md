@@ -17,7 +17,7 @@ wire.
 
 | Type | Attack / defend / range | Notes |
 |---|---|---|
-| Coastal battery | 9 / 6 / 5 | was Artillery; shells, +2 against ships (tech: Coastal batteries) |
+| Coastal battery | 9 / 6 / 5 | was Artillery; shells, +2 against ships, returns fire on ships that attack it (tech: Coastal batteries) |
 | Fortress guns | 8 / 9 / 4 | turret guns of a fortress; shells, +2 against ships |
 | MG bunker / pillbox | 3 / 10 / 1 | concrete machine-gun post: counts as machine guns in matchups (tech: Concrete pillboxes, 1916) |
 | AA emplacement | 4 / 6 / 3 | fixed anti-aircraft guns: +4 against aircraft (tech: Fixed anti-aircraft defences, 1915) |
