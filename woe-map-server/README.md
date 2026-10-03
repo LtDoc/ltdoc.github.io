@@ -355,7 +355,9 @@ Walking across hills costs 1.5× the distance and mountains 4× (⚖ Rules → M
 full pace. Tank Battalions and artillery cannot enter mountains at all: they stop where the mountains begin, and cross
 a range only by **rail**, which runs through hills and mountains at its usual speed for everyone. A defender on
 higher ground than its attacker gains +1 defend on hills and +2 in mountains (from hills: +1). Mountains cut
-supply lines (a line may cross 10 km of them, 50 km to mountain troops) unless a railway carries supply through. On image maps the
+supply lines (a line may cross 10 km of them, 50 km to mountain troops) unless a railway carries supply through. Under fog
+of war they block sight: a range hides whatever is beyond its crest until it climbs into view (aircraft and balloons see
+over them). On image maps the
 GM paints the ground: an area's dialog has *Ground* → Hills or Mountains. The map shows the relief: shaded slopes and
 snow-capped ranges at every zoom (the Alps, Rockies and Sierra Nevada are white-topped), and from 250 % drawn peaks
 over the mountains and rounded mounds over the hills.

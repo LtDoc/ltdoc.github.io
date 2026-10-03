@@ -77,6 +77,8 @@ function lookup(lobby) {
       const e = earth ? earth.cls[Terrain.cell(earth, x, y, W, H)] : FLAT;
       return areas.length && e < MOUNTAINS ? Math.max(e, paintedAt(x, y)) : e;
     },
+    earthClassAt(x, y) { return earth ? earth.cls[Terrain.cell(earth, x, y, W, H)] : FLAT; },
+    paintedAt: (x, y) => (areas.length ? paintedAt(x, y) : FLAT),
     heightAt(x, y) { return earth ? Terrain.heightAt(earth, x, y, W, H) : null; },
   };
 }
@@ -132,4 +134,36 @@ function mountainKm(lobby, look, x0, y0, x1, y1) {
   return m ? geo.distance(lobby, x0, y0, x1, y1) * m / n : 0;
 }
 
-module.exports = { FLAT, HILLS, MOUNTAINS, earthGrid, painted, lookup, classAt, enabled, moveKind, moveMult, inside, heightBonus, mountainKm };
+/**
+ * Can an observer at (x0, y0) see (x1, y1) past the mountains (docs/TERRAIN.md)? Only mountain ground blocks a
+ * sightline:
+ *   - Earth grid: a mountain cell between them (not the cells the two stand in) that rises above both (higher than
+ *     the observer's eye, 30 m over its ground, and the target, 10 m over its own) hides the target. So a crest hides
+ *     what lies on the far side, below it, while a unit climbing the slope facing the observer, or on the crest, stays
+ *     in view. (A ridge test rather than a true sightline: on 7 km cells a bulging slope would otherwise hide its own
+ *     upper part.)
+ *   - Painted Mountains (no heights): a line crossing a painted range is blocked, unless the observer or the target
+ *     stands in painted mountains itself (on its slopes).
+ * Sampled every 0.75 map px (half an Earth grid cell).
+ */
+function lineOfSight(lobby, look, x0, y0, x1, y1) {
+  if (!look.any) return true;
+  const px = Math.hypot(x1 - x0, y1 - y0);
+  const n = Math.max(1, Math.min(4000, Math.ceil(px / 0.75))), skip = Math.ceil(1.5 / Math.max(1e-6, px / n));   // the end cells
+  if (n <= 2 * skip) return true;
+  const h0 = look.earth ? look.heightAt(x0, y0) + 30 : 0, h1 = look.earth ? look.heightAt(x1, y1) + 10 : 0;
+  const top = Math.max(h0, h1) + 25;
+  let onSlope = null;
+  for (let i = skip; i < n - skip; i++) {
+    const t = (i + 0.5) / n, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t;
+    if (look.earth && look.earthClassAt(x, y) === MOUNTAINS) {
+      if (look.heightAt(x, y) > top) return false;
+    } else if (look.areas.length && look.paintedAt(x, y) === MOUNTAINS) {
+      if (onSlope === null) onSlope = look.paintedAt(x0, y0) === MOUNTAINS || look.paintedAt(x1, y1) === MOUNTAINS;
+      if (!onSlope) return false;
+    }
+  }
+  return true;
+}
+
+module.exports = { FLAT, HILLS, MOUNTAINS, earthGrid, painted, lookup, classAt, enabled, moveKind, moveMult, inside, heightBonus, mountainKm, lineOfSight };

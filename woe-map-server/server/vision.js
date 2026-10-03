@@ -9,6 +9,10 @@
  *   - Image maps: by radius, plus the side's own territory.
  *   - Sources: living units and active heroes (range by type or category, `settings.vision`, plus research
  *     `vision` effects) and towns by size. Submarines are only seen within `subSpotKm` of a source.
+ *   - Mountains block sight (server/terrain.js, docs/TERRAIN.md): outside its own ground, a side sees an enemy only
+ *     when one of the sources that brings the spot into vision has a clear line to it over the mountains (aircraft
+ *     and balloons see over them). The fog overlay stays by province: a hidden valley inside a seen province simply
+ *     shows no enemies.
  *
  * The server decides: canSee (lobbyAccess.js) asks `sees()`, so a unit outside vision never reaches a browser
  * (first load, live updates, history, drags, battles). When vision changes, `schedulePush` sends each player the
@@ -31,7 +35,8 @@ const q = {
     (SELECT IFNULL(MAX(updated_at), 0) FROM territories WHERE lobby_id = ?) || '|' ||
     (SELECT IFNULL(MAX(updated_at), 0) FROM game WHERE lobby_id = ?) || '|' ||
     (SELECT IFNULL(GROUP_CONCAT(a || '-' || b || status), '') FROM relations WHERE lobby_id = ?) || '|' ||
-    (SELECT IFNULL(GROUP_CONCAT(id || name), '') FROM factions WHERE lobby_id = ?) AS fp`),
+    (SELECT IFNULL(GROUP_CONCAT(id || name), '') FROM factions WHERE lobby_id = ?) || '|' ||
+    (SELECT COUNT(*) || ':' || IFNULL(MAX(updated_at), 0) FROM shapes WHERE lobby_id = ? AND kind = 'area') AS fp`),
   ghosts: db.prepare('SELECT * FROM fog_ghosts WHERE lobby_id = ? AND nation = ?'),
   allGhosts: db.prepare('SELECT * FROM fog_ghosts WHERE lobby_id = ?'),
   putGhost: db.prepare(`INSERT INTO fog_ghosts (lobby_id, nation, marker_id, x, y, name, type, unit_type, color, flag_nation, turn, seen_at)
@@ -50,7 +55,7 @@ function currentTick() {
   if (!tickArmed) { tickArmed = true; setImmediate(() => { tick++; tickArmed = false; }); }
   return tick;
 }
-function fingerprint(lobbyId) { return q.fingerprint.get(lobbyId, lobbyId, lobbyId, lobbyId, lobbyId, lobbyId).fp; }
+function fingerprint(lobbyId) { return q.fingerprint.get(lobbyId, lobbyId, lobbyId, lobbyId, lobbyId, lobbyId, lobbyId).fp; }
 function invalidate(lobbyId) { cache.delete(Number(lobbyId)); }
 
 function state(lobbyId) {
@@ -75,6 +80,10 @@ function state(lobbyId) {
       for (const [a, b] of [[r.a, r.b], [r.b, r.a]]) { if (!st.allies.has(a)) st.allies.set(a, new Set()); st.allies.get(a).add(b); }
     }
     if (!st.pv) { try { st.lookup = require('./territory').ownerLookup(lobby); } catch { st.lookup = null; } }
+    // Hills and mountains: sightlines over the mountains are checked only when the map has any.
+    const terrain = require('./terrain');
+    const look = terrain.enabled(g.settings) ? terrain.lookup(lobby) : null;
+    st.look = look && look.any ? look : null;
   }
   cache.set(lobbyId, st);
   return st;
@@ -119,7 +128,9 @@ function nationVision(st, nation) {
   const n = norm(nation);
   if (st.nations.has(n)) return st.nations.get(n);
   const f = st.byName.get(n);
-  const nv = { faction: f || null, sources: [], buckets: new Map(), provinces: st.pv ? new Set() : null };
+  // provinces: every province in vision; owned: the side's own ground (seen whatever the mountains); cover: for the
+  // others, the sources that bring them into vision (whose sightlines decide, past mountains).
+  const nv = { faction: f || null, sources: [], buckets: new Map(), provinces: st.pv ? new Set() : null, owned: new Set(), cover: new Map() };
   st.nations.set(n, nv);
   if (!f) return nv;
   const fx = require('./game').factionEffects(st.lobbyId, f.id);
@@ -128,7 +139,7 @@ function nationVision(st, nation) {
     const km = rangeOf(m, st.settings, fx);
     if (km <= 0) continue;
     const { rx, ry } = extent(st, m.x, m.y, km);
-    const src = { x: m.x, y: m.y, km, rx, ry };
+    const src = { x: m.x, y: m.y, km, rx, ry, air: m.type === 'unit' && UnitTypes.resolve(m.data?.unitType)?.cat === 'Air' };
     nv.sources.push(src);
     for (let gx = Math.floor((m.x - rx) / BUCKET); gx <= Math.floor((m.x + rx) / BUCKET); gx++)
       for (let gy = Math.floor((m.y - ry) / BUCKET); gy <= Math.floor((m.y + ry) / BUCKET); gy++) {
@@ -139,24 +150,29 @@ function nationVision(st, nation) {
   }
   if (st.pv) {
     const c = st.pv.get(st.lobbyId), G = st.pv.GRID;
-    for (const p of c.list) if (p.factionId === f.id) nv.provinces.add(p.id);
+    for (const p of c.list) if (p.factionId === f.id) { nv.provinces.add(p.id); nv.owned.add(p.id); }
+    const cover = (id, s) => { nv.provinces.add(id); if (nv.owned.has(id)) return; const l = nv.cover.get(id); if (l) { if (!l.includes(s)) l.push(s); } else nv.cover.set(id, [s]); };
     for (const s of nv.sources) {
       const here = st.pv.at(st.lobbyId, s.x, s.y);
-      if (here) nv.provinces.add(here.id);
+      if (here) cover(here.id, s);
       for (let gx = Math.floor((s.x - s.rx) / G); gx <= Math.floor((s.x + s.rx) / G); gx++)
         for (let gy = Math.floor((s.y - s.ry) / G); gy <= Math.floor((s.y + s.ry) / G); gy++)
           for (const p of c.grid.get(gx * 100000 + gy) || []) {
-            if (nv.provinces.has(p.id)) continue;
-            if (geo.distance(st.lobby, s.x, s.y, p.cx, p.cy) <= s.km) nv.provinces.add(p.id);
+            if (nv.owned.has(p.id)) continue;
+            if (geo.distance(st.lobby, s.x, s.y, p.cx, p.cy) <= s.km) cover(p.id, s);
           }
     }
   }
   return nv;
 }
+/** Does a source see (x, y) past the mountains? Aircraft and balloons see over them. */
+function sightFrom(st, s, x, y) {
+  return !st.look || s.air || require('./terrain').lineOfSight(st.lobby, st.look, s.x, s.y, x, y);
+}
 function nearSource(st, nv, x, y, capKm = Infinity) {
   for (const s of nv.buckets.get(Math.floor(x / BUCKET) * 100000 + Math.floor(y / BUCKET)) || []) {
     if (Math.abs(x - s.x) > s.rx || Math.abs(y - s.y) > s.ry) continue;
-    if (geo.distance(st.lobby, s.x, s.y, x, y) <= Math.min(s.km, capKm)) return true;
+    if (geo.distance(st.lobby, s.x, s.y, x, y) <= Math.min(s.km, capKm) && sightFrom(st, s, x, y)) return true;
   }
   return false;
 }
@@ -168,7 +184,12 @@ function inVision(st, side, x, y, sub = false) {
     const nv = nationVision(st, n);
     if (!nv.faction) continue;
     if (sub) { if (nearSource(st, nv, x, y, Number(st.settings.subSpotKm ?? 20))) return true; continue; }
-    if (prov) { if (nv.provinces.has(prov.id)) return true; continue; }
+    if (prov) {
+      if (!nv.provinces.has(prov.id)) continue;
+      if (!st.look || nv.owned.has(prov.id)) return true;
+      if ((nv.cover.get(prov.id) || []).some(s => sightFrom(st, s, x, y))) return true;
+      continue;
+    }
     if (owner != null && owner === nv.faction.id) return true;
     if (nearSource(st, nv, x, y)) return true;
   }

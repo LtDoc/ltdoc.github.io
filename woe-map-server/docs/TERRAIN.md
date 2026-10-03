@@ -87,6 +87,24 @@ its railheads, on either side of a range, so a railway over a pass keeps the far
 beyond a range are cut off unless a friendly place, column or convoy reaches them from their own side. (On the
 Brenner: German units in the Po valley are out of supply from Munich until a railway runs over the pass.)
 
+## Sight: mountains block it (fog of war)
+
+With fog of war on, a side still sees all of its **own ground**. Elsewhere, an enemy in a province (or, on image
+maps, a spot) in vision is seen only if **one of the sources bringing it into vision has a clear line to it**
+(`terrain.lineOfSight`, used by `vision.inVision`):
+
+- **Earth maps:** a mountain cell between the two (not the cells they stand in) that rises **above both** the
+  observer's eye (30 m over its ground) and the target (10 m over its own) blocks the line. So a range hides what lies
+  beyond its crest, below it, until the enemy climbs onto the slope facing the observer or the crest itself; a unit
+  climbing towards the observer stays in view, and a hollow behind a nearer shoulder is hidden. (A ridge test rather
+  than a true sightline: on 7 km cells a bulging slope would otherwise hide its own upper part.) Hills never block.
+- **Painted Mountains:** a line crossing a painted range is blocked unless the observer or the target stands in it.
+- **Aircraft and balloons** see over the mountains.
+
+Fog stays drawn by province: a hidden valley inside a province you see shows no enemies rather than being shaded.
+Enemies that slip behind a ridge leave a last-known-position ghost like any other. (Tested on the Pyrenees: from the
+French foothills, units on the north slope and the crest are seen, the Spanish side below the crest is not.)
+
 ## How it looks
 
 `public/js/relief.js` draws the ground over the land and the territory colours (so it reads whoever holds it) and
