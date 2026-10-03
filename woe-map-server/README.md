@@ -628,7 +628,7 @@ are ordinary history entries, so a bad fight can be reverted. A unit at zero str
 with a looping fire-and-smoke sprite until a GM deletes it or restores its strength (an edit or a revert both
 work).
 
-**Coastal batteries return fire** on a ship that attacks them: straight after its attack, if both still stand and the
+**Coastal batteries and fortress guns return fire** on a ship that attacks them: straight after its attack, if both still stand and the
 ship is within the battery's reach, the battery rolls a free shot back (no action point; its attack, tech, general,
 support and the +2 against ships, against the ship's defend). A hit costs the ship the base loss plus the margin; a
 miss costs nothing; the battery takes nothing from its own shot. It is logged as a 🎯 line of its own, and the

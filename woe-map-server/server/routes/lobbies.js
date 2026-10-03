@@ -1887,12 +1887,12 @@ router.post('/:id/combat', (req, res) => {
     }
     if (made.length) hub.broadcast(req.lobby.id, { type: 'craters', craters: made }, audience);
   }
-  // Coastal guns answer the ships that fire on them: a shot straight back, free (no action point), while both still
+  // Coastal batteries and fortress guns answer the ships that fire on them: a shot straight back, free (no action point), while both still
   // stand and the ship is within the battery's reach. It rolls like an attack (the battery's attack, tech, general,
   // support and matchup against the ship's defend); a hit costs the ship the base loss plus the margin, a miss costs
   // nothing, and the battery, firing from range, takes nothing in return.
   let returnFire = null;
-  if (typeD?.id === 'coastal' && typeA?.cat === 'Naval' && num(dAfter.data?.strength, 100) > 0 && num(aAfter.data?.strength, 100) > 0 &&
+  if (['coastal', 'fortress'].includes(typeD?.id) && typeA?.cat === 'Naval' && num(dAfter.data?.strength, 100) > 0 && num(aAfter.data?.strength, 100) > 0 &&
       !game.checkRange(req.lobby, g, false, dAfter, aAfter)) {
     const b = dAfter, s = aAfter, mB = Matchups.matchup(typeD, typeA);
     const atkB = num(b.data.attack) + bonusD.attack + (genD ? genD.bonus : 0) + supD.attack + mB.mod;
