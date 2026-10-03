@@ -137,12 +137,13 @@ class MapRenderer extends EventTarget {
     this.unitDots = new PIXI.Graphics();          // zoomed out on the Earth map: one dot per unit instead of its icon
     this.unitDots.eventMode = 'none';
     this.nml = window.NoMansLand ? new window.NoMansLand(this) : null;   // No Man's Land areas: mud, shell holes, wire, the dead
+    this.relief = window.Relief ? new window.Relief(this) : null;         // hills and mountains: hillshade, snow caps, peaks
     this.skirmish = window.Skirmish ? new window.Skirmish(this) : null;   // riflemen on infantry firing lines (skirmish.js)
     this.fogLayer = new PIXI.Container(); this.fogLayer.eventMode = 'none';     // fog of war on image maps (Earth: the province layer)
     this.ghostLayer = new PIXI.Container(); this.ghostLayer.eventMode = 'none'; // fog of war: last known enemy positions
     this.rideLayer = new PIXI.Container(); this.rideLayer.eventMode = 'none';   // trains carrying units on a rail trip
     this.rides = new Map();                                                      // unit id -> rail trip being played
-    this.world.addChild(...[this.mapLayer, this.territoryLayer, this.lakeG, this.lakeShoreG, this.gridLayer, this.townLayer, this.scarLayer, this.nml?.layer, this.snowG, this.sceneryLayer, this.craterLayer, this.craterSmokeG, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.fogLayer, this.skirmish?.layer, this.gunG, this.unitDots, this.ghostLayer, this.rideLayer].filter(Boolean), this.markerLayer, this.boomLayer, ...(this.skirmish ? [this.skirmish.airLayer] : []), this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
+    this.world.addChild(...[this.mapLayer, this.territoryLayer, this.lakeG, this.lakeShoreG, this.relief?.layer, this.gridLayer, this.townLayer, this.scarLayer, this.nml?.layer, this.snowG, this.sceneryLayer, this.craterLayer, this.craterSmokeG, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.fogLayer, this.skirmish?.layer, this.gunG, this.unitDots, this.ghostLayer, this.rideLayer].filter(Boolean), this.markerLayer, this.boomLayer, ...(this.skirmish ? [this.skirmish.airLayer] : []), this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
     app.stage.addChild(this.world, this.weatherG, this.pingArrows);
 
     app.stage.eventMode = 'static';
@@ -237,6 +238,7 @@ class MapRenderer extends EventTarget {
     this.lakes = null; this.lakeG.clear(); this.lakeShoreG.clear();
     if (this.earth) { this.mapLayer.removeChild(this.earth.container); this.earth.destroy(); this.earth = null; }
     for (const c of this.mapLayer.removeChildren()) c.destroy();
+    this.relief?.clear();
   }
 
   /** Show the bundled vector Earth (see earth.js). opts = lobby.settings.earth */
@@ -253,6 +255,7 @@ class MapRenderer extends EventTarget {
     this._drawGrid();
     this.fit();
     this._loadLakes(opts, gen);
+    this.relief?.setEarth(opts);
     return true;
   }
   /**
@@ -890,6 +893,7 @@ class MapRenderer extends EventTarget {
     v.shape = shape;
     this._drawShapeView(v);
     this.nml?.upsert(shape);
+    this.relief?.upsert(shape);
     if (shape.kind === 'trench') this._refreshTrenchNodes();
     if (this.selectedShapeId === shape.id && !this._vdrag) this._drawHandles();
   }
@@ -913,6 +917,7 @@ class MapRenderer extends EventTarget {
     if (v && v.trench) { v.trench.destroy(); v.trench = null; setTimeout(() => this._refreshTrenchNodes(), 0); }
     if (v && v.rail) { v.rail.destroy(); v.rail = null; }
     this.nml?.remove(id);
+    this.relief?.remove(id);
     if (!v) return;
     this.shapesLayer.removeChild(v.g, v.label);
     v.g.destroy(); v.label.destroy();
@@ -2436,6 +2441,10 @@ class MapRenderer extends EventTarget {
     if (this.nml?.size) {
       const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
       this.nml.tick(s, [tl.x, tl.y, br.x, br.y]);
+    }
+    if (this.relief?.active) {
+      const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
+      this.relief.tick(s, [tl.x, tl.y, br.x, br.y]);
     }
     this._syncWeather();
     if (this._tickWeather(nowMs)) anim = true;

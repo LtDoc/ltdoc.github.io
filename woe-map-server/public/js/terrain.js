@@ -94,7 +94,7 @@ const Terrain = (() => {
    * reach about 3400 m in the grid), so this sits below the real snow line, fitted so the high Alps, Sierra Nevada,
    * Rockies, Caucasus, Pyrenees and Norwegian fjells are white-topped and the Carpathians are not.
    */
-  const SNOW = [[0, 5200], [25, 5100], [30, 4300], [38, 3200], [46, 2500], [52, 2200], [61, 1550], [70, 800], [80, 200], [90, 0]];
+  const SNOW = [[0, 5200], [25, 5000], [30, 4000], [38, 2900], [46, 2100], [52, 1900], [61, 1450], [70, 700], [80, 200], [90, 0]];
   function snowLine(lat) {
     const a = Math.min(90, Math.abs(lat));
     for (let i = 1; i < SNOW.length; i++) {

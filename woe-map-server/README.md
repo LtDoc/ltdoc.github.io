@@ -354,7 +354,9 @@ elevation grid (`public/earth/terrain.bin.gz`, 2.1 MB, public domain): every 7 k
 Walking across hills costs 1.5× the distance and mountains 4× (⚖ Rules → Movement); Mountain Regiments cross both at
 full pace. Tank Battalions and artillery cannot enter mountains at all: they stop where the mountains begin, and cross
 a range only by **rail**, which runs through hills and mountains at its usual speed for everyone. On image maps the
-GM paints the ground: an area's dialog has *Ground* → Hills or Mountains.
+GM paints the ground: an area's dialog has *Ground* → Hills or Mountains. The map shows the relief: shaded slopes and
+snow-capped ranges at every zoom (the Alps, Rockies and Sierra Nevada are white-topped), and from 250 % drawn peaks
+over the mountains and rounded mounds over the hills.
 
 ### History and revert
 

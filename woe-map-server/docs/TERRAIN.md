@@ -58,3 +58,23 @@ Ships, aircraft and units aboard a convoy ignore the ground. Heroes walk like in
   for their ground; a tank or gun can only get off a train where the ground it walks to is open (it cannot detrain
   into the mountains).
 - The move's note says what slowed it: "slowed by the hills and the mountains".
+
+## How it looks
+
+`public/js/relief.js` draws the ground over the land and the territory colours (so it reads whoever holds it) and
+under towns, drawings and units:
+
+- **Earth maps, every zoom:** a hillshade of the grid lit from the north-west (exaggerated 28×; a small dead zone
+  keeps the plains calm), a faint brown wash on mountains and ochre on hills, and **snow caps**: white where a cell's
+  3 × 3 average height is above the snow line *and* it stands well above the ground round it, so the high Alps, the
+  Sierra Nevada crest, the Rockies, the Caucasus and the Pyrenees are white-topped while high plateaus (Tibet, the
+  Altiplano) mostly are not. The snow line (`Terrain.snowLine`) falls with latitude: about 4000 m at 30°, 2900 m at
+  38°, 2100 m at 46°, 1450 m at 61°. It is built once per map in 900-cell tiles, sea-only tiles skipped, one tile
+  per idle moment.
+- **Image maps:** the painted Hills / Mountains areas get a light brown or ochre wash.
+- **Close in** (fading in from 250 % to 350 % on the Earth, three times sooner on image maps): **peaks** over the
+  mountains (four ridge shapes, rock lit on the west face and shadowed on the east, white-capped where the snow
+  lies, taller on higher ground) and low rounded **mounds** over the hills, on a jittered lattice per 64 px chunk of
+  the map, seeded by the chunk so every browser draws the same, nearer glyphs overlapping those behind. Only the
+  chunks in view are built (a few hundred are kept); on image maps glyphs, spacing and chunks are three times
+  larger, to suit their bigger map pixels.
