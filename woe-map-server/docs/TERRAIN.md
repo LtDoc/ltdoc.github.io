@@ -118,9 +118,20 @@ under towns, drawings and units:
   38°, 2100 m at 46°, 1450 m at 61°. It is built once per map in 900-cell tiles, sea-only tiles skipped, one tile
   per idle moment.
 - **Image maps:** the painted Hills / Mountains areas get a light brown or ochre wash.
-- **Close in** (fading in from 250 % to 350 % on the Earth, three times sooner on image maps): **peaks** over the
-  mountains (four ridge shapes, rock lit on the west face and shadowed on the east, white-capped where the snow
-  lies, taller on higher ground) and low rounded **mounds** over the hills, on a jittered lattice per 64 px chunk of
-  the map, seeded by the chunk so every browser draws the same, nearer glyphs overlapping those behind. Only the
-  chunks in view are built (a few hundred are kept); on image maps glyphs, spacing and chunks are three times
-  larger, to suit their bigger map pixels.
+- **Close in** (fading in from 250 % to 350 % on the Earth, three times sooner on image maps): **mountain and hill
+  sprites** laid out as ranges. The art is the user's two sheets (, ), cut by
+   into  (21 mountains, 21 hills; the glacier,
+  the snow-patched hill and the two with figures on them are left out, and the sheets' light sticker rim is peeled
+  off). The build measures each sprite's snow, green and rock and how brown its rock is.
+  - **Range layout:** candidate spots on a lattice fixed to the map (1.6 map px apart, jittered) are taken **highest
+    ground first**; each becomes a sprite sized by its height (5.5 map px wide in the foothills up to 18 on the
+    crests, ± 18 %), and a spot is skipped if it would stand closer to a placed sprite than 42 % of their mean width.
+    So the crest gets a few big peaks, the flanks medium ones and the edges small ones, overlapping like a range;
+    hills follow (7–12 px, 62 %). Nearer sprites (lower on the screen) are drawn in front.
+  - **Which sprite:** snowy sprites where the snow lies (), lightly snowed ones near the snow line, bare rock
+    below, and now and then the green alpine one on lower mountains. Within each set the pick follows a smooth field
+    about 200 km across, from grey to brown rock, so a stretch of range shares a colour (grey central Alps, browner
+    Maritime Alps) instead of a patchwork.
+  - Built per 64 px chunk (with a margin so neighbouring chunks agree), ten new chunks a frame at most, a few hundred
+    kept; about 5000 sprites in view at 350 % still draw at full frame rate. On image maps sizes, spacing and chunks are
+    three times larger, to suit their bigger map pixels.

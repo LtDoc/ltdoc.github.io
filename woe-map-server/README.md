@@ -359,8 +359,9 @@ supply lines (a line may cross 10 km of them, 50 km to mountain troops) unless a
 of war they block sight: a range hides whatever is beyond its crest until it climbs into view (aircraft and balloons see
 over them). On image maps the
 GM paints the ground: an area's dialog has *Ground* → Hills or Mountains. The map shows the relief: shaded slopes and
-snow-capped ranges at every zoom (the Alps, Rockies and Sierra Nevada are white-topped), and from 250 % drawn peaks
-over the mountains and rounded mounds over the hills.
+snow-capped ranges at every zoom (the Alps, Rockies and Sierra Nevada are white-topped), and from 250 % mountain and hill
+sprites laid out as ranges, the biggest snow-capped peaks on the crests (`scripts/build-terrain.js` builds the atlas from
+`rob assets/Mountains.png` and `Hills.png`).
 
 ### History and revert
 

@@ -8,10 +8,11 @@
  *     rugged tops above the snow line (lower towards the poles) are white. Built once per map in 900-cell tiles
  *     (sea-only tiles skipped), one at a time in idle moments so the page never stalls.
  *   - Image maps: the GM's painted Hills / Mountains areas (area drawings with data.terrain) get a light wash.
- *   - Close in (from 250 % zoom, fading in to 350 %): peaks drawn over the mountains, rock faces lit on the west and
- *     shadowed on the east, white-capped above the snow line, and low rounded mounds over the hills, placed on a
- *     jittered lattice per 64 px chunk of the map (seeded by the chunk, the same in every browser), nearer ones
- *     overlapping those behind. Only the chunks in view are built, and a few hundred are kept.
+ *   - Close in (from 250 % zoom, fading in to 350 %): mountain and hill sprites (public/assets/terrain.png, cut by
+ *     scripts/build-terrain.js from the user's sheets) laid out as ranges: the highest ground takes the biggest peaks,
+ *     the flanks and foothills smaller ones, overlapping, nearer sprites in front; snow-capped sprites where the snow
+ *     lies, bare rock below it. Placed per 64 px chunk of the map from a lattice fixed to the map (the same in every
+ *     browser); only the chunks in view are built, and a few hundred are kept.
  * MapRenderer owns one (renderer.relief): setEarth(opts) with the map, clear() when it goes, upsert / remove for
  * drawings, tick(scale, view) every frame.
  */
@@ -22,12 +23,19 @@
   const L = [-Math.cos(40 * Math.PI / 180) * Math.SQRT1_2, -Math.cos(40 * Math.PI / 180) * Math.SQRT1_2, Math.sin(40 * Math.PI / 180)];   // light from the NW, 40° up
   const CHUNK = 64;          // map px per glyph chunk
   const PEAKS_FROM = 2.5, PEAKS_FULL = 3.5, KEEP = 400;
-  const SPACING = { mountains: 4.2, hills: 5 };   // map px between glyphs
+  const STEP = 1.6;          // map px between candidate spots (about one elevation cell on the usual Earth)
+  const SIZE = { mtnMin: 5.5, mtnMax: 18, hillMin: 7, hillMax: 12 };   // sprite widths in map px
+  const OVERLAP = { mountains: 0.42, hills: 0.62 };   // how close two sprites may stand, as a share of their mean width
   const PAINT_K = 3;         // maps without an Earth grid (image maps) have bigger map px: glyphs, spacing and chunks × 3, shown 3× sooner
 
   const smooth = t => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
   const idle = fn => (window.requestIdleCallback ? window.requestIdleCallback(fn, { timeout: 400 }) : setTimeout(fn, 16));
-  const rng = seed => { let s = (seed * 2654435761) >>> 0 || 1; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); };
+  /** A fixed pseudo-random number in [0, 1) for a lattice spot (i, j) and a purpose k: the same in every browser. */
+  const hash = (i, j, k) => {
+    let h = (Math.imul(i, 374761393) + Math.imul(j, 668265263) + Math.imul(k, 1442695041)) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177); h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  };
 
   let gridPromise = null;
   /** The elevation grid, fetched and classified once per page (shared with every map shown). */
@@ -66,58 +74,27 @@
     acc[3] = ao;
   }
 
-  // ---- Glyphs: a few peak and mound drawings, made once per page ---------------------------------------------------
-  let glyphs = null;
-  function makeGlyphs() {
-    if (glyphs) return glyphs;
-    const S = 4;   // drawn at 4× the base 24 × 20 px
-    const tex = draw => {
-      const c = document.createElement('canvas'); c.width = 24 * S; c.height = 20 * S;
-      const g = c.getContext('2d'); g.scale(S, S); g.lineJoin = 'round';
-      draw(g);
-      const t = PIXI.Texture.from(c);
-      t.source.scaleMode = 'linear';
-      return t;
-    };
-    const poly = (g, pts, fill) => { g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (const p of pts.slice(1)) g.lineTo(p[0], p[1]); g.closePath(); g.fillStyle = fill; g.fill(); };
-    // A peak: ridge points [x, y] from the left foot to the right foot; the west faces are lit, the east in shadow.
-    const peak = (ridge, snow) => tex(g => {
-      const base = 19.5;
-      g.globalAlpha = 0.28; poly(g, [[ridge[0][0] + 1.5, base], ...ridge.slice(1, -1).map(p => [p[0] + 2.5, p[1] + 2]), [ridge[ridge.length - 1][0] + 2.5, base]], '#1a140e'); g.globalAlpha = 1;
-      for (let k = 1; k < ridge.length - 1; k++) {
-        const top = ridge[k], l = ridge[k - 1], r = ridge[k + 1], mid = [top[0] + (r[0] - top[0]) * 0.15 + 0.4, base];
-        poly(g, [[l[0], base], l, top, mid], k % 2 ? '#a8977d' : '#b4a487');          // lit west face
-        poly(g, [mid, top, r, [r[0], base]], k % 2 ? '#6c5c49' : '#75644f');           // shadowed east face
-        if (snow) {
-          const h = (base - top[1]) * 0.44, sl = [top[0] - (top[0] - l[0]) * 0.44, top[1] + h], sr = [top[0] + (r[0] - top[0]) * 0.44, top[1] + h];
-          const zig = [top[0] + (sr[0] - top[0]) * 0.1, top[1] + h * 0.72];
-          poly(g, [sl, top, zig, [zig[0] - 0.6, sl[1] + 0.4]], '#f6f8fc');
-          poly(g, [zig, top, sr, [sr[0] - 1, sr[1] - 0.5]], '#c8d2df');
-        }
-      }
-      g.strokeStyle = 'rgba(40,30,20,0.55)'; g.lineWidth = 0.55;
-      g.beginPath(); g.moveTo(ridge[0][0], base); for (const p of ridge) g.lineTo(p[0], p[1]); g.lineTo(ridge[ridge.length - 1][0], base); g.stroke();
-    });
-    const shapes = [
-      [[1, 19.5], [12, 2.5], [23, 19.5]],
-      [[1, 19.5], [8, 7], [11, 10], [16, 3], [23, 19.5]],
-      [[0.5, 19.5], [9, 4], [13.5, 9.5], [17.5, 7.5], [23.5, 19.5]],
-      [[2, 19.5], [11, 5.5], [14, 8], [22, 19.5]],
-    ];
-    const mound = (w, h) => tex(g => {
-      const base = 19, cx = 12;
-      g.globalAlpha = 0.22; g.fillStyle = '#1a140e'; g.beginPath(); g.ellipse(cx + 1.5, base, w / 2 + 1, 1.6, 0, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
-      g.beginPath(); g.moveTo(cx - w / 2, base); g.bezierCurveTo(cx - w / 3, base - h, cx + w / 4, base - h * 1.05, cx + w / 2, base); g.closePath();
-      const gr = g.createLinearGradient(cx - w / 2, 0, cx + w / 2, 0);
-      gr.addColorStop(0, 'rgba(178,170,108,0.97)'); gr.addColorStop(0.5, 'rgba(138,134,78,0.97)'); gr.addColorStop(1, 'rgba(88,84,48,0.97)');
-      g.fillStyle = gr; g.fill();
-      g.strokeStyle = 'rgba(50,40,25,0.45)'; g.lineWidth = 0.5; g.stroke();
-    });
-    glyphs = {
-      peaks: shapes.map(s => peak(s, false)), snowy: shapes.map(s => peak(s, true)),
-      mounds: [mound(22, 12), mound(18, 10), mound(23, 9)],
-    };
-    return glyphs;
+  // ---- Sprites: the atlas of mountains and hills, loaded once per page ------------------------------------------------
+  let atlasPromise = null;
+  /**
+   * { hills, bare, mid, snowy, green }: the mountain sprites sorted into thirds by how much snow they show (the green,
+   * alpine one apart), and the hills, each { tex, ax, ay, w, h, warm }, every list ordered from grey to brown.
+   */
+  function loadAtlas() {
+    if (!atlasPromise) {
+      atlasPromise = Promise.all([
+        fetch('/assets/terrain.json?v=2').then(r => r.json()),
+        PIXI.Assets.load({ src: '/assets/terrain.png?v=2', loadParser: 'loadTextures' }),
+      ]).then(([meta, base]) => {
+        base.source.scaleMode = 'linear';
+        const mk = f => ({ ...f, tex: new PIXI.Texture({ source: base.source, frame: new PIXI.Rectangle(f.x, f.y, f.w, f.h) }) });
+        const mtn = meta.mountains.map(mk), rocky = mtn.filter(f => f.green <= 0.3).sort((a, b) => a.snow - b.snow);
+        const third = Math.ceil(rocky.length / 3), byWarmth = list => list.sort((a, b) => a.warm - b.warm);
+        return { hills: byWarmth(meta.hills.map(mk)), bare: byWarmth(rocky.slice(0, third)), mid: byWarmth(rocky.slice(third, 2 * third)), snowy: byWarmth(rocky.slice(2 * third)), green: mtn.filter(f => f.green > 0.3) };
+      });
+      atlasPromise.catch(() => { atlasPromise = null; });
+    }
+    return atlasPromise;
   }
 
   class Relief {
@@ -207,6 +184,13 @@
       const K = this._k, CH = CHUNK * K, from = PEAKS_FROM / K, full = PEAKS_FULL / K;
       if (K !== this._chunkK) { this._dropChunks(); this._chunkK = K; }
       const show = s >= from && this.active;
+      if (show && !this.atlas) {
+        if (!this._atlasLoading) {
+          this._atlasLoading = true;
+          loadAtlas().then(a => { this.atlas = a; this._dropChunks(); this.r.invalidate(); }).catch(() => {}).finally(() => { this._atlasLoading = false; });
+        }
+        return;
+      }
       if (!show) { if (this.peakC.visible) { this.peakC.visible = false; } return; }
       this.peakC.visible = true;
       this.peakC.alpha = smooth((s - from) / (full - from)) * 0.95 + 0.05;
@@ -222,7 +206,7 @@
           const k = `${cx},${cy}`;
           let ch = this.chunks.get(k);
           if (!ch) {
-            if (built > 40) { this._viewKey = ''; continue; }   // a big jump: finish on the next frames
+            if (built >= 10) { this._viewKey = ''; continue; }   // a big jump: finish on the next frames
             ch = { c: this._chunk(cx, cy), used: 0 }; built++;
             this.chunks.set(k, ch);
             if (ch.c) this.peakC.addChild(ch.c);
@@ -242,14 +226,21 @@
       for (const ch of this.chunks.values()) if (ch.c) ch.c.destroy({ children: true });
       this.chunks.clear(); this._viewKey = '';
     }
-    /** One chunk's glyphs (a Container sorted by depth), or null when it has no hills or mountains. */
+    /**
+     * One chunk's sprites (a Container, nearer ones in front), or null when it has no hills or mountains. Laid out as
+     * ranges: candidate spots on a lattice fixed to the map (jittered by a hash of the spot) over the chunk and a margin
+     * round it are taken highest ground first, each giving a sprite sized by its height (the crest of the Alps gets
+     * peaks three times the width of the foothills'), and a spot is skipped when it would stand too close to a sprite
+     * already placed (closer than OVERLAP of their mean width, so neighbours overlap like a range rather than sit
+     * apart). Hills come after the mountains. Only the sprites whose foot is in the chunk are kept; the margin makes
+     * neighbouring chunks agree near their edges.
+     */
     _chunk(cx, cy) {
-      const grid = this.grid, map = this.map || this.r.mapSize;
-      if (!map || !map.w) return null;
-      const K = this._k, CH = CHUNK * K;
+      const grid = this.grid, map = this.map || this.r.mapSize, A = this.atlas;
+      if (!map || !map.w || !A) return null;
+      const K = this._k, CH = CHUNK * K, step = STEP * K, wMax = SIZE.mtnMax * K, margin = wMax;
       const x0 = cx * CH, y0 = cy * CH;
       if (x0 >= map.w || y0 >= map.h || x0 + CH <= 0 || y0 + CH <= 0) return null;
-      const G = makeGlyphs(), rand = rng(cx * 73856093 ^ cy * 19349663 ^ 0x5bd1e995);
       const at = (x, y) => {
         let c = Terrain.FLAT, e = 0, snow = 0;
         if (grid) {
@@ -260,39 +251,74 @@
         }
         if (this.areas.size && c < Terrain.MOUNTAINS) {
           const p = this._paintedAt(x, y);
-          if (p > c) { c = p; e = p === Terrain.MOUNTAINS ? 2500 : 600; }
+          if (p > c) { c = p; e = -1; }   // painted: no height (sized at random below)
         }
         return { c, e, snow };
       };
-      const items = [];
-      for (const [cls, sp] of [[Terrain.MOUNTAINS, SPACING.mountains * K], [Terrain.HILLS, SPACING.hills * K]]) {
-        for (let y = y0 + sp / 2; y < y0 + CH; y += sp) {
-          for (let x = x0 + sp / 2 + ((Math.round(y / sp) % 2) ? sp / 2 : 0); x < x0 + CH; x += sp) {
-            const px = x + (rand() - 0.5) * sp * 0.7, py = y + (rand() - 0.5) * sp * 0.7, roll = rand(), pick = rand();
-            if (px < 0 || py < 0 || px >= map.w || py >= map.h) continue;
-            const g = at(px, py);
-            if (g.c !== cls) continue;
-            if (cls === Terrain.MOUNTAINS) {
-              if (roll < 0.08) continue;   // a gap now and then: ranges, not a carpet
-              const hgt = 3.6 + 3.4 * Math.min(1, g.e / 4200) + roll * 0.9;
-              const snowy = g.snow > 0.12 + roll * 0.25;
-              items.push({ y: py, tex: (snowy ? G.snowy : G.peaks)[Math.floor(pick * 4)], x: px, h: hgt * K, flip: false });
-            } else {
-              if (roll < 0.12) continue;
-              items.push({ y: py, tex: G.mounds[Math.floor(pick * 3)], x: px, h: (3.6 + roll * 1.6) * K, flip: pick > 0.5 });
-            }
+      const cands = [];
+      const i0 = Math.floor((x0 - margin) / step), i1 = Math.ceil((x0 + CH + margin) / step);
+      const j0 = Math.floor((y0 - margin) / step), j1 = Math.ceil((y0 + CH + margin) / step);
+      for (let j = j0; j <= j1; j++) {
+        for (let i = i0; i <= i1; i++) {
+          const x = (i + 0.5 + (hash(i, j, 1) - 0.5) * 0.9) * step, y = (j + 0.5 + (hash(i, j, 2) - 0.5) * 0.9) * step;
+          if (x < 0 || y < 0 || x >= map.w || y >= map.h) continue;
+          const g = at(x, y);
+          if (g.c === Terrain.FLAT) continue;
+          const r = hash(i, j, 3), r2 = hash(i, j, 4);
+          if (g.c === Terrain.MOUNTAINS) {
+            const t = g.e < 0 ? 0.35 + r * 0.45 : Math.min(1, Math.max(0, (g.e - 500) / 2800)) ** 0.85;
+            const w = (SIZE.mtnMin + (SIZE.mtnMax - SIZE.mtnMin) * t) * (0.82 + 0.36 * r2) * K;
+            cands.push({ x, y, w, cls: Terrain.MOUNTAINS, pr: (g.e < 0 ? t * 3000 : g.e) + r * 450, snow: g.snow, e: g.e, pick: hash(i, j, 5), alt: hash(i, j, 6) });
+          } else {
+            const w = (SIZE.hillMin + (SIZE.hillMax - SIZE.hillMin) * r2) * K;
+            cands.push({ x, y, w, cls: Terrain.HILLS, pr: -10000 + r * 1000, pick: hash(i, j, 5) });
           }
         }
       }
-      if (!items.length) return null;
-      items.sort((a, b) => a.y - b.y);
+      if (!cands.length) return null;
+      cands.sort((a, b) => b.pr - a.pr);
+      // Greedy, biggest first, with a spatial index of what is placed (cells of the widest sprite).
+      const placed = [], index = new Map(), cell = wMax;
+      const key = (gx, gy) => gx * 100003 + gy;
+      for (const c of cands) {
+        const f = c.cls === Terrain.MOUNTAINS ? OVERLAP.mountains : OVERLAP.hills;
+        const gx = Math.floor(c.x / cell), gy = Math.floor(c.y / cell);
+        let ok = true;
+        for (let dy = -1; dy <= 1 && ok; dy++) for (let dx = -1; dx <= 1 && ok; dx++) {
+          for (const p of index.get(key(gx + dx, gy + dy)) || []) {
+            const min = f * (c.w + p.w) / 2, ddx = c.x - p.x, ddy = (c.y - p.y) * 1.5;   // sprites are wider than deep
+            if (ddx * ddx + ddy * ddy < min * min) { ok = false; break; }
+          }
+        }
+        if (!ok) continue;
+        placed.push(c);
+        const k = key(gx, gy);
+        if (!index.has(k)) index.set(k, []);
+        index.get(k).push(c);
+      }
+      const mine = placed.filter(p => p.x >= x0 && p.x < x0 + CH && p.y >= y0 && p.y < y0 + CH);
+      if (!mine.length) return null;
+      mine.sort((a, b) => a.y - b.y);
+      // Neighbouring peaks share a colour: within each list (grey to brown) the pick follows a smooth field about
+      // 45 map px across (some 200 km on the Earth), with a little scatter.
+      const region = (x, y) => {
+        const size = 45 * K, gx = x / size, gy = y / size, i = Math.floor(gx), j = Math.floor(gy), fx = smooth(gx - i), fy = smooth(gy - j);
+        const v = (a, b) => hash(a, b, 9), top = v(i, j) + (v(i + 1, j) - v(i, j)) * fx, bot = v(i, j + 1) + (v(i + 1, j + 1) - v(i, j + 1)) * fx;
+        return smooth(Math.min(1, Math.max(0, (top + (bot - top) * fy - 0.5) * 1.8 + 0.5)));
+      };
+      const choose = (list, r, p) => list[Math.min(list.length - 1, Math.max(0, Math.floor((region(p.x, p.y) + (r - 0.5) * 0.4) * list.length)))];
       const c = new PIXI.Container(); c.eventMode = 'none';
-      for (const it of items) {
-        const sp = new PIXI.Sprite(it.tex);
-        sp.anchor.set(0.5, 0.97);
-        const k = it.h / 20;   // the glyphs are 24 × 20 units
-        sp.scale.set(it.flip ? -k / 4 : k / 4, k / 4);   // (textures are drawn at 4×)
-        sp.position.set(it.x, it.y);
+      for (const p of mine) {
+        let f;
+        if (p.cls === Terrain.HILLS) f = choose(A.hills, p.pick, p);
+        else if (p.snow > 0.45) f = choose(A.snowy, p.pick, p);
+        else if (p.snow > 0.12) f = choose(A.mid, p.pick, p);
+        else if (A.green.length && p.e >= 0 && p.e < 1500 && p.alt < 0.2) f = choose(A.green, p.pick, p);
+        else f = choose(A.bare, p.pick, p);
+        const sp = new PIXI.Sprite(f.tex);
+        sp.anchor.set(f.ax, f.ay);
+        sp.scale.set(p.w / f.w);
+        sp.position.set(p.x, p.y);
         c.addChild(sp);
       }
       return c;
