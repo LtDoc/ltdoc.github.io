@@ -327,13 +327,15 @@ function endTurn(lobby, hooks = {}) {
         state.resources[k] = round(next);
         parts.push(`${delta >= 0 ? '+' : ''}${round(delta)} ${GameData.byKey[k].name.toLowerCase()}`);
       }
-      state.money = round(state.money + inc.money); state.rp = round(state.rp + inc.rp); state.manpower = round(state.manpower + inc.manpower);
+      state.money = round(state.money + inc.money); state.manpower = round(state.manpower + inc.manpower);
       if (inc.money) parts.push(`${inc.money >= 0 ? '+' : ''}${round(inc.money)} money`);
       if (inc.rp) parts.push(`+${round(inc.rp)} RP`);
       if (inc.manpower) parts.push(`+${round(inc.manpower)} manpower`);
-      // Research: the bank of research points flows into the active project.
+      // Research: the RP banked during the turn flows into the active project (one tech at most per turn);
+      // this turn's RP income is banked afterwards, for the next turn.
       const techs = research.list(lobby.id);
       const researched = research.advance(state, techs, g).map(t => t.name);
+      state.rp = round(state.rp + inc.rp);
       if (researched.length) parts.push(`researched ${researched.join(', ')}`);
       // Recovery: damaged units heal when the faction has medical services.
       const fx = research.effectsFor(techs, state.techs || []);
@@ -361,7 +363,7 @@ function endTurn(lobby, hooks = {}) {
       if (lostBuilds.length) parts.push(`${lostBuilds.length} build${lostBuilds.length === 1 ? '' : 's'} lost with ${[...new Set(lostBuilds.map(x => x.site))].join(', ')}`);
       // Production: builds advance; finished ones become markers via the hook.
       const built = [];
-      for (const item of production.advance(state)) {
+      for (const item of production.advance(state, g.turn)) {
         try { const m = hooks.spawn ? hooks.spawn(faction, state, item) : null; if (m) built.push(m.name); }
         catch (e) { parts.push(`build failed: ${e.message}`); }
       }

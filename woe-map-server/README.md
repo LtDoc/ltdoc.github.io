@@ -434,13 +434,15 @@ still can).
 - **Sites.** A faction builds at the cities and capitals in its colours (capacity: capital 3, city 2
   parallel builds; villages build nothing) and at its factories (capacity = industry level). Ships need a
   **coastal** city (sea within 30 km on the Earth map); aircraft need a site of industry 2 or more. Cost is
-  paid when a build is queued and refunded if it is cancelled. **End turn** advances every build; finished
+  paid when a build is queued and refunded if it is cancelled. Work starts at the End turn of the turn a build
+  was ordered in (the queue says "starts at End turn" until then), and each End turn after that takes one turn
+  off: a 1-turn Infantry Regiment ordered in turn 3 stands at the start of turn 5. Finished
   units appear beside their site with the usual numbered name and the faction's stats, owned by the
   faction's player. The 🏭 Production panel lists every site with its queue, a **Build…** picker that shows each
   type's cost and why it cannot be built if it cannot, and a cancel button per item.
 - **Factories.** A player may **build a factory** within 50 km of one of their cities or towns (never a
   village) on their own or neutral ground: press the button on the 🏭 Production panel, click the map, and two turns
-  later a level-1 factory stands there (15 iron, 10 timber, 80 money, 2 manpower). The GM can place or
+  after the one it was ordered in a level-1 factory stands there (15 iron, 10 timber, 80 money, 2 manpower). The GM can place or
   upgrade factories directly.
 - **Major cities (Earth).** **Add major cities** places about 270 towns of the 1914 world with the names of
   the time (St Petersburg, Constantinople, Christiania, Lemberg, Peking, Bombay…), the capitals of the
@@ -490,8 +492,10 @@ Details and numbers: `docs/ECONOMY.md`.
   with rifles, machine guns, field artillery, dreadnoughts and balloons but no tanks, gas or fighters.
 - **Researching.** Research points come in each turn (base allowance, cities, factories, modifiers). From
   the 🔬 Research button on the menu, a player starts one project at a time and can queue up to five more;
-  at End turn the faction's banked RP flows into the active project, it unlocks when paid for, its effects
-  apply, and the next queued project starts (if its money can be paid). A tech can be researched only when
+  at End turn the RP the faction had banked during the turn flows into the active project (that turn's RP
+  income is banked afterwards, so nothing is finished on points the faction did not have yet); it unlocks when
+  paid for, its effects apply, and the next queued project starts (if its money can be paid) and draws on the
+  bank from the next End turn, so at most one tech completes per turn. A tech can be researched only when
   its prerequisites are known and its year is within the **research lead** (1 year) of the game date, so
   1918 tanks cannot appear in 1915. Progress on a dropped project is kept. Completed research is announced
   campaign-wide.

@@ -127,11 +127,14 @@ function cancel(state, itemId) {
 
 /**
  * End of turn: every item loses a turn; finished ones are returned (and removed from the queue) so the caller
- * can create the unit or factory marker. Pure apart from mutating `state.production`.
+ * can create the unit or factory marker. Work starts at the end of the turn a build was ordered in: items queued
+ * during `turn` (the turn now ending) do not count it, so a 1-turn build stands after the following End turn.
+ * Pure apart from mutating `state.production`.
  */
-function advance(state) {
+function advance(state, turn) {
   const done = [], left = [];
   for (const item of state.production || []) {
+    if (item.queuedTurn !== undefined && item.queuedTurn >= turn) { left.push(item); continue; }
     const next = { ...item, turnsLeft: item.turnsLeft - 1 };
     if (next.turnsLeft <= 0) done.push(next); else left.push(next);
   }

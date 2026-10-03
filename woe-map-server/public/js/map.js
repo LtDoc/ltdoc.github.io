@@ -112,7 +112,7 @@
       const d = state.game?.settings?.townDevIncome || {};
       text += ` (+${lv.level * (d.money || 0)} money, +${lv.level * (d.rp || 0)} RP a turn)`;
     }
-    if (info?.active) text += `${text ? ' · ' : ''}${m.type === 'factory' ? 'upgrading' : 'developing'} to ${info.active.toLevel}: ${info.active.turnsLeft} turn${info.active.turnsLeft === 1 ? '' : 's'} left`;
+    if (info?.active) text += `${text ? ' · ' : ''}${m.type === 'factory' ? 'upgrading' : 'developing'} to ${info.active.toLevel}: ${info.active.queuedTurn !== undefined && info.active.queuedTurn >= state.game?.turn ? 'starts at End turn · ' : ''}${info.active.turnsLeft} turn${info.active.turnsLeft === 1 ? '' : 's'}${info.active.queuedTurn !== undefined && info.active.queuedTurn >= state.game?.turn ? '' : ' left'}`;
     return text ? stat(m.type === 'factory' ? 'Project' : 'Development', text) : '';
   }
   function developButton(m) {

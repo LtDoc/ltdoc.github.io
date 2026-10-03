@@ -91,7 +91,7 @@ const ResearchUI = (() => {
     const gm = ctx.isGm(), actor = gm || (ctx.state.myFactionId === view.factionId);
     const hasFaction = !!view.factionId;
     $('#techHint').textContent = hasFaction
-      ? `Game year ${view.year}: techs dated up to ${view.year + view.lead} can be researched. RP banked: ${fmt(view.rp)} · money: ${fmt(view.money)}. One project at a time; money is paid when it starts.`
+      ? `Game year ${view.year}: techs dated up to ${view.year + view.lead} can be researched. RP banked: ${fmt(view.rp)} · money: ${fmt(view.money)}. One project at a time; money is paid when it starts. At End turn the active project draws on the RP banked now (this turn's income arrives after), and at most one tech completes per turn.`
       : 'No faction selected: showing the tree only.';
     const branches = [...new Set(view.techs.map(t => t.branch))];
     let html = '';

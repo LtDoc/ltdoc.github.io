@@ -223,18 +223,21 @@ function promote(state, techs, g) {
   }
   state.research = r;
 }
-/** End of turn: the faction's research points flow into the active project. Returns completed techs. */
+/**
+ * End of turn: the RP the faction had banked during the turn flows into the active project (the caller adds this
+ * turn's RP income afterwards, so a project is never finished on points the faction did not yet have). At most one
+ * tech completes per turn: the next queued project becomes active (its money paid) and draws on the bank from the
+ * next End turn. Returns completed techs.
+ */
 function advance(state, techs, g) {
   const done = [];
   promote(state, techs, g);
-  let r = researchState(state);
-  let guard = 0;
-  while (r.active && guard++ < 6) {
-    const tech = techs.find(t => t.key === r.active);
-    if (!tech) { r.active = null; break; }
+  const r = researchState(state);
+  const tech = r.active ? techs.find(t => t.key === r.active) : null;
+  if (r.active && !tech) r.active = null;
+  if (tech) {
     const have = num(r.progress[tech.key]);
-    const need = Math.max(0, tech.rp - have);
-    const spend = Math.min(need, Math.max(0, state.rp));
+    const spend = Math.min(Math.max(0, tech.rp - have), Math.max(0, state.rp));
     r.progress[tech.key] = have + spend;
     state.rp = Math.round((state.rp - spend) * 10) / 10;
     if (r.progress[tech.key] + 1e-9 >= tech.rp) {
@@ -244,8 +247,8 @@ function advance(state, techs, g) {
       done.push(tech);
       state.research = r;
       promote(state, techs, g);
-      r = researchState(state);
-    } else break;
+      return done;
+    }
   }
   state.research = r;
   return done;

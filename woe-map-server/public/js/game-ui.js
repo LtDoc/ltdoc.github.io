@@ -292,19 +292,22 @@ const GameUI = (() => {
   function productionHtml(e) {
     if (!prod || prod.factionId !== e.faction.id) return `<p class="hint">Loading…</p>`;
     const actor = ctx.isGm() || ctx.state.myFactionId === e.faction.id;
-    const left = n => `${n} turn${n === 1 ? '' : 's'}`;
+    // A build ordered this turn starts work at End turn: "starts next turn" until then.
+    const left = item => item.queuedTurn !== undefined && item.queuedTurn >= g().turn
+      ? `starts at End turn · ${item.turnsLeft} turn${item.turnsLeft === 1 ? '' : 's'}`
+      : `${item.turnsLeft} turn${item.turnsLeft === 1 ? '' : 's'} left`;
     let used = 0, total = 0;
     const sites = prod.sites.map(s => {
       used += s.queue.length; total += s.capacity;
       const q = s.queue.map(item => {
         const t = UnitTypes.LIST.find(x => x.id === item.typeId);
-        return `<div class="qitem"><span class="grow">${esc(t ? t.unit : item.typeId)}</span><span class="hint">${left(item.turnsLeft)}</span>${actor ? `<button class="small secondary" data-cancelbuild="${item.id}" title="Cancel and refund">×</button>` : ''}</div>`;
+        return `<div class="qitem"><span class="grow">${esc(t ? t.unit : item.typeId)}</span><span class="hint">${left(item)}</span>${actor ? `<button class="small secondary" data-cancelbuild="${item.id}" title="Cancel and refund">×</button>` : ''}</div>`;
       }).join('');
       const free = s.capacity - s.queue.length;
       const pips = `<span class="pips" title="${s.queue.length} of ${s.capacity} build slots in use">${'<i class="on"></i>'.repeat(s.queue.length)}${'<i></i>'.repeat(Math.max(0, free))}</span>`;
       return `<div class="site${free > 0 ? '' : ' full'}"><div class="sitehead"><span class="grow"><b>${esc(s.name)}</b> <span class="hint">${s.kind}${s.kind === 'factory' ? ` ${s.industry}` : ''}${s.coastal ? ' · ⚓ port' : ''}</span></span>${pips}${actor && free > 0 ? `<button class="small" data-openbuild="${s.id}">Build…</button>` : ''}</div>${q}</div>`;
     }).join('');
-    const factories = prod.factoryBuilds.map(item => `<div class="qitem"><span class="grow">🏭 Factory near ${esc(item.siteName || '')}</span><span class="hint">${left(item.turnsLeft)}</span>${actor ? `<button class="small secondary" data-cancelbuild="${item.id}" title="Cancel and refund">×</button>` : ''}</div>`).join('');
+    const factories = prod.factoryBuilds.map(item => `<div class="qitem"><span class="grow">🏭 Factory near ${esc(item.siteName || '')}</span><span class="hint">${left(item)}</span>${actor ? `<button class="small secondary" data-cancelbuild="${item.id}" title="Cancel and refund">×</button>` : ''}</div>`).join('');
     const fc = prod.costs.factory;
     return `<div class="box"><h4>Build sites <span class="hint">${used}/${total} slots in use</span></h4>
         ${sites.length ? sites : '<p class="hint">No cities or factories. Production needs a city, a capital or a factory in your colours.</p>'}
@@ -333,7 +336,7 @@ const GameUI = (() => {
     const running = list.filter(p => p.active).length;
     const rows = list.map(p => {
       const head = `<b>${esc(p.name)}</b> <span class="hint">${esc(p.kind)} · level ${p.level}/${p.max}</span>`;
-      if (p.active) return `<div class="diplo"><span class="grow">${head}<br><span class="hint">${p.project === 'upgradeFactory' ? 'Upgrading' : 'Developing'} to level ${p.active.toLevel}: ${p.active.turnsLeft} turn${p.active.turnsLeft === 1 ? '' : 's'} left</span></span>${actor ? `<button class="small secondary" data-cancelbuild="${p.active.id}" title="Cancel and refund">×</button>` : ''}</div>`;
+      if (p.active) return `<div class="diplo"><span class="grow">${head}<br><span class="hint">${p.project === 'upgradeFactory' ? 'Upgrading' : 'Developing'} to level ${p.active.toLevel}: ${p.active.queuedTurn !== undefined && p.active.queuedTurn >= g().turn ? `starts at End turn · ${p.active.turnsLeft} turn${p.active.turnsLeft === 1 ? '' : 's'}` : `${p.active.turnsLeft} turn${p.active.turnsLeft === 1 ? '' : 's'} left`}</span></span>${actor ? `<button class="small secondary" data-cancelbuild="${p.active.id}" title="Cancel and refund">×</button>` : ''}</div>`;
       if (!p.cost) return `<div class="diplo"><span class="grow">${head} <span class="hint">· fully developed</span></span></div>`;
       const short = [];
       for (const k of GameData.RESOURCE_KEYS) if ((st.resources[k] || 0) < p.cost[k]) short.push(GameData.byKey[k].name.toLowerCase());
