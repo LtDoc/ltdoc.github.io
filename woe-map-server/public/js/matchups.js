@@ -19,16 +19,16 @@
   const RULES = [
     // Cavalry: shock and pursuit, helpless against wire, trenches and machine guns.
     { a: { ids: CAVALRY }, d: { entrenched: true }, mod: -3, text: 'cavalry against entrenched troops' },
-    { a: { ids: CAVALRY }, d: { ids: ['machinegun'] }, mod: -3, text: 'cavalry against machine guns' },
+    { a: { ids: CAVALRY }, d: { ids: ['machinegun', 'mgbunker'] }, mod: -3, text: 'cavalry against machine guns' },
     { a: { ids: CAVALRY }, d: { cat: 'Artillery' }, mod: 3, text: 'cavalry overruns the guns' },
     { a: { ids: CAVALRY }, d: { cat: 'Support' }, mod: 2, text: 'cavalry raids the rear' },
     // Infantry.
-    { a: { cat: 'Infantry', not: ['machinegun'] }, d: { ids: ['machinegun'] }, mod: -2, text: 'infantry into machine guns' },
+    { a: { cat: 'Infantry', not: ['machinegun'] }, d: { ids: ['machinegun', 'mgbunker'] }, mod: -2, text: 'infantry into machine guns' },
     { a: { ids: ['stormtroopers'] }, d: { entrenched: true }, mod: 2, text: 'infiltration tactics' },
     { a: { ids: ['machinegun'] }, d: { ids: CAVALRY }, mod: 2, text: 'machine guns against horsemen' },
     // Armour.
     { a: { ids: ['tank'] }, d: { entrenched: true }, mod: 2, text: 'tanks cross the wire' },
-    { a: { ids: ['tank'] }, d: { ids: ['machinegun'] }, mod: 2, text: 'tanks are proof against machine guns' },
+    { a: { ids: ['tank'] }, d: { ids: ['machinegun', 'mgbunker'] }, mod: 2, text: 'tanks are proof against machine guns' },
     { a: { ids: ['tank'] }, d: { cat: 'Artillery', not: ['antiaircraft'] }, mod: -1, text: 'field guns firing over open sights' },
     { a: { ids: ['armouredcar'] }, d: { entrenched: true }, mod: -2, text: 'armoured cars are road-bound' },
     { a: { ids: ['armouredcar'] }, d: { ids: CAVALRY }, mod: 2, text: 'armoured cars against horsemen' },
@@ -37,10 +37,11 @@
     { a: { ids: ['heavyartillery', 'siegeartillery', 'railwaygun', 'mortar'] }, d: { entrenched: true }, mod: 2, text: 'heavy shells against fieldworks' },
     { a: { ids: ['gas'] }, d: { entrenched: true }, mod: 2, text: 'gas settles in the trenches' },
     { a: { ids: ['sappers'] }, d: { entrenched: true }, mod: 2, text: 'mines under the enemy line' },
-    { a: { ids: ['coastal'] }, d: { cat: 'Naval' }, mod: 2, text: 'coastal guns against ships' },
+    { a: { ids: ['coastal', 'fortress'] }, d: { cat: 'Naval' }, mod: 2, text: 'coastal guns against ships' },
+    { a: { ids: ['heavyartillery', 'siegeartillery', 'railwaygun'] }, d: { cat: 'Emplacements' }, mod: 1, text: 'heavy shells against concrete' },
     // Air.
-    { a: { ids: ['antiaircraft'] }, d: { cat: 'Air' }, mod: 4, text: 'anti-aircraft fire' },
-    { a: { cat: 'Air' }, d: { ids: ['antiaircraft'] }, mod: -2, text: 'flying into flak' },
+    { a: { ids: ['antiaircraft', 'aaemplacement'] }, d: { cat: 'Air' }, mod: 4, text: 'anti-aircraft fire' },
+    { a: { cat: 'Air' }, d: { ids: ['antiaircraft', 'aaemplacement'] }, mod: -2, text: 'flying into flak' },
     { a: { ids: ['fighter'] }, d: { ids: ['bomber', 'airship', ...SPOTTERS] }, mod: 2, text: 'fighters hunt bombers and spotters' },
     { a: { cat: 'Infantry' }, d: { cat: 'Air' }, mod: -3, text: 'rifles against aircraft' },
     { a: { cat: 'Mounted & mobile' }, d: { cat: 'Air' }, mod: -3, text: 'ground troops against aircraft' },
@@ -64,6 +65,7 @@
   /** Attack modifier for `att` attacking `def` ({ entrenched } = the defender has trench cover). */
   function matchup(att, def, { entrenched = false } = {}) {
     const notes = [];
+    if (def?.cat === 'Emplacements') entrenched = true;   // fixed works count as dug in
     for (const r of RULES) if (hits(r.a, att, false) && hits(r.d, def, entrenched)) notes.push({ mod: r.mod, text: r.text });
     const raw = notes.reduce((s, n) => s + n.mod, 0);
     return { mod: Math.max(-MAX, Math.min(MAX, raw)), notes };

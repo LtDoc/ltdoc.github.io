@@ -27,7 +27,7 @@ const alive = m => num(m.data?.strength, 100) > 0;
 function needsSupply(m) {
   if (m.type !== 'unit' || m.data?.aboard) return false;   // troops aboard a convoy are carried by it
   const t = typeOf(m);
-  return t ? LAND.has(t.cat) : true;
+  return t ? LAND.has(t.cat) : true;   // (emplacements are not in LAND: they need none)
 }
 const ENGINEERS = new Set(['engineers', 'pioneers', 'sappers']);
 
@@ -121,6 +121,8 @@ function compute(lobby, settings, markers) {
     return ctx;
   };
   for (const m of markers) {
+    // Emplacements are fixed works with their own magazines: never out of supply.
+    if (m.type === 'unit' && !m.data?.aboard && typeOf(m)?.cat === 'Emplacements') { out.set(m.id, { supplied: true, via: 'emplacement', from: null }); continue; }
     if (!needsSupply(m)) continue;
     const ctx = ctxFor(m.data?.nation);
     if (typeId(m) === 'supply') {
@@ -158,7 +160,7 @@ function supportBonus(lobby, settings, markers, unit, friendsOf) {
   if (hq) { out.attack += num(s.hqBonus, 1); out.defend += num(s.hqBonus, 1); out.notes.push(`+${num(s.hqBonus, 1)} ${hq.name}`); }
   const eng = num(s.engineerDefend, 1) ? near(id => ENGINEERS.has(id), num(s.engineerKm, 20)) : null;
   if (eng) { out.defend += num(s.engineerDefend, 1); out.defendNotes = [`+${num(s.engineerDefend, 1)} works by ${eng.name}`]; }
-  if (typeOf(unit)?.cat === 'Artillery') {
+  if (UnitTypes.firesFromRange(typeOf(unit))) {
     const sig = num(s.signalsArtillery, 1) ? near(id => id === 'signals', num(s.signalsKm, 60)) : null;
     if (sig) { out.attack += num(s.signalsArtillery, 1); out.notes.push(`+${num(s.signalsArtillery, 1)} spotting by ${sig.name}`); }
   }

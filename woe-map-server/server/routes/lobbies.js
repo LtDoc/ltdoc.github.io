@@ -284,7 +284,7 @@ function shapeById(req, id, all) {
 /** Rewrite a marker's position and data (heroes' missions and travel), recording history and broadcasting. */
 function writeMarker(req, before, patch) {
   const x = patch.x !== undefined ? patch.x : before.x, y = patch.y !== undefined ? patch.y : before.y;
-  const data = sanitizeData(before.type, { ...before.data, ...(patch.data || {}) });
+  const data = sanitizeData(before.type, { ...before.data, ...(patch.data || {}), ...(x !== before.x || y !== before.y ? { heldTurns: 0 } : {}) });
   const adminOnly = patch.adminOnly !== undefined ? (patch.adminOnly ? 1 : 0) : (before.adminOnly ? 1 : 0);
   q.updateMarker.run(before.type, before.name, x, y, before.iconFile, before.iconFile ? null : before.iconUrl, before.color,
     adminOnly, before.visibleTo ? JSON.stringify(before.visibleTo) : null, before.ownerId, JSON.stringify(data), now(), before.locked ? 1 : 0, before.id);
@@ -963,7 +963,7 @@ router.patch('/:id/markers/:mid', (req, res) => {
   }
   // Game mode: players move within their allowance and cannot rewrite their units' stats.
   const g = game.get(req.lobby.id);
-  let clampNote = null, railNote = null;
+  let clampNote = null, railNote = null, mudNote = null;
   if (b.data && typeof b.data === 'object' && g.enabled && !isGm && before.type === 'unit') {
     for (const k of game.PROTECTED_UNIT_FIELDS) delete b.data[k];
   }
@@ -984,12 +984,14 @@ router.patch('/:id/markers/:mid', (req, res) => {
     const mv = game.checkMove(req.lobby, g, isGm, before, x, y);
     if (mv.error) return res.status(409).json({ error: mv.error });
     x = mv.x; y = mv.y;
+    b.data = { ...(b.data || {}), heldTurns: 0 };   // on the move: no longer dug in
     if (mv.movedKm !== undefined) b.data = { ...(b.data || {}), movedKm: mv.movedKm };
     // By rail: no trail across the map (the train animation shows the trip); the trail starts again where it got off.
     const ride = rideOf(mv.route, mv.path);
     if (ride) b.data = { ...(b.data || {}), ride, ...(g.enabled ? { trail: [[x, y]] } : {}) };
     else if (g.enabled && ['unit', 'hero'].includes(before.type)) b.data = { ...(b.data || {}), trail: extendTrail(before, x, y, mv.path) };
     if (mv.clamped) clampNote = `${before.name} could only move ${Math.round(mv.remaining)} of ${mv.dist} this turn`;
+    if (mv.slowed) mudNote = `${before.name} was slowed by No Man's Land`;
     if (mv.route) railNote = `${before.name} went by rail (${Math.round(mv.route.railKm)} ${geo.isEarth(req.lobby) ? 'km' : (req.lobby.scale_label || 'units')} of track${mv.clamped ? ', stopped short' : ''})`;
   }
   let iconFile = before.iconFile;
@@ -1011,7 +1013,7 @@ router.patch('/:id/markers/:mid', (req, res) => {
   if (isConvoy(after) && (x !== before.x || y !== before.y)) moveCargo(req, after);
   if (isConvoy(after) && num(after.data?.strength, 100) <= 0 && num(before.data?.strength, 100) > 0) sinkCargo(req, after, 'was destroyed');
   const captureNote = (x !== before.x || y !== before.y) ? afterMove(req, after) : null;
-  res.json({ marker: after, note: [railNote, clampNote, captureNote].filter(Boolean).join(' · ') || null });
+  res.json({ marker: after, note: [railNote, mudNote, clampNote, captureNote].filter(Boolean).join(' · ') || null });
 });
 
 /** Move several markers at once (group drag). Each move is validated and recorded individually. */
@@ -1048,8 +1050,9 @@ router.post('/:id/markers/move', (req, res) => {
       byRail++;
       if (t < 1) { const w = rails.walk(req.lobby, p.chk.route.path, p.chk.cost * t); x = Math.round(w.x * 10) / 10; y = Math.round(w.y * 10) / 10; path = w.points; }
     }
-    if (p.chk.movedKm !== undefined || (g.enabled && ['unit', 'hero'].includes(p.before.type))) {
+    if (p.chk.movedKm !== undefined || (g.enabled && ['unit', 'hero'].includes(p.before.type)) || p.before.data?.heldTurns) {
       const data = { ...p.before.data };
+      delete data.heldTurns;   // on the move: no longer dug in
       if (p.chk.movedKm !== undefined) {
         const used = num(p.before.data.movedKm);
         const spent = p.chk.cost !== undefined ? p.chk.cost * t : geo.distance(req.lobby, p.before.x, p.before.y, x, y);
@@ -1133,10 +1136,16 @@ function canEditShape(req, s) {
 }
 
 /**
- * Per-kind extras. Trench: facing (which side is the rear), build state, zigzag flag.
+ * Per-kind extras. Area: the No Man's Land tag (slow, muddy ground; only the GM sets it while the game is running).
+ * Trench: facing (which side is the rear), build state, zigzag flag.
  * Rail: cuts [{ id, x, y, turn, by, at }], which only the game routes (sabotage, repair) and the GM change.
  */
-function shapeData(kind, raw, before, isGm) {
+function shapeData(kind, raw, before, isGm, mayTag = isGm) {
+  if (kind === 'area') {
+    const d = (raw && typeof raw === 'object') ? raw : {};
+    const nml = mayTag && d.noMansLand !== undefined ? !!d.noMansLand : !!before?.noMansLand;
+    return nml ? { noMansLand: true } : null;
+  }
   if (kind === 'rail') {
     const prev = Array.isArray(before?.cuts) ? before.cuts : [];
     const cuts = isGm && raw && Array.isArray(raw.cuts)
@@ -1195,7 +1204,7 @@ router.post('/:id/shapes', (req, res) => {
   const width = kind === 'trench' ? clamp(num(b.width, 0.5), 0.05, 50) : clamp(num(b.width, 3), 1, 20);
   const adminOnly = isGm && b.adminOnly ? 1 : 0;
   const visibleTo = isGm ? parseVisibleTo(b.visibleTo) : null;
-  const data = shapeData(kind, b.data, null, isGm);
+  const data = shapeData(kind, b.data, null, isGm, isGm || !game.get(req.lobby.id).enabled);
   if (data && kind === 'trench') data.nation = trenchNation(req, points);
   const t = now();
   const id = q.insertShape.run(null, req.lobby.id, kind, label, JSON.stringify(points), color, width, adminOnly, visibleTo, req.user.id, t, t, b.locked ? 1 : 0, data ? JSON.stringify(data) : null).lastInsertRowid;
@@ -1223,7 +1232,7 @@ router.patch('/:id/shapes/:sid', (req, res) => {
   const adminOnly = isGm && b.adminOnly !== undefined ? (b.adminOnly ? 1 : 0) : (before.adminOnly ? 1 : 0);
   const visibleTo = isGm && b.visibleTo !== undefined ? parseVisibleTo(b.visibleTo) : (before.visibleTo ? JSON.stringify(before.visibleTo) : null);
   const locked = b.locked !== undefined ? (b.locked ? 1 : 0) : (before.locked ? 1 : 0);
-  const data = b.data !== undefined ? shapeData(before.kind, b.data, before.data, isGm) : (before.data && Object.keys(before.data).length ? { ...before.data } : null);
+  const data = b.data !== undefined ? shapeData(before.kind, b.data, before.data, isGm, isGm || !game.get(req.lobby.id).enabled) : (before.data && Object.keys(before.data).length ? { ...before.data } : null);
   if (data && before.kind === 'trench') data.nation = trenchNation(req, points);
   q.updateShape.run(before.kind, label, JSON.stringify(points), color, width, adminOnly, visibleTo, now(), locked, data ? JSON.stringify(data) : null, before.id);
   const after = access.serializeShape(q.shape.get(before.id, req.lobby.id));
@@ -1801,7 +1810,7 @@ router.post('/:id/combat', (req, res) => {
   const atk = num(a.data.attack) + bonusA.attack + (genA ? genA.bonus : 0) + supA.attack + match.mod;
   const def = num(d.data.defend) + bonusD.defend + (cover ? cover.bonus : 0) + (genD ? genD.bonus : 0) + supD.defend;
   // Cut off from supply, the defender breaks more easily: a successful attack does double damage.
-  const cutOffD = g.enabled && g.settings.supplyEnabled !== false && d.data?.supplied === false;
+  const cutOffD = g.enabled && g.settings.supplyEnabled !== false && d.data?.supplied === false && UnitTypes.resolve(d.data?.unitType)?.cat !== 'Emplacements';
   const aRoll = crypto.randomInt(1, cfg.die + 1), dRoll = crypto.randomInt(1, cfg.die + 1);
   const aTotal = aRoll + atk, dTotal = dRoll + def;
   const margin = aTotal - dTotal;
@@ -1811,7 +1820,7 @@ router.post('/:id/combat', (req, res) => {
   else { aLoss = dLoss = Math.ceil(cfg.baseLoss / 2); outcome = 'tie'; }
   aLoss = Math.round(aLoss); dLoss = Math.round(dLoss);
   // Artillery fires from range: a repelled or drawn bombardment costs the guns nothing.
-  const artilleryA = UnitTypes.resolve(a.data?.unitType)?.cat === 'Artillery';
+  const artilleryA = UnitTypes.firesFromRange(UnitTypes.resolve(a.data?.unitType));
   const sparedA = artilleryA && outcome !== 'attacker' && aLoss > 0;
   if (sparedA) aLoss = 0;
 
@@ -1849,8 +1858,8 @@ router.post('/:id/combat', (req, res) => {
     : fogSet ? (ws => ws.lobbyRole === 'gm' || ws.user.id === req.user.id || fogSet.has(String(ws.nation || '').toLowerCase())) : null;
   const event = logEvent(req.lobby.id, req.user.id, 'combat', text, data, audience);
   // The fight stays on the map for the rest of the turn: gunfire between the two, or shells around the target.
-  const catA = UnitTypes.resolve(a.data?.unitType)?.cat;
-  const kind = catA === 'Artillery' || catA === 'Naval' ? 'shells' : 'gunfire';
+  const typeOfA = UnitTypes.resolve(a.data?.unitType);
+  const kind = UnitTypes.firesFromRange(typeOfA) || typeOfA?.cat === 'Naval' ? 'shells' : 'gunfire';
   // Who fell, for the dead left lying afterwards (the units may be gone by then).
   const side = m => ({ from: losses[m.id].from, to: losses[m.id].to, type: m.data?.unitType || '', nation: m.data?.nation || '' });
   const bid = qb.insert.run(req.lobby.id, g.turn, a.id, d.id, kind, a.x, a.y, d.x, d.y, hidden ? 1 : 0, req.user.id, g.enabled ? null : Date.now() + 5 * 60000, now(), cover ? 1 : 0,

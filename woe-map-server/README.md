@@ -278,6 +278,14 @@ Editing a drawing you own (or any, as GM) is direct manipulation on the map, bui
 
 Each release saves and records one "reshaped" history entry, so an overzealous edit is one revert away.
 
+**No Man's Land.** Tick *No Man's Land* in an area's dialog (while the game is running only the GM can) and the area
+becomes the ground between the lines (`public/js/nomansland.js`): churned mud and standing water at every zoom, shell
+holes from 250 %, belts of barbed wire along its length (broken by gaps) from 300 %, coils on pickets from 600 %, and
+the dead of earlier fighting, men of the campaign's armies and here and there a horse and rider, from 800 %. All of
+it is generated from the area's shape, the same in every browser. Walking across it costs **3×** the distance
+inside (⚖ Rules → Movement → *No Man's Land movement cost*); a move cut short says so, and the popup shows the cost.
+Rail trips are not slowed.
+
 ### Trenches
 
 The ⌇ toolbar button (or **T**) digs a trench: click points like a line, or press and drag to draw freehand.
@@ -620,7 +628,7 @@ are ordinary history entries, so a bad fight can be reverted. A unit at zero str
 with a looping fire-and-smoke sprite until a GM deletes it or restores its strength (an edit or a revert both
 work).
 
-**Artillery** firing from range takes no losses when its attack is repelled or ends in a stalemate (the log
+**Artillery** (and gun emplacements: coastal batteries, fortress guns, AA emplacements) firing from range takes no losses when its attack is repelled or ends in a stalemate (the log
 notes "guns out of reach of the reply"); it still takes the winner's loss when it wins.
 
 **Battles stay on the map for the turn.** Every attack is recorded until End turn (`battles` table,
@@ -660,7 +668,10 @@ choose from the name.
 - Stormtroopers go in as the army's assault troops; French colonial troops go in as zouaves.
 
 Troops that hold their ground **dig in**: rifle pits and sandbags after a turn, a belt of barbed wire in front after two
-(or at once in a trench line), which slows charging cavalry to a crawl. **Gas troops** attack with a cloud of
+(or at once in a trench line), which slows charging cavalry to a crawl. A unit that moves leaves its pits and wire
+behind and starts digging again from nothing.
+**Holding fire:** the target of a bombardment does not shoot back at the distant guns, and artillery attacked at
+close quarters does not return fire; their men stand to their positions. (Visual only: the dice are unchanged.) **Gas troops** attack with a cloud of
 yellow-green gas let out from cylinders, which rolls over the enemy's line; his men mask up and stop firing until it clears.
 Observation balloons float on their tethers (heavy guns shelling put up a spotter), and are shot down in flames;
 airships circle and bomb; anti-aircraft guns fill the sky round enemy planes with black flak bursts.

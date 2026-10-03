@@ -35,6 +35,7 @@ const GameData = (() => {
 
   const DEFAULT_SETTINGS = {
     kmPerMove: 50,            // km (or map units on image maps) per movement point per turn
+    noMansLandCost: 3,        // walking across No Man's Land (areas with that tag) costs this many times the distance
     waiveMovement: false,     // GM switch: nobody is limited
     captureRadiusKm: 30,      // phase 2: ground taken around an advancing land unit (halved 27 Sep 2026: one unit should not take a country)
     cityRadiusKm: 75,         // phase 2: district that changes hands with a major city
@@ -94,7 +95,7 @@ const GameData = (() => {
     fogOfWar: false,          // fog of war (docs/FOG-OF-WAR.md): other sides' units are seen only within sight
     subSpotKm: 20,            // fog of war: submarines are spotted only this close to a vision source
     // Fog of war: how far each unit sees (km), by type where listed, else by category; places by size; heroes.
-    vision: { Infantry: 50, Support: 50, Artillery: 30, 'Mounted & mobile': 80, Naval: 80, Air: 150,
+    vision: { Infantry: 50, Support: 50, Artillery: 30, Emplacements: 40, 'Mounted & mobile': 80, Naval: 80, Air: 150,
       reconnaissance: 120, tank: 40, armouredtrain: 40, submarine: 30, reconair: 250, airship: 250, balloon: 100,
       hero: 50, capital: 100, city: 60, village: 30 },
   };
@@ -153,6 +154,9 @@ const GameData = (() => {
     mortar: c({ iron: 5, nitrates: 4, money: 25, manpower: 1, turns: 1 }),
     antiaircraft: c({ iron: 8, copper: 5, nitrates: 3, money: 45, manpower: 1, turns: 2 }),
     coastal: c({ iron: 25, copper: 5, nitrates: 5, money: 80, manpower: 1, turns: 3 }),
+    fortress: c({ iron: 30, coal: 10, nitrates: 6, timber: 10, money: 110, manpower: 1, turns: 4 }),
+    mgbunker: c({ iron: 10, timber: 6, copper: 2, money: 40, manpower: 1, turns: 2 }),
+    aaemplacement: c({ iron: 12, copper: 6, nitrates: 3, money: 55, manpower: 1, turns: 2 }),
     hq: c({ money: 40, manpower: 1, turns: 1 }),
     engineers: c({ timber: 8, iron: 4, money: 30, manpower: 2, turns: 1 }),
     sappers: c({ timber: 6, iron: 4, nitrates: 2, money: 30, manpower: 2, turns: 1 }),

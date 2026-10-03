@@ -310,6 +310,10 @@
           <label class="inline" id="trenchZigWrap"><input type="checkbox" id="trenchZigzag" checked> Add traverses on long straights (fire-trench zigzag)</label>
           <p class="hint">Width is in map pixels (tokens are about 36). The centreline is what units and editing use; drag its points from the popup like any drawing.</p>
         </div>
+        <div id="nmlFields" hidden>
+          <label class="inline"><input type="checkbox" id="shapeNoMansLand"> No Man's Land</label>
+          <p class="hint">Churned mud, shell holes, wire and the dead between the lines. Walking across it costs several times the distance (⚖ Rules → Movement); while the game is running only the GM can set this.</p>
+        </div>
         <p id="railFields" class="hint" hidden>Land units and heroes move several times faster along open track (⚖ Rules → Railways). Rails whose ends touch are joined; start or end a line on other track to branch off it. GM-only railways are plans: nothing runs on them.</p>
         <div id="shapeGmFields">
           <label>Visible to nations <span class="hint">(comma separated, blank = everyone)</span><input id="shapeVisibleTo" list="nationList" autocomplete="off" placeholder="Everyone"></label>
@@ -620,6 +624,7 @@
                 <label>Distance per movement point <span class="hint">(km / map units per turn)</span><input id="ruleKmPerMove" type="number" step="any" min="1"></label>
                 <label>Attack reach per range point <span class="hint">(infantry 1, cavalry 2, artillery 3)</span><input id="ruleKmPerRange" type="number" step="any" min="1"></label>
               </div>
+              <label>No Man's Land movement cost <span class="hint">(× distance walked inside areas tagged No Man's Land)</span><input id="ruleNoMansLand" type="number" step="any" min="1" max="20"></label>
               <label class="inline"><input type="checkbox" id="ruleWaive"> Waive movement and range limits</label>
             </section>
             <section data-page="r-economy" hidden>
@@ -745,6 +750,7 @@
   <script src="/js/province-layer.js"></script>
   <script src="/js/trench.js"></script>
   <script src="/js/towns.js"></script>
+  <script src="/js/nomansland.js"></script>
   <script src="/js/sound.js"></script>
   <script src="/js/railnet.js"></script>
   <script src="/js/rail.js"></script>

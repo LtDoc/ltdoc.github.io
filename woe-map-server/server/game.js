@@ -28,6 +28,7 @@ const q = {
   markers: db.prepare('SELECT * FROM markers WHERE lobby_id = ?'),
   clearBattles: db.prepare('DELETE FROM battles WHERE lobby_id = ? AND turn <= ?'),
   clearCraters: db.prepare('DELETE FROM craters WHERE lobby_id = ? AND expires_turn <= ?'),
+  nmlAreas: db.prepare(`SELECT points FROM shapes WHERE lobby_id = ? AND kind = 'area' AND json_extract(data, '$.noMansLand') = 1`),
   // New turn: movement and action points back (and units that attacked may move again); heldTurns counts the turns a unit has stayed put (it digs in: rifle
   // pits, then wire, in the battle scenes).
   resetUnits: db.prepare(`UPDATE markers SET data = json_remove(json_set(data, '$.movedKm', 0, '$.apUsed', 0, '$.heldTurns',
@@ -533,6 +534,40 @@ function undoTurn(lobby) {
  * off is cheaper than going straight (server/rails.js); `cost` is what the move spends, `route` the rail trip.
  * GMs, disabled game mode and the waive switch pass straight through.
  */
+/**
+ * No Man's Land (areas drawn with that tag): every km walked across it costs settings.noMansLandCost km of movement.
+ * A straight walk from (x0, y0) to (x1, y1), sampled every quarter map px: { cost, slowed (it crosses some), frac(budget)
+ * (how far along the way, 0..1, that much movement gets it) }.
+ */
+function walkCost(lobby, settings, x0, y0, x1, y1) {
+  const dist = geo.distance(lobby, x0, y0, x1, y1), mult = Math.max(1, num(settings.noMansLandCost, 3));
+  const flat = { cost: dist, slowed: false, frac: b => (dist > 0 ? Math.min(1, b / dist) : 1) };
+  if (mult <= 1 || dist <= 0) return flat;
+  const lo = [Math.min(x0, x1), Math.min(y0, y1)], hi = [Math.max(x0, x1), Math.max(y0, y1)];
+  const polys = q.nmlAreas.all(lobby.id).map(r => access.safeJson(r.points)).filter(p => Array.isArray(p) && p.length >= 3).map(p => {
+    const xs = p.map(v => v[0]), ys = p.map(v => v[1]);
+    return { p, x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+  }).filter(b => b.x1 >= lo[0] && b.x0 <= hi[0] && b.y1 >= lo[1] && b.y0 <= hi[1]);
+  if (!polys.length) return flat;
+  const inside = (b, x, y) => {
+    if (x < b.x0 || x > b.x1 || y < b.y0 || y > b.y1) return false;
+    let c = false;
+    for (let i = 0, j = b.p.length - 1; i < b.p.length; j = i++) {
+      const [xi, yi] = b.p[i], [xj, yj] = b.p[j];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c;
+    }
+    return c;
+  };
+  const n = Math.max(1, Math.min(4000, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 0.25))), w = new Float64Array(n);
+  let cost = 0, slowed = false;
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t, mud = polys.some(b => inside(b, x, y));
+    w[i] = dist / n * (mud ? mult : 1); cost += w[i]; slowed = slowed || mud;
+  }
+  if (!slowed) return flat;
+  return { cost, slowed, frac: budget => { let acc = 0; for (let i = 0; i < n; i++) { if (acc + w[i] >= budget) return (i + (budget - acc) / w[i]) / n; acc += w[i]; } return 1; } };
+}
+
 /** Turns the dead of a fight lie on the field: the turn of the fight and the two after it. */
 const REMAINS_TURNS = 3;
 
@@ -565,16 +600,18 @@ function checkMove(lobby, g, isGm, marker, x, y) {
   if (remaining <= 0.01) return { error: `${marker.name} has no movement left this turn (${round(allowance)} ${unit} per turn)` };
   const route = require('./rails').plan(lobby, g.settings, marker, x, y);
   if (!route && (err = wet(true))) return { error: `${marker.name}: ${err}` };
-  const cost = route ? route.cost : dist;
-  if (cost <= remaining + 1e-6) return { x, y, clamped: false, movedKm: round(used + cost), cost, route, path: route ? route.path.map(p => [p[0], p[1]]) : null };
+  // Walking: No Man's Land costs several times its distance.
+  const walk = route ? null : walkCost(lobby, g.settings, marker.x, marker.y, x, y);
+  const cost = route ? route.cost : walk.cost, slowed = !!walk?.slowed;
+  if (cost <= remaining + 1e-6) return { x, y, clamped: false, movedKm: round(used + cost), cost, route, slowed, path: route ? route.path.map(p => [p[0], p[1]]) : null };
   if (route) {
     const w = require('./rails').walk(lobby, route.path, remaining);
     return { x: round(w.x), y: round(w.y), clamped: true, movedKm: round(allowance), remaining, dist: round(cost), cost, route, path: w.points };
   }
-  const t = remaining / dist, cx = round(marker.x + (x - marker.x) * t), cy = round(marker.y + (y - marker.y) * t);
+  const t = walk.frac(remaining), cx = round(marker.x + (x - marker.x) * t), cy = round(marker.y + (y - marker.y) * t);
   // Run out of movement part-way: not in the middle of a strait.
   if (landUnit && territory.landCourseError(lobby, cx, cy, cx, cy, false)) return { error: `${marker.name} would stop in the water short of the far shore: move it to the near side first` };
-  return { x: cx, y: cy, clamped: true, movedKm: round(allowance), remaining, dist: round(dist), cost };
+  return { x: cx, y: cy, clamped: true, movedKm: round(allowance), remaining, dist: round(cost), cost, slowed };
 }
 
 /** Attack reach of a unit in campaign units: (range + tech bonus) × kmPerRange. */
@@ -594,7 +631,7 @@ function checkRange(lobby, g, isGm, attacker, defender) {
 /** Whether a unit may attack this turn; returns an error string or null. */
 function checkAttack(g, isGm, marker) {
   if (!g.enabled || isGm) return null;
-  if (marker.data?.supplied === false && g.settings.supplyEnabled !== false) return `${marker.name} is out of supply and cannot attack`;
+  if (marker.data?.supplied === false && g.settings.supplyEnabled !== false && UnitTypes.resolve(marker.data?.unitType)?.cat !== 'Emplacements') return `${marker.name} is out of supply and cannot attack`;
   const ap = num(marker.data.ap);
   if (ap <= 0) return `${marker.name} has no action points and cannot attack`;
   if (num(marker.data.apUsed) >= ap) return `${marker.name} has used its action points this turn`;

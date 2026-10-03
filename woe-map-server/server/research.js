@@ -43,6 +43,7 @@ const q = {
  * once (techs the GM already has under the same key are left alone); a GM can still delete them afterwards.
  */
 const PATCHES = [
+  { id: 'emplacements-2026-10', keys: ['concrete_pillboxes', 'aa_emplacements'] },
   { id: 'fog-2026-10', keys: ['aerial_photography'] },
   { id: 'economy-2026-09', keys: ['econ_statistics', 'econ_municipal', 'econ_machine_tools', 'econ_savings', 'econ_scientific_management', 'econ_electrification', 'econ_reconstruction'] },
 ];

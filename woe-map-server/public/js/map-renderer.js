@@ -136,12 +136,13 @@ class MapRenderer extends EventTarget {
     this.handleLayer = new PIXI.Container();
     this.unitDots = new PIXI.Graphics();          // zoomed out on the Earth map: one dot per unit instead of its icon
     this.unitDots.eventMode = 'none';
+    this.nml = window.NoMansLand ? new window.NoMansLand(this) : null;   // No Man's Land areas: mud, shell holes, wire, the dead
     this.skirmish = window.Skirmish ? new window.Skirmish(this) : null;   // riflemen on infantry firing lines (skirmish.js)
     this.fogLayer = new PIXI.Container(); this.fogLayer.eventMode = 'none';     // fog of war on image maps (Earth: the province layer)
     this.ghostLayer = new PIXI.Container(); this.ghostLayer.eventMode = 'none'; // fog of war: last known enemy positions
     this.rideLayer = new PIXI.Container(); this.rideLayer.eventMode = 'none';   // trains carrying units on a rail trip
     this.rides = new Map();                                                      // unit id -> rail trip being played
-    this.world.addChild(...[this.mapLayer, this.territoryLayer, this.lakeG, this.lakeShoreG, this.gridLayer, this.townLayer, this.scarLayer, this.snowG, this.sceneryLayer, this.craterLayer, this.craterSmokeG, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.fogLayer, this.skirmish?.layer, this.gunG, this.unitDots, this.ghostLayer, this.rideLayer].filter(Boolean), this.markerLayer, this.boomLayer, ...(this.skirmish ? [this.skirmish.airLayer] : []), this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
+    this.world.addChild(...[this.mapLayer, this.territoryLayer, this.lakeG, this.lakeShoreG, this.gridLayer, this.townLayer, this.scarLayer, this.nml?.layer, this.snowG, this.sceneryLayer, this.craterLayer, this.craterSmokeG, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.fogLayer, this.skirmish?.layer, this.gunG, this.unitDots, this.ghostLayer, this.rideLayer].filter(Boolean), this.markerLayer, this.boomLayer, ...(this.skirmish ? [this.skirmish.airLayer] : []), this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
     app.stage.addChild(this.world, this.weatherG, this.pingArrows);
 
     app.stage.eventMode = 'static';
@@ -888,6 +889,7 @@ class MapRenderer extends EventTarget {
     }
     v.shape = shape;
     this._drawShapeView(v);
+    this.nml?.upsert(shape);
     if (shape.kind === 'trench') this._refreshTrenchNodes();
     if (this.selectedShapeId === shape.id && !this._vdrag) this._drawHandles();
   }
@@ -910,6 +912,7 @@ class MapRenderer extends EventTarget {
     const v = this.shapeViews.get(id);
     if (v && v.trench) { v.trench.destroy(); v.trench = null; setTimeout(() => this._refreshTrenchNodes(), 0); }
     if (v && v.rail) { v.rail.destroy(); v.rail = null; }
+    this.nml?.remove(id);
     if (!v) return;
     this.shapesLayer.removeChild(v.g, v.label);
     v.g.destroy(); v.label.destroy();
@@ -961,7 +964,11 @@ class MapRenderer extends EventTarget {
       v.label.scale.set(1 / sc);
       return;
     }
-    if (s.kind === 'area') {
+    if (s.kind === 'area' && s.data?.noMansLand) {
+      g.poly(pts.flat()).fill({ color: 0x000000, alpha: selected ? 0.12 : 0.001 });
+      if (selected) g.poly(pts.flat()).stroke({ width: w + 6 / sc, color: 0xffffff, alpha: 0.5 });
+      g.poly(pts.flat()).stroke({ width: Math.max(1, w * 0.4), color: 0x3a2e22, alpha: selected ? 0.9 : 0.35 });
+    } else if (s.kind === 'area') {
       g.poly(pts.flat()).fill({ color, alpha: selected ? 0.32 : 0.18 });
       if (selected) g.poly(pts.flat()).stroke({ width: w + 6 / sc, color: 0xffffff, alpha: 0.5 });
       g.poly(pts.flat()).stroke({ width: w, color, alpha: 0.95 });
@@ -1810,6 +1817,9 @@ class MapRenderer extends EventTarget {
       const squadsOn = gunZoom && (onScreen(ax, ay, margin * 3) || onScreen(dx, dy, margin * 3) || onScreen((ax + dx) / 2, (ay + dy) / 2, L / 2 + margin));
       const addFront = (id, view, kind, x0, y0, x1, y1, px, otherPx) => {
         if ((fronts.get(id)?.battleId ?? -1) > b.id) return;   // the unit's latest fight sets its line
+        // Holding fire: the target of a bombardment does not shoot back at the distant guns, and artillery attacked
+        // does not return fire.
+        const holdFire = id === b.defenderId && (b.kind === 'shells' || window.UnitTypes?.resolve(view?.marker?.data?.unitType)?.cat === 'Artillery');
         const l = Math.hypot(x1 - x0, y1 - y0), r0 = Math.min(l * 0.3, px / s), r1 = Math.min(l * 0.3, otherPx / s);
         const fux = (x1 - x0) / l, fuy = (y1 - y0) / l;
         if (kind === 'balloon') {
@@ -1818,6 +1828,7 @@ class MapRenderer extends EventTarget {
             enemyId: id === b.attackerId ? b.defenderId : b.attackerId, enemyKind: id === b.attackerId ? kD : kA, createdAt: b.createdAt });
           return;
         }
+        if (kind === 'air' && holdFire) { fronts.set(id, { battleId: b.id, view, kind, mode: 'orbit', ax: x0, ay: y0, hx: x0, hy: y0, createdAt: b.createdAt }); return; }
         if (kind === 'air') {
           const dog = (id === b.attackerId ? kD : kA) === 'air';
           fronts.set(id, { battleId: b.id, view, kind, mode: dog ? 'dogfight' : 'strafe', ax: dog ? dx : x1, ay: dog ? dy : y1, hx: x0, hy: y0,
@@ -1825,12 +1836,12 @@ class MapRenderer extends EventTarget {
           return;
         }
         const enemyId = id === b.attackerId ? b.defenderId : b.attackerId, enemyKind = id === b.attackerId ? kD : kA;
-        fronts.set(id, { battleId: b.id, turn: b.turn, from: startOf.get(id), view, kind, enemyId, enemyKind, cover: id === b.defenderId && !!b.cover, shells: b.kind === 'shells' && id === b.attackerId, cx: x0 + fux * r0, cy: y0 + fuy * r0, ux: fux, uy: fuy,
+        fronts.set(id, { battleId: b.id, turn: b.turn, from: startOf.get(id), holdFire, view, kind, enemyId, enemyKind, cover: id === b.defenderId && !!b.cover, shells: b.kind === 'shells' && id === b.attackerId, cx: x0 + fux * r0, cy: y0 + fuy * r0, ux: fux, uy: fuy,
           front: Math.max(80, Math.min(190, (l - r0 - r1) * s * 0.9)) / s, backPx: r0 * s, tx: x1 - fux * r1, ty: y1 - fuy * r1, createdAt: b.createdAt });
       };
       if (squadsOn) {
         // Heavy guns shelling get a spotter balloon up behind the battery, its observers directing the fire.
-        if (b.kind === 'shells' && kA === 'guns' && /heavyartillery|siegeartillery|railwaygun/.test(window.UnitTypes?.resolve(Av?.marker?.data?.unitType)?.id || '')) {
+        if (b.kind === 'shells' && kA === 'guns' && /heavyartillery|siegeartillery|railwaygun|coastal|fortress/.test(window.UnitTypes?.resolve(Av?.marker?.data?.unitType)?.id || '')) {
           const key = 'spot' + b.attackerId;
           fronts.set(key, { view: Av, kind: 'balloon', spotter: true, mode: 'hold', hx: ax - ux * 34 / s + nx * 22 / s, hy: ay - uy * 34 / s + ny * 22 / s });
           keep.add(key);
@@ -1855,7 +1866,8 @@ class MapRenderer extends EventTarget {
           const fd = fronts.get(b.defenderId);
           if (fd) fd.gas = cover;
         } else if (aStands && !own(kA) && !air) this._drawLineFire(g, ax, ay, dx, dy, e.seed, 1, t, s, pA, kD ? LINE : 10);
-        if (dStands && !own(kD) && !air) this._drawLineFire(g, dx, dy, ax, ay, e.seed + 7.77, 0.65, t, s, pD, kA ? LINE : 10);
+        const dHolds = window.UnitTypes?.resolve(Dv?.marker?.data?.unitType)?.cat === 'Artillery';
+        if (dStands && !dHolds && !own(kD) && !air) this._drawLineFire(g, dx, dy, ax, ay, e.seed + 7.77, 0.65, t, s, pD, kA ? LINE : 10);
       } else {
         // Shelling: visible when the guns or the target are on screen (above 150 %). Each shell leaves the guns
         // with a flash, climbs a slow arc toward where it will land (so players can see where fire comes from),
@@ -2415,10 +2427,14 @@ class MapRenderer extends EventTarget {
     if (this._tickPings(nowMs)) anim = true;
     // From 800 % the planes of air units are up, circling, and naval units' ships lie on the water, whether or not
     // they fight (skirmish.js).
-    if (this.battles.size || this.shellsInFlight.length || this.skirmish?.squads.size || (s >= 8 && (this.skirmish?.mounts || this.skirmish?.ships))) {
+    if (this.battles.size || this.shellsInFlight.length || this.skirmish?.squads.size || (s >= 8 && this.skirmish)) {
       const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
       if (this._tickBattles(nowMs, tl.x, tl.y, br.x, br.y)) anim = true;
       if (this.shellsInFlight.length) anim = true;
+    } else if (this.skirmish) this.skirmish.remainsC.visible = false;
+    if (this.nml?.size) {
+      const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
+      this.nml.tick(s, [tl.x, tl.y, br.x, br.y]);
     }
     this._syncWeather();
     if (this._tickWeather(nowMs)) anim = true;

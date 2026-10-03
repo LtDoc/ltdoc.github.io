@@ -288,8 +288,9 @@
   function unitDoctrineRows(m) {
     let rows = '';
     const t = window.UnitTypes?.resolve(m.data?.unitType);
-    const land = !t || ['Infantry', 'Mounted & mobile', 'Artillery', 'Support'].includes(t.cat);
-    if (supplyOn() && land) {
+    const land = !t || ['Infantry', 'Mounted & mobile', 'Artillery', 'Emplacements', 'Support'].includes(t.cat);
+    if (supplyOn() && t?.cat === 'Emplacements') rows += stat('Supply', 'none needed (a fixed work with its own stores)');
+    else if (supplyOn() && land) {
       const st = state.game?.settings || {}, cutTurns = Number(m.data?.unsuppliedTurns) || 0;
       rows += stat('Supply', m.data?.surrendered && Number(m.data?.strength ?? 100) <= 0 ? '⚑ SURRENDERED for want of supply'
         : m.data?.supplied === false
@@ -920,7 +921,7 @@
 
   // ---- Convoys (docs/UNITS.md): troops embark on transports and land together ---------------------------------
   const isConvoyM = m => !!m && m.type === 'unit' && window.UnitTypes?.resolve(m.data?.unitType)?.id === 'transport';
-  const isLandType = m => { const t = window.UnitTypes?.resolve(m.data?.unitType); return !t || ['Infantry', 'Mounted & mobile', 'Artillery', 'Support'].includes(t.cat); };
+  const isLandType = m => { const t = window.UnitTypes?.resolve(m.data?.unitType); return !t || ['Infantry', 'Mounted & mobile', 'Artillery', 'Emplacements', 'Support'].includes(t.cat); };
   function convoyRules() {
     const s = state.game?.settings || {};
     return { cap: Number(s.convoyCapacity ?? 10), board: Number(s.convoyBoardKm ?? 30), land: Number(s.convoyLandKm ?? 100) };
@@ -1872,7 +1873,7 @@
 
   function shapePopupHtml(s) {
     const creator = s.createdBy && state.members.find(x => x.userId === s.createdBy);
-    let body = stat('Kind', s.kind === 'area' ? 'Area' : s.kind === 'trench' ? 'Trench' : s.kind === 'rail' ? 'Railway' : 'Line') + (s.kind === 'rail' ? '' : stat('Points', s.points.length));
+    let body = stat('Kind', s.kind === 'area' ? (s.data?.noMansLand ? "No Man's Land" : 'Area') : s.kind === 'trench' ? 'Trench' : s.kind === 'rail' ? 'Railway' : 'Line') + (s.kind === 'rail' ? '' : stat('Points', s.points.length));
     if (s.kind === 'rail') body += railPopupRows(s);
     if (s.kind === 'trench') {
       body += stat('State', { plan: 'planned', dug: 'dug', reinforced: 'reinforced' }[s.data?.state] || 'dug') + stat('Width', `${s.width} ${state.lobby?.scaleLabel || ''}`) + nationStat(s.data?.nation);
@@ -1880,6 +1881,7 @@
       const bonus = st === 'plan' ? 0 : (st === 'reinforced' ? (g?.trenchBonusReinforced ?? 4) : (g?.trenchBonusDug ?? 2));
       if (bonus) body += stat('Cover', `+${bonus} defend for ${esc(s.data?.nation || 'any')} units within ${g?.trenchRangeKm ?? 20} ${state.lobby?.scaleLabel || 'km'}`);
     }
+    if (s.data?.noMansLand) body += stat('Movement', `walking across it costs ${state.game?.settings?.noMansLandCost ?? 3}× the distance`);
     if (creator) body += stat('Drawn by', creator.displayName);
     if (s.visibleTo && s.visibleTo.length) body += stat('Visible to', s.visibleTo.join(', '));
     if (s.kind !== 'area') {
@@ -2432,6 +2434,9 @@
     $('#railFields').hidden = !rail;
     $('#shapeWidthLabel').textContent = trench ? `Trench width (${state.lobby?.scaleLabel || 'map units'})` : 'Line width';
     $('#trenchFields').hidden = !trench;
+    $('#nmlFields').hidden = kind !== 'area';
+    $('#shapeNoMansLand').checked = !!shape?.data?.noMansLand;
+    $('#shapeNoMansLand').disabled = gameOn() && state.role !== 'gm';
     $('#trenchZigWrap').hidden = !trench || !!shape;                 // traverses are applied when the trench is first dug
     if (trench) {
       $('#trenchState').value = shape ? (shape.data?.state || 'dug') : 'dug';
@@ -2451,6 +2456,7 @@
       visibleTo: $('#shapeVisibleTo').value, adminOnly: $('#shapeAdminOnly').checked,
     };
     const editing = state.editingShapeId ? state.shapes.get(state.editingShapeId) : null;
+    if ((editing && editing.kind === 'area') || state.pendingShape?.kind === 'area') body.data = { noMansLand: $('#shapeNoMansLand').checked };
     if ((editing && editing.kind === 'trench') || state.pendingShape?.kind === 'trench') {
       body.data = { state: $('#trenchState').value, facing: $('#trenchFacing').value, zigzag: $('#trenchZigzag').checked };
     }

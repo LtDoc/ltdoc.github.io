@@ -561,7 +561,7 @@ function trenchCover(lobby, settings, unit, shapes) {
   return best;
 }
 
-const LAND_CATEGORIES = new Set(['Infantry', 'Mounted & mobile', 'Artillery', 'Support']);
+const LAND_CATEGORIES = new Set(['Infantry', 'Mounted & mobile', 'Artillery', 'Emplacements', 'Support']);
 function isLandUnit(m) {
   if (m.type !== 'unit' || m.data?.aboard) return false;   // aboard a convoy: at sea, not holding or taking ground
   const t = UnitTypes.resolve(m.data?.unitType);

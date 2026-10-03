@@ -48,6 +48,21 @@ const UnitTypes = (() => {
       g.poly([b.x + 8, b.y + 1, b.x + b.w - 6, b.y + 5, b.x + 8, b.y + 9]).fill(WF);
     },
     antiAir: (g, b) => g.arc(b.cx, b.y + b.h - 2, 8, Math.PI, 0).stroke(W).moveTo(b.cx - 8, b.y + b.h - 2).lineTo(b.cx + 8, b.y + b.h - 2).stroke(W),
+    // Emplacements: the weapon's symbol over a crenellated base line (fixed fortifications).
+    battlements: (g, b) => {
+      const y = b.y + b.h - 0.5, x0 = b.x + 3, x1 = b.x + b.w - 3, n = 5, w = (x1 - x0) / (n * 2 - 1);
+      g.moveTo(x0, y);
+      for (let i = 0; i < n * 2 - 1; i++) { const x = x0 + i * w; if (i % 2 === 0) g.lineTo(x, y - 3).lineTo(x + w, y - 3).lineTo(x + w, y); else g.lineTo(x + w, y); }
+      g.stroke({ width: 1.2, color: WF });
+    },
+    coastalGuns: (g, b) => { sym.heavyArtillery(g, { ...b, cy: b.cy - 2 }); sym.battlements(g, b); },
+    fortress: (g, b) => { g.circle(b.cx - 5, b.cy - 2, 2.5).fill(WF).circle(b.cx + 5, b.cy - 2, 2.5).fill(WF); sym.battlements(g, b); },
+    mgBunker: (g, b) => {
+      g.moveTo(b.cx, b.y + b.h - 5).lineTo(b.cx, b.y + 2).stroke(W);
+      g.poly([b.cx, b.y, b.cx - 3.5, b.y + 4.5, b.cx + 3.5, b.y + 4.5]).fill(WF);
+      sym.battlements(g, b);
+    },
+    aaEmplacement: (g, b) => { g.arc(b.cx, b.y + b.h - 5, 7, Math.PI, 0).stroke(W); sym.battlements(g, b); },
     gas: (g, b) => g.circle(b.cx - 5, b.cy + 2, 3).fill(WF).circle(b.cx + 5, b.cy + 2, 3).fill(WF).circle(b.cx, b.cy - 3, 3.5).fill(WF),
     air: (g, b) => g.poly([b.cx - 12, b.cy - 6, b.cx, b.cy, b.cx - 12, b.cy + 6]).fill(WF).poly([b.cx + 12, b.cy - 6, b.cx, b.cy, b.cx + 12, b.cy + 6]).fill(WF),
     seaplane: (g, b) => {
@@ -147,7 +162,13 @@ const UnitTypes = (() => {
     { id: 'railwaygun', name: 'Railway gun', cat: 'Artillery', symbol: 'railwayGun', stats: [10, 0, 1, 6, 4] },
     { id: 'mortar', name: 'Trench mortars', cat: 'Artillery', symbol: 'mortar', stats: [5, 3, 1, 2, 2] },
     { id: 'antiaircraft', name: 'Anti-aircraft', cat: 'Artillery', symbol: 'antiAir', stats: [3, 4, 1, 3, 2] },
-    { id: 'coastal', name: 'Coastal battery', cat: 'Artillery', symbol: 'heavyArtillery', mod: 'CST', stats: [9, 6, 1, 5, 0] },
+
+    // Emplacements: fixed works that never move and need no supply (docs/UNITS.md). `guns`: they fire from range like
+    // artillery (shelling, spared the reply when repelled).
+    { id: 'coastal', name: 'Coastal battery', cat: 'Emplacements', symbol: 'coastalGuns', mod: 'CST', guns: true, stats: [9, 6, 1, 5, 0] },
+    { id: 'fortress', name: 'Fortress guns', cat: 'Emplacements', symbol: 'fortress', mod: 'FT', guns: true, stats: [8, 9, 1, 4, 0] },
+    { id: 'mgbunker', name: 'MG bunker / pillbox', cat: 'Emplacements', symbol: 'mgBunker', mod: 'BNK', stats: [3, 10, 1, 1, 0] },
+    { id: 'aaemplacement', name: 'AA emplacement', cat: 'Emplacements', symbol: 'aaEmplacement', mod: 'AA', guns: true, stats: [4, 6, 1, 3, 0] },
     // Support
     { id: 'hq', name: 'Headquarters', cat: 'Support', symbol: 'hq', stats: [1, 3, 1, 1, 2] },
     { id: 'engineers', name: 'Engineers', cat: 'Support', symbol: 'engineers', stats: [3, 5, 1, 1, 2] },
@@ -190,7 +211,7 @@ const UnitTypes = (() => {
     armouredtrain: 'Armoured Train',
     fieldartillery: 'Field Artillery Battery', horseartillery: 'Horse Artillery Battery', heavyartillery: 'Heavy Artillery Battery',
     siegeartillery: 'Siege Battery', railwaygun: 'Railway Gun', mortar: 'Trench Mortar Battery', antiaircraft: 'Anti-aircraft Battery',
-    coastal: 'Coastal Battery',
+    coastal: 'Coastal Battery', fortress: 'Fortress', mgbunker: 'MG Bunker', aaemplacement: 'AA Emplacement',
     hq: 'Headquarters', engineers: 'Engineer Battalion', sappers: 'Sapper Company', pioneers: 'Pioneer Battalion', signals: 'Signals Company',
     supply: 'Supply Column', medical: 'Field Hospital', gas: 'Gas Company', railway: 'Railway Company', labour: 'Labour Battalion',
     fighter: 'Fighter Squadron', bomber: 'Bomber Squadron', reconair: 'Reconnaissance Flight', seaplane: 'Seaplane Flight',
@@ -231,7 +252,8 @@ const UnitTypes = (() => {
     [/storm|assault|shock/, 'stormtroopers'], [/mountain|alpin|alpine/, 'mountain'], [/marine/, 'marines'],
     [/conscript|levy|levies|draftee|recruit|green/, 'conscripts'],
     [/militia|territorial|landwehr|landsturm|reserve/, 'militia'], [/colonial|askari|sepoy|zouave|senegal/, 'colonial'],
-    [/bicycle|cyclist/, 'bicycle'], [/machine|mg\b|maxim|vickers/, 'machinegun'],
+    [/bicycle|cyclist/, 'bicycle'], [/bunker|pillbox|blockhouse/, 'mgbunker'], [/aa emplacement|anti.?air(craft)? emplacement|flak tower/, 'aaemplacement'],
+    [/fortress|\bforts?\b|fortif|citadel/, 'fortress'], [/machine|mg\b|maxim|vickers/, 'machinegun'],
     [/dragoon/, 'dragoons'], [/lancer|uhlan/, 'lancers'], [/hussar/, 'hussars'], [/camel/, 'camelry'],
     [/armou?red car/, 'armouredcar'], [/armou?red train/, 'armouredtrain'], [/tank|armou?r|panzer/, 'tank'],
     [/recon|scout/, 'reconnaissance'], [/cav|horse|mounted|cossack|sotnia|cuirassier|chasseur|spahi|bedouin/, 'cavalry'],
@@ -272,7 +294,9 @@ const UnitTypes = (() => {
   }
 
   const categories = [...new Set(LIST.map(t => t.cat))];
-  return { LIST, categories, resolve, draw, symbols: sym, defaults, statsFor, statLabel, STAT_KEYS, STAT_LABELS };
+  /** Whether a type fires from range like artillery (it shells its target and is spared the reply when repelled). */
+  const firesFromRange = t => !!t && (t.cat === 'Artillery' || !!t.guns);
+  return { LIST, categories, resolve, draw, symbols: sym, defaults, statsFor, statLabel, STAT_KEYS, STAT_LABELS, firesFromRange };
 })();
 
 if (typeof window !== 'undefined') window.UnitTypes = UnitTypes;

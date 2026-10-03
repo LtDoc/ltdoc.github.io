@@ -7,7 +7,24 @@ All distances and bonuses are campaign rules (⚖ Rules → Supply & support).
 ## Supply
 
 Every land unit (infantry, mounted, artillery, support, and custom types) is either **supplied** or **cut off**.
-Ships, aircraft and heroes do not need supply.
+Ships, aircraft, heroes and **emplacements** do not need supply.
+
+## Emplacements
+
+Fixed works, in their own category: they never move (movement 0), need no supply (never cut off, no attrition) and
+count as **entrenched** for every matchup. They are drawn in grey concrete pits, the MG bunker and fortress behind
+wire.
+
+| Type | Attack / defend / range | Notes |
+|---|---|---|
+| Coastal battery | 9 / 6 / 5 | was Artillery; shells, +2 against ships (tech: Coastal batteries) |
+| Fortress guns | 8 / 9 / 4 | turret guns of a fortress; shells, +2 against ships |
+| MG bunker / pillbox | 3 / 10 / 1 | concrete machine-gun post: counts as machine guns in matchups (tech: Concrete pillboxes, 1916) |
+| AA emplacement | 4 / 6 / 3 | fixed anti-aircraft guns: +4 against aircraft (tech: Fixed anti-aircraft defences, 1915) |
+
+Coastal batteries, fortress guns and AA emplacements fire from range like artillery (`UnitTypes.firesFromRange`):
+they shell their target, are spared the reply when repelled, and signals units spot for them. Heavy, siege and
+railway guns get +1 against any emplacement.
 
 - **Towns are the nodes.** A unit within **30 km** of a friendly town (its nation's or an ally's) is supplied
   directly, as a garrison.
@@ -80,15 +97,15 @@ the combat log ("attacker +1 Corps HQ").
 
 Strengths and weaknesses are added to the attacker's roll, capped at ±5 in total. The unit panel lists a type's
 strengths and weaknesses, the attack dialog shows the modifier against each target, and the combat log names
-each rule that applied. "Entrenched" means the defender has trench cover.
+each rule that applied. "Entrenched" means the defender has trench cover, or is an emplacement.
 
 | Attacker | Defender | Modifier |
 |---|---|---|
 | Cavalry (all mounted horse types, camels, reconnaissance) | entrenched troops | −3 |
-| Cavalry | machine guns | −3 |
+| Cavalry | machine guns (and MG bunkers) | −3 |
 | Cavalry | artillery | +3 |
 | Cavalry | support troops | +2 |
-| Infantry (not machine guns) | machine guns | −2 |
+| Infantry (not machine guns) | machine guns (and MG bunkers) | −2 |
 | Machine guns | cavalry | +2 |
 | Stormtroopers | entrenched | +2 |
 | Tanks | entrenched / machine guns / artillery | +2 / +2 / −1 |
@@ -96,8 +113,9 @@ each rule that applied. "Entrenched" means the defender has trench cover.
 | Field and horse artillery | entrenched | +1 |
 | Heavy, siege, railway guns, mortars | entrenched | +2 |
 | Gas troops, sappers | entrenched | +2 |
-| Coastal batteries | ships | +2 |
-| Anti-aircraft | aircraft | +4 |
+| Coastal batteries, fortress guns | ships | +2 |
+| Heavy, siege, railway guns | emplacements | +1 |
+| Anti-aircraft, AA emplacements | aircraft | +4 |
 | Aircraft | anti-aircraft | −2 |
 | Fighters | bombers, airships, spotters | +2 |
 | Infantry, mounted troops | aircraft | −3 |
@@ -215,8 +233,8 @@ Infantry, Ottoman Infantry and Russian Infantry.
 
 Other units in a battle (attacking or attacked, gunfire or shelling) show their own kit on the same line:
 
-- **Artillery**: four guns spread along the line, each worked by two men of the nation's army. Field guns and
-  anti-aircraft use the field gun, heavy and coastal batteries the heavy gun, siege batteries and railway guns the
+- **Artillery**: four guns spread along the line, each worked by two men of the nation's army. Field guns,
+  anti-aircraft and AA emplacements use the field gun, heavy and coastal batteries and fortress guns the heavy gun, siege batteries and railway guns the
   siege gun, horse artillery the horse-drawn gun (and trench mortars and machine guns, for an army without teams, the
   mortar and the Maxim). Guns recoil, flash and smoke as they fire, and a battery's shells leave from one of its
   guns. The eight crew fall like riflemen (one per 12.5 % lost); a gun whose two crew are both down goes grey and

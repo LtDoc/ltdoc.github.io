@@ -37,6 +37,12 @@
  * mode): men and fallen riders by their dead horses, kept per campaign in this browser (localStorage). Fights this
  * browser did not see have their dead laid out from the server's record of them (who fell, where the lines were).
  *
+ * Emplacements (coastal batteries, fortress guns, MG bunkers, AA emplacements) stand as gun teams and guns in concrete
+ * works, always dug in (wire before the bunkers and forts).
+ *
+ * Holding fire: a unit being shelled does not shoot back at the distant guns, and artillery attacked at close quarters
+ * does not return fire (its men stand to their guns); fronts flagged `holdFire` by the renderer.
+ *
  * Every round fired leaves the man or gun that fired it as a tracer and flies at one of the enemy's men (or
  * machines), at the weapon's rate: bolt-action rifles 10–15 rounds a minute, machine guns in bursts at their cyclic
  * rates (RIFLE_RPM, HMG_RPM, LMG_RPM); guns and tanks firing over open sights send a shell the same way.
@@ -137,7 +143,7 @@
   function strHash(s) { let h = 0; for (const c of String(s || '').toLowerCase()) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; }
   // Which gun each artillery type works; machine-gun companies get the Maxim.
   const GUN_FOR = { fieldartillery: 'field', antiaircraft: 'field', horseartillery: 'horse', heavyartillery: 'heavy', siegeartillery: 'siege',
-    railwaygun: 'siege', coastal: 'heavy', mortar: 'mortar', machinegun: 'hmg' };
+    railwaygun: 'siege', coastal: 'heavy', fortress: 'heavy', aaemplacement: 'field', mortar: 'mortar', machinegun: 'hmg', mgbunker: 'hmg' };
   // A point on two cubic curves end to end (pts: 7 points, the middle one shared), u from 0 to 1 over both.
   const bez2 = (pts, u) => {
     const j = u < 0.5 ? 0 : 3, k = u < 0.5 ? u * 2 : (u - 0.5) * 2, a = 1 - k;
@@ -167,6 +173,7 @@
       this.layer.addChild(this.groundG, this.remainsC, this.deadC, this.machC, this.aliveC);
       this.remains = [];             // the dead this browser saw fall: { key, turn, at, x, y (anchor), ox, oy (boosted px off it), r, sg, f, i }
       this.past = [];                // earlier fights from the server, for the dead this browser did not see (see _ghosts)
+      this.fixed = [];               // the dead lying in No Man's Land (nomansland.js): they never clear
       this._remSp = [];
       // Aircraft fly above the unit tokens (the renderer puts this layer over them): shadows, planes, then their fire.
       this.airLayer = new PIXI.Container(); this.airLayer.eventMode = 'none';
@@ -263,7 +270,7 @@
       const t = typeOf(m);
       if (!t) return null;
       if (t.id === 'tank') return 'tanks';
-      if (t.cat === 'Artillery' || t.id === 'machinegun') return 'guns';
+      if (window.UnitTypes.firesFromRange(t) || t.id === 'machinegun' || t.id === 'mgbunker') return 'guns';
       if (t.cat === 'Infantry') return 'rifles';
       if (HORSE.has(t.id)) return 'horse';
       if (AIR.has(t.id)) return 'air';
@@ -310,7 +317,7 @@
     /** One man's figure for a role: always the same one of the kit's figures for him. */
     _pick(q, i, role) { const l = this._frames(q.kit, role); return l ? l[(i + q.id) % l.length] : null; }
     /** Machine-gun companies and trench mortars whose army has the art go in as teams (gun and crew in one figure). */
-    _teamFor(q) { return q.kind !== 'guns' || !q.kit ? null : (q.type === 'machinegun' && this._frames(q.kit, 'mg')) ? 'mg' : (q.type === 'mortar' && this._frames(q.kit, 'mortar')) ? 'mortar' : null; }
+    _teamFor(q) { return q.kind !== 'guns' || !q.kit ? null : ((q.type === 'machinegun' || q.type === 'mgbunker') && this._frames(q.kit, 'mg')) ? 'mg' : (q.type === 'mortar' && this._frames(q.kit, 'mortar')) ? 'mortar' : null; }
     clear() { for (const q of this.squads.values()) { this._bury(q); this._drop(q); } this.squads.clear(); this.airG.clear(); }
     _sprites(q) { return [...q.men.flatMap(m => [m.sp, m.carcass, m.litter, m.bearer].filter(Boolean)), ...q.machines.flatMap(x => x.sh ? [x.sp, x.sh] : [x.sp])]; }
     /** A sprite for a stretcher or a second bearer, among the living. */
@@ -587,7 +594,7 @@
       // line to a point well past it (the echelon held, a little closed up).
       const c = q.cycle;
       if (c.st === 'go' && living.every(m => !m.leg)) { c.st = 'form'; c.until = nowMs + 2500 + Math.random() * 2500; }
-      if (c.st === 'form' && !f.idle && nowMs >= c.until && living.length) {
+      if (c.st === 'form' && !f.idle && !f.holdFire && nowMs >= c.until && living.length) {
         c.st = 'go';
         for (const m of living) {
           const from = [m.co * F, m.cd], to = [m.o * F, -(reach + 115 + m.jd * 15) + (m.d - 4) * 0.5];
@@ -699,7 +706,7 @@
     _tickShips(q, f, nowMs, t, s, boost, g) {
       const [, , , lenPx, guns, every, torpedoes] = FLEET[q.type] || FLEET.destroyer;
       const L = lenPx * boost, sub = q.type === 'submarine', face = (f.ux || 1) >= 0 ? 1 : -1, n = q.machines.length;
-      const fight = !f.idle && f.tx != null;
+      const fight = !f.idle && !f.holdFire && f.tx != null;
       // Losses: a ship goes down per share of strength lost; repairs bring one back.
       const afloat = q.machines.filter(sh => !sh.dead), want = aliveFor(strengthOf(f.view), n);
       if (afloat.length > want && nowMs >= q.nextDeath) {
@@ -1200,7 +1207,7 @@
         // In a gas cloud: masks on, a sickly cast to them, and no aimed fire until it clears.
         sp.tint = f.gas > 0.3 ? 0xd3dc9a : 0xffffff;
         if (f.gas > 0.5) m.nextShot = Math.max(m.nextShot, nowMs + 600);
-        if (m.role !== 'medic' && nowMs >= m.nextShot) {
+        if (m.role !== 'medic' && !f.holdFire && nowMs >= m.nextShot) {
           const lmg = m.role === 'lmg' && this._has(q.kit, 'lmg.') && LMG_RPM[q.kit.army];
           if (lmg) {
             if (!m.burst) m.burst = q.kit.army === 'french' ? 3 + Math.floor(Math.random() * 3) : 4 + Math.floor(Math.random() * 6);
@@ -1246,7 +1253,8 @@
       const dug = this._dug(q, f);
       if (dug) {
         // Dug in: each gun in a pit walled with sandbags (open at the back); wire out in front after a second turn.
-        for (const gn of q.machines) { const [x, y] = at(gn.o, gn.d); this._pit(x, y, f, s, boost, q.team || hmg ? 1.6 : 1.8, true); }
+        const concrete = typeOf(f.view?.marker)?.cat === 'Emplacements';
+        for (const gn of q.machines) { const [x, y] = at(gn.o, gn.d); this._pit(x, y, f, s, boost, q.team || hmg ? 1.6 : 1.8, true, concrete); }
         if (dug > 1) this._wire(q, f, at, s, boost);
       }
       for (const gn of q.machines) {
@@ -1260,11 +1268,11 @@
         this._orient(gn.sp, gn.frame, sc, theta, f.ux);
         gn.sp.tint = gn.manned ? 0xffffff : 0x6f6f6f;
         gn.muzzle = this._muzzleOf(gn.sp, gn.frame);
-        if (!gn.manned || f.idle) continue;
+        if (!gn.manned || f.idle || f.holdFire) continue;
         // Firing on its own: field guns now and then (shells come through fireGun), machine guns in bursts.
         if (hmg) {
           this._mgBurst(q, gn, f, nowMs, s, boost, g);
-        } else if (q.type === 'antiaircraft' && (f.enemyKind === 'air' || f.enemyKind === 'balloon')) {
+        } else if ((q.type === 'antiaircraft' || q.type === 'aaemplacement') && (f.enemyKind === 'air' || f.enemyKind === 'balloon')) {
           // Anti-aircraft: a shell every 1.5–3 s bursting in the sky near one of the enemy's planes.
           if (nowMs >= gn.nextShot) {
             gn.firedAt = nowMs; gn.nextShot = nowMs + 1500 + Math.random() * 1500;
@@ -1290,7 +1298,8 @@
      */
     _dug(q, f) {
       if (q.kind !== 'rifles' && q.kind !== 'guns') return 0;
-      const held = Number(f.view?.marker?.data?.heldTurns) || 0, level = Math.max(Math.min(2, held), f.cover ? 2 : 0);
+      const fixed = typeOf(f.view?.marker)?.cat === 'Emplacements' ? (['mgbunker', 'fortress'].includes(q.type) ? 2 : 1) : 0;   // concrete works
+      const held = Number(f.view?.marker?.data?.heldTurns) || 0, level = Math.max(Math.min(2, held), f.cover ? 2 : 0, fixed);
       q.wireAt = level > 1 ? WIRE_D : 0;   // where cavalry charging it are held up
       return level;
     }
@@ -1298,18 +1307,18 @@
      * A pit at (x, y) (world units), `size` times a rifle pit: dark earth, the spoil heaped on the enemy side and
      * sandbags along its top; a gun pit (`ring`) walled with sandbags all round but the back.
      */
-    _pit(x, y, f, s, boost, size, ring = false) {
+    _pit(x, y, f, s, boost, size, ring = false, concrete = false) {
       const g = this.groundG, k = boost / s * size * 1.3, ux = f.ux || 0, uy = f.uy || 0, rot = Math.atan2(uy, ux);
       const oval = (cx, cy, rx, ry, a, n = 12) => { const pts = []; for (let i = 0; i < n; i++) { const t = i / n * Math.PI * 2; pts.push(cx + Math.cos(t) * rx * Math.cos(a) - Math.sin(t) * ry * Math.sin(a), cy + Math.cos(t) * rx * Math.sin(a) + Math.sin(t) * ry * Math.cos(a)); } return pts; };
       // Spoil heaped up on the enemy side (the pit is long across the front).
-      g.poly(oval(x + ux * 3 * k, y + uy * 3 * k, 4.2 * k, 7.5 * k, rot)).fill({ color: 0x86704f, alpha: 0.85 });
-      g.poly(oval(x, y, 4 * k, 7 * k, rot)).fill({ color: 0x3f3122, alpha: 0.9 });
+      g.poly(oval(x + ux * 3 * k, y + uy * 3 * k, 4.2 * k, 7.5 * k, rot)).fill({ color: concrete ? 0x8e8c85 : 0x86704f, alpha: 0.85 });
+      g.poly(oval(x, y, 4 * k, 7 * k, rot)).fill({ color: concrete ? 0x46453f : 0x3f3122, alpha: 0.9 });
       // Sandbags: a row along the forward lip, or round a gun pit.
       const bags = ring ? 9 : 4, span = ring ? Math.PI * 1.5 : Math.PI * 0.75;
       for (let i = 0; i < bags; i++) {
         const a = rot - span / 2 + span * (i + 0.5) / bags, r = ring ? 7.6 * k : 6 * k;
         const bx = x + Math.cos(a) * r * (ring ? 1 : 0.75), by = y + Math.sin(a) * r * (ring ? 1 : 0.75) * (ring ? 1 : 1.3);
-        g.poly(oval(bx, by, 1.5 * k / (ring ? size / 1.6 : 1), 2.6 * k / (ring ? size / 1.6 : 1), a, 8)).fill({ color: 0xb6a57a }).stroke({ width: 0.4 * boost / s, color: 0x6f6448, alpha: 0.8 });
+        g.poly(oval(bx, by, 1.5 * k / (ring ? size / 1.6 : 1), 2.6 * k / (ring ? size / 1.6 : 1), a, concrete ? 4 : 8)).fill({ color: concrete ? 0xb4b1a8 : 0xb6a57a }).stroke({ width: 0.4 * boost / s, color: concrete ? 0x6b6a64 : 0x6f6448, alpha: 0.8 });
       }
     }
     /** A belt of concertina wire across the squad's front, WIRE_D ahead of its line, on pickets. */
@@ -1546,7 +1555,7 @@
       gn.sp.tint = gn.manned || this._frames(q.kit, q.team + '.empty') ? 0xffffff : 0x6f6f6f;
       const reach = fr.len * unit * 0.45;
       gn.muzzle = [x + Math.cos(theta) * reach, y + Math.sin(theta) * reach];
-      if (!gn.manned || f.idle) return;
+      if (!gn.manned || f.idle || f.holdFire) return;
       if (hmg) {
         this._mgBurst(q, gn, f, nowMs, s, boost, g);
       } else {
@@ -1591,7 +1600,7 @@
           if (nowMs - tk.smokeAt > 260) { tk.smokeAt = nowMs; q.puffs.push({ x: x + (Math.random() - 0.5) * 6 / s, y: y - 4 / s, t0: nowMs, dark: true }); }
           continue;
         }
-        if (!tk.roll && !f.idle && nowMs >= tk.nextShot) {
+        if (!tk.roll && !f.idle && !f.holdFire && nowMs >= tk.nextShot) {
           tk.firedAt = nowMs; tk.nextShot = nowMs + 2500 + Math.random() * 2500;
           const [mx, my] = this._muzzleOf(sp, fr); q.puffs.push({ x: mx, y: my, t0: nowMs }); this._round(q, f, mx, my, nowMs, s, true);
         }
@@ -1650,6 +1659,7 @@
       this._saveRemains();
     }
     _remainsLive(r) {
+      if (r.fixed) return true;
       const turn = this.r.gameTurn?.();
       return turn != null ? turn - r.turn < REMAINS_TURNS && turn >= r.turn : Date.now() - r.at < REMAINS_MS;
     }
@@ -1665,6 +1675,8 @@
       if (!this.storeKey) return;
       try { localStorage.setItem(this.storeKey, JSON.stringify(this.remains)); } catch { /* full or blocked */ }
     }
+    /** The dead lying in No Man's Land (nomansland.js), in the remains' form, with `fixed` set. */
+    setFixed(list) { this.fixed = Array.isArray(list) ? list : []; this.r.invalidate(); }
     /** Earlier fights (GET /battles: past), for laying out the dead of those this browser did not see. */
     setPast(list) { this.past = Array.isArray(list) ? list : []; this._ghostList = null; }
     /**
@@ -1719,7 +1731,7 @@
       if (show) {
         const boost = Math.min(1.5, Math.max(1, s / 14)), k = boost / s, M = 60 / s, turn = this.r.gameTurn?.();
         const man = TORSO_PX / this.tex.torso * k;
-        for (const list of [this._ghosts(), this.remains]) {
+        for (const list of [this.fixed, this._ghosts(), this.remains]) {
           for (const r of list) {
             const x = r.x + r.ox * k, y = r.y + r.oy * k;
             if (x < view[0] - M || x > view[2] + M || y < view[1] - M || y > view[3] + M || !this._remainsLive(r)) continue;
@@ -1731,7 +1743,7 @@
             if (sp.texture !== fr.t) { sp.texture = fr.t; sp.anchor.set(fr.ax, fr.ay); }
             const sc = r.f === 'h' ? DEAD_HORSE_PX / fr.w * k : man;
             sp.visible = true; sp.position.set(x, y); sp.rotation = r.r; sp.scale.set(r.sg * sc, sc);
-            const age = turn != null ? turn - r.turn : 0;
+            const age = r.fixed ? 2 : turn != null ? turn - r.turn : 0;   // No Man's Land's dead are long dead
             sp.tint = age >= 2 ? 0xc4beb4 : age >= 1 ? 0xe2ded6 : 0xffffff;
           }
         }
