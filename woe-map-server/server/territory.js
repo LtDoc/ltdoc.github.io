@@ -74,13 +74,35 @@ function world(year) {
   return cache.get(key);
 }
 /** Land as a projected multipolygon (with bboxes) for a map size, cached per size. */
+/**
+ * The Earth's land in map pixels, as [{ poly, bbox }], with its lakes cut out: lakes are water (no troops, no
+ * craters, no provinces; ships may sail on them), islands in them land again. Cached per map size.
+ */
 function landFor(lobby) {
   const key = `land:${lobby.map_width}x${lobby.map_height}`;
   if (!cache.has(key)) {
     const land = loadGz('land');
     const W = lobby.map_width, H = lobby.map_height;
     const polys = land ? land.polygons.map(poly => poly.map(ring => ring.map(p => geo.project(p[0], p[1], W, H)))) : [];
-    cache.set(key, polys.map(p => ({ poly: p, bbox: bboxOf([p]) })));
+    const lakes = lakesFor(lobby), out = [];
+    for (const p of polys) {
+      const bb = bboxOf([p]), wet = lakes.filter(l => overlaps(l.bbox, bb)).map(l => l.poly);
+      let cut = [p];
+      if (wet.length) { try { cut = pc.difference([p], ...wet); } catch { cut = [p]; } }
+      for (const q of cut) out.push({ poly: q, bbox: bboxOf([q]) });
+    }
+    cache.set(key, out);
+  }
+  return cache.get(key);
+}
+/** The Earth's lakes in map pixels, as [{ poly, bbox }] (a lake's holes are its islands). Cached per map size. */
+function lakesFor(lobby) {
+  const key = `lakes:${lobby.map_width}x${lobby.map_height}`;
+  if (!cache.has(key)) {
+    const lakes = loadGz('lakes');
+    const W = lobby.map_width, H = lobby.map_height;
+    const polys = lakes ? lakes.polygons.map(poly => poly.map(ring => ring.map(p => geo.project(p[0], p[1], W, H)))) : [];
+    cache.set(key, polys.filter(p => p.length && p[0].length > 2).map(p => ({ poly: p, bbox: bboxOf([p]) })));
   }
   return cache.get(key);
 }
@@ -584,4 +606,4 @@ function capture(lobby, g, unit, factions, markers, relation) {
 }
 
 module.exports = { assignHistory, historyNames, landMask, landAt, nearWater, shipCourseError, nearestWater, nearestLand, NEUTRAL, all, write, clear, carve, circle, landClip, ownerAt, seedFromYear, assignArea, brush, ownershipChanges, capture, isLandUnit, earthYears, clean,
-  trenchOwner, trenchOwnershipChanges, trenchCover, distanceToPath, isLand, isCoastal, landFor, loadGz, world, bboxOf, pointInMulti, overlaps, ownerLookup };
+  trenchOwner, trenchOwnershipChanges, trenchCover, distanceToPath, isLand, isCoastal, landFor, lakesFor, loadGz, world, bboxOf, pointInMulti, overlaps, ownerLookup };

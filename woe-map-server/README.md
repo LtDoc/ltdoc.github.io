@@ -509,7 +509,10 @@ Details and numbers: `docs/ECONOMY.md`.
 - **Provinces (Earth map).** **Cut provinces only** (👑 GM panel → World; pick the year and a size, 100 km by
   default; the year defaults to the one the Earth map shows) slices the land into provinces that follow that year's state borders and the coastline: one
   around every major city plus a jittered grid inside each state, every cell clipped to the coast and cut
-  along the border, fragments merged into their neighbour. The whole world is about 15,000 provinces and
+  along the border, fragments merged into their neighbour. **Lakes are water**, like the sea: provinces stop at
+  their shores (islands in them are land), and the server's land tests treat them as water, so no craters on
+  them, ships may sail on them, and lakeside cities count as coastal. Provinces cut before this have their lakes
+  cut out the first time the lobby loads (`lakes_cut`); one lying wholly in a lake is dropped. The whole world is about 15,000 provinces and
   takes a minute or two; progress shows next to the button. Each province is named after the city inside
   it or the nearest one with a compass direction ("Reims NE"), and hovering the map names the province and
   its owner on the HUD. Provinces are then assigned to factions by state name, and every capture, brush

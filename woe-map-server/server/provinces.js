@@ -26,7 +26,12 @@ const q = {
   all: db.prepare('SELECT * FROM provinces WHERE lobby_id = ? ORDER BY id'),
   count: db.prepare('SELECT COUNT(*) AS n FROM provinces WHERE lobby_id = ?'),
   clear: db.prepare('DELETE FROM provinces WHERE lobby_id = ?'),
-  insert: db.prepare('INSERT INTO provinces (lobby_id, name, state, subject, cx, cy, faction_id, geometry, updated_at, year) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+  insert: db.prepare('INSERT INTO provinces (lobby_id, name, state, subject, cx, cy, faction_id, geometry, updated_at, year, lakes_cut) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)'),
+  uncut: db.prepare('SELECT id, geometry FROM provinces WHERE lobby_id = ? AND lakes_cut = 0'),
+  setCut: db.prepare('UPDATE provinces SET geometry = ?, cx = ?, cy = ?, lakes_cut = 1, updated_at = ? WHERE id = ?'),
+  markCut: db.prepare('UPDATE provinces SET lakes_cut = 1 WHERE id = ?'),
+  drop: db.prepare('DELETE FROM provinces WHERE id = ?'),
+  lobby: db.prepare('SELECT * FROM lobbies WHERE id = ?'),
   setOwner: db.prepare('UPDATE provinces SET faction_id = ?, updated_at = ? WHERE id = ? AND lobby_id = ?'),
   owners: db.prepare('SELECT id, faction_id FROM provinces WHERE lobby_id = ?'),
 };
@@ -93,8 +98,34 @@ function serialize(row) {
   return { id: row.id, name: row.name, state: row.state, subject: row.subject, year: row.year || 1914, cx: row.cx, cy: row.cy, factionId: row.faction_id, geometry: access.safeJson(row.geometry) || [] };
 }
 const GRID = 32;   // map px per index cell (provinces are ~20 px across on the default Earth map)
+/**
+ * Lakes are water (territory.landFor): provinces cut before that have lakes inside them. The first time a lobby's
+ * provinces load, any not yet cut have their lakes cut out (their centre moves if it has to); a province that lay
+ * wholly in a lake is dropped. Ownership is untouched.
+ */
+function cutLakes(lobbyId) {
+  const rows = q.uncut.all(lobbyId);
+  if (!rows.length) return;
+  const lobby = q.lobby.get(lobbyId);
+  const lakes = lobby && geo.isEarth(lobby) ? territory.lakesFor(lobby) : [];
+  db.exec('BEGIN');
+  try {
+    for (const r of rows) {
+      const g = access.safeJson(r.geometry) || [];
+      const bb = g.length ? bboxOf(g) : null, wet = bb ? lakes.filter(l => overlaps(l.bbox, bb)).map(l => l.poly) : [];
+      if (!wet.length) { q.markCut.run(r.id); continue; }
+      const cut = clip('difference', g, wet, () => g).filter(poly => poly.length && ringArea(poly[0]) > CLEAN.minArea);
+      if (!cut.length) { q.drop.run(r.id); continue; }
+      if (Math.abs(areaOf(cut) - areaOf(g)) < 0.01) { q.markCut.run(r.id); continue; }
+      const [cx, cy] = centreOf(cut);
+      q.setCut.run(JSON.stringify(roundMulti(cut)), r1(cx), r1(cy), now(), r.id);
+    }
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
 function get(lobbyId) {
   if (!cache.has(lobbyId)) {
+    cutLakes(lobbyId);
     const list = q.all.all(lobbyId).map(r => { const p = serialize(r); p.bbox = bboxOf(p.geometry); return p; });
     // Grid index: every cell a province's bbox touches lists it, so a point lookup tests only a handful.
     const grid = new Map();
