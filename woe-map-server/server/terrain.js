@@ -123,4 +123,13 @@ function heightBonus(lobby, settings, attacker, defender) {
   return { bonus, text: `defender +${bonus} on higher ground (${Terrain.NAMES[cD]} above ${Terrain.NAMES[cA]})` };
 }
 
-module.exports = { FLAT, HILLS, MOUNTAINS, earthGrid, painted, lookup, classAt, enabled, moveKind, moveMult, inside, heightBonus };
+/** Km of mountains along the straight line (x0, y0) → (x1, y1), sampled every 0.75 map px (half an Earth grid cell). */
+function mountainKm(lobby, look, x0, y0, x1, y1) {
+  if (!look.any) return 0;
+  const n = Math.max(1, Math.min(4000, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 0.75)));
+  let m = 0;
+  for (let i = 0; i < n; i++) { const t = (i + 0.5) / n; if (look.classAt(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t) === MOUNTAINS) m++; }
+  return m ? geo.distance(lobby, x0, y0, x1, y1) * m / n : 0;
+}
+
+module.exports = { FLAT, HILLS, MOUNTAINS, earthGrid, painted, lookup, classAt, enabled, moveKind, moveMult, inside, heightBonus, mountainKm };

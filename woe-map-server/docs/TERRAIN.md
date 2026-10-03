@@ -74,6 +74,19 @@ cover and shown in the combat line, e.g. "defender +2 on higher ground (mountain
 It counts for artillery firing from range too. Aircraft (attacking or attacked) and ships attacked at sea ignore it;
 a ship bombarding the shore attacks from flat ground, so a battery on hills or cliffs gains it.
 
+## Supply: mountains cut supply lines
+
+Every supply link is a straight line (`supply.compute`): a place, column, railhead or convoy to a unit; a place,
+railhead or convoy to a Supply Column; one column to the next. A line may cross at most **10 km of mountains**
+(*Supply lines may cross mountains for*, about one grid cell, so a unit standing at the edge of a range is still
+reached), or **50 km when it ends at mountain troops** (*… to mountain troops*), who can be supplied some way into
+a range. Of the sources in reach, the nearest with a clear line counts. Hills do not cut supply.
+
+**Railways carry supply through** regardless: open track connected to a friendly place supplies columns near any of
+its railheads, on either side of a range, so a railway over a pass keeps the far side supplied. Without one, units
+beyond a range are cut off unless a friendly place, column or convoy reaches them from their own side. (On the
+Brenner: German units in the Po valley are out of supply from Munich until a railway runs over the pass.)
+
 ## How it looks
 
 `public/js/relief.js` draws the ground over the land and the territory colours (so it reads whoever holds it) and

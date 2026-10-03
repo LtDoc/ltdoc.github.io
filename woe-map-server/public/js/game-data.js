@@ -42,6 +42,8 @@ const GameData = (() => {
     mountainTroopsCost: 1,    // mountain troops in the mountains
     hillsDefend: 1,           // defend bonus on hills attacked from flat ground (higher ground: the difference counts)
     mountainsDefend: 2,       // defend bonus in mountains attacked from flat ground (from hills: 2 − 1 = +1)
+    supplyMountainKm: 10,     // a supply line may cross this many km of mountains (railways carry supply through regardless)
+    mountainTroopsSupplyKm: 50,   // … or this many when it ends at mountain troops
     waiveMovement: false,     // GM switch: nobody is limited
     captureRadiusKm: 30,      // phase 2: ground taken around an advancing land unit (halved 27 Sep 2026: one unit should not take a country)
     cityRadiusKm: 75,         // phase 2: district that changes hands with a major city
