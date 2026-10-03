@@ -991,7 +991,8 @@ router.patch('/:id/markers/:mid', (req, res) => {
     if (ride) b.data = { ...(b.data || {}), ride, ...(g.enabled ? { trail: [[x, y]] } : {}) };
     else if (g.enabled && ['unit', 'hero'].includes(before.type)) b.data = { ...(b.data || {}), trail: extendTrail(before, x, y, mv.path) };
     if (mv.clamped) clampNote = `${before.name} could only move ${Math.round(mv.remaining)} of ${mv.dist} this turn`;
-    if (mv.slowed) mudNote = `${before.name} was slowed by No Man's Land`;
+    if (mv.slowNote) mudNote = `${before.name} was ${mv.slowNote}`;
+    if (mv.stopped) clampNote = mv.stopped;
     if (mv.route) railNote = `${before.name} went by rail (${Math.round(mv.route.railKm)} ${geo.isEarth(req.lobby) ? 'km' : (req.lobby.scale_label || 'units')} of track${mv.clamped ? ', stopped short' : ''})`;
   }
   let iconFile = before.iconFile;
@@ -1039,8 +1040,10 @@ router.post('/:id/markers/move', (req, res) => {
   }
   // A formation moves as one: if any unit would be clamped, scale every move by the slowest unit's fraction.
   let t = 1;
-  for (const p of plan) if (p.chk.clamped) t = Math.min(t, p.chk.remaining / p.chk.dist);
-  if (t < 1) errors.push(`Formation moved ${Math.round(t * 100)}% of the way: the slowest unit ran out of movement`);
+  for (const p of plan) if (p.chk.clamped) t = Math.min(t, p.chk.t !== undefined ? p.chk.t : p.chk.remaining / p.chk.dist);
+  if (t < 1) errors.push(plan.some(p => p.chk.stopped && p.chk.t <= t + 1e-9)
+    ? `Formation moved ${Math.round(t * 100)}% of the way: tanks or artillery stopped where the mountains begin`
+    : `Formation moved ${Math.round(t * 100)}% of the way: the slowest unit ran out of movement`);
   let byRail = 0;
   for (const p of plan) {
     let x = t < 1 ? Math.round((p.before.x + (p.x - p.before.x) * t) * 10) / 10 : p.x;
@@ -1055,7 +1058,7 @@ router.post('/:id/markers/move', (req, res) => {
       delete data.heldTurns;   // on the move: no longer dug in
       if (p.chk.movedKm !== undefined) {
         const used = num(p.before.data.movedKm);
-        const spent = p.chk.cost !== undefined ? p.chk.cost * t : geo.distance(req.lobby, p.before.x, p.before.y, x, y);
+        const spent = p.chk.costTo && t < 1 ? p.chk.costTo(t) : p.chk.cost !== undefined ? p.chk.cost * t : geo.distance(req.lobby, p.before.x, p.before.y, x, y);
         data.movedKm = Math.round((used + spent) * 10) / 10;
       }
       const ride = rideOf(p.chk.route, path);
@@ -1136,7 +1139,8 @@ function canEditShape(req, s) {
 }
 
 /**
- * Per-kind extras. Area: the No Man's Land tag (slow, muddy ground; only the GM sets it while the game is running).
+ * Per-kind extras. Area: the No Man's Land tag (slow, muddy ground) and painted ground, terrain: 'hills' | 'mountains'
+ * (server/terrain.js); only the GM sets either while the game is running.
  * Trench: facing (which side is the rear), build state, zigzag flag.
  * Rail: cuts [{ id, x, y, turn, by, at }], which only the game routes (sabotage, repair) and the GM change.
  */
@@ -1144,7 +1148,9 @@ function shapeData(kind, raw, before, isGm, mayTag = isGm) {
   if (kind === 'area') {
     const d = (raw && typeof raw === 'object') ? raw : {};
     const nml = mayTag && d.noMansLand !== undefined ? !!d.noMansLand : !!before?.noMansLand;
-    return nml ? { noMansLand: true } : null;
+    const ground = mayTag && d.terrain !== undefined ? d.terrain : before?.terrain;
+    const out = { ...(nml ? { noMansLand: true } : {}), ...(['hills', 'mountains'].includes(ground) ? { terrain: ground } : {}) };
+    return Object.keys(out).length ? out : null;
   }
   if (kind === 'rail') {
     const prev = Array.isArray(before?.cuts) ? before.cuts : [];

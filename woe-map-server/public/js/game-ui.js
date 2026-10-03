@@ -658,7 +658,8 @@ const GameUI = (() => {
     // Rules form (only overwrite fields the GM is not typing in).
     const s = game.settings;
     const set = (id, v) => { const el = $(id); if (el && document.activeElement !== el) { if (el.type === 'checkbox') el.checked = !!v; else el.value = v; } };
-    set('#ruleKmPerMove', s.kmPerMove); set('#ruleKmPerRange', s.kmPerRange); set('#ruleNoMansLand', s.noMansLandCost ?? 3); set('#ruleWaive', s.waiveMovement); set('#ruleUpkeep', s.upkeep);
+    set('#ruleKmPerMove', s.kmPerMove); set('#ruleKmPerRange', s.kmPerRange); set('#ruleNoMansLand', s.noMansLandCost ?? 3);
+    set('#ruleTerrain', s.terrain !== false); set('#ruleHills', s.hillsMoveCost ?? 1.5); set('#ruleMountains', s.mountainMoveCost ?? 4); set('#ruleMountainTroops', s.mountainTroopsCost ?? 1); set('#ruleWaive', s.waiveMovement); set('#ruleUpkeep', s.upkeep);
     set('#ruleUpkeepGrain', s.upkeepGrain); set('#ruleUpkeepOil', s.upkeepOil);
     set('#ruleBaseMoney', s.baseMoney); set('#ruleBaseRp', s.baseRp); set('#ruleBaseManpower', s.baseManpower);
     set('#rulePublic', s.publicTreasury); set('#ruleCapturedIdle', s.capturedIdle);
@@ -730,7 +731,8 @@ const GameUI = (() => {
     const { $ } = ctx;
     const v = id => Number($(id).value);
     const settings = {
-      kmPerMove: v('#ruleKmPerMove'), kmPerRange: v('#ruleKmPerRange'), noMansLandCost: v('#ruleNoMansLand'), waiveMovement: $('#ruleWaive').checked, upkeep: $('#ruleUpkeep').checked,
+      kmPerMove: v('#ruleKmPerMove'), kmPerRange: v('#ruleKmPerRange'), noMansLandCost: v('#ruleNoMansLand'),
+      terrain: $('#ruleTerrain').checked, hillsMoveCost: v('#ruleHills'), mountainMoveCost: v('#ruleMountains'), mountainTroopsCost: v('#ruleMountainTroops'), waiveMovement: $('#ruleWaive').checked, upkeep: $('#ruleUpkeep').checked,
       upkeepGrain: v('#ruleUpkeepGrain'), upkeepOil: v('#ruleUpkeepOil'),
       baseMoney: v('#ruleBaseMoney'), baseRp: v('#ruleBaseRp'), baseManpower: v('#ruleBaseManpower'), publicTreasury: $('#rulePublic').checked,
       capturedIdle: $('#ruleCapturedIdle').checked,

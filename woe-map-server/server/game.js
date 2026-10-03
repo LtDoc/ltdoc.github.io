@@ -537,37 +537,59 @@ function undoTurn(lobby) {
  * GMs, disabled game mode and the waive switch pass straight through.
  */
 /**
- * No Man's Land (areas drawn with that tag): every km walked across it costs settings.noMansLandCost km of movement.
- * A straight walk from (x0, y0) to (x1, y1), sampled every quarter map px: { cost, slowed (it crosses some), frac(budget)
- * (how far along the way, 0..1, that much movement gets it) }.
+ * The movement a straight walk from (x0, y0) to (x1, y1) costs, sampled every quarter map px:
+ *   - No Man's Land (areas drawn with that tag): each km inside costs settings.noMansLandCost km;
+ *   - hills and mountains (server/terrain.js, docs/TERRAIN.md), for a land unit or hero `marker`: hills cost
+ *     hillsMoveCost, mountains mountainMoveCost (mountain troops: neither, or mountainTroopsCost in the mountains);
+ *     tanks and artillery cannot enter mountains at all: the walk stops where they begin. One caught in the mountains
+ *     may still walk out of them, to a destination outside them (`opts.leave` false: not even that, for the walk
+ *     off a train).
+ * Returns { cost (Infinity when the end cannot be reached), slowed, reasons: ['nml' | 'hills' | 'mountains'],
+ * blocked (fraction of the way where it stops, or null), frac(budget) (how far along, 0..1, that much movement gets
+ * it, never past `blocked`), costTo(t) (movement to go a fraction t of the way) }.
  */
-function walkCost(lobby, settings, x0, y0, x1, y1) {
+function walkCost(lobby, settings, x0, y0, x1, y1, marker = null, opts = {}) {
   const dist = geo.distance(lobby, x0, y0, x1, y1), mult = Math.max(1, num(settings.noMansLandCost, 3));
-  const flat = { cost: dist, slowed: false, frac: b => (dist > 0 ? Math.min(1, b / dist) : 1) };
-  if (mult <= 1 || dist <= 0) return flat;
+  const flat = { cost: dist, slowed: false, reasons: [], blocked: null, frac: b => (dist > 0 ? Math.min(1, b / dist) : 1), costTo: t => dist * t };
+  if (dist <= 0) return flat;
   const lo = [Math.min(x0, x1), Math.min(y0, y1)], hi = [Math.max(x0, x1), Math.max(y0, y1)];
-  const polys = q.nmlAreas.all(lobby.id).map(r => access.safeJson(r.points)).filter(p => Array.isArray(p) && p.length >= 3).map(p => {
+  const polys = mult <= 1 ? [] : q.nmlAreas.all(lobby.id).map(r => access.safeJson(r.points)).filter(p => Array.isArray(p) && p.length >= 3).map(p => {
     const xs = p.map(v => v[0]), ys = p.map(v => v[1]);
     return { p, x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
   }).filter(b => b.x1 >= lo[0] && b.x0 <= hi[0] && b.y1 >= lo[1] && b.y0 <= hi[1]);
-  if (!polys.length) return flat;
-  const inside = (b, x, y) => {
-    if (x < b.x0 || x > b.x1 || y < b.y0 || y > b.y1) return false;
-    let c = false;
-    for (let i = 0, j = b.p.length - 1; i < b.p.length; j = i++) {
-      const [xi, yi] = b.p[i], [xj, yj] = b.p[j];
-      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c;
-    }
-    return c;
-  };
+  const terrain = require('./terrain');
+  const onFoot = marker && (marker.type === 'hero' || require('./territory').isLandUnit(marker)) && terrain.enabled(settings);
+  const ground = onFoot ? terrain.lookup(lobby) : null;
+  if (!polys.length && !ground?.any) return flat;
+  const kind = ground ? terrain.moveKind(marker) : 'normal';
   const n = Math.max(1, Math.min(4000, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 0.25))), w = new Float64Array(n);
-  let cost = 0, slowed = false;
+  let cost = 0, blocked = null, leaving = kind === 'blocked' && opts.leave !== false && ground.classAt(x0, y0) === terrain.MOUNTAINS && ground.classAt(x1, y1) !== terrain.MOUNTAINS;
+  const reasons = new Set();
   for (let i = 0; i < n; i++) {
-    const t = (i + 0.5) / n, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t, mud = polys.some(b => inside(b, x, y));
-    w[i] = dist / n * (mud ? mult : 1); cost += w[i]; slowed = slowed || mud;
+    const t = (i + 0.5) / n, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t, mud = polys.some(b => terrain.inside(b, x, y));
+    const cls = ground ? ground.classAt(x, y) : terrain.FLAT;
+    let tm = terrain.moveMult(settings, kind, cls);
+    if (tm === Infinity) {
+      if (leaving) tm = Math.max(1, num(settings.mountainMoveCost, 4));   // making its way out of the mountains it is in
+      else { blocked = Math.max(0, i - 0.5) / n; reasons.add('mountains'); break; }   // halt on the last open ground
+    } else leaving = false;
+    w[i] = dist / n * (mud ? mult : 1) * tm; cost += w[i];
+    if (mud) reasons.add('nml');
+    if (tm > 1) reasons.add(cls === terrain.MOUNTAINS ? 'mountains' : 'hills');
   }
-  if (!slowed) return flat;
-  return { cost, slowed, frac: budget => { let acc = 0; for (let i = 0; i < n; i++) { if (acc + w[i] >= budget) return (i + (budget - acc) / w[i]) / n; acc += w[i]; } return 1; } };
+  if (!reasons.size) return flat;
+  const end = blocked === null ? n : Math.ceil(blocked * n);
+  return {
+    cost: blocked === null ? cost : Infinity, slowed: true, reasons: [...reasons], blocked,
+    frac: budget => { let acc = 0; for (let i = 0; i < end; i++) { if (acc + w[i] >= budget) return Math.min(blocked ?? 1, (i + (budget - acc) / w[i]) / n); acc += w[i]; } return blocked ?? 1; },
+    costTo: t => { let acc = 0; const k = Math.min(end, t * n); for (let i = 0; i < Math.floor(k); i++) acc += w[i]; if (k % 1 && Math.floor(k) < end) acc += w[Math.floor(k)] * (k % 1); return acc; },
+  };
+}
+/** "slowed by No Man's Land and the hills" from walkCost reasons (without the stop at the mountains). */
+function slowText(reasons) {
+  const names = { nml: "No Man's Land", hills: 'the hills', mountains: 'the mountains' };
+  const list = (reasons || []).map(r => names[r]).filter(Boolean);
+  return list.length ? `slowed by ${list.length > 1 ? `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}` : list[0]}` : '';
 }
 
 /** Turns the dead of a fight lie on the field: the turn of the fight and the two after it. */
@@ -600,20 +622,25 @@ function checkMove(lobby, g, isGm, marker, x, y) {
   const remaining = Math.max(0, allowance - used);
   const unit = geo.isEarth(lobby) ? 'km' : (lobby.scale_label || 'units');
   if (remaining <= 0.01) return { error: `${marker.name} has no movement left this turn (${round(allowance)} ${unit} per turn)` };
-  const route = require('./rails').plan(lobby, g.settings, marker, x, y);
+  // Walking pays for the ground (No Man's Land, hills, mountains); the train is taken when it is cheaper than that.
+  const walkAll = walkCost(lobby, g.settings, marker.x, marker.y, x, y, marker);
+  const route = require('./rails').plan(lobby, g.settings, marker, x, y, walkAll.cost);
   if (!route && (err = wet(true))) return { error: `${marker.name}: ${err}` };
-  // Walking: No Man's Land costs several times its distance.
-  const walk = route ? null : walkCost(lobby, g.settings, marker.x, marker.y, x, y);
-  const cost = route ? route.cost : walk.cost, slowed = !!walk?.slowed;
-  if (cost <= remaining + 1e-6) return { x, y, clamped: false, movedKm: round(used + cost), cost, route, slowed, path: route ? route.path.map(p => [p[0], p[1]]) : null };
+  const walk = route ? null : walkAll;
+  const cost = route ? route.cost : walk.cost, slowed = !!walk?.slowed, slowNote = walk ? slowText(walk.reasons.filter(r => r !== 'mountains' || walk.blocked === null)) : '';
+  if (cost <= remaining + 1e-6) return { x, y, clamped: false, movedKm: round(used + cost), cost, route, slowed, slowNote, path: route ? route.path.map(p => [p[0], p[1]]) : null, costTo: walk ? walk.costTo : null };
   if (route) {
     const w = require('./rails').walk(lobby, route.path, remaining);
-    return { x: round(w.x), y: round(w.y), clamped: true, movedKm: round(allowance), remaining, dist: round(cost), cost, route, path: w.points };
+    return { x: round(w.x), y: round(w.y), clamped: true, movedKm: round(allowance), remaining, dist: round(cost), cost, route, path: w.points, t: w.spent / cost };
   }
   const t = walk.frac(remaining), cx = round(marker.x + (x - marker.x) * t), cy = round(marker.y + (y - marker.y) * t);
+  const stopped = walk.blocked !== null && t >= walk.blocked - 1e-9;   // halted by mountains it cannot enter, not by its allowance
+  if (stopped && t < 1e-3) return { error: `${marker.name} cannot enter the mountains: tanks and artillery go round them or by rail` };
   // Run out of movement part-way: not in the middle of a strait.
   if (landUnit && territory.landCourseError(lobby, cx, cy, cx, cy, false)) return { error: `${marker.name} would stop in the water short of the far shore: move it to the near side first` };
-  return { x: cx, y: cy, clamped: true, movedKm: round(allowance), remaining, dist: round(cost), cost, slowed };
+  const spent = walk.costTo(t);
+  return { x: cx, y: cy, clamped: true, movedKm: round(used + spent), remaining, dist: Number.isFinite(cost) ? round(cost) : null, cost: spent, slowed, slowNote, t,
+    stopped: stopped ? `${marker.name} stopped where the mountains begin: tanks and artillery cannot cross them except by rail` : null, costTo: walk.costTo };
 }
 
 /** Attack reach of a unit in campaign units: (range + tech bonus) × kmPerRange. */
@@ -646,7 +673,7 @@ const PROTECTED_UNIT_FIELDS = ['attack', 'defend', 'ap', 'range', 'movement', 's
 module.exports = {
   REMAINS_TURNS,
   get, save, serializeGame, ensureState, serializeState, writeState, factionStates, incomeFor, endTurn, undoTurn, reports,
-  checkMove, checkAttack, checkRange, attackRange, PROTECTED_UNIT_FIELDS, emptyResources, q, applySupply, applyAttrition,
+  checkMove, walkCost, checkAttack, checkRange, attackRange, PROTECTED_UNIT_FIELDS, emptyResources, q, applySupply, applyAttrition,
   relationStatus, setRelation, relations, diplomacy, serializeDiplomacy, factionEffects,
   TRADE_KEYS, trades, serializeTrade, exchange, shortOf, goodsText, goodName, cancelTradesBetween,
 };

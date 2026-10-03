@@ -36,6 +36,10 @@ const GameData = (() => {
   const DEFAULT_SETTINGS = {
     kmPerMove: 50,            // km (or map units on image maps) per movement point per turn
     noMansLandCost: 3,        // walking across No Man's Land (areas with that tag) costs this many times the distance
+    terrain: true,            // hills and mountains (docs/TERRAIN.md): movement, combat, supply and sight
+    hillsMoveCost: 1.5,       // walking across hills costs this many times the distance (mountain troops: 1)
+    mountainMoveCost: 4,      // walking across mountains costs this many times the distance; tanks and artillery cannot enter
+    mountainTroopsCost: 1,    // mountain troops in the mountains
     waiveMovement: false,     // GM switch: nobody is limited
     captureRadiusKm: 30,      // phase 2: ground taken around an advancing land unit (halved 27 Sep 2026: one unit should not take a country)
     cityRadiusKm: 75,         // phase 2: district that changes hands with a major city

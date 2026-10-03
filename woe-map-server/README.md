@@ -349,6 +349,13 @@ right-click to remove one, Move to shift it. Every change is in History.
 `world_<year>.geojson` files from historical-basemaps (it has years from 123,000 BC to 2010) and every year found
 appears in the Borders list.
 
+**Hills and mountains** ([docs/TERRAIN.md](docs/TERRAIN.md)). The Earth map knows its relief from NASA's Blue Marble
+elevation grid (`public/earth/terrain.bin.gz`, 2.1 MB, public domain): every 7 km cell is flat, hills or mountains.
+Walking across hills costs 1.5× the distance and mountains 4× (⚖ Rules → Movement); Mountain Regiments cross both at
+full pace. Tank Battalions and artillery cannot enter mountains at all: they stop where the mountains begin, and cross
+a range only by **rail**, which runs through hills and mountains at its usual speed for everyone. On image maps the
+GM paints the ground: an area's dialog has *Ground* → Hills or Mountains.
+
 ### History and revert
 
 Every create, edit, move and delete of a marker or drawing is recorded with its full before/after state. The

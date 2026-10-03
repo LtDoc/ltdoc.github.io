@@ -313,6 +313,8 @@
         <div id="nmlFields" hidden>
           <label class="inline"><input type="checkbox" id="shapeNoMansLand"> No Man's Land</label>
           <p class="hint">Churned mud, shell holes, wire and the dead between the lines. Walking across it costs several times the distance (⚖ Rules → Movement); while the game is running only the GM can set this.</p>
+          <label>Ground <select id="shapeTerrain"><option value="">As the map</option><option value="hills">Hills</option><option value="mountains">Mountains</option></select></label>
+          <p class="hint">Hills and mountains for maps without elevation (Earth maps have their own): slow movement, and tanks and artillery cannot enter mountains except by rail (⚖ Rules → Movement).</p>
         </div>
         <p id="railFields" class="hint" hidden>Land units and heroes move several times faster along open track (⚖ Rules → Railways). Rails whose ends touch are joined; start or end a line on other track to branch off it. GM-only railways are plans: nothing runs on them.</p>
         <div id="shapeGmFields">
@@ -625,6 +627,12 @@
                 <label>Attack reach per range point <span class="hint">(infantry 1, cavalry 2, artillery 3)</span><input id="ruleKmPerRange" type="number" step="any" min="1"></label>
               </div>
               <label>No Man's Land movement cost <span class="hint">(× distance walked inside areas tagged No Man's Land)</span><input id="ruleNoMansLand" type="number" step="any" min="1" max="20"></label>
+              <label class="inline"><input type="checkbox" id="ruleTerrain"> Hills and mountains <span class="hint">(slow movement; tanks and artillery cannot enter mountains except by rail)</span></label>
+              <div class="grid3">
+                <label>Hills cost <span class="hint">(× distance)</span><input id="ruleHills" type="number" step="any" min="1" max="20"></label>
+                <label>Mountains cost <span class="hint">(× distance)</span><input id="ruleMountains" type="number" step="any" min="1" max="50"></label>
+                <label>Mountain troops in mountains <span class="hint">(× distance; hills: 1)</span><input id="ruleMountainTroops" type="number" step="any" min="1" max="20"></label>
+              </div>
               <label class="inline"><input type="checkbox" id="ruleWaive"> Waive movement and range limits</label>
             </section>
             <section data-page="r-economy" hidden>
