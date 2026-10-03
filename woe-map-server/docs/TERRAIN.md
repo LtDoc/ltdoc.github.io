@@ -119,8 +119,8 @@ under towns, drawings and units:
   per idle moment.
 - **Image maps:** the painted Hills / Mountains areas get a light brown or ochre wash.
 - **Close in** (fading in from 250 % to 350 % on the Earth, three times sooner on image maps): **mountain and hill
-  sprites** laid out as ranges. The art is the user's two sheets (, ), cut by
-   into  (21 mountains, 21 hills; the glacier,
+  sprites** laid out as ranges. The art is the user's two sheets (`rob assets/Mountains.png`, `Hills.png`), cut by
+  `node scripts/build-terrain.js "rob assets"` into `public/assets/terrain.png` (21 mountains, 21 hills; the glacier,
   the snow-patched hill and the two with figures on them are left out, and the sheets' light sticker rim is peeled
   off). The build measures each sprite's snow, green and rock and how brown its rock is.
   - **Range layout:** candidate spots on a lattice fixed to the map (1.6 map px apart, jittered) are taken **highest
@@ -128,7 +128,7 @@ under towns, drawings and units:
     crests, ± 18 %), and a spot is skipped if it would stand closer to a placed sprite than 42 % of their mean width.
     So the crest gets a few big peaks, the flanks medium ones and the edges small ones, overlapping like a range;
     hills follow (7–12 px, 62 %). Nearer sprites (lower on the screen) are drawn in front.
-  - **Which sprite:** snowy sprites where the snow lies (), lightly snowed ones near the snow line, bare rock
+  - **Which sprite:** snowy sprites where the snow lies (`snowAt`), lightly snowed ones near the snow line, bare rock
     below, and now and then the green alpine one on lower mountains. Within each set the pick follows a smooth field
     about 200 km across, from grey to brown rock, so a stretch of range shares a colour (grey central Alps, browner
     Maritime Alps) instead of a patchwork.
