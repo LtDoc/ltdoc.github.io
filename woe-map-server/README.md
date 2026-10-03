@@ -358,10 +358,9 @@ higher ground than its attacker gains +1 defend on hills and +2 in mountains (fr
 supply lines (a line may cross 10 km of them, 50 km to mountain troops) unless a railway carries supply through. Under fog
 of war they block sight: a range hides whatever is beyond its crest until it climbs into view (aircraft and balloons see
 over them). On image maps the
-GM paints the ground: an area's dialog has *Ground* → Hills or Mountains. The map shows the relief: shaded slopes and
-snow-capped ranges at every zoom (the Alps, Rockies and Sierra Nevada are white-topped), and from 250 % mountain and hill
-sprites laid out as ranges, the biggest snow-capped peaks on the crests (`scripts/build-terrain.js` builds the atlas from
-`rob assets/Mountains.png` and `Hills.png`).
+GM paints the ground: an area's dialog has *Ground* → Hills or Mountains. The map shows the relief as shaded
+slopes, and from 220 % a few mountain clusters along each range (snow-tipped on the high crests) with trees at their
+feet; hills have no drawing of their own (`scripts/build-terrain.js` builds the atlas from `rob assets/Terrain Assets`).
 
 ### History and revert
 

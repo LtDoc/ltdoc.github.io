@@ -108,31 +108,28 @@ French foothills, units on the north slope and the crest are seen, the Spanish s
 ## How it looks
 
 `public/js/relief.js` draws the ground over the land and the territory colours (so it reads whoever holds it) and
-under towns, drawings and units:
+under towns, drawings and units. Less is more: only the shading and a few mountain clusters with trees at their
+feet. **Hills have no drawing of their own** (their rules stand); they show only through the shading. Painted Hills
+areas show only as the drawing itself.
 
-- **Earth maps, every zoom:** a hillshade of the grid lit from the north-west (exaggerated 28×; a small dead zone
-  keeps the plains calm), a faint brown wash on mountains and ochre on hills, and **snow caps**: white where a cell's
-  3 × 3 average height is above the snow line *and* it stands well above the ground round it, so the high Alps, the
-  Sierra Nevada crest, the Rockies, the Caucasus and the Pyrenees are white-topped while high plateaus (Tibet, the
-  Altiplano) mostly are not. The snow line (`Terrain.snowLine`) falls with latitude: about 4000 m at 30°, 2900 m at
-  38°, 2100 m at 46°, 1450 m at 61°. It is built once per map in 900-cell tiles, sea-only tiles skipped, one tile
-  per idle moment.
-- **Image maps:** the painted Hills / Mountains areas get a light brown or ochre wash.
-- **Close in** (fading in from 250 % to 350 % on the Earth, three times sooner on image maps): **mountain and hill
-  sprites** laid out as ranges. The art is the user's two sheets (`rob assets/Mountains.png`, `Hills.png`), cut by
-  `node scripts/build-terrain.js "rob assets"` into `public/assets/terrain.png` (21 mountains, 21 hills; the glacier,
-  the snow-patched hill and the two with figures on them are left out, and the sheets' light sticker rim is peeled
-  off). The build measures each sprite's snow, green and rock and how brown its rock is.
-  - **Range layout:** candidate spots on a lattice fixed to the map (1.6 map px apart, jittered) are taken **highest
-    ground first**; each becomes a sprite sized by its height (5.5 map px wide in the foothills up to 18 on the
-    crests, ± 18 %), and a spot is skipped if it would stand closer to a placed sprite than 42 % of their mean width.
-    So the crest gets a few big peaks, the flanks medium ones and the edges small ones, overlapping like a range;
-    hills follow (7–12 px, 62 %). Nearer sprites (lower on the screen) are drawn in front.
-  - **Which sprite:** snowy sprites where the snow lies (`snowAt`), lightly snowed ones near the snow line, bare rock
-    below, and now and then the green alpine one on lower mountains. Within each set the pick follows a smooth field
-    about 200 km across, from grey to brown rock, so a stretch of range shares a colour (grey central Alps, browner
-    Maritime Alps) instead of a patchwork.
-  - Built per 64 px chunk (with a margin so neighbouring chunks agree), ten new chunks a frame at most, a few hundred
-    kept; about 5000 sprites in view at 350 % still draw at full frame rate. On image maps sizes, spacing and chunks are
-    three times larger, to suit their bigger map pixels. Painted areas have no heights, so the depth inside the
-    area stands in for one: its spine is the crest (the biggest, snow-capped peaks), its edges the foothills.
+- **Earth maps, every zoom:** a hillshade of the grid lit from the north-west (exaggerated 28×, heights smoothed over
+  3 × 3 cells, a small dead zone so the plains stay calm): shadowed slopes darken, lit ones lighten a little. No
+  tints or snow overlay. Built once per map in 900-cell tiles, sea-only tiles skipped, one tile per idle moment.
+- **Close in** (fading in from 220 % to 300 % on the Earth, three times sooner on image maps): the user's mountain
+  and tree sprites from `rob assets/Terrain Assets`, packed by `node scripts/build-terrain.js "rob assets/Terrain Assets"`
+  into `public/assets/terrain.png`: `gl1`–`gl5` (snow-tipped), `p1`–`p5` (bare), each from a single peak to a
+  broad cluster of peaks, and the trees `dl1`–`dl3`, `dp1`–`dp3` and the deciduous grove.
+  - **Mountains:** candidate spots on a lattice fixed to the map (3 map px apart, jittered) are taken **highest
+    ground first**. Each picks a sprite by height (single peaks low, broad clusters on the crests), snow-tipped where
+    the snow lies (`snowAt`: the 3 × 3 average height above the snow line, which falls with latitude: about 4000 m at
+    30°, 2900 m at 38°, 2100 m at 46°, 1450 m at 61°), bare below, drawn at its own width (the broadest 30 map px).
+    A cluster that would spill well off the mountains steps down a size; a spot that would stand closer to a placed
+    sprite than their mean width is skipped, and a third of the low spots are dropped. So a range gets a few
+    clusters along its spine with gaps between, not a carpet.
+  - **Trees** stand round the foot of the ranges: ground below 1400 m with mountains within about 20 km (fewer in the
+    dry subtropics, 14°–36°), sparse stands, mostly the bigger ones, kept clear of the mountain sprites, so the
+    ranges meet the plain.
+  - Nearer sprites (lower on the screen) are drawn in front. Built per 64 px chunk (with a margin so neighbouring
+    chunks agree), ten new chunks a frame at most, a few hundred kept. On image maps sizes, spacing and chunks are
+    three times larger. Painted Mountains areas have no heights, so the depth inside the area stands in for one: its
+    spine takes the broad snow-tipped clusters, its edge band the trees.
