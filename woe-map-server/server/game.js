@@ -537,7 +537,17 @@ function checkMove(lobby, g, isGm, marker, x, y) {
     const err = require('./territory').shipCourseError(lobby, marker.x, marker.y, x, y);
     if (err) return { error: `${marker.name}: ${err}` };
   }
-  if (!g.enabled || isGm || g.settings.waiveMovement || !['unit', 'hero'].includes(marker.type)) return { x, y, clamped: false };
+  // Land units keep off the water for players in any mode (seas and lakes need a convoy); the GM can place them
+  // anywhere. The end must be on land; walking, the way there must not cross open water (by rail, the track decides).
+  const territory = require('./territory');
+  const landUnit = !isGm && territory.isLandUnit(marker);
+  const wet = direct => (landUnit ? territory.landCourseError(lobby, marker.x, marker.y, x, y, direct) : null);
+  let err = wet(false);
+  if (err) return { error: `${marker.name}: ${err}` };
+  if (!g.enabled || isGm || g.settings.waiveMovement || !['unit', 'hero'].includes(marker.type)) {
+    if ((err = wet(true))) return { error: `${marker.name}: ${err}` };
+    return { x, y, clamped: false };
+  }
   if (marker.type === 'unit' && marker.data?.supplied === false && g.settings.supplyEnabled !== false) return { error: `${marker.name} is out of supply and cannot move until a Supply Column reaches it` };
   const dist = geo.distance(lobby, marker.x, marker.y, x, y);
   if (dist < 1e-6) return { x, y, clamped: false };
@@ -548,14 +558,17 @@ function checkMove(lobby, g, isGm, marker, x, y) {
   const unit = geo.isEarth(lobby) ? 'km' : (lobby.scale_label || 'units');
   if (remaining <= 0.01) return { error: `${marker.name} has no movement left this turn (${round(allowance)} ${unit} per turn)` };
   const route = require('./rails').plan(lobby, g.settings, marker, x, y);
+  if (!route && (err = wet(true))) return { error: `${marker.name}: ${err}` };
   const cost = route ? route.cost : dist;
   if (cost <= remaining + 1e-6) return { x, y, clamped: false, movedKm: round(used + cost), cost, route, path: route ? route.path.map(p => [p[0], p[1]]) : null };
   if (route) {
     const w = require('./rails').walk(lobby, route.path, remaining);
     return { x: round(w.x), y: round(w.y), clamped: true, movedKm: round(allowance), remaining, dist: round(cost), cost, route, path: w.points };
   }
-  const t = remaining / dist;
-  return { x: round(marker.x + (x - marker.x) * t), y: round(marker.y + (y - marker.y) * t), clamped: true, movedKm: round(allowance), remaining, dist: round(dist), cost };
+  const t = remaining / dist, cx = round(marker.x + (x - marker.x) * t), cy = round(marker.y + (y - marker.y) * t);
+  // Run out of movement part-way: not in the middle of a strait.
+  if (landUnit && territory.landCourseError(lobby, cx, cy, cx, cy, false)) return { error: `${marker.name} would stop in the water short of the far shore: move it to the near side first` };
+  return { x: cx, y: cy, clamped: true, movedKm: round(allowance), remaining, dist: round(dist), cost };
 }
 
 /** Attack reach of a unit in campaign units: (range + tech bonus) × kmPerRange. */

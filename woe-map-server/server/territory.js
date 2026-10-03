@@ -281,6 +281,35 @@ function shipCourseError(lobby, x0, y0, x1, y1) {
   }
   return null;
 }
+/**
+ * Where a land unit may go: the end on land, and no stretch of water on the way wider than a strait (STRAIT_KM: the
+ * Bosporus, the Dardanelles, Messina, the Danish sounds), so seas and lakes need a convoy. The coastline is coarse,
+ * so a port can lie a few km out in the "sea": an end within SHORE_KM of land counts as ashore, and a unit starting
+ * in the water may cross a strait's width plus however far out it stands (enough to wade ashore, not to cross the
+ * Channel from Dover). `direct` false (it goes by rail) checks only the end. Returns an error string or null.
+ */
+const STRAIT_KM = 20, SHORE_KM = 8;
+function landCourseError(lobby, x0, y0, x1, y1, direct = true) {
+  const m = landMask(lobby);
+  if (!m) return null;
+  const ashoreAt = (x, y) => isLand(lobby, x, y) || landAt(lobby, x, y) || !!nearestLand(lobby, x, y, SHORE_KM);
+  if (!ashoreAt(x1, y1)) return 'Land units cannot move onto water: embark on a convoy to cross the sea';
+  if (!direct) return null;
+  const steps = Math.ceil(Math.hypot(x1 - x0, y1 - y0) / (m.cell / 2));
+  // Starting in the water: the first stretch may be as wide as a strait plus the way ashore.
+  let wetFrom = null, limit = STRAIT_KM;
+  if (!isLand(lobby, x0, y0) && !landAt(lobby, x0, y0)) {
+    const shore = nearestLand(lobby, x0, y0, 400);
+    wetFrom = [x0, y0]; limit = STRAIT_KM + (shore ? shore.d || 0 : 400);
+  }
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t;
+    if (!(i === steps || landAt(lobby, x, y))) { if (!wetFrom) wetFrom = [x, y]; continue; }
+    if (wetFrom && geo.distance(lobby, wetFrom[0], wetFrom[1], x, y) > limit) return 'Land units cannot cross open water: go round by land, or embark on a convoy';
+    wetFrom = null; limit = STRAIT_KM;
+  }
+  return null;
+}
 /** The nearest water point to (x, y) within `maxPx` (searching outwards), or null. For launching new ships. */
 /**
  * The nearest land to a point (a beach to put troops ashore), no further than maxKm, or null. On image maps (no
@@ -605,5 +634,5 @@ function capture(lobby, g, unit, factions, markers, relation) {
   return { held: false, changed, owners, flips, cities: cities.map(c => c.name), owner, mine };
 }
 
-module.exports = { assignHistory, historyNames, landMask, landAt, nearWater, shipCourseError, nearestWater, nearestLand, NEUTRAL, all, write, clear, carve, circle, landClip, ownerAt, seedFromYear, assignArea, brush, ownershipChanges, capture, isLandUnit, earthYears, clean,
+module.exports = { assignHistory, historyNames, landMask, landAt, nearWater, shipCourseError, landCourseError, nearestWater, nearestLand, NEUTRAL, all, write, clear, carve, circle, landClip, ownerAt, seedFromYear, assignArea, brush, ownershipChanges, capture, isLandUnit, earthYears, clean,
   trenchOwner, trenchOwnershipChanges, trenchCover, distanceToPath, isLand, isCoastal, landFor, lakesFor, loadGz, world, bboxOf, pointInMulti, overlaps, ownerLookup };

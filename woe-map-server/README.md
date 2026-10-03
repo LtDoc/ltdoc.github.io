@@ -702,7 +702,14 @@ provinces each landing point is tested, otherwise the server says whether the ta
 **Ships stay at sea.** A player's ship may only move to water or a coastal spot (within about 10–15 km of the
 sea, for harbours), and its straight course may not cross land ("go round by sea"); the GM is exempt. New ships
 are launched on the nearest water to their shipyard. The test uses a cached land raster (2 map px per cell)
-built from the bundled Natural Earth land in about 40 ms (`territory.landMask`). Outside game mode, where there are no turns, they last five minutes.
+built from the bundled Natural Earth land in about 40 ms (`territory.landMask`).
+
+**Land units stay ashore.** A player's land unit may only move to land (anywhere within 8 km of it counts, as the
+coastline is coarse and ports can lie just off it), and walking there it may not cross open water wider than a
+strait (20 km: the Bosporus, the Dardanelles, Messina, the Danish sounds pass; the Channel, the seas and lakes such
+as Lake Michigan need a convoy). By rail only the end is tested (the track decides the way). A unit already in the
+water may cross a strait's width plus however far out it stands, enough to wade ashore. Units aboard a convoy move
+with it, and the GM is exempt (`territory.landCourseError`, in `game.checkMove`). Outside game mode, where there are no turns, they last five minutes.
 
 The sheets are `public/assets/explosion.png` (hits: one row of 8 frames of 128 px), `public/assets/shellburst.png`
 (shelling: one row of 7 frames of 128 px) and `public/assets/burning.webp` (8×8 frames of 128 px); any sheet of
