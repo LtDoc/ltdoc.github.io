@@ -56,7 +56,7 @@ track across the map.
 
 ## Attacking a railway
 
-**Attack…** on a unit lists railway sections within its reach under **Railways**: for each line, the nearest
+**⛓ Cut railway…** in a unit's panel lists railway sections within its reach: for each line, the nearest
 open section on the ground of a power it is at war with ("Cut"), and the nearest section of its own side's
 track ("Blow up"). Neutral ground and powers you are at peace with are off limits (the GM is exempt).
 

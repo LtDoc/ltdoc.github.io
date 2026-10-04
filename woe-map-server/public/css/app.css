@@ -194,6 +194,27 @@ label.tight select, label.tight input { margin: 0; }
 .tw-main { font: 700 14px Georgia, serif; letter-spacing: .06em; text-transform: uppercase; padding: 9px 14px; border-radius: 8px;
   background: linear-gradient(#c0392b, #8e2a20); border: 1px solid #000; box-shadow: inset 0 1px 0 rgba(255,255,255,.2); }
 .tw-main.ready-btn { background: linear-gradient(#d68a2a, #a35f12); }
+.tw-main.battle-btn { background: linear-gradient(#b03a2e, #7b241c); }
+.tw-info .tw-phase { font-size: 12px; font-weight: 600; letter-spacing: .04em; }
+.tw-info .tw-phase:empty { display: none; }
+.tw-info .tw-phase.move { color: #9fd3a8; }
+.tw-info .tw-phase.battle { color: #ff8f7a; }
+/* Phase change banner over the map (phased turns) */
+#phaseBanner { position: absolute; top: 22%; left: 50%; transform: translate(-50%, -50%); z-index: 6; pointer-events: none; text-align: center;
+  padding: 14px 34px; border-radius: 10px; background: rgba(16,22,30,.88); border: 1px solid rgba(212,168,75,.6); box-shadow: 0 10px 40px rgba(0,0,0,.6);
+  font: 700 26px Georgia, serif; letter-spacing: .12em; text-transform: uppercase; color: var(--gold2); animation: phaseIn 3.2s ease forwards; }
+#phaseBanner[hidden] { display: none; }
+#phaseBanner small { display: block; margin-top: 4px; font: 400 13px system-ui, sans-serif; letter-spacing: 0; text-transform: none; color: #cfd8e0; }
+#phaseBanner.battle { border-color: rgba(231,76,60,.75); color: #ff8f7a; }
+@keyframes phaseIn { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.92); } 12% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 80% { opacity: 1; } 100% { opacity: 0; } }
+/* Selection bar: what can be done with several selected units (corps) */
+#selBar { position: absolute; bottom: 64px; left: 50%; transform: translateX(-50%); z-index: 4; display: flex; gap: 6px; align-items: center;
+  padding: 6px 10px; border-radius: 8px; background: rgba(26,37,48,.95); border: 1px solid var(--line); white-space: nowrap; max-width: calc(100% - 20px); }
+#selBar[hidden] { display: none; }
+#selBar select { max-width: 160px; }
+.corpslist .corps { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 5px 0; border-top: 1px solid var(--line); }
+.corpslist .corps:first-child { border-top: 0; }
+.corpslist .corps b { flex: 1 1 auto; }
 .tw-main.ready-btn.done { background: linear-gradient(#2e9e5b, #1d6e3e); }
 #turnWidget.allready #btnEndTurn { animation: twPulse 1.6s ease-in-out infinite; }
 @keyframes twPulse { 50% { box-shadow: 0 0 0 4px rgba(46,204,113,.45), inset 0 1px 0 rgba(255,255,255,.2); } }

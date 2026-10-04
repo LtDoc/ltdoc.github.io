@@ -95,6 +95,9 @@ class MapRenderer extends EventTarget {
     this.lakeG.eventMode = 'none';
     this.lakeShoreG = new PIXI.Graphics();
     this.lakeShoreG.eventMode = 'none';
+    this.fieldLayer = new PIXI.Container();     // resource nodes' works drawn from above (resource-art.js), under the towns
+    this.fieldLayer.eventMode = 'none';
+    this.fieldSites = new Map();                 // resource marker id -> { key, m, plan, g, detail, dirty }
     this.townLayer = new PIXI.Container();      // towns drawn from above (towns.js), at map scale, under craters and counters
     this.townLayer.eventMode = 'none';
     this.towns = new Map();                      // town marker id -> { key, m, plan, g, fires, dirty }
@@ -142,7 +145,7 @@ class MapRenderer extends EventTarget {
     this.ghostLayer = new PIXI.Container(); this.ghostLayer.eventMode = 'none'; // fog of war: last known enemy positions
     this.rideLayer = new PIXI.Container(); this.rideLayer.eventMode = 'none';   // trains carrying units on a rail trip
     this.rides = new Map();                                                      // unit id -> rail trip being played
-    this.world.addChild(...[this.mapLayer, this.territoryLayer, this.lakeG, this.lakeShoreG, this.gridLayer, this.townLayer, this.scarLayer, this.nml?.layer, this.snowG, this.sceneryLayer, this.craterLayer, this.craterSmokeG, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.fogLayer, this.skirmish?.layer, this.gunG, this.unitDots, this.ghostLayer, this.rideLayer].filter(Boolean), this.markerLayer, this.boomLayer, ...(this.skirmish ? [this.skirmish.airLayer] : []), this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
+    this.world.addChild(...[this.mapLayer, this.territoryLayer, this.lakeG, this.lakeShoreG, this.gridLayer, this.fieldLayer, this.townLayer, this.scarLayer, this.nml?.layer, this.snowG, this.sceneryLayer, this.craterLayer, this.craterSmokeG, this.trenchLayer, this.railLayer, this.shapesLayer, this.trailG, this.fxLayer, this.fogLayer, this.skirmish?.layer, this.gunG, this.unitDots, this.ghostLayer, this.rideLayer].filter(Boolean), this.markerLayer, this.boomLayer, ...(this.skirmish ? [this.skirmish.airLayer] : []), this.arcG, this.overlayLayer, this.pingLayer, this.handleLayer);
     app.stage.addChild(this.world, this.weatherG, this.pingArrows);
 
     app.stage.eventMode = 'static';
@@ -285,10 +288,11 @@ class MapRenderer extends EventTarget {
     this.lakeStyle = st;
     for (const { rings } of list) {
       this.lakeG.poly(rings[0].flat()).fill(st.lake);
-      for (let i = 1; i < rings.length; i++) this.lakeG.poly(rings[i].flat()).cut();
+      cutHoles(this.lakeG, rings);
     }
     this._drawLakeShores();
     for (const t of this.towns.values()) { t.g?.destroy(); t.g = null; t.plan = null; t.fires = []; }
+    for (const f of this.fieldSites.values()) { f.g?.destroy(); f.g = null; f.plan = null; }
     this.invalidate();
   }
   /** The lakes' shores: a thin line the same width on screen at any zoom (redrawn on zoom). */
@@ -495,9 +499,12 @@ class MapRenderer extends EventTarget {
     if (this.lakes) this._drawLakeShores();
     if (this._aura) this._drawAura();
     if (this._supplyPts) this._drawSupplyLine();
+    if (this._marches) this._drawMarches();
+    if (this._corps) this._drawCorpsLine();
     if (this.persistTrails) this.queueTrails();
     this._syncCraterZoom();
-    if (this._range) { const r = this._range; this.showRange(r.x, r.y, r.radius, r.exhausted, r.ry); }
+    if (this._range) { const r = this._range; this.showRange(r.x, r.y, r.radius, r.exhausted, r.ry, r.reach); }
+    if (this._fire) this._drawFireRange();
     if (this.earth) {
       clearTimeout(this._earthTimer);
       this._earthTimer = setTimeout(() => { if (this.earth) { this.earth.redraw(this.scale); this.invalidate(); } }, 120);
@@ -527,6 +534,7 @@ class MapRenderer extends EventTarget {
     this.invalidate();
     if (marker.type === 'unit') this._dotsDirty = true;
     this._townUpsert(marker);
+    this._fieldUpsert(marker);
     let v = this.views.get(marker.id);
     if (v && v.dying) { v.root.parent?.removeChild(v.root); v.root.destroy({ children: true }); v = null; }
     if (!v) {
@@ -551,6 +559,7 @@ class MapRenderer extends EventTarget {
     if (this.persistTrails) this.queueTrails();
     this._syncCraterZoom();
     this._townRemove(id);
+    this._fieldRemove(id);
     const v = this.views.get(id);
     if (v) {
       v.dying = true;
@@ -563,6 +572,7 @@ class MapRenderer extends EventTarget {
     for (const v of this.views.values()) { v.root.parent?.removeChild(v.root); v.root.destroy({ children: true }); }
     this.views.clear();
     for (const id of [...this.towns.keys()]) this._townRemove(id);
+    for (const id of [...this.fieldSites.keys()]) this._fieldRemove(id);
   }
 
   // ---- Weather ----------------------------------------------------------------------------------------------
@@ -601,7 +611,7 @@ class MapRenderer extends EventTarget {
     for (const [lv, list] of levels) for (const multi of list) for (const poly of multi) {
       if (!poly.length) continue;
       this.snowG.poly(poly[0].flat()).fill({ color: 0xf4f6f8, alpha: 0.1 * lv });
-      for (let i = 1; i < poly.length; i++) this.snowG.poly(poly[i].flat()).cut();
+      cutHoles(this.snowG, poly);
     }
   }
   /** Snow or rain falling over the view (screen space), from 400 % zoom. Returns true while it falls. */
@@ -685,6 +695,84 @@ class MapRenderer extends EventTarget {
     }
     t.dirty = false;
   }
+  // ---- Resource works ---------------------------------------------------------------------------------------
+  // Every resource node is drawn as its works from above (resource-art.js): fields, pits, derricks, forest… grown from
+  // its name, its yield and its improvements; built the first time it comes into view (a few a frame), like towns.
+  // Works stay off the towns' streets and houses, and towns lay no fields of their own over the works.
+  _fieldUpsert(m) {
+    if (m.type !== 'resource' || !window.ResourceArt) { if (this.fieldSites.has(m.id)) this._fieldRemove(m.id); return; }
+    const key = `${m.data?.kind}|${m.name}|${m.x}|${m.y}|${m.data?.yield}|${m.data?.improved || 0}`, f = this.fieldSites.get(m.id);
+    if (f && f.key === key) return;
+    if (f) this._fieldRemove(m.id);
+    const site = { key, m: { id: m.id, name: m.name, x: m.x, y: m.y, data: { kind: m.data?.kind, yield: m.data?.yield, improved: m.data?.improved } }, plan: null, g: null, dirty: false };
+    site.R = window.ResourceArt.radius(site.m);
+    this.fieldSites.set(m.id, site);
+    this._replanTownsNear(site);
+  }
+  _fieldRemove(id) {
+    const f = this.fieldSites.get(id);
+    if (!f) return;
+    f.g?.destroy();
+    this.fieldSites.delete(id);
+    this._replanTownsNear(f);
+  }
+  /** Towns near works that appeared, grew or went lay out their fields again. */
+  _replanTownsNear(f) {
+    for (const t of this.towns.values()) {
+      if (!t.plan || Math.hypot(t.m.x - f.m.x, t.m.y - f.m.y) > f.R * 1.2 + t.plan.reach) continue;
+      t.g?.destroy(); t.g = null; t.plan = null; t.fires = [];
+    }
+    this.invalidate();
+  }
+  /** Is a map point on a resource node's works (their fields keep towns' fields off)? */
+  _inWorks(x, y) {
+    for (const f of this.fieldSites.values()) if (Math.abs(x - f.m.x) < f.R && Math.abs(y - f.m.y) < f.R && Math.hypot(x - f.m.x, y - f.m.y) < f.R * 0.9) return true;
+    return false;
+  }
+  /** Is a map point in a town's dense centre? Works keep off it (they may reach into its outskirts, drawn under them). */
+  _inTown(x, y) {
+    const K = window.TownArt?.KINDS;
+    if (!K) return false;
+    for (const t of this.towns.values()) {
+      const r = (K[t.m.data?.size] || K.village).R * 0.7;
+      if (Math.abs(x - t.m.x) < r && Math.abs(y - t.m.y) < r && Math.hypot(x - t.m.x, y - t.m.y) < r) return true;
+    }
+    return false;
+  }
+  /** Each frame: works shown from 150 % zoom, those in view built (a little at a time) or redrawn as needed. */
+  _tickFields(vx0, vy0, vx1, vy1) {
+    const on = this.scale >= 1.5 && this.fieldSites.size > 0;
+    this.fieldLayer.visible = on;
+    if (!on) return false;
+    if (this._fieldTex === undefined) {
+      // The wheat textures arrive once; grain fields are drawn plain until then, then again with them.
+      this._fieldTex = null;
+      window.ResourceArt.textures().then(t => { this._fieldTex = t; if (t) { for (const f of this.fieldSites.values()) if (f.plan && ['grain'].includes(f.plan.kind)) f.dirty = true; this.invalidate(); } });
+    }
+    const t0 = performance.now(), detail = this.scale >= 5;
+    let built = 0, pending = false;
+    const isLand = (x, y) => (!(this.provinceLayer && this.provinceLayer.size) || !!this.provinceAt(x, y)) && !this._inLake(x, y);
+    const isFree = (x, y) => !this._inTown(x, y);
+    for (const f of this.fieldSites.values()) {
+      const m = f.m, reach = f.plan ? f.plan.reach : f.R * 1.4 + 0.5;
+      const inView = m.x + reach > vx0 && m.x - reach < vx1 && m.y + reach > vy0 && m.y - reach < vy1;
+      if (!inView) { if (f.g) f.g.visible = false; continue; }
+      if (!f.plan || f.dirty || f.detail !== detail) {
+        if (built && performance.now() - t0 > 8) { pending = true; continue; }
+        built++;
+        if (!f.plan) f.plan = window.ResourceArt.plan(m, isLand, isFree);
+        f.g?.destroy();
+        f.g = window.ResourceArt.draw(f.plan, detail, this._fieldTex);
+        f.g.position.set(f.plan.x, f.plan.y);
+        this.fieldLayer.addChild(f.g);
+        f.detail = detail; f.dirty = false;
+      }
+      f.g.visible = true;
+    }
+    if (pending) this.invalidate();
+    return pending;
+  }
+
   /** Each frame: towns shown from 150 % zoom, those in view built (a little at a time) or redrawn as needed. */
   _tickTowns(vx0, vy0, vx1, vy1) {
     const on = this.scale >= 1.5 && this.towns.size > 0;
@@ -703,7 +791,7 @@ class MapRenderer extends EventTarget {
       if (!t.plan || t.dirty || t.detail !== detail) {
         if (built && performance.now() - t0 > 10) { pending = true; continue; }
         built++;
-        if (!t.plan) t.plan = window.TownArt.plan(m, isLand);
+        if (!t.plan) t.plan = window.TownArt.plan(m, isLand, (x, y) => !this._inWorks(x, y));
         this._drawTown(t, detail);
       }
       t.g.visible = true;
@@ -1208,7 +1296,7 @@ class MapRenderer extends EventTarget {
     if (!this.mode) return;
     const s = this.scale;
     const m = this.mode === 'draw' ? this.draw : this.measure;
-    const color = this.mode === 'draw' ? (this.draw.kind === 'trench' ? 0xc9b37f : this.draw.kind === 'rail' ? 0xd0d3d4 : 0xf1c40f) : 0xabe67e;
+    const color = this.mode === 'draw' ? (this.draw.kind === 'trench' ? 0xc9b37f : this.draw.kind === 'rail' ? 0xd0d3d4 : this.draw.kind === 'corps' ? 0xe74c3c : 0xf1c40f) : 0xabe67e;
     const pts = [...m.points];
     if (m.hover && pts.length) pts.push(m.hover);
     if (pts.length >= 2) {
@@ -1417,7 +1505,7 @@ class MapRenderer extends EventTarget {
     for (const poly of v.geometry) {
       if (!poly.length) continue;
       g.poly(poly[0].flat()).fill({ color, alpha: neutral ? 0.1 : 0.3 });
-      for (let i = 1; i < poly.length; i++) g.poly(poly[i].flat()).cut();
+      cutHoles(g, poly);
       // Border: a dark line with the owner's colour inside it, drawn along every ring (holes are other people's land).
       for (let i = 0; i < poly.length; i++) g.poly(poly[i].flat()).stroke({ width: 2.6 / s, color: 0x101c15, alpha: neutral ? 0.35 : 0.7 });
       for (let i = 0; i < poly.length; i++) g.poly(poly[i].flat()).stroke({ width: 1.2 / s, color, alpha: neutral ? 0.5 : 0.95 });
@@ -1441,14 +1529,18 @@ class MapRenderer extends EventTarget {
   }
 
   // ---- Movement range ring (game mode) ----------------------------------------------
-  /** Draw the remaining-movement circle (world units) around a unit being dragged. */
-  showRange(x, y, radius, exhausted, ry) {
+  /**
+   * Draw the remaining-movement circle (world units) around a unit, or `reach` ({ poly } from public/js/reach.js) when
+   * water, No Man's Land or a manned trench shape it.
+   */
+  showRange(x, y, radius, exhausted, ry, reach) {
     if (!this._rangeG) { this._rangeG = new PIXI.Graphics(); this._rangeG.eventMode = 'none'; this.overlayLayer.addChild(this._rangeG); }
-    this._range = { x, y, radius, exhausted, ry };
+    this._range = { x, y, radius, exhausted, ry, reach };
     const g = this._rangeG, s = this.scale;
     g.clear();
     const color = exhausted ? 0xe74c3c : 0x2ecc71;
-    if (radius > 0) g.ellipse(x, y, radius, ry || radius).fill({ color, alpha: 0.1 }).stroke({ width: 2.5 / s, color, alpha: 0.95 });
+    if (radius > 0 && reach?.poly?.length >= 6) g.poly(reach.poly).fill({ color, alpha: 0.1 }).stroke({ width: 2.5 / s, color, alpha: 0.95, join: 'round' });
+    else if (radius > 0) g.ellipse(x, y, radius, ry || radius).fill({ color, alpha: 0.1 }).stroke({ width: 2.5 / s, color, alpha: 0.95 });
     else g.circle(x, y, 10 / s).stroke({ width: 2 / s, color, alpha: 0.9 });
     g.visible = true;
     this.invalidate();
@@ -1522,7 +1614,179 @@ class MapRenderer extends EventTarget {
     this.invalidate();
   }
   hideSupplyLine() { this._supplyPts = null; if (this._supplyG && this._supplyG.visible) { this._supplyG.visible = false; this.invalidate(); } }
+  /**
+   * A corps' front line: a red line with short ticks toward the enemy ('left' or 'right' of the line walked from its first
+   * point; none while the player is still choosing) and the rows behind it dashed.
+   */
+  showCorpsLine(points, front, depthPx = 0) {
+    if (!this._corpsG) { this._corpsG = new PIXI.Graphics(); this._corpsG.eventMode = 'none'; this.overlayLayer.addChild(this._corpsG); }
+    this._corps = { points, front, depthPx };
+    this._drawCorpsLine();
+  }
+  _drawCorpsLine() {
+    const g = this._corpsG, c = this._corps, s = this.scale;
+    if (!g || !c) return;
+    g.clear();
+    const pts = c.points;
+    if (!pts || pts.length < 2) { g.visible = false; return; }
+    g.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]);
+    g.stroke({ width: 3.2 / s, color: 0xe74c3c, alpha: 0.95 });
+    if (c.front === 'left' || c.front === 'right') {
+      const tick = 9 / s, gap = 26 / s, side = c.front === 'left' ? 1 : -1;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const [ax, ay] = pts[i], [bx, by] = pts[i + 1], L = Math.hypot(bx - ax, by - ay) || 1, ux = (bx - ax) / L, uy = (by - ay) / L;
+        const nx = uy * side, ny = -ux * side;   // toward the enemy (left of the walking direction when side = 1)
+        for (let d = gap / 2; d < L; d += gap) {
+          const x = ax + ux * d, y = ay + uy * d;
+          g.moveTo(x, y).lineTo(x + nx * tick, y + ny * tick).moveTo(x + nx * tick - ux * tick * 0.45, y + ny * tick - uy * tick * 0.45).lineTo(x + nx * tick * 1.55, y + ny * tick * 1.55).lineTo(x + nx * tick + ux * tick * 0.45, y + ny * tick + uy * tick * 0.45);
+        }
+      }
+      g.stroke({ width: 2 / s, color: 0xe74c3c, alpha: 0.9 });
+    }
+    g.visible = true;
+    this.invalidate();
+  }
+  /**
+   * Marching orders: each march's route split into one leg per turn ([{ legs: [[[x, y], …], …], turns: [turn each leg
+   * ends in], color, selected }]), dashed, the legs alternating light and full colour, a bar and the turn number where
+   * each turn's movement runs out, and a flag at the objective. Drawn when the orders or the units change, not every frame.
+   */
+  setMarches(list) {
+    if (!this._marchG) {
+      this._marchG = new PIXI.Graphics(); this._marchG.eventMode = 'none'; this.overlayLayer.addChildAt(this._marchG, 0);
+      this._marchLabels = new PIXI.Container(); this._marchLabels.eventMode = 'none'; this.overlayLayer.addChildAt(this._marchLabels, 1);
+    }
+    this._marches = list && list.length ? list : null;
+    this._drawMarches();
+  }
+  _drawMarches() {
+    const g = this._marchG, list = this._marches, s = this.scale;
+    if (!g) return;
+    g.clear();
+    let used = 0;
+    const labels = this._marchLabels.children;
+    const label = (x, y, text, a) => {
+      let t = labels[used];
+      if (!t) { t = new PIXI.Text({ text: '', style: { ...LABEL_STYLE, fontSize: 11, fontWeight: '700' }, resolution: 2 }); t.anchor.set(0, 1); this._marchLabels.addChild(t); }
+      t.text = text; t.position.set(x + 5 / s, y - 4 / s); t.scale.set(1 / s); t.alpha = a; t.visible = true; used++;
+    };
+    const dashed = (pts, width, color, alpha) => {
+      const dash = 8 / s, gap = 6 / s;
+      let start = 0;   // where the next dash starts along this segment: the pattern runs on round corners
+      for (let i = 1; i < pts.length; i++) {
+        const [ax, ay] = pts[i - 1], [bx, by] = pts[i], L = Math.hypot(bx - ax, by - ay);
+        if (L < 1e-9) continue;
+        const ux = (bx - ax) / L, uy = (by - ay) / L;
+        let d = start;
+        for (; d < L; d += dash + gap) { const s0 = Math.max(0, d), e = Math.min(L, d + dash); if (e > s0) g.moveTo(ax + ux * s0, ay + uy * s0).lineTo(ax + ux * e, ay + uy * e); }
+        start = d - L - (dash + gap);   // negative: a dash cut by the corner finishes on the next segment
+        if (start < -(dash + gap)) start += dash + gap;
+      }
+      g.stroke({ width, color, alpha, cap: 'round' });
+    };
+    if (!list) { g.visible = false; for (const t of labels) t.visible = false; this.invalidate(); return; }
+    for (const m of list) {
+      const a = m.selected ? 1 : 0.75, light = mixColor(m.color, 0xffffff, 0.55);
+      m.legs.forEach((leg, k) => {
+        if (leg.length < 2) return;
+        dashed(leg, 4.4 / s, 0x111111, 0.45 * a);
+        dashed(leg, 2.4 / s, k % 2 ? light : m.color, 0.95 * a);
+      });
+      // Where each turn's movement runs out: a bar across the line and the turn number.
+      m.legs.forEach((leg, k) => {
+        if (k === m.legs.length - 1 || leg.length < 2) return;
+        const [px, py] = leg[leg.length - 1], [qx, qy] = leg[leg.length - 2], L = Math.hypot(px - qx, py - qy) || 1;
+        const nx = -(py - qy) / L * 6 / s, ny = (px - qx) / L * 6 / s;
+        g.moveTo(px - nx, py - ny).lineTo(px + nx, py + ny).stroke({ width: 4.5 / s, color: 0x111111, alpha: 0.6 * a });
+        g.moveTo(px - nx, py - ny).lineTo(px + nx, py + ny).stroke({ width: 2.4 / s, color: 0xffffff, alpha: 0.95 * a });
+        if (m.turns[k] != null) label(px, py, `T${m.turns[k]}`, a);
+      });
+      const last = m.legs[m.legs.length - 1], end = last[last.length - 1];
+      if (m.turns[m.turns.length - 1] != null) label(end[0] + 14 / s, end[1] - 16 / s, `T${m.turns[m.turns.length - 1]}`, a);
+      m.x = end[0]; m.y = end[1];
+      // The flag: a pole and a pennant in the unit's colour.
+      const ph = 26 / s, pw = 17 / s, fh = 11 / s;
+      g.ellipse(m.x, m.y, 6 / s, 3 / s).fill({ color: 0x111111, alpha: 0.35 * a }).stroke({ width: 1.4 / s, color: 0xffffff, alpha: 0.8 * a });
+      g.moveTo(m.x, m.y).lineTo(m.x, m.y - ph).stroke({ width: 4 / s, color: 0xffffff, alpha: 0.7 * a });
+      g.moveTo(m.x, m.y).lineTo(m.x, m.y - ph).stroke({ width: 2 / s, color: 0x2b2b2b, alpha: a });
+      g.poly([m.x + 1 / s, m.y - ph, m.x + pw, m.y - ph + fh / 2, m.x + 1 / s, m.y - ph + fh]).fill({ color: m.color, alpha: a }).stroke({ width: 1.6 / s, color: 0xffffff, alpha: 0.85 * a });
+    }
+    for (let i = used; i < labels.length; i++) labels[i].visible = false;
+    g.visible = true;
+    this.invalidate();
+  }
+  hideCorpsLine() { this._corps = null; if (this._corpsG && this._corpsG.visible) { this._corpsG.visible = false; this.invalidate(); } }
   hideAura() { this._aura = null; if (this._auraG && this._auraG.visible) { this._auraG.visible = false; this.invalidate(); } }
+  /**
+   * A selected unit's attack reach: a dashed red ellipse (rx, ry in world units) beside the green movement ring; faint
+   * when it cannot attack now (the movement phase, its action spent, cut off).
+   */
+  showFireRange(x, y, rx, ry, live) {
+    if (!this._fireG) { this._fireG = new PIXI.Graphics(); this._fireG.eventMode = 'none'; this.overlayLayer.addChild(this._fireG); }
+    this._fire = { x, y, rx, ry, live };
+    this._drawFireRange();
+  }
+  _drawFireRange() {
+    const f = this._fire, g = this._fireG, s = this.scale;
+    if (!f || !g) return;
+    g.clear();
+    if (!(f.rx > 0)) { g.visible = false; return; }
+    // Dashes about 10 screen px long with 7 px gaps, however far the ring reaches.
+    const circ = Math.PI * (f.rx + f.ry) * s, n = Math.max(12, Math.min(720, Math.round(circ / 17))), step = Math.PI * 2 / n;
+    for (let i = 0; i < n; i++) {
+      const a0 = i * step, a1 = a0 + step * 10 / 17;
+      g.moveTo(f.x + Math.cos(a0) * f.rx, f.y + Math.sin(a0) * f.ry).lineTo(f.x + Math.cos(a1) * f.rx, f.y + Math.sin(a1) * f.ry);
+    }
+    g.stroke({ width: 2.2 / s, color: 0xe74c3c, alpha: f.live ? 0.95 : 0.4 });
+    g.ellipse(f.x, f.y, f.rx, f.ry).fill({ color: 0xe74c3c, alpha: f.live ? 0.05 : 0.02 });
+    g.visible = true;
+    this.invalidate();
+  }
+  hideFireRange() { this._fire = null; if (this._fireG && this._fireG.visible) { this._fireG.visible = false; this.invalidate(); } }
+  /**
+   * The unit an attack would go against: a pulsing ring with sight ticks round it (red when the attack would go in, grey
+   * when it cannot) and a thin line from each unit that would fire. Follows the token as it moves; the cursor turns
+   * to a crosshair over it.
+   */
+  setTarget(id, ok, fromIds = []) {
+    if (this._target && this._target.id !== id) this.clearTarget();
+    this._target = { id, ok, fromIds };
+    const v = this.views.get(id);
+    if (v) v.root.cursor = 'crosshair';
+    this.invalidate();
+  }
+  clearTarget() {
+    const t = this._target;
+    if (!t) return;
+    this._target = null;
+    const v = this.views.get(t.id);
+    if (v) v.root.cursor = 'pointer';
+    if (this._targetG) { this._targetG.clear(); this._targetG.visible = false; }
+    this.invalidate();
+  }
+  _drawTarget(t) {
+    if (!this._targetG) { this._targetG = new PIXI.Graphics(); this._targetG.eventMode = 'none'; this.overlayLayer.addChild(this._targetG); }
+    const tg = this._target, g = this._targetG, v = this.views.get(tg.id), s = this.scale;
+    g.clear();
+    if (!v || v.dying || !v.root.visible) { g.visible = false; return false; }
+    const color = tg.ok ? 0xe74c3c : 0x95a5a6;
+    for (const id of tg.fromIds) {
+      const a = this.views.get(id);
+      if (a && !a.dying) g.moveTo(a.x, a.y).lineTo(v.x, v.y);
+    }
+    if (tg.fromIds.length) g.stroke({ width: 1.6 / s, color, alpha: 0.55 });
+    const R = (Math.max(v.w, v.h) / 2 * Math.abs(v.root.scale.y) + 6 / s) * (1 + 0.05 * Math.sin(t * 6));
+    g.circle(v.x, v.y, R).stroke({ width: 4.5 / s, color: 0x000000, alpha: 0.35 });
+    g.circle(v.x, v.y, R).stroke({ width: 2.4 / s, color, alpha: 0.95 });
+    for (let i = 0; i < 4; i++) {
+      const a = i * Math.PI / 2 + Math.PI / 4, c = Math.cos(a), sn = Math.sin(a);
+      g.moveTo(v.x + c * (R - 5 / s), v.y + sn * (R - 5 / s)).lineTo(v.x + c * (R + 8 / s), v.y + sn * (R + 8 / s));
+    }
+    g.stroke({ width: 2.4 / s, color, alpha: 0.95 });
+    g.visible = true;
+    return true;
+  }
 
   // ---- Movement trails (game mode) --------------------------------------------------
   /** Redraw every unit's and hero's trail this turn (marker.data.trail), in its colour, with an arrow at the end. */
@@ -1928,11 +2192,13 @@ class MapRenderer extends EventTarget {
     return anim;
   }
   /**
-   * Which way a unit out of a fight faces (a unit vector): towards the nearest unit of another nation within about
-   * 60 px of map (a front line faces the enemy across it), else the way it last moved, else down the screen. Worked out
-   * again every few seconds.
+   * Which way a unit out of a fight faces (a unit vector): the way its corps line faces (data.facing, set when the corps
+   * formed on a line), else towards the nearest unit of another nation within about 60 px of map (a front line faces the
+   * enemy across it), else the way it last moved, else down the screen. Worked out again every few seconds.
    */
   _facing(v, nowMs) {
+    const set = v.marker.data?.facing;
+    if (set !== undefined && set !== null && Number.isFinite(Number(set))) return [Math.cos(Number(set)), Math.sin(Number(set))];
     const c = v._face;
     if (c && nowMs < c.until && c.x === v.x && c.y === v.y) return c.u;
     const me = String(v.marker.data?.nation || '').toLowerCase();
@@ -2368,7 +2634,7 @@ class MapRenderer extends EventTarget {
   }
 
   _startMarkerPointer(view, e) {
-    // Right-click: the app opens the token's panel (units and heroes only show it this way).
+    // Right-click: the app attacks it (an enemy, with your units selected) or opens its panel.
     if (e.button === 2 && (!this.mode || this.mode === 'select')) {
       e.stopPropagation();
       this.dispatchEvent(new CustomEvent('markercontext', { detail: { id: view.id } }));
@@ -2444,6 +2710,10 @@ class MapRenderer extends EventTarget {
       const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
       if (this._tickTowns(tl.x, tl.y, br.x, br.y)) anim = true;
     } else this.townLayer.visible = false;
+    if (this.fieldSites.size && this.scale >= 1.5) {
+      const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
+      if (this._tickFields(tl.x, tl.y, br.x, br.y)) anim = true;
+    } else this.fieldLayer.visible = false;
     if (this.craters.size && this.scale >= 1.5) {
       const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
       if (this._tickCraterSmoke(nowMs, tl.x, tl.y, br.x, br.y)) anim = true;
@@ -2559,6 +2829,7 @@ class MapRenderer extends EventTarget {
     }
     this._declutterLabels();
     this._drawUnitDots(hideUnits);
+    if (this._target && this._drawTarget(t)) anim = true;
 
     for (const layer of [this.fxLayer, this.boomLayer]) {
       for (const fx of [...layer.children]) {
@@ -2697,6 +2968,36 @@ const UNIT_ICON_MIN_SCALE = 1;
 /** Base size of unit, town and player tokens relative to the original art scale (reduced 25 % on 29 Sep 2026). */
 const TOKEN_BASE = 0.75;
 
+/**
+ * Small shapes thousands of tokens draw alike (shadow, selection ring, strength bar, flag backing, badges) share one
+ * GraphicsContext per distinct shape, and with it one set of GPU buffers, instead of every token holding its own copy.
+ * Shared contexts are never drawn into again: a token switches to another one (`g.context = sharedShape(...)`).
+ */
+const SHARED_SHAPES = new Map();
+function sharedShape(key, draw) {
+  let ctx = SHARED_SHAPES.get(key);
+  if (!ctx) { ctx = new PIXI.GraphicsContext(); draw(ctx); SHARED_SHAPES.set(key, ctx); }
+  return ctx;
+}
+const NO_SHAPE = () => sharedShape('none', () => {});
+/**
+ * Cut a polygon's holes (rings 1…) out of the fill just drawn, all in one cut(). PixiJS 8 adds every hole after the
+ * first to the instruction before the fill as well (the previous shape), and the triangulator then bridges that shape
+ * to a hole far outside it: a wedge across the map (seen between Lake Nipigon and the lakes west of it).
+ */
+function cutHoles(g, rings) {
+  if (rings.length < 2) return;
+  for (let i = 1; i < rings.length; i++) g.poly(rings[i].flat());
+  g.cut();
+}
+const round1 = v => Math.round(v * 10) / 10;
+
+/** Blend two 0xRRGGBB colours (t = 0: a, 1: b). */
+function mixColor(a, b, t) {
+  const ch = sh => Math.round(((a >> sh) & 255) + ((((b >> sh) & 255) - ((a >> sh) & 255)) * t));
+  return (ch(16) << 16) | (ch(8) << 8) | ch(0);
+}
+
 const LABEL_STYLE = {
   fontFamily: 'Segoe UI, Arial, sans-serif', fontSize: 13, fontWeight: '600', fill: 0xffffff,
   stroke: { color: 0x000000, width: 3 }, align: 'center',
@@ -2718,8 +3019,8 @@ class MarkerView {
     this.root = new PIXI.Container();
     this.root.eventMode = 'static';
     this.root.cursor = 'pointer';
-    this.shadow = new PIXI.Graphics();
-    this.ring = new PIXI.Graphics();
+    this.shadow = new PIXI.Graphics(NO_SHAPE());
+    this.ring = new PIXI.Graphics(NO_SHAPE());
     this.ring.visible = false;
     this.body = new PIXI.Container();
     this.label = new PIXI.Text({ text: '', style: LABEL_STYLE, resolution: 2 });
@@ -2734,8 +3035,8 @@ class MarkerView {
     this.w = 30; this.h = 30; this._gen = 0;
 
     this.root.on('pointerdown', e => this.r._startMarkerPointer(this, e));
-    this.root.on('pointerover', () => { this.hover = true; this.r.invalidate(); });
-    this.root.on('pointerout', () => { this.hover = false; this.r.invalidate(); });
+    this.root.on('pointerover', () => { this.hover = true; this.r.invalidate(); this.r.dispatchEvent(new CustomEvent('markerhover', { detail: { id: this.id, over: true } })); });
+    this.root.on('pointerout', () => { this.hover = false; this.r.invalidate(); this.r.dispatchEvent(new CustomEvent('markerhover', { detail: { id: this.id, over: false } })); });
     this.update(marker);
   }
 
@@ -2894,10 +3195,11 @@ class MarkerView {
     this.w = sw; this.h = sh;
     if (m.type === 'unit') {
       const st = Math.max(0, Math.min(100, Number(m.data?.strength ?? 100)));
-      const bw = Math.max(26, Math.min(sw, 60));
-      const bar = new PIXI.Graphics().rect(-bw / 2, sh / 2 + 2, bw, 3).fill({ color: 0, alpha: 0.55 });
-      if (st > 0) bar.rect(-bw / 2, sh / 2 + 2, bw * st / 100, 3).fill(st > 60 ? 0x2ecc71 : st > 30 ? 0xf1c40f : 0xe74c3c);
-      c.addChild(bar);
+      const bw = round1(Math.max(26, Math.min(sw, 60))), by = round1(sh / 2 + 2), pct = Math.round(st);
+      c.addChild(new PIXI.Graphics(sharedShape(`bar|${bw}|${by}|${pct}`, g => {
+        g.rect(-bw / 2, by, bw, 3).fill({ color: 0, alpha: 0.55 });
+        if (pct > 0) g.rect(-bw / 2, by, bw * pct / 100, 3).fill(pct > 60 ? 0x2ecc71 : pct > 30 ? 0xf1c40f : 0xe74c3c);
+      })));
       this.h = sh + 6;
       if (st <= 0) { sp.alpha = 0.6; sp.tint = 0x777777; }
     }
@@ -2915,7 +3217,8 @@ class MarkerView {
     const fh = 13, fw = Math.max(10, Math.min(26, fh * tex.width / tex.height));
     const top = -this.h / 2 - 4;
     const cont = new PIXI.Container();
-    cont.addChild(new PIXI.Graphics().rect(-fw / 2 - 1, top - fh - 1, fw + 2, fh + 2).fill({ color: 0x000000, alpha: 0.55 }));
+    const bw = round1(fw), bt = round1(top);
+    cont.addChild(new PIXI.Graphics(sharedShape(`flagback|${bw}|${bt}|${fh}`, g => g.rect(-bw / 2 - 1, bt - fh - 1, bw + 2, fh + 2).fill({ color: 0x000000, alpha: 0.55 }))));
     const sp = new PIXI.Sprite(tex); sp.anchor.set(0.5, 1); sp.width = fw; sp.height = fh; sp.position.set(0, top);
     cont.addChild(sp);
     cont.eventMode = 'none';
@@ -2931,23 +3234,44 @@ class MarkerView {
     this._refreshSupply(rules);
     const moved = rules && rules.enabled && m.type === 'unit' ? Number(m.data?.movedKm) || 0 : 0;
     if (!moved) { if (this.movedDot) { this.movedDot.visible = false; } return; }
-    if (!this.movedDot) { this.movedDot = new PIXI.Graphics(); this.movedDot.eventMode = 'none'; this.root.addChild(this.movedDot); }
+    if (!this.movedDot) { this.movedDot = new PIXI.Graphics(NO_SHAPE()); this.movedDot.eventMode = 'none'; this.root.addChild(this.movedDot); }
     const allowance = (Number(m.data?.movement) || 0) * (rules.kmPerMove || 1);
-    const spent = moved >= allowance - 0.01;
-    this.movedDot.clear().circle(this.w / 2 - 1, -this.h / 2 + 3, 4).fill(spent ? 0xe74c3c : 0xf1c40f).stroke({ width: 1.2, color: 0x1e2b1a });
+    const spent = moved >= allowance - 0.01, dx = round1(this.w / 2 - 1), dy = round1(-this.h / 2 + 3);
+    this.movedDot.context = sharedShape(`moved|${dx}|${dy}|${spent}`, g => g.circle(dx, dy, 4).fill(spent ? 0xe74c3c : 0xf1c40f).stroke({ width: 1.2, color: 0x1e2b1a }));
     this.movedDot.visible = true;
   }
 
-  /** Game mode: a land unit cut off from supply carries a red no-entry badge and is dimmed a little. */
+  /**
+   * Game mode: a land unit cut off from supply carries an amber badge with a dot for each turn of supplies it has left;
+   * out of them, a red no-entry badge, and it is dimmed a little; a submerged submarine
+   * shows faint (only its own side and destroyers close by see it at all); a blockaded port carries a navy badge.
+   */
   _refreshSupply(rules) {
     const m = this.marker;
     const cut = !!(rules && rules.enabled && rules.supply && m.type === 'unit' && m.data?.supplied === false);
-    if (this.body) this.body.alpha = cut ? 0.72 : 1;
+    const left = cut && Number.isFinite(Number(m.data?.supplies)) ? Math.max(0, Math.round(Number(m.data.supplies))) : 0, out = cut && left <= 0;
+    if (this.body) this.body.alpha = out ? 0.72 : (m.type === 'unit' && m.data?.submerged ? 0.42 : 1);
+    const blockaded = !!(rules && rules.enabled && m.type === 'town' && m.data?.blockaded);
+    if (blockaded || this.blockBadge) {
+      if (!this.blockBadge) { this.blockBadge = new PIXI.Graphics(NO_SHAPE()); this.blockBadge.eventMode = 'none'; this.root.addChild(this.blockBadge); }
+      const bx = round1(this.w / 2 - 2), by = round1(-this.h / 2 + 3);
+      this.blockBadge.context = sharedShape(`blockade|${bx}|${by}`, g => g.circle(bx, by, 6).fill(0x1f4e79).stroke({ width: 1.3, color: 0x0b0f14 })
+        .moveTo(bx, by - 3.6).lineTo(bx, by + 3.4).moveTo(bx - 3.2, by + 1.2).quadraticCurveTo(bx, by + 5.2, bx + 3.2, by + 1.2).moveTo(bx - 2, by - 2).lineTo(bx + 2, by - 2)
+        .stroke({ width: 1.3, color: 0xffffff }));
+      this.blockBadge.visible = blockaded;
+      this.r.invalidate();
+    }
     if (!cut) { if (this.supplyBadge) this.supplyBadge.visible = false; return; }
-    if (!this.supplyBadge) { this.supplyBadge = new PIXI.Graphics(); this.supplyBadge.eventMode = 'none'; this.root.addChild(this.supplyBadge); }
-    const x = -this.w / 2 + 2, y = -this.h / 2 + 3;
-    this.supplyBadge.clear().circle(x, y, 5.5).fill(0xc0392b).stroke({ width: 1.3, color: 0x1e1e1e })
-      .rect(x - 3.2, y - 1, 6.4, 2).fill(0xffffff);
+    if (!this.supplyBadge) { this.supplyBadge = new PIXI.Graphics(NO_SHAPE()); this.supplyBadge.eventMode = 'none'; this.root.addChild(this.supplyBadge); }
+    const x = round1(-this.w / 2 + 2), y = round1(-this.h / 2 + 3);
+    const dots = Math.min(left, 3);
+    this.supplyBadge.context = out
+      ? sharedShape(`nosupply|${x}|${y}`, g => g.circle(x, y, 5.5).fill(0xc0392b).stroke({ width: 1.3, color: 0x1e1e1e })
+        .rect(x - 3.2, y - 1, 6.4, 2).fill(0xffffff))
+      : sharedShape(`lowsupply|${x}|${y}|${dots}`, g => {
+        g.circle(x, y, 5.5).fill(0xe08e0b).stroke({ width: 1.3, color: 0x1e1e1e });
+        for (let i = 0; i < dots; i++) g.circle(x + (i - (dots - 1) / 2) * 3, y, 1.15).fill(0xffffff);
+      });
     this.supplyBadge.visible = true;
     this.r.invalidate();
   }
@@ -3011,19 +3335,20 @@ class MarkerView {
     this.label.y = h / 2 + 3;
     this._refreshMovedDot();
     if (this.marker.type === 'scenery') {
-      this.shadow.clear();
-      this.ring.clear().rect(-w / 2 - 3, -h / 2 - 3, w + 6, h + 6).stroke({ width: 2, color: 0xf1c40f });
+      this.shadow.context = NO_SHAPE();
+      const sw = round1(w), sh = round1(h);
+      this.ring.context = sharedShape(`ringbox|${sw}|${sh}`, g => g.rect(-sw / 2 - 3, -sh / 2 - 3, sw + 6, sh + 6).stroke({ width: 2, color: 0xf1c40f }));
       this.root.hitArea = new PIXI.Rectangle(-w / 2, -h / 2, w, h);
       return;
     }
-    this.shadow.clear().ellipse(0, h / 2 + 1, w * 0.45, 4).fill({ color: 0x000000, alpha: 0.35 });
-    const rr = Math.max(w, h) / 2 + 7;
-    this.ring.clear().circle(0, 0, rr).stroke({ width: 3, color: 0xf1c40f });
-    if (this.marker.adminOnly) {
-      this.ring.circle(0, 0, rr + 4).stroke({ width: 1, color: 0xe67e22, alpha: 0.8 });
-    } else if (this.marker.visibleTo && this.marker.visibleTo.length) {
-      this.ring.circle(0, 0, rr + 4).stroke({ width: 1, color: 0x5dade2, alpha: 0.8 });
-    }
+    const sy = round1(h / 2 + 1), sx = round1(w * 0.45);
+    this.shadow.context = sharedShape(`shadow|${sx}|${sy}`, g => g.ellipse(0, sy, sx, 4).fill({ color: 0x000000, alpha: 0.35 }));
+    const rr = round1(Math.max(w, h) / 2 + 7);
+    const extra = this.marker.adminOnly ? 0xe67e22 : (this.marker.visibleTo && this.marker.visibleTo.length ? 0x5dade2 : null);
+    this.ring.context = sharedShape(`ring|${rr}|${extra}`, g => {
+      g.circle(0, 0, rr).stroke({ width: 3, color: 0xf1c40f });
+      if (extra !== null) g.circle(0, 0, rr + 4).stroke({ width: 1, color: extra, alpha: 0.8 });
+    });
     this.root.hitArea = new PIXI.Rectangle(-w / 2 - 4, -h / 2 - 4, w + 8, h + 8 + 16);
   }
 

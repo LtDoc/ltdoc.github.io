@@ -83,14 +83,24 @@ function syncFog(lobbyId, only = null) {
   if (!set) return;
   const vision = require('./vision');
   const st = vision.state(lobbyId);
+  const byViewer = new Map();   // the same player in several tabs: work it out once
   for (const ws of set) {
     if (ws.readyState !== ws.OPEN || (only && ws !== only)) continue;
     const v = viewer(ws);
-    const ov = vision.overlay(v), key = JSON.stringify(ov);
-    if (key !== ws.fogKey) { ws.fogKey = key; send(ws, { type: 'vision', vision: ov }); }
-    if (!st.on || v.role === 'gm') { ws.fogSeen = null; continue; }
-    const seen = new Map();
-    for (const m of st.markers) if (vision.foreign(v, m) && access.canSee(m, v)) seen.set(m.id, m);
+    const vk = `${v.role}|${v.userId}|${v.nation}|${v.viewAs || ''}`;
+    let view = byViewer.get(vk);
+    if (!view) {
+      const ov = vision.overlay(v);
+      view = { ov, key: JSON.stringify(ov), seen: null };
+      if (st.track && v.role !== 'gm') {   // fog of war, or submerged submarines
+        view.seen = new Map();
+        for (const m of st.markers) if (vision.foreign(v, m) && access.canSee(m, v)) view.seen.set(m.id, m);
+      }
+      byViewer.set(vk, view);
+    }
+    if (view.key !== ws.fogKey) { ws.fogKey = view.key; send(ws, { type: 'vision', vision: view.ov }); }
+    if (!view.seen) { ws.fogSeen = null; continue; }
+    const seen = view.seen;
     const prev = ws.fogSeen;
     if (prev) {
       for (const [id, m] of seen) if (!prev.has(id)) send(ws, { type: 'marker', action: 'upsert', marker: vision.redact(m, v), actorId: null, fog: true });
@@ -182,7 +192,28 @@ function attach(server) {
       ws.ping();
     }
   }, 30000);
-  wss.on('close', () => clearInterval(timer));
+  const sweep = setInterval(() => { try { sweepIdle(); } catch (e) { console.warn('cache sweep failed', e); } }, 5 * 60000);
+  sweep.unref();
+  wss.on('close', () => { clearInterval(timer); clearInterval(sweep); });
+}
+
+/**
+ * Memory: a campaign nobody has had open for IDLE_MS gives back what is cached for it (its provinces, tens of MB on
+ * the Earth map, its sight and its railway network). Everything is rebuilt from the database when next needed.
+ */
+const IDLE_MS = 30 * 60000;
+const idleSince = new Map();   // lobbyId -> when it was last seen with nobody connected
+function sweepIdle(now = Date.now()) {
+  const provinces = require('./provinces'), vision = require('./vision'), rails = require('./rails');
+  const ids = new Set([...provinces.cached(), ...vision.cached(), ...rails.cached()].map(Number));
+  for (const id of idleSince.keys()) if (!ids.has(id)) idleSince.delete(id);
+  for (const id of ids) {
+    if (rooms.has(id)) { idleSince.delete(id); continue; }
+    if (!idleSince.has(id)) { idleSince.set(id, now); continue; }
+    if (now - idleSince.get(id) < IDLE_MS) continue;
+    provinces.invalidate(id); vision.invalidate(id); rails.forget(id);
+    idleSince.delete(id);
+  }
 }
 
 /** Re-evaluate roles and nations for every socket in a lobby after membership changes. */
@@ -201,4 +232,4 @@ function refreshRoles(lobbyId) {
   require('./vision').schedulePush(lobbyId);
 }
 
-module.exports = { attach, broadcast, broadcastEntity, broadcastVisible, broadcastPresence, presence, refreshRoles, syncFog };
+module.exports = { attach, sweepIdle, broadcast, broadcastEntity, broadcastVisible, broadcastPresence, presence, refreshRoles, syncFog };

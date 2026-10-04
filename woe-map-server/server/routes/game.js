@@ -19,8 +19,11 @@ const vision = require('../vision');   // fog of war
 const UnitTypes = require('../../public/js/units');
 const geo = require('../geo');
 
-module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById, createMarker, writeMarker, writeShape, canEditMarker, scheduleSupply }) {
+module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById, createMarker, writeMarker, writeShape, canEditMarker, scheduleSupply, createShape, reshapeShape, removeShape, moveMarkerTo, trenchNation }) {
   const router = express.Router({ mergeParams: true });
+  // Unit orders: replenish, dive, dig, demolish, corps (routes/orders.js).
+  const orders = require('./orders')({ logEvent, clean, num, writeMarker, canEditMarker, createShape, reshapeShape, removeShape, moveMarkerTo, trenchNation });
+  router.use(orders.router);
 
   function requireGm(req, res, next) {
     if (req.lobbyRole !== 'gm') return res.status(403).json({ error: 'Game master only' });
@@ -78,6 +81,21 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       hasTerritories: provinces.has(req.lobby.id) || territory.all(req.lobby.id).length > 0,
       reports: g.enabled ? visibleReports(req, g, game.reports(req.lobby.id)) : { turn: null, turns: [], reports: [] },
     });
+  });
+
+  /**
+   * Research range and movement bonuses for the viewer's units (the GM: every faction's), so the browser's attack ring,
+   * movement area and march plans reach exactly as far as the server's (game.attackRange, game.checkMove).
+   */
+  router.get('/reach', (req, res) => {
+    const gm = req.lobbyRole === 'gm', mine = myFaction(req), bonus = {};
+    const pick = (src, k = 'range') => Object.fromEntries(Object.entries(src || {}).filter(([, v]) => Number(v[k])).map(([n, v]) => [n, Number(v[k])]));
+    for (const f of game.q.factions.all(req.lobby.id)) {
+      if (!gm && (!mine || mine.id !== f.id)) continue;
+      const fx = game.factionEffects(req.lobby.id, f.id);
+      bonus[f.name.toLowerCase()] = { cat: pick(fx.statCat), unit: pick(fx.statUnit), moveCat: pick(fx.statCat, 'movement'), moveUnit: pick(fx.statUnit, 'movement') };
+    }
+    res.json({ bonus });
   });
 
   /** Turn reports the viewer may read: the GM sees every faction, a player their own (everyone when treasuries are public). */
@@ -281,12 +299,14 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       queue: (state.production || []).filter(q => q.siteId === s.id && q.typeId !== 'factory' && !isProject(q)),
     }));
     const factories = (state.production || []).filter(q => q.typeId === 'factory');
-    // Long-term projects: every factory and town of the faction, with the next step's cost and any project under way.
+    // Long-term projects: every factory, town and resource node of the faction, with the next step's cost and any
+    // project under way.
     const name = faction.name.toLowerCase();
-    const projects = markers.filter(m => ['factory', 'town'].includes(m.type) && String(m.data?.nation || '').toLowerCase() === name).map(m => {
+    const projects = markers.filter(m => ['factory', 'town', 'resource'].includes(m.type) && String(m.data?.nation || '').toLowerCase() === name).map(m => {
       const p = production.projectCostFor(g, fx, m);
       const active = (state.production || []).find(q => isProject(q) && q.siteId === m.id) || null;
-      return { id: m.id, name: m.name, kind: m.type === 'factory' ? 'factory' : (m.data?.size || 'village'), project: p.id, level: p.level, max: p.max, cost: p.cost, active };
+      const res = m.type === 'resource' ? { resource: m.data?.kind, yield: num(m.data?.yield) } : {};
+      return { id: m.id, name: m.name, kind: m.type === 'factory' ? 'factory' : m.type === 'resource' ? 'resource' : (m.data?.size || 'village'), project: p.id, level: p.level, max: p.max, cost: p.cost, active, ...res };
     });
     const costs = Object.fromEntries([...UnitTypes.LIST.map(t => t.id), 'factory'].map(id => [id, production.costWith(g, fx, id)]));
     const buildable = Object.fromEntries(UnitTypes.LIST.map(t => [t.id, research.canBuild(fx, t.id)]));
@@ -316,7 +336,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     catch (e) { return res.status(400).json({ error: e.message }); }
     game.writeState(state);
     const what = item.typeId === 'factory' ? 'building a factory at' : GameData.PROJECTS[item.typeId]
-      ? `${item.typeId === 'upgradeFactory' ? 'upgrading' : 'developing'} ${item.siteName} to level ${item.toLevel}`
+      ? `${{ upgradeFactory: 'upgrading', developTown: 'developing', improveResource: 'improving' }[item.typeId]} ${item.siteName} to level ${item.toLevel}`
       : `building ${UnitTypes.LIST.find(t => t.id === item.typeId)?.unit || item.typeId} at`;
     logEvent(req.lobby.id, req.user.id, 'system', `${faction.name} begins ${what}${GameData.PROJECTS[item.typeId] ? '' : ` ${item.siteName}`} (${item.turns} turn${item.turns === 1 ? '' : 's'})`, { faction: faction.name, audience: { nations: [faction.name], treasury: true } },
       ws => ws.lobbyRole === 'gm' || g.settings.publicTreasury || String(ws.nation || '').toLowerCase() === faction.name.toLowerCase());
@@ -759,14 +779,18 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
         out.supplyLinkBySize = { ...(g.settings.supplyLinkBySize || {}) };
         for (const k of ['capital', 'city', 'village']) if (s.supplyLinkBySize[k] !== undefined) out.supplyLinkBySize[k] = clamp(num(s.supplyLinkBySize[k], 0), 0, 5000);
       }
-      numIn('supplyTownKm', 0, 2000); numIn('supplyLinkKm', 0, 5000); numIn('supplyRangeKm', 0, 2000); numIn('convoyLinkKm', 0, 5000); numIn('attritionRate', 0, 100); numIn('attritionDisbandBelow', 0, 100); numIn('convoyRangeKm', 0, 2000); numIn('hospitalKm', 0, 1000); numIn('hospitalHeal', 0, 100);
+      numIn('supplyTownKm', 0, 2000); numIn('supplyLinkKm', 0, 5000); numIn('supplyRangeKm', 0, 2000); numIn('convoyLinkKm', 0, 5000); numIn('attritionRate', 0, 100); numIn('supplyStock', 0, 20); numIn('attritionDisbandBelow', 0, 100); numIn('convoyRangeKm', 0, 2000); numIn('hospitalKm', 0, 1000); numIn('hospitalHeal', 0, 100);
       numIn('hqKm', 0, 1000); numIn('hqBonus', 0, 10); numIn('engineerKm', 0, 1000); numIn('engineerDefend', 0, 10); numIn('signalsKm', 0, 1000); numIn('signalsArtillery', 0, 10);
       numIn('convoyCapacity', 1, 50); numIn('convoyBoardKm', 0, 1000); numIn('convoyLandKm', 0, 2000);
       numIn('railSpeed', 1, 50); numIn('railCutKm', 1, 500); numIn('railDefence', -10, 50); numIn('railGuardKm', 0, 1000); numIn('railRepairKm', 0, 1000); numIn('railJoinKm', 0, 200);
       numIn('heroAuraKm', 0, 5000); numIn('spySecurity', -10, 30); numIn('spyCounterKm', 0, 5000); numIn('spyStealPerStar', 0, 1000);
       numIn('kmPerMove', 1, 100000); numIn('kmPerRange', 1, 100000); numIn('noMansLandCost', 1, 20); numIn('captureRadiusKm', 1, 5000); numIn('cityRadiusKm', 1, 5000);
       numIn('researchLead', 0, 50); numIn('baseMoney', -1000, 100000); numIn('baseRp', -1000, 100000); numIn('baseManpower', -1000, 100000);
-      numIn('upkeepGrain', 0, 100); numIn('upkeepOil', 0, 100);
+      numIn('upkeepGrain', 0, 100); numIn('upkeepOil', 0, 100); numIn('upkeepCoal', 0, 100);
+      if (s.upkeepFree && typeof s.upkeepFree === 'object') {
+        out.upkeepFree = { ...(g.settings.upkeepFree || {}) };
+        for (const k of ['capital', 'city', 'village']) if (s.upkeepFree[k] !== undefined) out.upkeepFree[k] = clamp(num(s.upkeepFree[k], 0), 0, 1000);
+      }
       numIn('trenchRangeKm', 0, 1000); numIn('trenchBonusDug', 0, 50); numIn('trenchBonusReinforced', 0, 50);
       numIn('factoryRangeKm', 1, 5000); numIn('coastalKm', 1, 500); numIn('researchLead', 0, 50);
       if (s.startYear !== undefined) out.startYear = clamp(Math.round(num(s.startYear, 1914)), 1000, 3000);
@@ -789,8 +813,12 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
         }
         out.unitCosts = cur;
       }
-      for (const k of ['waiveMovement', 'occupyNeutrals', 'upkeep', 'publicTreasury', 'capturedIdle', 'diplomatsRequired', 'supplyEnabled', 'fogOfWar']) if (s[k] !== undefined) out[k] = !!s[k];
+      for (const k of ['waiveMovement', 'occupyNeutrals', 'upkeep', 'publicTreasury', 'capturedIdle', 'diplomatsRequired', 'supplyEnabled', 'fogOfWar', 'phases', 'trenchBlocks']) if (s[k] !== undefined) out[k] = !!s[k];
       numIn('subSpotKm', 0, 1000);
+      numIn('wornStep', 0, 100); numIn('replenishMax', 0, 100); numIn('replenishEnemyKm', 0, 5000);
+      numIn('trenchSectionKm', 1, 500); numIn('trenchDigKm', 0, 1000); numIn('trenchDigTimber', 0, 1000); numIn('trenchReinforceTimber', 0, 1000); numIn('trenchDemolishDefence', -10, 50);
+      numIn('blockadeKm', 0, 2000); numIn('subDetectKm', 0, 1000); numIn('corpsDepthKm', 0, 500);
+      numIn('resourceImproveRate', 0, 5);
       if (s.vision && typeof s.vision === 'object') {
         out.vision = { ...(g.settings.vision || {}) };
         for (const [k, v] of Object.entries(s.vision)) if (Object.hasOwn(GameData.DEFAULT_SETTINGS.vision, k)) out.vision[k] = clamp(num(v, 0), 0, 5000);
@@ -827,9 +855,33 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     res.json({ turn: g.turn, ready: readyList(req.lobby.id, g) });
   });
 
+  /**
+   * GM: switch the turn's phase (phased turns): 'battle' closes movement and opens attacks; 'move' goes back.
+   * Everyone is told (log line, toast and banner); ready-ups start again for the new phase.
+   */
+  router.post('/phase', requireGm, (req, res) => {
+    const g = game.get(req.lobby.id);
+    if (!g.enabled) return res.status(400).json({ error: 'Game mode is off' });
+    if (g.phase === 'open') return res.status(400).json({ error: 'Phased turns are switched off (⚖ Rules → Turns)' });
+    const phase = req.body?.phase === 'battle' ? 'battle' : 'move';
+    if (phase === g.phase) return res.json({ game: g });
+    g.phase = phase;
+    const saved = game.save(g);
+    game.q.clearAllReady.run(req.lobby.id);
+    logEvent(req.lobby.id, req.user.id, 'system', phase === 'battle'
+      ? `⚔ Turn ${saved.turn}: the battle phase begins. Attacks are open; units hold their positions until the next turn.`
+      : `🚩 Turn ${saved.turn}: back to the movement phase. Units may move again; attacks wait for the battle phase.`);
+    broadcastGame(req.lobby.id, saved);
+    hub.broadcast(req.lobby.id, { type: 'phase', turn: saved.turn, phase });
+    broadcastReady(req.lobby.id, saved);
+    res.json({ game: saved });
+  });
+
   router.post('/end-turn', requireGm, (req, res) => {
     const before = game.get(req.lobby.id);
     if (!before.enabled) return res.status(400).json({ error: 'Game mode is off' });
+    // Engineers finish this turn's trench work first, so the new cover counts from the next turn.
+    orders.processDigs(req);
     // Ownership follows territory: settle nodes, factories and towns before income is counted.
     const settled = applyOwnership(req);
     let result;
@@ -844,7 +896,9 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
         if (!site) throw new Error(`${item.siteName || 'the site'} is gone`);
         const lv = GameData.projectLevel(site);
         const next = Math.min(lv.max, lv.level + 1);
-        const after = writeMarker(req, site, { data: item.typeId === 'upgradeFactory' ? { industry: next } : { developed: next } });
+        const field = { upgradeFactory: 'industry', developTown: 'developed', improveResource: 'improved' }[item.typeId];
+        const after = writeMarker(req, site, { data: { [field]: next } });
+        if (item.typeId === 'improveResource') return { name: `${after.name} improved to level ${next} (${GameData.worksName(after.data?.kind, next).toLowerCase()})` };
         return { name: `${after.name} ${item.typeId === 'upgradeFactory' ? 'upgraded' : 'developed'} to level ${next}` };
       }
       if (item.typeId === 'factory') {
@@ -870,6 +924,8 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       const host = t.home ? null : game.q.faction.get(Number(t.to), req.lobby.id);
       secretLog(req, [h.data.nation, host?.name], t.home ? `✉ ${h.name} is back in ${t.toName}` : `✉ ${h.name} (${h.data.nation}) arrives in ${t.toName} and is received by ${host?.name || 'the host'}`);
     }
+    // Marching orders carry on with the new turn's movement (by rail where quicker).
+    orders.processMarches(req);
     if (settled.length) logEvent(req.lobby.id, null, 'system', `${settled.length} place${settled.length === 1 ? '' : 's'} changed hands with the front line`);
     logEvent(req.lobby.id, req.user.id, 'system', `Turn ${before.turn} ended. Turn ${g.turn} begins: ${GameData.fmtDate(g.date)}. Movement and action points are reset.`);
     for (const s of result.summaries) {
@@ -1178,7 +1234,8 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     } else {
       const bonus = research.statBonus(game.factionEffects(req.lobby.id, unit.data?.nation), UnitTypes.resolve(unit.data?.unitType)).attack;
       const gen = heroRules.generalFor(req.lobby, g.settings, markers, unit);
-      const atk = num(unit.data?.attack) + bonus + (gen ? gen.bonus : 0);
+      const worn = g.enabled ? game.wornPenalty(g.settings, unit) : 0;
+      const atk = num(unit.data?.attack) + bonus + (gen ? gen.bonus : 0) - worn;
       // The holder's (or its allies') strongest land unit within the guard radius defends the line.
       const guardOf = holder && holder.id ? friendsOf(req, holder.name) : null;
       const guards = guardOf ? markers.filter(m => territory.isLandUnit(m) && num(m.data?.strength, 100) > 0 && guardOf(m.data?.nation) &&
@@ -1188,11 +1245,11 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       const aRoll = crypto.randomInt(1, 21), dRoll = crypto.randomInt(1, 21);
       success = aRoll + atk > dRoll + def;
       rolls = { aRoll, dRoll, atk, def, guard: guard ? guard.name : null };
-      const notes = [bonus ? `+${bonus} tech` : '', gen ? `+${gen.bonus} ${gen.hero.name}` : '', guard ? `guarded by ${guard.name}` : ''].filter(Boolean);
+      const notes = [bonus ? `+${bonus} tech` : '', gen ? `+${gen.bonus} ${gen.hero.name}` : '', worn ? `−${worn} worn` : '', guard ? `guarded by ${guard.name}` : ''].filter(Boolean);
       text = `💥 ${unit.name} attacked ${railName(rail)} ${place}: ${aRoll}+${atk}=${aRoll + atk} vs ${dRoll}+${def}=${dRoll + def}${notes.length ? ` (${notes.join(', ')})` : ''} → ` +
         (success ? `the line is cut (${Math.round(num(g.settings.railCutKm, 10) * 2)} ${u} of track)` : 'the line holds');
     }
-    if (g.enabled) writeMarker(req, unit, { data: { apUsed: num(unit.data?.apUsed) + 1, attacked: true } });
+    if (g.enabled || unit.data?.submerged) writeMarker(req, unit, { data: { ...(g.enabled ? { apUsed: num(unit.data?.apUsed) + 1, attacked: true } : {}), ...(unit.data?.submerged ? { submerged: false } : {}) } });
     let after = rail;
     if (success) {
       const cut = { id: crypto.randomBytes(4).toString('hex'), x: Math.round(at.x * 10) / 10, y: Math.round(at.y * 10) / 10, turn: g.turn, by: unit.data?.nation || '', at: new Date().toISOString() };

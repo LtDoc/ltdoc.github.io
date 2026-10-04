@@ -16,7 +16,8 @@
  *     enclosure map): wheat, stubble, young crops, pasture, ploughed land and woodland, hedged, with furrows and
  *     trees along the hedges; villages sit in the middle of a wide spread of them, towns and capitals ring theirs.
  *
- *   TownArt.plan(marker, isLand)              → plan (local coordinates, map px): pure and deterministic
+ *   TownArt.plan(marker, isLand, isFree)      → plan (local coordinates, map px): pure and deterministic; no fields
+ *                                               where isFree(x, y) is false (a resource node's works, resource-art.js)
  *   TownArt.draw(plan, damageOf, detail)      → PIXI.Graphics; damageOf(building) 0 intact, 1 burnt-out, 2 rubble;
  *                                               detail false: a cheaper drawing for zoomed-out views
  *
@@ -54,7 +55,7 @@ const TownArt = (() => {
   };
 
   /** A town's plan: streets, buildings, square, church, parks, fields and trees, in map px about its centre. */
-  function plan(m, isLand = () => true) {
+  function plan(m, isLand = () => true, isFree = () => true) {
     const kind = KINDS[m.data?.size] ? m.data.size : 'village', K = KINDS[kind];
     const rnd = rng(hashStr(`${m.name}|${m.id}`)), R = K.R * (0.88 + rnd() * 0.24);
     const land = (x, y) => isLand(m.x + x, m.y + y);
@@ -217,7 +218,7 @@ const TownArt = (() => {
     for (let k = 0; k < rings; k++) for (let j = 0; j < sectors; j++) {
       const c = [lat[k][j], lat[k][(j + 1) % sectors], lat[k + 1][(j + 1) % sectors], lat[k + 1][j]];
       const mid = lerp2(c, 0.5, 0.5);
-      if ([...c, mid].some(p => near(taken, p[0], p[1], 0.08, 0.4)) || !c.every(p => land(p[0], p[1]))) continue;
+      if ([...c, mid].some(p => near(taken, p[0], p[1], 0.08, 0.4)) || !c.every(p => land(p[0], p[1]) && isFree(m.x + p[0], m.y + p[1]))) continue;
       // Beyond the farmland's reach in this direction: open country (a field or two still straggles out).
       const out = (Math.hypot(mid[0], mid[1]) - r0) / (r1 - r0), lim = reachAt(Math.atan2(mid[1], mid[0]));
       if (out > lim + (rnd() - 0.5) * 0.15 && rnd() > 0.04) continue;

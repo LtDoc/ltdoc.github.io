@@ -41,8 +41,12 @@ const GameData = (() => {
     cityRadiusKm: 75,         // phase 2: district that changes hands with a major city
     occupyNeutrals: true,
     upkeep: false,            // built in, off by default
-    upkeepGrain: 1,           // per unit per turn when upkeep is on
-    upkeepOil: 1,             // per vehicle, aircraft or ship per turn when upkeep is on
+    // Upkeep (balanced against the 1914 powers' resource regions and armies, docs/ECONOMY.md): each town feeds a home
+    // army for free; every unit beyond that eats grain. Ships burn coal, aircraft and motor vehicles oil.
+    upkeepFree: { capital: 8, city: 3, village: 1 },   // units each town of a nation supports without grain
+    upkeepGrain: 0.2,         // grain per unit per turn beyond the home allowance
+    upkeepCoal: 0.25,         // coal per ship (and armoured train) per turn
+    upkeepOil: 0.5,           // oil per aircraft, airship, tank, armoured car and submarine per turn
     researchLead: 1,          // phase 4: years ahead of the game date a tech may be researched
     baseMoney: 10,            // per faction per turn, before cities
     baseRp: 5,
@@ -54,27 +58,42 @@ const GameData = (() => {
     },
     factoryIncome: { money: 2, rp: 0, manpower: 0 },   // per factory, times its industry level
     townDevIncome: { money: 3, rp: 1, manpower: 0 },   // per development level of a town (long-term projects)
+    resourceImproveRate: 0.25, // each improvement level of a resource node adds this share of its base yield (docs/ECONOMY.md)
     startStock: { resources: 20, money: 100, manpower: 20, rp: 0 },   // stockpiles when game mode starts
     publicTreasury: false,    // players may see every faction's treasury
     factoryRangeKm: 50,       // players may build a factory this close to one of their cities or towns
     coastalKm: 30,            // a city this close to the sea can build ships (Earth map)
     cityCapacity: { capital: 3, city: 2, village: 0 },   // parallel builds per town size (factories use their level)
-    trenchRangeKm: 20,        // units this close to a friendly dug trench get cover
+    trenchRangeKm: 20,        // units this close to a friendly dug trench get cover (and man it: see trenchBlocks)
+    trenchBlocks: true,       // enemy land units cannot cross a dug trench where a defender stands within trenchRangeKm
     trenchBonusDug: 2,        // added to defend when attacked
     trenchBonusReinforced: 4,
     capturedIdle: true,       // phase 5: a place that changed hands this turn yields nothing at End turn
     kmPerRange: 50,           // attack reach per range point: infantry (1) 50 km, cavalry (2) 100 km, field artillery (3) 150 km
+    wornStep: 20,             // combat: a unit fights at −1 attack and defend for every this much % strength it has lost (0 = off)
+    phases: true,             // turns run in two phases: movement (moves, no attacks), then battle (attacks, no moves)
+    replenishMax: 50,         // replenishing: strength points a unit can take on in one turn
+    replenishEnemyKm: 50,     // replenishing: no enemy (at war) land unit may be this close
+    trenchSectionKm: 10,      // trenches: an engineer digs (or reinforces) this much of a trench per turn
+    trenchDigKm: 20,          // trenches: engineers dig and sappers blow up trench within this distance of themselves
+    trenchDigTimber: 4,       // trenches: timber per section dug…
+    trenchReinforceTimber: 6, // …and per section reinforced
+    trenchDemolishDefence: 2, // trenches: added to the defender's roll against sappers (plus the trench's cover and its best guard)
+    blockadeKm: 50,           // naval: enemy warships this close to a coastal town, with none of its side's, blockade it (no supply from it)
+    subDetectKm: 20,          // naval: a submerged submarine is seen only by destroyers this close
+    corpsDepthKm: 15,         // corps lines: artillery forms up this far behind the front line, support twice as far
     heroAuraKm: 60,           // heroes: a general's bonus reaches friendly units this close
     diplomatsRequired: true,  // heroes: peace offers and alliance proposals need a diplomat posted to the other nation
     spySecurity: 0,           // heroes: added to the defender's roll when no spy of theirs is near a mission
     spyCounterKm: 150,        // heroes: a nation's spies within this distance contest a foreign mission
     spyStealPerStar: 5,       // heroes: research points a successful theft takes per star
-    supplyEnabled: true,      // supply (docs/UNITS.md): land units are supplied or cut off, decided at End turn
+    supplyEnabled: true,      // supply (docs/UNITS.md): land units are linked or cut off (kept live) and carry a few turns of supplies
     supplyTownKm: 30,         // supply: land units this close to a friendly town are supplied directly (garrison)
     supplyLinkBySize: { capital: 600, city: 400, village: 200 },   // supply: a place feeds a Supply Column this close, by size
     supplyLinkKm: 150,        // supply: a Supply Column this close to a railhead or another linked column is linked too
     supplyRangeKm: 100,       // supply: a linked Supply Column supplies land units this close (its stretch of front)
-    attritionRate: 25,        // supply: a unit cut off for a second End turn (and each after) loses this % of its remaining strength…
+    supplyStock: 3,           // supply: turns of supplies a land unit carries; it uses one at each End turn cut off, topped up when linked again
+    attritionRate: 25,        // supply: a unit cut off with no supplies left loses this % of its remaining strength at each End turn…
     attritionDisbandBelow: 10, // …and surrenders below this %
     convoyLinkKm: 200,        // supply: a convoy (transport ships) feeds Supply Columns this close, anywhere (invasions)
     convoyRangeKm: 100,       // supply: a convoy supplies land units this close (a beachhead)
@@ -211,6 +230,9 @@ const GameData = (() => {
    * than the one before, so they pay back over many turns rather than fixing this month's shortfall.
    *   upgradeFactory: industry level 1 → 5; each level adds factory income and one build slot.
    *   developTown:    development 0 → max by size; each level adds townDevIncome, every second one a build slot.
+   *   improveResource: improvements 0 → 3 at a resource node; each adds resourceImproveRate of its base yield. The
+   *                    cost grows with the node's yield (perYield), so a rich field costs more to improve than a small
+   *                    deposit and pays back about as fast.
    * `step` is how many steps the site has already taken (factory: level − 1; town: its development level).
    */
   const PROJECTS = {
@@ -224,31 +246,68 @@ const GameData = (() => {
       base: { timber: 10, iron: 5, grain: 8, money: 60, manpower: 2, turns: 4 },
       step: { timber: 5, iron: 3, money: 40, manpower: 1, turns: 2 },
     },
+    improveResource: {
+      label: 'Improve works', verb: 'Improve', max: () => 3,
+      base: { iron: 6, timber: 6, money: 30, manpower: 1, turns: 3 },
+      step: { iron: 4, timber: 2, money: 20, turns: 1 },
+      perYield: { money: 6, iron: 1 },
+    },
   };
+  /** What each improvement level of a resource node is called, by resource (levels 1–3). */
+  const RESOURCE_WORKS = {
+    grain: ['Mechanised farms', 'Granaries', 'Rail siding'],
+    coal: ['Deeper shafts', 'Coking ovens', 'Colliery railway'],
+    iron: ['Steam shovels', 'Ore railway', 'Blast furnaces'],
+    oil: ['More derricks', 'Pipeline', 'Refinery'],
+    copper: ['Steam shovels', 'Concentrator', 'Smelter'],
+    rubber: ['New plantings', 'Tapping gangs', 'Processing sheds'],
+    nitrates: ['Oficina', 'Leaching vats', 'Nitrate railway'],
+    timber: ['Sawmill', 'Logging railway', 'Pulp mill'],
+    cotton: ['Gin house', 'Irrigation', 'Baling press'],
+    horses: ['Stud farm', 'Paddocks', 'Remount depot'],
+  };
+  const worksName = (kind, level) => (RESOURCE_WORKS[kind] || RESOURCE_WORKS.grain)[Math.max(1, Math.min(3, level)) - 1];
+  /** A resource node's yield a turn with its improvements (to a tenth). */
+  function resourceYield(marker, settings) {
+    const base = Number(marker?.data?.yield) || 0, lvl = Math.max(0, Math.min(3, Math.round(Number(marker?.data?.improved) || 0)));
+    const rate = Number(settings?.resourceImproveRate ?? 0.25);
+    return Math.round(base * (1 + rate * lvl) * 10) / 10;
+  }
   /** The project a marker can take (by type), or null. */
-  function projectFor(marker) { return marker?.type === 'factory' ? 'upgradeFactory' : marker?.type === 'town' ? 'developTown' : null; }
-  /** Current level, steps taken and maximum for a factory or town marker. */
+  function projectFor(marker) { return marker?.type === 'factory' ? 'upgradeFactory' : marker?.type === 'town' ? 'developTown' : marker?.type === 'resource' ? 'improveResource' : null; }
+  /** Current level, steps taken and maximum for a factory, town or resource marker. */
   function projectLevel(marker) {
     const id = projectFor(marker);
     if (!id) return null;
     if (id === 'upgradeFactory') { const level = Math.max(1, Math.round(Number(marker.data?.industry) || 1)); return { id, level, step: level - 1, max: 5 }; }
+    if (id === 'improveResource') { const level = Math.max(0, Math.min(3, Math.round(Number(marker.data?.improved) || 0))); return { id, level, step: level, max: 3 }; }
     const level = Math.max(0, Math.round(Number(marker.data?.developed) || 0));
     return { id, level, step: level, max: PROJECTS.developTown.max(marker.data?.size) };
   }
-  /** Full cost row of the next step (before research discounts). */
-  function projectCost(id, step) {
+  /** Full cost row of the next step (before research discounts); `site` (the marker) for costs that grow with its yield. */
+  function projectCost(id, step, site) {
     const p = PROJECTS[id];
-    const out = {};
-    for (const k of COST_KEYS) out[k] = (p.base[k] || 0) + (p.step[k] || 0) * Math.max(0, step);
+    const out = {}, y = Number(site?.data?.yield) || 0;
+    for (const k of COST_KEYS) out[k] = Math.round((p.base[k] || 0) + (p.step[k] || 0) * Math.max(0, step) + (p.perYield?.[k] || 0) * y);
     out.turns = Math.max(1, Math.round(out.turns || 1));
     return out;
   }
   /** Extra build slots a town's development gives (one per two levels). */
   const devSlots = developed => Math.floor((Number(developed) || 0) / 2);
 
-  /** Unit categories that burn oil under upkeep, plus specific land vehicle types. */
-  const OIL_CATEGORIES = new Set(['Air', 'Naval']);
-  const OIL_TYPES = new Set(['tank', 'armouredcar', 'armouredtrain']);
+  /**
+   * Fuel under upkeep: 'oil' for aircraft, tanks, armoured cars and submarines; 'coal' for every other ship and the
+   * armoured train (1914 navies burned coal); null for units that march or ride.
+   */
+  const OIL_CATEGORIES = new Set(['Air']);
+  const OIL_TYPES = new Set(['tank', 'armouredcar', 'submarine']);
+  const COAL_TYPES = new Set(['armouredtrain']);
+  function fuelOf(type) {
+    if (!type) return null;
+    if (OIL_CATEGORIES.has(type.cat) || OIL_TYPES.has(type.id)) return 'oil';
+    if (type.cat === 'Naval' || COAL_TYPES.has(type.id)) return 'coal';
+    return null;
+  }
 
   /** Advance an ISO date (YYYY-MM-DD) by one turn step. */
   function stepDate(iso, step) {
@@ -280,8 +339,8 @@ const GameData = (() => {
     return out;
   }
 
-  return { RESOURCES, RESOURCE_KEYS, byKey, iconUrl, POOLS, FACTORY_ICON, TURN_STEPS, DEFAULT_SETTINGS, OIL_CATEGORIES, OIL_TYPES, stepDate, fmtDate, mergeSettings, deadlineInfo,
-    COST_KEYS, DEFAULT_COSTS, costFor, costLabel, PROJECTS, projectFor, projectLevel, projectCost, devSlots };
+  return { RESOURCES, RESOURCE_KEYS, byKey, iconUrl, POOLS, FACTORY_ICON, TURN_STEPS, DEFAULT_SETTINGS, OIL_CATEGORIES, OIL_TYPES, fuelOf, stepDate, fmtDate, mergeSettings, deadlineInfo,
+    COST_KEYS, DEFAULT_COSTS, costFor, costLabel, PROJECTS, projectFor, projectLevel, projectCost, devSlots, RESOURCE_WORKS, worksName, resourceYield };
 })();
 
 if (typeof window !== 'undefined') window.GameData = GameData;

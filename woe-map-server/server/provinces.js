@@ -7,8 +7,8 @@
  *
  * Generation: Voronoi cells around jittered seeds (about one per province, plus one per major city), each
  * clipped to land and cut along the seed's state border. Land the coarse historical borders miss (coastal
- * slivers, islands nobody owned) goes to the nearest cell so every bit of land belongs to exactly one
- * province. Tiny fragments merge into their neighbour; provinces are named after the city inside them or
+ * slivers, small islands) goes to the nearest state's nearest province (strayTarget), so every bit of land belongs to
+ * exactly one province and a cell reaching across the sea does not take the far shore. Tiny fragments merge into their neighbour; provinces are named after the city inside them or
  * the nearest one ("Reims NE").
  */
 const fs = require('node:fs');
@@ -26,7 +26,10 @@ const q = {
   all: db.prepare('SELECT * FROM provinces WHERE lobby_id = ? ORDER BY id'),
   count: db.prepare('SELECT COUNT(*) AS n FROM provinces WHERE lobby_id = ?'),
   clear: db.prepare('DELETE FROM provinces WHERE lobby_id = ?'),
-  insert: db.prepare('INSERT INTO provinces (lobby_id, name, state, subject, cx, cy, faction_id, geometry, updated_at, year, lakes_cut) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)'),
+  insert: db.prepare('INSERT INTO provinces (lobby_id, name, state, subject, cx, cy, faction_id, geometry, updated_at, year, lakes_cut, strays_fixed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)'),
+  unsettled: db.prepare('SELECT COUNT(*) AS n FROM provinces WHERE lobby_id = ? AND strays_fixed = 0'),
+  settleAll: db.prepare('UPDATE provinces SET strays_fixed = 1 WHERE lobby_id = ?'),
+  setGeometry: db.prepare('UPDATE provinces SET geometry = ?, cx = ?, cy = ?, updated_at = ? WHERE id = ?'),
   uncut: db.prepare('SELECT id, geometry FROM provinces WHERE lobby_id = ? AND lakes_cut = 0'),
   setCut: db.prepare('UPDATE provinces SET geometry = ?, cx = ?, cy = ?, lakes_cut = 1, updated_at = ? WHERE id = ?'),
   markCut: db.prepare('UPDATE provinces SET lakes_cut = 1 WHERE id = ?'),
@@ -92,8 +95,118 @@ function clip(kind, a, b, fallback) {
   return fallback();
 }
 
+// ---- Land the historical borders miss -----------------------------------------------------------
+/**
+ * Islands the bundled borders leave out altogether, with the power that held them in the years given: the nearest
+ * coast is another country's. [lonMin, latMin, lonMax, latMax, power, fromYear, toYear].
+ */
+const LOOSE_LAND = [
+  [-2.8, 49.1, -1.9, 49.8, 'United Kingdom', 0, 9999],   // the Channel Islands (Jersey, Guernsey, Alderney, Sark)
+  [11.85, 36.7, 12.1, 36.9, 'Italy', 1861, 9999],        // Pantelleria (nearer Tunisia)
+  [24.45, 40.5, 24.85, 40.85, 'Greece', 1913, 9999],     // Thasos (Greek from the Balkan Wars)
+  [25.0, 39.75, 25.5, 40.05, 'Greece', 1913, 9999],      // Lemnos
+  [26.55, 37.6, 27.07, 37.82, 'Greece', 1913, 9999],     // Samos (nearer the Anatolian coast)
+];
+/** A year's states in map pixels: [{ i, name, subject, multi, bbox }]. */
+function statesFor(lobby, year) {
+  const world = territory.world(year);
+  if (!world) return null;
+  const W = lobby.map_width, H = lobby.map_height;
+  const P = (lon, lat) => { const [x, y] = geo.project(lon, lat, W, H); return [r1(x), r1(y)]; };
+  return world.countries.map((c, i) => {
+    const multi = c.p.map(poly => poly.map(ring => ring.map(p => P(p[0], p[1]))));
+    return { i, name: c.state, subject: c.power && !Powers.same(c.power, c.state) ? c.power : '', multi, bbox: bboxOf(multi) };
+  });
+}
+/**
+ * Which state a piece of land outside every state belongs with: a loose island's listed holder, else the state whose
+ * outline is nearest (within maxKm), else -1. Distances are measured on the map with east-west squeezed by latitude.
+ */
+function strayTarget(lobby, states, piece, year, maxKm = 150) {
+  const W = lobby.map_width, H = lobby.map_height;
+  const [x, y] = centreOf(piece);
+  const [lon, lat] = geo.unproject(x, y, W, H);
+  // A listed island goes to the nearest state of its holder (some powers are several states), however far.
+  let only = null;
+  for (const [a, b, c, d, power, from, to] of LOOSE_LAND) {
+    if (lon < a || lon > c || lat < b || lat > d || year < from || year > to) continue;
+    const held = states.filter(st => Powers.same(st.name, power) || Powers.same(st.subject, power));
+    if (held.length) { only = held; maxKm = 5000; break; }
+  }
+  const kx = Math.max(0.05, Math.cos(lat * Math.PI / 180)), pxPerKm = H / 180 / 111.32;
+  const reachY = maxKm * pxPerKm, reachX = reachY / kx;
+  let best = -1, bd = maxKm * pxPerKm;
+  for (const s of only || states) {
+    const b = s.bbox;
+    if (x < b[0] - reachX || x > b[2] + reachX || y < b[1] - reachY || y > b[3] + reachY) continue;
+    for (const poly of s.multi) for (const ring of poly) {
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const ax = ring[j][0], ay = ring[j][1], bx = ring[i][0], by = ring[i][1];
+        if (Math.min(ax, bx) > x + reachX || Math.max(ax, bx) < x - reachX || Math.min(ay, by) > y + reachY || Math.max(ay, by) < y - reachY) continue;
+        const dx = (bx - ax) * kx, dy = by - ay, px = (x - ax) * kx, py = y - ay, L2 = dx * dx + dy * dy;
+        const t = L2 > 0 ? Math.max(0, Math.min(1, (px * dx + py * dy) / L2)) : 0;
+        const d = Math.hypot(px - dx * t, py - dy * t);
+        if (d < bd) { bd = d; best = s.i; }
+      }
+    }
+  }
+  return best;
+}
+/**
+ * Provinces cut before strayTarget gave land the borders miss to whichever cell it fell in, so a cell reaching across
+ * the sea could take the far shore (French provinces held slivers of Kent, the Isle of Wight and the Channel Islands).
+ * The first time a lobby's provinces load, every such piece moves to the nearest province of the state it belongs
+ * with. Ownership follows the province it joins; nothing else changes.
+ */
+function settleStrays(lobbyId) {
+  if (!q.unsettled.get(lobbyId).n) return;
+  const lobby = q.lobby.get(lobbyId);
+  const rows = q.all.all(lobbyId).map(serialize);
+  const moves = [];
+  if (lobby && geo.isEarth(lobby)) {
+    const byYear = new Map();
+    for (const p of rows) if (p.geometry.length > 1) { if (!byYear.has(p.year)) byYear.set(p.year, []); byYear.get(p.year).push(p); }
+    for (const [year, list] of byYear) {
+      const states = statesFor(lobby, year);
+      if (!states) continue;
+      const inState = (px, py) => states.some(s => inBbox(px, py, s.bbox) && pointInMulti(px, py, s.multi));
+      const sameYear = rows.filter(p => p.year === year);
+      for (const p of list) {
+        const main = p.geometry.reduce((a, poly) => (ringArea(poly[0]) > ringArea(a[0]) ? poly : a), p.geometry[0]);
+        for (const poly of p.geometry) {
+          if (poly === main) continue;
+          const [cx, cy] = centreOf([poly]);
+          if (inState(cx, cy)) continue;   // inside a state's outline: placed by the border, not stray
+          const t = strayTarget(lobby, states, [poly], year);
+          if (t < 0 || states[t].name === p.state) continue;
+          let to = null, bd = Infinity;
+          for (const o of sameYear) { if (o.state !== states[t].name) continue; const d = (o.cx - cx) ** 2 + (o.cy - cy) ** 2; if (d < bd) { bd = d; to = o; } }
+          if (to) moves.push({ from: p, to, poly });
+        }
+      }
+    }
+  }
+  db.exec('BEGIN');
+  try {
+    const changed = new Map();
+    for (const m of moves) {
+      m.from.geometry = m.from.geometry.filter(poly => poly !== m.poly);
+      m.to.geometry = clip('union', m.to.geometry, [m.poly], () => [...m.to.geometry, m.poly]);
+      changed.set(m.from.id, m.from); changed.set(m.to.id, m.to);
+    }
+    for (const p of changed.values()) {
+      const [cx, cy] = centreOf(p.geometry);
+      q.setGeometry.run(JSON.stringify(roundMulti(p.geometry)), r1(cx), r1(cy), now(), p.id);
+    }
+    q.settleAll.run(lobbyId);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  if (moves.length) console.log(`provinces: moved ${moves.length} piece${moves.length === 1 ? '' : 's'} of land the borders miss to the nearest state's province (campaign ${lobbyId})`);
+}
+
 // ---- Cache and storage -----------------------------------------------------------------------
-const cache = new Map();   // lobbyId -> { list, byId }
+const cache = new Map();   // lobbyId -> { list, byId, grid, build, owners }
+let builds = 0;
 function serialize(row) {
   return { id: row.id, name: row.name, state: row.state, subject: row.subject, year: row.year || 1914, cx: row.cx, cy: row.cy, factionId: row.faction_id, geometry: access.safeJson(row.geometry) || [] };
 }
@@ -126,6 +239,7 @@ function cutLakes(lobbyId) {
 function get(lobbyId) {
   if (!cache.has(lobbyId)) {
     cutLakes(lobbyId);
+    settleStrays(lobbyId);
     const list = q.all.all(lobbyId).map(r => { const p = serialize(r); p.bbox = bboxOf(p.geometry); return p; });
     // Grid index: every cell a province's bbox touches lists it, so a point lookup tests only a handful.
     const grid = new Map();
@@ -137,13 +251,15 @@ function get(lobbyId) {
           grid.get(k).push(p);
         }
     }
-    cache.set(lobbyId, { list, byId: new Map(list.map(p => [p.id, p])), grid });
+    cache.set(lobbyId, { list, byId: new Map(list.map(p => [p.id, p])), grid, build: ++builds, owners: 0 });
   }
   return cache.get(lobbyId);
 }
 function invalidate(lobbyId) { cache.delete(lobbyId); }
+/** Campaigns whose provinces are held in memory. */
+function cached() { return [...cache.keys()]; }
 function count(lobbyId) { return q.count.get(lobbyId).n; }
-function has(lobbyId) { return count(lobbyId) > 0; }
+function has(lobbyId) { const c = cache.get(lobbyId); return c ? c.list.length > 0 : count(lobbyId) > 0; }   // asked on every ownership lookup
 function list(lobbyId) { return get(lobbyId).list; }
 /** The province under a map point, or null (sea). */
 function at(lobbyId, x, y) {
@@ -165,7 +281,10 @@ function setOwner(lobbyId, ids, factionId) {
   require('./vision').schedulePush(lobbyId);   // ownership feeds fog of war
   const t = now(), c = get(lobbyId);
   for (const id of ids) { q.setOwner.run(factionId, t, id, lobbyId); const p = c.byId.get(id); if (p) p.factionId = factionId; }
+  c.owners++;
 }
+/** Changes whenever a province changes hands or the provinces are reloaded: a key for caches built on ownership. */
+function ownersKey(lobbyId) { const c = get(lobbyId); return `${c.build}.${c.owners}`; }
 function ownership(lobbyId) { return q.owners.all(lobbyId).map(r => [r.id, r.faction_id]); }
 function restoreOwnership(lobbyId, pairs) {
   const t = now();
@@ -359,10 +478,7 @@ async function generate(lobby, opts = {}, progress = () => {}) {
   const onLand = (x, y) => tiles.some(t => inBbox(x, y, t.bbox) && (t.full || pointInMulti(x, y, t.multi)));
 
   // States of the seed year in map pixels.
-  const states = world.countries.map((c, i) => {
-    const multi = c.p.map(poly => poly.map(ring => ring.map(p => P(p[0], p[1]))));
-    return { i, name: c.state, subject: c.power && !Powers.same(c.power, c.state) ? c.power : '', multi, bbox: bboxOf(multi) };
-  });
+  const states = statesFor(lobby, year);
   const stateAt = (x, y) => { for (const s of states) if (inBbox(x, y, s.bbox) && pointInMulti(x, y, s.multi)) return s.i; return -1; };
 
   // Seeds: a jittered grid about sizeKm apart inside every state, one at least, plus every major city.
@@ -432,8 +548,14 @@ async function generate(lobby, opts = {}, progress = () => {}) {
         const piece = clip('intersection', rest, st.multi, () => []);
         if (piece.length) { orphans.push({ piece, state: st.i }); rest = clip('difference', rest, st.multi, () => []); }
       }
-      // Land outside every state (coastal slivers the coarse borders miss) stays with this cell.
-      prov = prov.length ? (rest.length ? clip('union', prov, rest, () => prov) : prov) : rest;
+      // Land outside every state (coastal slivers and small islands the coarse borders miss) goes with the nearest
+      // state: kept when that is this cell's own (or nobody's), else handed to that state like a piece of it.
+      const keep = [];
+      for (const poly of rest) {
+        const t = strayTarget(lobby, states, [poly], year);
+        if (t < 0 || t === s.state) keep.push(poly); else orphans.push({ piece: [poly], state: t });
+      }
+      prov = prov.length ? (keep.length ? clip('union', prov, keep, () => prov) : prov) : keep;
     }
     if (prov.length) provs[i] = prov;
   }
@@ -505,4 +627,4 @@ async function generate(lobby, opts = {}, progress = () => {}) {
   return { count: rows.length, year, sizeKm, seeds: seeds.length };
 }
 
-module.exports = { GRID, CLEAN, nearestOwner, ownerAt, get, list, count, has, at, within, setOwner, ownership, restoreOwnership, clear, give, assignByState, assignHistory, historyNames, generate, invalidate, unionAll, landTiles };
+module.exports = { GRID, CLEAN, nearestOwner, ownerAt, get, list, count, has, at, within, setOwner, ownersKey, ownership, restoreOwnership, clear, give, assignByState, assignHistory, historyNames, generate, invalidate, cached, unionAll, landTiles };

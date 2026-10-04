@@ -21,6 +21,9 @@ below lists what differs from the proposal. The rest of this document is the des
   attacker is revealed to the defender's side until End turn (`revealTo`, as a spy's recon). Capture lines name the
   nation, not the unit. Other sides' unit counts are hidden on the Nation panel even with public treasuries.
 - **GM**: sees everything; 👁 View as player (docs/UI.md) shows a nation's view, fog included.
+- **Submerged submarines** (3 Oct 2026, docs/WARFARE.md) are hidden from other sides in every game, fog or not,
+  except within `subDetectKm` of one of their destroyers. Without fog the vision state then tracks only submarines,
+  through the same pushes.
 - **Research**: the `vision` effect (`{ type: 'vision', unit?|cat?|all?, km }`) and one new tech, *Aerial
   photography* (1915, aircraft +100 km), added to existing campaigns' trees. *Wireless telegraphy* and *Sound
   ranging* are unchanged.

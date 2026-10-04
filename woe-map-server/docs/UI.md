@@ -64,14 +64,23 @@ Zoom out, zoom level, zoom in, fit (`F`); then select box (`S`), measure (`M`), 
 
 What used to be the popup beside a marker is now a card docked bottom left, above the tools (beside the open
 panel, if any): the unit's stats, strengths and weaknesses, supply and orders, or a place's or drawing's details
-and actions. Right-click a unit or hero for it (left-click selects to move); other markers and drawings open it
-on a left-click. × or `Esc` closes it.
+and actions. Right-click a unit or hero for it (left-click selects to move; right-clicking an enemy while your
+units are selected attacks it instead, docs/COMMS.md); other markers and drawings open it on a left-click. × or
+`Esc` closes it.
 
 ## Turn widget (bottom right, game mode)
 
-Turn number, date and the deadline countdown. The GM's button is **End turn** (it pulses once every nation is
-ready); a player's is **Ready up** / **✓ Ready**, the same switch as their flag in the ready bar. Underneath:
-how many nations are ready. 💬 Chat sits beside it.
+Turn number, date, the phase (🚩 Movement phase, ⚔ Battle phase; docs/WARFARE.md) and the deadline countdown. The
+GM's button is **⚔ Battle phase** in the movement phase and **End turn** in the battle phase (it pulses once every
+nation is ready; without phased turns it is always End turn); a player's is **Ready up** / **✓ Ready**, the same
+switch as their flag in the ready bar, and ready-ups start again with each phase. Underneath: how many nations are
+ready. 💬 Chat sits beside it. A phase change puts a banner over everyone's map for a few seconds.
+
+## Selection bar (game mode)
+
+With several of your land units selected, a bar at the bottom of the map offers **⚑ Form corps** and **＋ Add to
+corps**. Corps are listed on 🏛 Nation → Forces with **Select**, **⇥ Form line**, **↻ Same line**, rename and disband
+(docs/WARFARE.md).
 
 ## View as player (👁, GM)
 

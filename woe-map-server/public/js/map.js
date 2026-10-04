@@ -41,7 +41,9 @@
   renderer.gameDate = () => (gameOn() ? state.game.date : null);   // the battle figures dress for the year and season
   renderer.gameTurn = () => (gameOn() ? state.game.turn : null);   // craters weather and stop smoking as turns pass
   renderer.skirmish?.setStore(`woe.remains.${lobbyId}`);   // the dead left on the field, kept in this browser per campaign
-  renderer.canEditShape = s => canEditShape(s) && !s.locked;
+  renderer.canEditShape = s => canEditShape(s) && !s.locked && !earthworks(s);
+  /** A dug trench while the game runs: a player cannot redraw it (engineers dig and sappers blow up, a section at a time). */
+  function earthworks(s) { return s.kind === 'trench' && state.role !== 'gm' && !!state.game?.enabled && (s.data?.state || 'dug') !== 'plan'; }
   renderer.unitsToPx = (x, y, units) => units / (distanceUnits(x, y, x + 1, y) || 1);   // km (or map units) → px, locally
   Object.defineProperty(renderer, 'railCutKm', { get: () => Number(state.game?.settings?.railCutKm) || 10 });
 
@@ -107,13 +109,14 @@
   function developmentStat(m) {
     const lv = GameData.projectLevel(m);
     const info = window.GameUI?.projectInfo(m.id);
-    let text = m.type === 'town' ? `level ${lv.level} / ${lv.max}` : '';
+    let text = m.type === 'town' || m.type === 'resource' ? `level ${lv.level} / ${lv.max}` : '';
+    if (m.type === 'resource' && lv.level) text += ` (${GameData.RESOURCE_WORKS[m.data?.kind]?.slice(0, lv.level).join(', ').toLowerCase() || ''})`;
     if (m.type === 'town' && lv.level) {
       const d = state.game?.settings?.townDevIncome || {};
       text += ` (+${lv.level * (d.money || 0)} money, +${lv.level * (d.rp || 0)} RP a turn)`;
     }
-    if (info?.active) text += `${text ? ' · ' : ''}${m.type === 'factory' ? 'upgrading' : 'developing'} to ${info.active.toLevel}: ${info.active.queuedTurn !== undefined && info.active.queuedTurn >= state.game?.turn ? 'starts at End turn · ' : ''}${info.active.turnsLeft} turn${info.active.turnsLeft === 1 ? '' : 's'}${info.active.queuedTurn !== undefined && info.active.queuedTurn >= state.game?.turn ? '' : ' left'}`;
-    return text ? stat(m.type === 'factory' ? 'Project' : 'Development', text) : '';
+    if (info?.active) text += `${text ? ' · ' : ''}${{ factory: 'upgrading', resource: 'improving' }[m.type] || 'developing'} to ${info.active.toLevel}: ${info.active.queuedTurn !== undefined && info.active.queuedTurn >= state.game?.turn ? 'starts at End turn · ' : ''}${info.active.turnsLeft} turn${info.active.turnsLeft === 1 ? '' : 's'}${info.active.queuedTurn !== undefined && info.active.queuedTurn >= state.game?.turn ? '' : ' left'}`;
+    return text ? stat({ factory: 'Project', resource: 'Works' }[m.type] || 'Development', text) : '';
   }
   function developButton(m) {
     if (!mySite(m)) return '';
@@ -121,8 +124,9 @@
     if (lv.level >= lv.max) return '';
     const info = window.GameUI?.projectInfo(m.id);
     if (info?.active) return '';
-    const cost = info?.cost || GameData.projectCost(lv.id, lv.step);
-    return `<button class="small" data-act="develop" title="Level ${lv.level + 1}: ${esc(GameData.costLabel(cost))}">${lv.id === 'upgradeFactory' ? '⬆ Upgrade' : '🏗 Develop'}</button>`;
+    const cost = info?.cost || GameData.projectCost(lv.id, lv.step, m);
+    const what = lv.id === 'improveResource' ? `${GameData.worksName(m.data?.kind, lv.level + 1)}, +${Math.round(Number(m.data?.yield || 0) * Number(state.game?.settings?.resourceImproveRate ?? 0.25) * 10) / 10} a turn: ` : '';
+    return `<button class="small" data-act="develop" title="Level ${lv.level + 1}: ${esc(what)}${esc(GameData.costLabel(cost))}">${{ upgradeFactory: '⬆ Upgrade', improveResource: '⛏ Improve' }[lv.id] || '🏗 Develop'}</button>`;
   }
   function shapeName(s) {
     return s.label || { area: 'Unnamed area', trench: 'Unnamed trench', rail: 'Unnamed railway' }[s.kind] || 'Unnamed line';
@@ -267,8 +271,12 @@
 
   // ---- Supply, support units and matchups (docs/UNITS.md) ----------------------------------------------
   const supplyOn = () => gameOn() && state.game?.settings?.supplyEnabled !== false;
-  /** Cut off from supply (decided at End turn): cannot move or attack, double losses when beaten. */
-  function cutOff(m) { return !!m && m.type === 'unit' && supplyOn() && m.data?.supplied === false; }
+  /** Turns of supplies a land unit carries at most (rules: supplyStock). */
+  const stockMax = () => Math.max(0, Math.round(Number(state.game?.settings?.supplyStock ?? 3)));
+  /** What a unit has left of the supplies it carries (full when not yet worked out). */
+  const stockOf = m => { const v = Number(m.data?.supplies); return Number.isFinite(v) ? v : stockMax(); };
+  /** Out of supply: cut off with nothing left of what it carries. Cannot move or attack, double losses when beaten. */
+  function cutOff(m) { return !!m && m.type === 'unit' && supplyOn() && m.data?.supplied === false && stockOf(m) <= 0; }
   const ENGINEER_IDS = ['engineers', 'pioneers', 'sappers'];
   /** What a support unit does for those around it, with its reach in km (null for other units). */
   function supportRole(m) {
@@ -291,14 +299,17 @@
     const land = !t || ['Infantry', 'Mounted & mobile', 'Artillery', 'Emplacements', 'Support'].includes(t.cat);
     if (supplyOn() && t?.cat === 'Emplacements') rows += stat('Supply', 'none needed (a fixed work with its own stores)');
     else if (supplyOn() && land) {
-      const st = state.game?.settings || {}, cutTurns = Number(m.data?.unsuppliedTurns) || 0;
+      const st = state.game?.settings || {}, cutTurns = Number(m.data?.unsuppliedTurns) || 0, left = stockOf(m), of = stockMax();
+      const since = cutTurns ? ` for ${cutTurns} turn${cutTurns === 1 ? '' : 's'}` : '';
       rows += stat('Supply', m.data?.surrendered && Number(m.data?.strength ?? 100) <= 0 ? '⚑ SURRENDERED for want of supply'
-        : m.data?.supplied === false
-          ? `OUT OF SUPPLY${cutTurns ? ` for ${cutTurns} turn${cutTurns === 1 ? '' : 's'}` : ''}: cannot move or attack; double losses when beaten; ${cutTurns >= 1 ? `loses ${st.attritionRate ?? 25}% strength at the next End turn` : `attrition (${st.attritionRate ?? 25}% a turn) starts at the second End turn cut off`}, surrenders below ${st.attritionDisbandBelow ?? 10}%`
-          : m.data?.supplied === true ? `supplied${supplySourceText(m.data.supplyFrom)}` : 'not yet worked out');
+        : m.data?.supplied === false && left <= 0
+          ? `${left}/${of} · OUT OF SUPPLY${since}: cannot move or attack; double losses when beaten; loses ${st.attritionRate ?? 25}% strength at each End turn still cut off, surrenders below ${st.attritionDisbandBelow ?? 10}%`
+          : m.data?.supplied === false
+            ? `${left}/${of} · CUT OFF${since}: living on what it carries, one used at each End turn cut off (no replacements or hospital care meanwhile); at 0/${of} it is out of supply`
+            : m.data?.supplied === true ? `${of}/${of} · supplied${supplySourceText(m.data.supplyFrom)}` : 'not yet worked out');
     }
     const role = supportRole(m);
-    if (role && gameOn()) rows += stat('Support', role.text + (m.data?.supplied === false ? ' (not while cut off)' : ''));
+    if (role && gameOn()) rows += stat('Support', role.text + (cutOff(m) ? ' (not while out of supply)' : ''));
     if (gameOn() && state.game?.settings?.fogOfWar) rows += stat('Vision', `${visionKm(m)} km${t?.id === 'submarine' ? ` · spotted only within ${state.game.settings.subSpotKm ?? 20} km` : ''} (plus research)`);
     if (window.Matchups && t) {
       const d = Matchups.describe(t);
@@ -314,14 +325,24 @@
   // to send it there. A selected group moves together, keeping its shape. The GM can still drag tokens.
   const MOVERS = ['unit', 'hero'];
   const rulesOn = () => gameOn() && !state.game?.settings?.waiveMovement;
+  /** Phased turns: 'move', 'battle', or 'open' (no phases, or game mode off). */
+  const phaseOf = () => (gameOn() ? state.game.phase || 'open' : 'open');
+  /** In the battle phase a player's units hold their positions. */
+  const holdsPosition = () => state.role !== 'gm' && phaseOf() === 'battle';
+  const attacksClosed = () => state.role !== 'gm' && phaseOf() === 'move';
   function clickMoves(m) {
     return !!m && rulesOn() && MOVERS.includes(m.type) && canEdit(m) && !m.locked && !(m.type === 'hero' && ['travelling', 'captured'].includes(m.data?.status));
   }
   renderer.dragAllowed = m => !(rulesOn() && MOVERS.includes(m.type)) || state.role === 'gm';
+  /** A turn's movement for a unit or hero, with its nation's research (as game.checkMove counts it). */
+  function moveAllowance(m) {
+    const t = m.type === 'unit' ? window.UnitTypes?.resolve(m.data?.unitType) : null, b = reachBonus[String(m.data?.nation || '').toLowerCase()];
+    const bonus = b && t ? (Number(b.moveCat?.[t.cat]) || 0) + (Number(b.moveUnit?.[t.id]) || 0) : 0;
+    return Math.max(0, (Number(m.data?.movement) || 0) + bonus) * (Number(state.game?.settings?.kmPerMove) || 50);
+  }
   function remainingFor(m) {
-    if (cutOff(m) || m.data?.attacked) return 0;   // attacked this turn: stays put until the next
-    const km = Number(state.game?.settings?.kmPerMove) || 50;
-    return Math.max(0, (Number(m.data?.movement) || 0) * km - (Number(m.data?.movedKm) || 0));
+    if (cutOff(m) || m.data?.attacked || holdsPosition()) return 0;   // attacked this turn (or the battle phase): stays put until the next
+    return Math.max(0, moveAllowance(m) - (Number(m.data?.movedKm) || 0));
   }
   /** The selected tokens that move by click: { lead, list, remaining } (remaining = the slowest one's), or null. */
   function movers() {
@@ -331,21 +352,167 @@
     const lead = list.find(m => m.id === state.selectedId) || list[0];
     return { lead, list, remaining: Math.min(...list.map(remainingFor)) };
   }
-  let reachSegs = [];
+  let reachSegs = [], reachArea = null;
   function updateMoveRange() {
+    syncFireRange();
     const ms = movers();
-    reachSegs = [];
+    reachSegs = []; reachArea = null;
     if (!ms) { renderer.hideRange(); return; }
     const { lead, list, remaining } = ms;
     const rx = remaining / (distanceUnits(lead.x, lead.y, lead.x + 1, lead.y) || 1);
     const ry = remaining / (distanceUnits(lead.x, lead.y, lead.x, lead.y + 1) || 1);
-    renderer.showRange(lead.x, lead.y, rx, remaining <= 0.01, ry);
+    reachArea = remaining > 0.01 ? reachFor(lead, remaining) : null;
+    renderer.showRange(lead.x, lead.y, rx, remaining <= 0.01, ry, reachArea);
     if (remaining > 0.01 && list.every(canRide)) reachSegs = showRailReach(lead, remaining) || [];
     else renderer.hideRailReach();
   }
+  // ---- Movement reach: the green area (public/js/reach.js) ------------------------------------------------
+  // Worked out when the selection, its unit or the ground around it changes (a shape, a unit that may man a trench,
+  // the rules), never per frame; cached by what it depends on, and changes in a burst (End turn) are run once.
+  let reachMemo = { key: null, area: null }, reachVersion = 0, reachTimer = null;
+  function reachChanged() {
+    reachVersion++;
+    if (reachTimer) return;
+    reachTimer = setTimeout(() => { reachTimer = null; if (movers()) updateMoveRange(); }, 150);
+  }
+  const LAND_CATS = ['Infantry', 'Mounted & mobile', 'Artillery', 'Emplacements', 'Support'];
+  /** How the server checks a token's course: 'land' (keeps off open water), 'ship' (keeps off land), or 'free'. */
+  function courseKind(m) {
+    if (m.type !== 'unit') return 'free';                       // heroes walk anywhere (server: isLandUnit)
+    const cat = window.UnitTypes?.resolve(m.data?.unitType)?.cat;
+    if (cat === 'Naval') return 'ship';
+    return !cat || LAND_CATS.includes(cat) ? 'land' : 'free';
+  }
+  /** Segments of the dug enemy trenches a land unit would be halted at, each with a test for a visible defender near a point. */
+  function reachWalls(m) {
+    const S = state.game?.settings || {};
+    if (!gameOn() || S.trenchBlocks === false) return [];
+    const norm = s => String(s || '').trim().toLowerCase(), facs = state.factions || [], rels = state.relations || [];
+    const me = facs.find(f => norm(f.name) === norm(m.data?.nation));
+    if (!me) return [];
+    const rel = (a, b) => { const [x, y] = a < b ? [a, b] : [b, a]; return rels.find(r => r.a === x && r.b === y)?.status || 'peace'; };
+    const range = Number(S.trenchRangeKm ?? 20), out = [];
+    for (const s of state.shapes.values()) {
+      if (s.kind !== 'trench' || !s.data?.nation || s.data.state === 'plan' || (s.points || []).length < 2) continue;
+      const holder = facs.find(f => norm(f.name) === norm(s.data.nation));
+      if (!holder || holder.id === me.id || rel(me.id, holder.id) !== 'war') continue;
+      const side = new Set([norm(holder.name), ...facs.filter(f => f.id !== holder.id && rel(f.id, holder.id) === 'alliance').map(f => norm(f.name))]);
+      const guards = [...state.markers.values()].filter(u => u.type === 'unit' && u.id !== m.id && !u.data?.aboard && Number(u.data?.strength ?? 100) > 0
+        && side.has(norm(u.data?.nation)) && courseKind(u) === 'land');
+      if (!guards.length) continue;
+      const manned = (x, y) => guards.some(u => distanceUnits(u.x, u.y, x, y) <= range);
+      for (let i = 1; i < s.points.length; i++) out.push({ a: s.points[i - 1], b: s.points[i], manned });
+    }
+    return out;
+  }
+  /** The selected unit's reach as the server will judge it, or null where the plain circle is exact (the GM, open ground). */
+  function reachFor(m, remaining) {
+    if (!window.Reach || state.role === 'gm') return null;
+    const S = state.game?.settings || {}, kind = courseKind(m);
+    const key = [m.id, m.x, m.y, remaining, kind, reachVersion, Reach.ready(), S.noMansLandCost, S.trenchBlocks, S.trenchRangeKm,
+      (state.relations || []).map(r => r.status[0]).join('')].join('|');
+    if (reachMemo.key === key) return reachMemo.area;
+    const areas = [...state.shapes.values()].filter(s => s.kind === 'area' && s.data?.noMansLand && (s.points || []).length >= 3).map(s => s.points);
+    const walls = kind === 'land' ? reachWalls(m) : [];
+    const plain = kind === 'free' || !isEarth();
+    const area = plain && !areas.length && !walls.length ? null : Reach.compute({
+      x: m.x, y: m.y, remaining, kind: isEarth() ? kind : 'free', dist: distanceUnits, perKm: kmToWorld(m.x, m.y, 1),
+      nml: { mult: Number(S.noMansLandCost ?? 3), areas }, walls,
+    });
+    reachMemo = { key, area };
+    return area;
+  }
+  /** Send the selection marching on (x, y): each keeps its place in the group; it goes as far as it can now, the rest at End turn. */
+  async function orderMarch(ms, x, y) {
+    const moves = ms.list.map(m => ({ id: m.id, x: round1(m.x + (x - ms.lead.x)), y: round1(m.y + (y - ms.lead.y)) }));
+    try {
+      const d = await api.post(`${base}/game/units/goal`, { moves });
+      for (const m of d.moved || []) upsertMarker(m);
+      const text = [d.message, ...(d.errors || [])].filter(Boolean).join(' · ');
+      if (text) toast(`🚩 ${text}`, 8000);
+    } catch (err) { toast(err.message); }
+  }
+  /**
+   * A march as the server will carry it out, leg by leg: the route it would take from where it stands (by rail when
+   * game.checkMove would board a train, else straight, paying No Man's Land), cut where each turn's movement runs out.
+   * This turn's remaining movement first, then a full turn's at each End turn. Returns { legs: [[[x, y], …], …], turns:
+   * [the turn each leg ends in], arrives }. The server plans each leg afresh, so a changing front can change the rest.
+   */
+  function marchLegs(m) {
+    const g = m.data.goal, per = moveAllowance(m), turn0 = state.game?.turn || 1;
+    let path = null;
+    if (canRide(m) && window.RailNet) {
+      const net = railNet();
+      if (net.edges.length) path = RailNet.route(net, { x: m.x, y: m.y }, { x: g.x, y: g.y }, { usable: railUsable(m.data?.nation), speed: railOpts().speed })?.path || null;
+    }
+    const walking = !path;
+    if (walking) path = [[m.x, m.y, 1], [g.x, g.y, 1]];
+    if (per <= 0) return { legs: [path.map(p => [p[0], p[1]])], turns: [null], arrives: null };
+    const mult = Math.max(1, Number(state.game?.settings?.noMansLandCost ?? 3));
+    const areas = walking && mult > 1 ? [...state.shapes.values()].filter(s => s.kind === 'area' && s.data?.noMansLand && (s.points || []).length >= 3).map(s => {
+      const xs = s.points.map(p => p[0]), ys = s.points.map(p => p[1]);
+      return { p: s.points, b: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] };
+    }) : [];
+    const inRing = (pts, x, y) => { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
+    const mud = (x, y) => areas.some(a => x >= a.b[0] && x <= a.b[2] && y >= a.b[1] && y <= a.b[3] && inRing(a.p, x, y));
+    let budget = remainingFor(m), turn = turn0;
+    if (budget <= 0.01) { budget = per; turn++; }   // nothing left this turn: it goes on at the next End turn
+    const legs = [], turns = [];
+    let leg = [[path[0][0], path[0][1]]];
+    const ds = per / 60;   // small enough to find No Man's Land and the turn's end within a km or two
+    outer: for (let i = 1; i < path.length; i++) {
+      const [ax, ay] = path[i - 1], [bx, by, f = 1] = path[i], L = distanceUnits(ax, ay, bx, by), n = Math.max(1, Math.ceil(L / ds));
+      for (let k = 0; k < n; k++) {
+        const t0 = k / n, t1 = (k + 1) / n, px = ax + (bx - ax) * t0, py = ay + (by - ay) * t0, qx = ax + (bx - ax) * t1, qy = ay + (by - ay) * t1;
+        const c = L / n * f * (areas.length && mud((px + qx) / 2, (py + qy) / 2) ? mult : 1);
+        let frac = 0;
+        while (c * (1 - frac) > budget + 1e-9) {
+          frac += budget / c;
+          const sx = px + (qx - px) * frac, sy = py + (qy - py) * frac;
+          leg.push([sx, sy]); legs.push(leg); turns.push(turn);
+          if (legs.length >= 40) break outer;   // a march of more than 40 turns: the rest is drawn as one leg
+          leg = [[sx, sy]]; turn++; budget = per;
+        }
+        budget -= c * (1 - frac);
+      }
+      leg.push([bx, by]);
+    }
+    if (legs.length >= 40) leg = [leg[0], [g.x, g.y]];
+    legs.push(leg); turns.push(legs.length > 40 ? null : turn);
+    return { legs, turns, arrives: legs.length > 40 ? null : turn };
+  }
+  /** The march lines, legs and flags of every order this viewer may see (their own side's; the GM all), batched and cached. */
+  const marchMemo = new Map();
+  let marchTimer = null;
+  function syncMarches() {
+    if (marchTimer) return;
+    marchTimer = setTimeout(() => {
+      marchTimer = null;
+      const sel = new Set(state.selectedIds?.length ? state.selectedIds : state.selectedId != null ? [state.selectedId] : []);
+      const S = state.game?.settings || {}, ver = [state.game?.turn, phaseOf(), S.kmPerMove, S.noMansLandCost, S.railSpeed, railNet().edges.length, reachVersion].join('|');
+      const list = [];
+      for (const m of state.markers.values()) {
+        if (!m.data?.goal || !['unit', 'hero'].includes(m.type)) continue;
+        const key = [m.x, m.y, m.data.goal.x, m.data.goal.y, m.data.movedKm, m.data.movement, m.data.supplied, m.data.supplies, m.data.attacked, ver].join('|');
+        let plan = marchMemo.get(m.id);
+        if (!plan || plan.key !== key) { plan = { key, ...marchLegs(m) }; marchMemo.set(m.id, plan); }
+        list.push({ legs: plan.legs, turns: plan.turns, color: colorNum(m.color), selected: sel.has(m.id) });
+      }
+      renderer.setMarches(list);
+    }, 30);
+  }
+  /** A unit's or hero's marching order in its panel: where to, how far, and a button to call it off. */
+  function marchRow(m) {
+    const g = m.data?.goal;
+    if (!g || !gameOn()) return '';
+    const u = state.lobby?.scaleLabel || 'km', left = distanceUnits(m.x, m.y, g.x, g.y);
+    const plan = marchLegs(m), when = plan.arrives == null ? '' : plan.arrives === state.game.turn ? ', arrives this turn' : `, arrives in turn ${plan.arrives} (${plan.arrives - state.game.turn} more End turn${plan.arrives - state.game.turn === 1 ? '' : 's'})`;
+    return rawStat('Marching', `🚩 ${esc(nearPlace(g.x, g.y) || 'to its objective')} · ${fmtNum(left)} ${u} to go${when}`
+      + (canEdit(m) ? ' <button type="button" class="small secondary" data-act="unmarch" title="Call off the march; it stays where it is">✕ Cancel</button>' : ''));
+  }
   function insideReach(ms, x, y) {
     if (ms.remaining <= 0.01) return false;
-    if (distanceUnits(ms.lead.x, ms.lead.y, x, y) <= ms.remaining + 1e-6) return true;
+    if (reachArea ? Reach.contains(reachArea, x, y) : distanceUnits(ms.lead.x, ms.lead.y, x, y) <= ms.remaining + 1e-6) return true;
     const tol = 16 / renderer.scale;
     return reachSegs.some(([x1, y1, x2, y2]) => RailNet.project([[x1, y1], [x2, y2]], x, y).d2 <= tol * tol);
   }
@@ -357,8 +524,8 @@
     if (!ms) return;
     const c = ms.list.find(cutOff);
     if (c) { toast(`${c.name} is out of supply and cannot move until a Supply Column reaches it`); return; }
-    if (ms.remaining <= 0.01) { toast(`${ms.list.length > 1 ? 'The slowest of them' : ms.lead.name} has no movement left this turn`); return; }
-    if (!insideReach(ms, x, y)) { toast(`Out of reach: ${ms.list.length > 1 ? 'the group' : ms.lead.name} can still go ${fmtNum(ms.remaining)} ${state.lobby?.scaleLabel || 'km'} this turn (inside the green ring or along the green track)`); return; }
+    // Beyond this turn's reach (or none left, or the battle phase): a marching order, carried on at each End turn.
+    if (holdsPosition() || ms.remaining <= 0.01 || !insideReach(ms, x, y)) { orderMarch(ms, x, y); return; }
     if (ms.list.length === 1) commitMove({ id: ms.lead.id, x, y });
     else commitMove({ id: ms.lead.id, moves: ms.list.map(m => ({ id: m.id, x: m.x + (x - ms.lead.x), y: m.y + (y - ms.lead.y) })) });
   });
@@ -408,10 +575,13 @@
     const sel = e.detail.id != null ? state.markers.get(e.detail.id) : null;
     if (sel && PANEL_ON_RIGHT.includes(sel.type) && state.panelFor !== sel.id && !panelHinted) {
       panelHinted = true;
-      toast(rulesOn() ? 'Right-click the map to move it there · right-click a unit for its panel' : 'Right-click a unit to open its panel', 3200);
+      toast(rulesOn() ? 'Right-click the map to move it there · right-click an enemy to attack it · right-click your own unit for its panel' : 'Right-click an enemy to attack it · right-click your own unit for its panel', 4000);
     }
     renderPopup(); highlightList();
+    renderer.clearTarget();
+    if (renderer._marches) syncMarches();   // the selected march stands out
     updateMoveRange();
+    renderSelBar();
     if (state.selectedIds.length > 1) toast(`${state.selectedIds.length} tokens selected: ${rulesOn() ? 'right-click inside the ring to move them together' : 'drag any of them to move the group'}`, 1800);
   });
   renderer.addEventListener('mode', e => {
@@ -486,6 +656,7 @@
     if (!d) { if (renderer.mode !== 'measure') hideModeHud(); return; }
     showModeHud(false);
     const need = d.kind === 'area' ? 3 : 2;
+    if (d.kind === 'corps') { $('#modeText').textContent = d.points < 2 ? 'Corps line: click points along the front' : `${d.points} points · double-click, Enter or Done, then click the enemy's side`; return; }
     const what = d.kind === 'area' ? 'an area' : d.kind === 'trench' ? 'a trench' : d.kind === 'rail' ? 'a railway' : 'a line';
     $('#modeText').textContent = d.points < need
       ? `Drawing ${what}: ${d.kind === 'trench' || d.kind === 'rail' ? `click points or drag freehand${d.kind === 'rail' ? '; clicks near other track join it' : ''}` : `click ${need - d.points} more point${need - d.points === 1 ? '' : 's'}`}`
@@ -513,6 +684,7 @@
       } catch (err) { toast(err.message); }
       return;
     }
+    if (e.detail.kind === 'corps') { armCorpsFront(e.detail.points); return; }
     if (e.detail.kind === 'rail') { openShapeModal(null, { kind: 'rail', points: railPath(e.detail.points) }); return; }
     if (e.detail.kind === 'trench') {
       // Keep the raw samples so the modal can re-process them with or without traverses.
@@ -560,6 +732,7 @@
   }
   function disarmPlacing() {
     if (!state.placing) return;
+    if (state.placing.corpsFront) renderer.hideCorpsLine();
     state.placing = null;
     renderer.setPassThrough(false);
     $$('#qaList .qa').forEach(b => b.classList.remove('active'));
@@ -590,6 +763,10 @@
       $('#modeText').textContent = `New factory: click the map within ${state.game?.settings?.factoryRangeKm ?? 50} ${state.lobby?.scaleLabel || 'km'} of one of your cities or towns. Esc to cancel.`;
       return;
     }
+    if (state.placing.corpsFront) {
+      $('#modeText').textContent = `${state.placing.corpsFront.name}: click on the enemy's side of the line. Esc to cancel.`;
+      return;
+    }
     if (state.placing.hero) {
       const h = state.placing.hero;
       $('#modeText').textContent = `Placing a ${H.starText(h.stars)} ${(H.ROLES[h.role] || H.ROLES.general).label.toLowerCase()} for ${quickNation() || 'no one'}: click the map. Esc to cancel.`;
@@ -600,6 +777,7 @@
   }
   renderer.addEventListener('mapclick', async e => {
     if (!state.placing) return;
+    if (state.placing.corpsFront) { await formCorpsLine(e.detail.x, e.detail.y); return; }
     if (state.placing.ping) {
       try { const d = await api.post(`${base}/pings`, { x: round1(e.detail.x), y: round1(e.detail.y) }); showPing(d.ping, true); }
       catch (err) { toast(err.message); }
@@ -900,7 +1078,9 @@
     if (isNew && !quiet) renderer.pulse(m.x, m.y, colorNum(m.color));
     renderMarkerLists();
     if (state.selectedId === m.id) renderPopup();
+    if (m.data?.goal || prev?.data?.goal) syncMarches();
     if (state.selectedId === m.id || (state.selectedIds || []).includes(m.id)) updateMoveRange();
+    else if (m.type === 'unit') reachChanged();   // it may man (or leave) a trench in the way
     gameMarkerChanged(m.type);
   }
 
@@ -1030,9 +1210,11 @@
   }
 
   function removeMarker(id) {
-    const type = state.markers.get(id)?.type;
+    const type = state.markers.get(id)?.type, marching = !!state.markers.get(id)?.data?.goal;
+    if (type === 'unit') reachChanged();
     state.markers.delete(id);
     renderer.remove(id);
+    if (marching) syncMarches();
     renderMarkerLists();
     if (state.selectedId === id) { state.selectedId = null; renderPopup(); }
     gameMarkerChanged(type);
@@ -1054,6 +1236,8 @@
   let nationTimer = 0;
 
   function upsertShape(s) {
+    if (s.kind === 'trench' || s.kind === 'area') reachChanged();
+    if (s.kind === 'rail' || s.kind === 'area') syncMarches();
     state.shapes.set(s.id, s);
     renderer.upsertShape(s);
     renderMarkerLists();
@@ -1061,6 +1245,8 @@
   }
 
   function removeShape(id) {
+    if (['trench', 'area'].includes(state.shapes.get(id)?.kind)) reachChanged();
+    if (['rail', 'area'].includes(state.shapes.get(id)?.kind)) syncMarches();
     state.shapes.delete(id);
     renderer.removeShape(id);
     renderMarkerLists();
@@ -1142,9 +1328,11 @@
         }
         case 'members': await loadMembers(); break;
         case 'factions': await loadFactions(); await loadMembers(); await loadMarkers(); if (gameOn()) GameUI.load().catch(() => {}); break;
-        case 'game': { const was = !!state.game?.enabled; GameUI.onGame(msg.game); syncRailButton(); syncTrails(); updateMoveRange(); if (was !== !!msg.game?.enabled) Comms.loadTrades(); else Comms.refresh(); break; }
-        case 'turn': GameUI.onTurn(msg); loadBattles(); break;
-        case 'faction': GameUI.onFaction(msg); break;
+        case 'game': { const was = !!state.game?.enabled; GameUI.onGame(msg.game); syncRailButton(); syncTrails(); updateMoveRange(); if (was !== !!msg.game?.enabled) { Comms.loadTrades(); loadCorps(); } else Comms.refresh(); renderPopup(); break; }
+        case 'turn': GameUI.onTurn(msg); loadBattles(); loadCorps(); loadReachBonus(); break;
+        case 'phase': showPhaseBanner(msg.phase); updateMoveRange(); renderPopup(); renderSelBar(); syncMarches(); break;
+        case 'corps': loadCorps(); break;
+        case 'faction': GameUI.onFaction(msg); loadReachBonus(); break;
         case 'ready': if (msg.turn === state.game?.turn) { state.ready = msg.ready || []; renderReady(); } break;
         case 'territory': renderer.setTerritories(msg.territories, !!msg.replace); GameUI.onTerritories(); break;
         case 'provinces': await loadProvinces(); break;
@@ -1584,12 +1772,15 @@
     } catch (err) { toast(err.message); }
   }
 
-  let listFrame = 0;
+  // The lists are only built while the Map panel is open (thousands of units change all the time); opening it catches up.
+  let listFrame = 0, listsStale = true;
   function renderMarkerLists() {
+    if (state.panel !== 'markers') { listsStale = true; return; }
     if (listFrame) return;
     listFrame = requestAnimationFrame(() => { listFrame = 0; renderMarkerListsNow(); });
   }
   function renderMarkerListsNow() {
+    listsStale = false;
     const q = $('#searchInput').value.trim().toLowerCase();
     const match = s => !q || String(s || '').toLowerCase().includes(q);
     const all = [...state.markers.values()].filter(m => match(m.name) || match(m.data?.nation));
@@ -1672,7 +1863,20 @@
     if (state.selectedId !== id || (state.selectedIds || []).length > 1) renderer.select(id);
     else renderPopup();
   }
-  renderer.addEventListener('markercontext', e => openPanel(e.detail.id));
+  // Right-click on an enemy unit with your units selected attacks it; on anything else it opens the panel.
+  renderer.addEventListener('markercontext', e => {
+    const target = state.markers.get(e.detail.id), plan = target && !state.placing ? attackPlan(target) : null;
+    if (plan) launchAttack(target, plan);
+    else openPanel(e.detail.id);
+  });
+  // Hovering an enemy with your units selected rings it as the target.
+  renderer.addEventListener('markerhover', e => {
+    const { id, over } = e.detail;
+    if (!over) { if (renderer._target?.id === id) renderer.clearTarget(); return; }
+    const target = state.markers.get(id), plan = target && !state.placing && !renderer.mode ? attackPlan(target) : null;
+    if (!plan) { renderer.clearTarget(); return; }
+    renderer.setTarget(id, plan.ready.length > 0 && !attacksClosed(), plan.ready.map(m => m.id));
+  });
   function renderPopup() {
     const el = $('#popup');
     const m = state.selectedId != null ? state.markers.get(state.selectedId) : null;
@@ -1737,6 +1941,7 @@
     if (gameOn() && !['captured', 'travelling'].includes(d.status)) {
       const allow = (Number(d.movement) || 0) * (Number(s.kmPerMove) || 50), used = Number(d.movedKm) || 0;
       rows += stat('This turn', `${Math.max(0, (Number(d.ap) || 1) - (Number(d.apUsed) || 0))}/${Number(d.ap) || 1} actions · ${fmtNum(Math.max(0, allow - used))} of ${fmtNum(allow)} ${km} left`);
+      rows += marchRow(m);
     }
     return `<div class="herocard ${esc(d.status || 'active')}">
       <div class="hero-portrait" title="${esc(role.label)}"><div class="hero-oval">${heroPortraitHtml(m)}</div></div>
@@ -1835,7 +2040,16 @@
       if (gameOn()) {
         const km = state.game.settings.kmPerMove, allow = (Number(d.movement) || 0) * km, used = Number(d.movedKm) || 0;
         body += stat('This turn', `${d.attacked ? 'attacked, cannot move' : `${fmtNum(Math.max(0, allow - used))} of ${fmtNum(allow)} ${state.lobby?.scaleLabel || 'km'} left`} · ${Math.max(0, (Number(d.ap) || 0) - (Number(d.apUsed) || 0))}/${Number(d.ap) || 0} AP`);
+        body += marchRow(m);
       }
+      if (gameOn()) {
+        const S = state.game.settings || {}, worn = wornOf(m);
+        if (worn) body += stat('Worn', `−${worn} attack and defend (${d.strength}% strength)`);
+        if (d.dig) body += stat('Orders', `${d.dig.mode === 'reinforce' ? 'reinforcing' : 'digging'} ${S.trenchSectionKm ?? 10} ${state.lobby?.scaleLabel || 'km'} of trench at End turn (within ${S.trenchDigKm ?? 20} ${state.lobby?.scaleLabel || 'km'} of it)`);
+        if (Number(d.replenishedTurn) === state.game.turn) body += stat('Refitting', 'took on replacements this turn');
+      }
+      if (d.submerged) body += stat('Submerged', `seen only by destroyers within ${state.game?.settings?.subDetectKm ?? 20} ${state.lobby?.scaleLabel || 'km'}; surfaces to attack`);
+      if (d.corps) body += stat('Corps', corpsName(d.corps));
       const cover = trenchCoverFor(m);
       if (cover) body += stat('Cover', `+${cover.bonus} defend (${esc(cover.trench.label || 'trench')})`);
       const gen = generalFor(m);
@@ -1844,10 +2058,14 @@
       if (d.abilities?.length) body += `<div class="stat"><span class="muted">Abilities</span></div><ul style="margin:2px 0 4px 16px;padding:0;font-size:12px">${d.abilities.map(a => `<li>${esc(a)}</li>`).join('')}</ul>`;
     } else if (m.type === 'town') {
       body += stat('Size', d.size) + nationStat(d.nation);
+      if (gameOn() && d.blockaded) body += stat('Blockade', '⚓ enemy warships lie off the coast: it supplies no troops until they are driven off');
       if (gameOn()) body += developmentStat(m);
     } else if (m.type === 'resource') {
       const r = window.GameData?.byKey[d.kind];
-      body += stat('Resource', r ? r.name : d.kind) + stat('Yield per turn', d.yield) + nationStat(d.nation);
+      const y = GameData.resourceYield(m, state.game?.settings);
+      body += stat('Resource', r ? r.name : d.kind) + stat('Yield per turn', y !== Number(d.yield || 0) ? `${y} (${d.yield} and its works)` : d.yield) + nationStat(d.nation);
+      if (gameOn()) body += developmentStat(m);
+      else if (d.improved) body += stat('Works', `level ${d.improved} / 3`);
     } else if (m.type === 'factory') {
       body += stat('Industry level', `${d.industry ?? 1} / 5`) + nationStat(d.nation);
       if (gameOn()) body += developmentStat(m);
@@ -1861,7 +2079,8 @@
     let actions = `<button class="small secondary" data-act="center">Center</button>`;
     if (canEdit(m)) actions += `<button class="small" data-act="edit">Edit</button>`;
     if (canEdit(m)) actions += `<button class="small secondary" data-act="lock" title="${m.locked ? 'Let it be selected and dragged again' : 'Clicks and drags pass through a locked token'}">${m.locked ? '🔓 Unlock' : '🔒 Lock'}</button>`;
-    if (m.type === 'unit' && canEdit(m) && (d.strength ?? 100) > 0) actions += `<button class="small danger" data-act="attack">⚔ Attack…</button>`;
+    if (m.type === 'unit' && canEdit(m) && (d.strength ?? 100) > 0 && [...state.shapes.values()].some(s => s.kind === 'rail')) actions += `<button class="small danger" data-act="railcut" title="Cut (or blow up) a railway within reach. To attack a unit, select this one and right-click the enemy."${attacksClosed() ? ' disabled' : ''}>⛓ Cut railway…</button>`;
+    if (m.type === 'unit' && canEdit(m) && (d.strength ?? 100) > 0) actions += unitOrderButtons(m);
     actions += developButton(m);
     if (m.type === 'hero') actions += heroActionsHtml(m);
     if (m.type === 'unit' || m.type === 'hero') actions += convoyActions(m);
@@ -1892,13 +2111,14 @@
     let actions = '';
     if (canEditShape(s)) actions += `<button class="small" data-act="edit">Edit</button>`;
     if (canEditShape(s)) actions += `<button class="small secondary" data-act="lock">${s.locked ? '🔓 Unlock' : '🔒 Lock'}</button>`;
-    if (canEditShape(s) && !s.locked && s.kind !== 'area') actions += `<button class="small secondary" data-act="continue" title="Keep adding points at the end">${s.kind === 'trench' || s.kind === 'rail' ? 'Extend' : 'Continue'}</button>`;
-    if (canEditShape(s)) actions += `<button class="small secondary" data-act="move" title="Drag the whole drawing to a new place">Move</button>`;
+    if (canEditShape(s) && !s.locked && s.kind !== 'area' && !earthworks(s)) actions += `<button class="small secondary" data-act="continue" title="Keep adding points at the end">${s.kind === 'trench' || s.kind === 'rail' ? 'Extend' : 'Continue'}</button>`;
+    if (canEditShape(s) && !earthworks(s)) actions += `<button class="small secondary" data-act="move" title="Drag the whole drawing to a new place">Move</button>`;
     actions += `<button class="small secondary" data-act="history">History</button>`;
     if (canEditShape(s)) actions += `<button class="small danger" data-act="del">Delete</button>`;
-    const hint = canEditShape(s) && !s.locked ? `<p class="hint" style="margin:6px 0 0">Drag a point to move it · grab the line to add a point · right-click (or Alt-click) a point to remove it · Move button or Shift-drag to move everything</p>`
+    const planNote = s.kind === 'trench' && gameOn() && (s.data?.state || 'dug') === 'plan' ? `<p class="hint" style="margin:6px 0 0">Planned: engineers or pioneers within ${state.game.settings.trenchDigKm ?? 20} ${state.lobby?.scaleLabel || 'km'} dig it ${state.game.settings.trenchSectionKm ?? 10} ${state.lobby?.scaleLabel || 'km'} a turn (🛠 Dig trench in their panel; ${state.game.settings.trenchDigTimber ?? 4} timber a section).</p>` : '';
+    const hint = earthworks(s) ? '<p class="hint" style="margin:6px 0 0">Dug earthworks: engineers reinforce it and sappers blow it up, a section at a time.</p>' : canEditShape(s) && !s.locked ? `<p class="hint" style="margin:6px 0 0">Drag a point to move it · grab the line to add a point · right-click (or Alt-click) a point to remove it · Move button or Shift-drag to move everything</p>`
       : (s.locked ? '<p class="hint" style="margin:6px 0 0">Locked: clicks on the map pass through it. Unlock to edit.</p>' : '');
-    return `<h3><span class="dot" style="background:${esc(s.kind === 'rail' ? '#8d8a86' : s.color)}"></span>${esc(shapeName(s))} <span class="badge">${s.kind === 'rail' ? 'Railway' : 'Drawing'}</span>${visBadge(s)}</h3>${body}${hint}<div class="actions">${actions}</div>`;
+    return `<h3><span class="dot" style="background:${esc(s.kind === 'rail' ? '#8d8a86' : s.color)}"></span>${esc(shapeName(s))} <span class="badge">${s.kind === 'rail' ? 'Railway' : 'Drawing'}</span>${visBadge(s)}</h3>${body}${planNote}${hint}<div class="actions">${actions}</div>`;
   }
 
   async function popupAction(act, m, btn) {
@@ -1907,8 +2127,10 @@
       else if (act === 'center') renderer.centerOn(m.x, m.y);
       else if (act === 'edit') openEdit(m);
       else if (act === 'lock') { const d = await api.patch(`${base}/markers/${m.id}`, { locked: !m.locked }); upsertMarker(d.marker); }
-      else if (act === 'attack') openCombat(m);
+      else if (act === 'railcut') openRailCut(m);
+      else if (act === 'unmarch') { const d = await api.del(`${base}/game/units/${m.id}/goal`); upsertMarker(d.marker); toast(`${m.name}'s march is called off`); }
       else if (['recon', 'steal', 'hunt', 'send', 'recall', 'expel'].includes(act)) await heroOrder(act, m);
+      else if (['replenish', 'dig', 'reinforce', 'undig', 'demolish', 'wreck', 'dive', 'surface'].includes(act)) await unitOrder(act, m);
       else if (act === 'develop') { const f = (state.factions || []).find(x => x.name.toLowerCase() === String(m.data?.nation || '').toLowerCase()); await GameUI.startProject(GameData.projectFor(m), m.id, f?.id); renderPopup(); }
       else if (act === 'history') showHistoryFor('marker', m.id);
       else if (act === 'dup') {
@@ -1998,7 +2220,7 @@
       <div data-for="resource"><div class="grid2">
         <label>Resource<select id="${p}Kind">${(window.GameData ? GameData.RESOURCES : []).map(r => `<option value="${r.key}">${esc(r.name)}</option>`).join('')}</select></label>
         <label>Yield per turn<input id="${p}Yield" type="number" min="0" max="50" step="any" value="3"></label>
-      </div><div class="grid2"><label>Owner faction<select id="${p}ResNationSel">${nationOptions()}</select></label></div>
+      </div><div class="grid2"><label>Owner faction<select id="${p}ResNationSel">${nationOptions()}</select></label><label>Works <span class="hint">(improvements 0–3)</span><input id="${p}Improved" type="number" min="0" max="3" step="1" placeholder="0"></label></div>
       <label id="${p}ResNationCustomWrap" hidden>Custom nation<input id="${p}ResNation" list="nationList" maxlength="60"></label></div>
       <div data-for="factory"><div class="grid2">
         <label>Owner faction<select id="${p}FacNationSel">${nationOptions()}</select></label>
@@ -2139,7 +2361,7 @@
     });
     if (type === 'town') Object.assign(data, { size: v('Size'), nation: readNation(p, 'TownNation'), industry: v('Industry2'), developed: Number(v('Developed')) || 0 });
     if (type === 'poi') Object.assign(data, { category: v('Category') });
-    if (type === 'resource') Object.assign(data, { kind: v('Kind'), yield: v('Yield') === '' ? 1 : v('Yield'), nation: readNation(p, 'ResNation') });
+    if (type === 'resource') Object.assign(data, { kind: v('Kind'), yield: v('Yield') === '' ? 1 : v('Yield'), nation: readNation(p, 'ResNation'), improved: Number(v('Improved')) || 0 });
     if (type === 'factory') Object.assign(data, { industry: v('Industry') || 1, nation: readNation(p, 'FacNation') });
     if (type === 'scenery') Object.assign(data, { scale: v('Scale') || 1, rotation: v('Rotation') || 0, flip: !!document.getElementById(p + 'Flip')?.checked });
     if (type === 'hero') Object.assign(data, {
@@ -2173,6 +2395,7 @@
     set('Industry', d.industry ?? 1); setNation(p, 'FacNation', m.type === 'factory' ? d.nation : '');
     set('Industry2', m.type === 'town' ? (d.industry ?? '') : '');
     set('Developed', m.type === 'town' ? (d.developed || '') : '');
+    set('Improved', m.type === 'resource' ? (d.improved || '') : '');
     set('Owner', m.ownerId ?? ''); set('VisibleTo', (m.visibleTo || []).join(', '));
     set('Scale', d.scale ?? 1); set('Rotation', d.rotation ?? 0);
     if (m.type === 'hero') {
@@ -2439,7 +2662,11 @@
     $('#shapeNoMansLand').disabled = gameOn() && state.role !== 'gm';
     $('#trenchZigWrap').hidden = !trench || !!shape;                 // traverses are applied when the trench is first dug
     if (trench) {
-      $('#trenchState').value = shape ? (shape.data?.state || 'dug') : 'dug';
+      // While the game runs players only plan trenches; engineers dig them.
+      const plansOnly = gameOn() && state.role !== 'gm';
+      $('#trenchState').disabled = plansOnly;
+      $('#trenchState').title = plansOnly ? 'Players plan trenches; engineers dig them a section a turn' : '';
+      $('#trenchState').value = shape ? (shape.data?.state || 'dug') : (plansOnly ? 'plan' : 'dug');
       $('#trenchFacing').value = shape ? (shape.data?.facing || 'left') : 'left';
       $('#trenchZigzag').checked = shape ? shape.data?.zigzag !== false : true;
     }
@@ -2487,69 +2714,330 @@
     closeModals();
   };
 
+  // ---- Unit orders (server/routes/orders.js) --------------------------------------------------------------
+  /** Combat penalty of a worn unit, as the server works it out: −1 per wornStep % of strength lost. */
+  function wornOf(m) {
+    const step = Number(state.game?.settings?.wornStep ?? 20);
+    if (!gameOn() || step <= 0 || m.type !== 'unit') return 0;
+    return Math.floor((100 - Math.max(0, Math.min(100, Number(m.data?.strength ?? 100)))) / step + 1e-9);
+  }
+  /** The order buttons a unit's commander gets: replenish, dig / reinforce, blow up a trench, dive / surface. */
+  function unitOrderButtons(m) {
+    const d = m.data || {}, t = window.UnitTypes?.resolve(d.unitType), S = state.game?.settings || {}, u = state.lobby?.scaleLabel || 'km';
+    let out = '';
+    if (t?.id === 'submarine') out += d.submerged ? '<button class="small secondary" data-act="surface" title="Come up: everyone in sight sees it again">⬆ Surface</button>'
+      : `<button class="small secondary" data-act="dive" title="Run submerged: only destroyers within ${S.subDetectKm ?? 20} ${u} see it. It surfaces to attack."${gameOn() && d.attacked && state.role !== 'gm' ? ' disabled' : ''}>🌊 Dive</button>`;
+    if (!gameOn()) return out;
+    const strength = Number(d.strength ?? 100);
+    if (strength < 100) {
+      const cost = window.GameData.costFor(t?.id || 'infantry', S.unitCosts), amt = Math.min(Number(S.replenishMax ?? 50), 100 - strength);
+      out += `<button class="small" data-act="replenish" title="Take on up to ${amt}% strength for about ${Math.ceil(cost.manpower * amt / 10) / 10} manpower and ${Math.ceil(cost.money * amt / 10) / 10} money. In own or allied territory, supplied, with no enemy within ${S.replenishEnemyKm ?? 50} ${u}; it then spends the turn refitting."${Number(d.replenishedTurn) === state.game.turn && state.role !== 'gm' ? ' disabled' : ''}>🩹 Replenish</button>`;
+    }
+    if (['engineers', 'pioneers'].includes(t?.id)) {
+      if (d.dig) out += '<button class="small secondary" data-act="undig">✕ Stop digging</button>';
+      else out += `<button class="small" data-act="dig" title="Dig ${S.trenchSectionKm ?? 10} ${u} of the nearest planned trench within ${S.trenchDigKm ?? 20} ${u} at End turn (${S.trenchDigTimber ?? 4} timber)">🛠 Dig trench</button><button class="small secondary" data-act="reinforce" title="Reinforce ${S.trenchSectionKm ?? 10} ${u} of the nearest dug trench of your side at End turn (${S.trenchReinforceTimber ?? 6} timber)">🛠 Reinforce</button>`;
+    }
+    if (t?.id === 'sappers') out += `<button class="small danger" data-act="wreck" title="Knock the works of the nearest improved resource node within ${S.trenchDigKm ?? 20} ${u} down a level: your own side's for certain (scorched earth), an enemy's on d20 + attack against d20 + ${S.trenchDemolishDefence ?? 2} + its best guard"${attacksClosed() ? ' disabled' : ''}>🔥 Wreck works</button>`;
+    if (t?.id === 'sappers') out += `<button class="small danger" data-act="demolish" title="Blow up ${S.trenchSectionKm ?? 10} ${u} of the nearest enemy trench within ${S.trenchDigKm ?? 20} ${u}: d20 + attack against d20 + its works and its best guard"${attacksClosed() ? ' disabled' : ''}>💥 Blow up trench</button>`;
+    return out;
+  }
+  async function unitOrder(act, m) {
+    if (act === 'demolish' && !confirm(`Send ${m.name} against the nearest enemy trench? It uses its action for the turn.`)) return;
+    if (act === 'wreck' && !confirm(`Send ${m.name} to wreck the works of the nearest improved resource node? It uses its action for the turn, and your own side's works go down too.`)) return;
+    const path = { replenish: 'replenish', dig: 'dig', reinforce: 'dig', demolish: 'demolish', wreck: 'wreck', dive: 'dive', surface: 'dive' }[act];
+    const body = act === 'reinforce' ? { mode: 'reinforce' } : act === 'dig' ? { mode: 'dig' } : act === 'surface' ? { submerged: false } : act === 'dive' ? { submerged: true } : {};
+    const d = act === 'undig' ? await api.del(`${base}/game/units/${m.id}/dig`) : await api.post(`${base}/game/units/${m.id}/${path}`, body);
+    if (d.marker) upsertMarker(d.marker);
+    if (d.message) toast(d.message, act === 'demolish' || act === 'wreck' ? 8000 : 6000);
+    if (d.event && !state.events.some(x => x.id === d.event.id)) { state.events.push(d.event); renderLog(true); }
+    renderPopup();
+  }
+
+  // ---- Phases -------------------------------------------------------------------------------------------
+  /** A banner over the map, a toast, a chime and a desktop notification when the GM changes the phase. */
+  function showPhaseBanner(phase) {
+    const el = $('#phaseBanner');
+    const battle = phase === 'battle';
+    el.className = battle ? 'battle' : '';
+    el.innerHTML = battle ? '⚔ Battle phase<small>Attacks are open. Units hold their positions until the next turn.</small>'
+      : '🚩 Movement phase<small>Units move. Attacks wait for the battle phase.</small>';
+    el.hidden = false;
+    el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
+    clearTimeout(showPhaseBanner.t);
+    showPhaseBanner.t = setTimeout(() => { el.hidden = true; }, 3300);
+    toast(battle ? '⚔ The battle phase has begun: attacks are open' : '🚩 Back to the movement phase', 4000);
+    beep();
+    notify(battle ? 'Battle phase' : 'Movement phase', battle ? 'Attacks are open; units hold their positions' : 'Units may move again');
+  }
+
+  // ---- Corps (server/routes/orders.js) ---------------------------------------------------------------------
+  state.corps = [];
+  async function loadCorps() {
+    if (!gameOn()) { state.corps = []; return; }
+    try { state.corps = (await api.get(`${base}/game/corps`)).corps || []; } catch { state.corps = []; }
+    GameUI.renderNation(); renderSelBar();
+    if (state.selectedId != null) renderPopup();
+  }
+  function corpsName(id) { return state.corps.find(c => c.id === Number(id))?.name || `corps #${id}`; }
+  const ROMAN = n => [[1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']].reduce((s, [v, r]) => { while (n >= v) { s += r; n -= v; } return s; }, '');
+  /** Selected units a player may put in a corps: their own, alive, on land (not ships or aircraft). */
+  function corpsCandidates() {
+    return (state.selectedIds || []).map(id => state.markers.get(id)).filter(m => {
+      if (!m || m.type !== 'unit' || !canEdit(m) || Number(m.data?.strength ?? 100) <= 0) return false;
+      const cat = window.UnitTypes?.resolve(m.data?.unitType)?.cat;
+      return cat !== 'Naval' && cat !== 'Air';
+    });
+  }
+  /**
+   * The bar shown with several of your units selected: form a corps, or add them to one; when they are all one corps,
+   * its line orders too (the Nation panel's ⇥ Form line and ↻ Same line).
+   */
+  function renderSelBar() {
+    const bar = $('#selBar');
+    const list = gameOn() ? corpsCandidates() : [];
+    if (list.length < 2) { bar.hidden = true; return; }
+    const nation = String(list[0].data?.nation || '').toLowerCase();
+    const same = list.every(m => String(m.data?.nation || '').toLowerCase() === nation);
+    const mine = state.corps.filter(c => c.nation.toLowerCase() === nation);
+    const corps = same ? mine.find(c => list.every(m => c.unitIds.includes(m.id))) : null;
+    if (corps) {
+      const off = holdsPosition() ? ' disabled title="Corps form up in the movement phase"' : '';
+      bar.innerHTML = `<span class="hint">${list.length} units of</span> <b>${esc(corps.name)}</b>`
+        + `<button type="button" class="small" data-corps="line:${corps.id}"${off || ' title="Draw a front line; the corps forms up on it"'}>⇥ Form line</button>`
+        + (corps.line ? `<button type="button" class="small secondary" data-corps="again:${corps.id}"${off || ' title="Form up on the last line again (units short of movement carry on)"'}>↻ Same line</button>` : '');
+      bar.hidden = false;
+      return;
+    }
+    bar.innerHTML = `<span class="hint">${list.length} units</span>` + (same
+      ? `<button type="button" class="small" data-selbar="form">⚑ Form corps</button>${mine.length ? `<select id="selBarCorps">${mine.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select><button type="button" class="small secondary" data-selbar="add">＋ Add to corps</button>` : ''}`
+      : '<span class="hint">· a corps is one nation\'s units</span>');
+    bar.hidden = false;
+  }
+  $('#selBar').addEventListener('click', async e => {
+    const b = e.target.closest('[data-selbar]');
+    if (!b) return;
+    const ids = corpsCandidates().map(m => m.id);
+    try {
+      if (b.dataset.selbar === 'form') {
+        const nation = String(state.markers.get(ids[0])?.data?.nation || '');
+        const n = state.corps.filter(c => c.nation.toLowerCase() === nation.toLowerCase()).length + 1;
+        const name = prompt('Name the corps', `${ROMAN(n)} Corps`);
+        if (!name) return;
+        const d = await api.post(`${base}/game/corps`, { name, unitIds: ids });
+        toast(`${d.corps.name} formed: ${d.corps.unitIds.length} units. ⇥ Form line in this bar draws its front.`, 5000);
+      } else {
+        const cid = Number($('#selBarCorps').value);
+        await api.patch(`${base}/game/corps/${cid}`, { addIds: ids });
+        toast(`${ids.length} units joined ${corpsName(cid)}`);
+      }
+      await loadCorps();
+    } catch (err) { toast(err.message); }
+  });
+  /** The Nation panel's corps list for a faction: select, form line, add the selection, rename, disband. */
+  function corpsHtml(e) {
+    const list = (state.corps || []).filter(c => c.nation.toLowerCase() === e.faction.name.toLowerCase());
+    const help = '<p class="hint">Select several of your land units on the map (⬚ or Shift-drag) and press ⚑ Form corps. A corps forms on a line you draw: front-line troops spread along it, artillery behind them, support further back, all facing the enemy.</p>';
+    if (!list.length) return `<div class="section">Corps</div>${help}`;
+    return `<div class="section">Corps <span class="hint">(${list.length})</span></div><div class="corpslist">${list.map(c => `<div class="corps"><b>${esc(c.name)}</b><span class="hint">${c.unitIds.length} unit${c.unitIds.length === 1 ? '' : 's'}</span>
+      <button type="button" class="small secondary" data-corps="select:${c.id}" title="Select its units on the map">Select</button>
+      <button type="button" class="small" data-corps="line:${c.id}" title="Draw a front line; the corps forms up on it"${holdsPosition() ? ' disabled' : ''}>⇥ Form line</button>
+      ${c.line ? `<button type="button" class="small secondary" data-corps="again:${c.id}" title="Form up on the last line again (units short of movement carry on)"${holdsPosition() ? ' disabled' : ''}>↻ Same line</button>` : ''}
+      <button type="button" class="small secondary" data-corps="rename:${c.id}">✎</button>
+      <button type="button" class="small secondary" data-corps="disband:${c.id}" title="Disband the corps (its units stay where they are)">✕</button></div>`).join('')}</div>`;
+  }
+  document.addEventListener('click', async e => {
+    const b = e.target.closest('[data-corps]');
+    if (!b) return;
+    const [act, idText] = b.dataset.corps.split(':'), c = state.corps.find(x => x.id === Number(idText));
+    if (!c) return;
+    try {
+      if (act === 'select') {
+        const ids = c.unitIds.filter(id => state.markers.has(id));
+        if (!ids.length) { toast(`${c.name} has no units on the map`); return; }
+        const first = state.markers.get(ids[0]);
+        renderer.centerOn(first.x, first.y);
+        renderer.selectMany(ids, ids[0]);
+      } else if (act === 'line') {
+        state.corpsDraw = c.id;
+        renderer.startDraw('corps');
+        toast(`${c.name}: click points along its front, finish with a double-click, Enter or Done, then click the enemy's side`, 5000);
+      } else if (act === 'again') {
+        await sendCorpsLine(c, c.line, c.front);
+      } else if (act === 'rename') {
+        const name = prompt('Rename the corps', c.name);
+        if (!name || name === c.name) return;
+        await api.patch(`${base}/game/corps/${c.id}`, { name });
+        await loadCorps();
+      } else if (act === 'disband' && confirm(`Disband ${c.name}? Its units stay where they are.`)) {
+        await api.del(`${base}/game/corps/${c.id}`);
+        await loadCorps();
+      }
+    } catch (err) { toast(err.message); }
+  });
+  /** After drawing a corps line: wait for a click on the enemy's side of it. */
+  function armCorpsFront(points) {
+    const c = state.corps.find(x => x.id === state.corpsDraw);
+    state.corpsDraw = null;
+    if (!c) return;
+    disarmPlacing();
+    state.placing = { corpsFront: { id: c.id, name: c.name, points } };
+    renderer.showCorpsLine(points, null);
+    renderer.app.canvas.style.cursor = 'crosshair';
+    updatePlaceHud();
+  }
+  /** Which side of the line (walked from its first point) a point is on: 'left' or 'right', by the nearest segment. */
+  function sideOf(points, x, y) {
+    let best = null, bd = Infinity;
+    for (let i = 1; i < points.length; i++) {
+      const [ax, ay] = points[i - 1], [bx, by] = points[i], dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy || 1;
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / L2)), px = ax + dx * t, py = ay + dy * t, d = (x - px) ** 2 + (y - py) ** 2;
+      if (d < bd) { bd = d; best = { ax, ay, dx, dy }; }
+    }
+    // Left of the walking direction is (dy, −dx) in map space (y down), as on the server.
+    return (x - best.ax) * best.dy - (y - best.ay) * best.dx > 0 ? 'left' : 'right';
+  }
+  async function formCorpsLine(x, y) {
+    const p = state.placing.corpsFront, c = state.corps.find(k => k.id === p.id);
+    disarmPlacing();
+    if (!c) return;
+    await sendCorpsLine(c, p.points, sideOf(p.points, x, y));
+  }
+  async function sendCorpsLine(c, points, front) {
+    renderer.showCorpsLine(points, front);
+    try {
+      const d = await api.post(`${base}/game/corps/${c.id}/line`, { points: points.map(q => [round1(q[0]), round1(q[1])]), front });
+      for (const m of d.moved || []) upsertMarker(m);
+      toast(d.message + (d.errors?.length ? ` · ${d.errors.slice(0, 3).join('; ')}` : '') + (d.note ? ` · ${d.note}` : ''), 7000);
+      await loadCorps();
+    } catch (err) { toast(err.message); }
+    setTimeout(() => renderer.hideCorpsLine(), 5000);
+  }
+
   // ---- Combat -------------------------------------------------------------------------------------------
-  function openCombat(attacker) {
-    if (cutOff(attacker) && state.role !== 'gm') { toast(`${attacker.name} is out of supply and cannot attack`); return; }
-    const typeA = window.UnitTypes?.resolve(attacker.data?.unitType);
-    const matchText = m => {
-      if (!window.Matchups) return '';
-      const r = Matchups.matchup(typeA, window.UnitTypes?.resolve(m.data?.unitType), { entrenched: !!trenchCoverFor(m) });
-      return r.notes.length ? ` · ${r.mod > 0 ? '+' : ''}${r.mod} (${r.notes.map(n => n.text).join('; ')})` : '';
-    };
-    // Only the other side's units: never the attacker's own nation, and never an ally while the game is on.
-    const mine = String(attacker.data?.nation || '').toLowerCase();
-    const myFaction = mine ? (state.factions || []).find(f => f.name.toLowerCase() === mine) : null;
-    const allied = m => {
-      if (!gameOn() || !myFaction) return false;
-      const f = (state.factions || []).find(x => x.name.toLowerCase() === String(m.data?.nation || '').toLowerCase());
-      if (!f || f.id === myFaction.id) return false;
-      const [a, b] = f.id < myFaction.id ? [f.id, myFaction.id] : [myFaction.id, f.id];
-      return (state.relations || []).some(r => r.a === a && r.b === b && r.status === 'alliance');
-    };
-    // Game mode: only targets within the unit's reach (range points × km per range point).
-    const limited = gameOn() && !state.game.settings.waiveMovement;
-    const reach = limited ? (Number(attacker.data?.range) || 0) * (Number(state.game.settings.kmPerRange) || 50) : Infinity;
-    const unitLabel = state.lobby?.scaleLabel || 'km';
-    const targets = [...state.markers.values()]
-      .filter(m => m.type === 'unit' && m.id !== attacker.id && (Number(m.data?.strength ?? 100)) > 0 && !m.data?.aboard && !(mine && String(m.data?.nation || '').toLowerCase() === mine) && !allied(m))
-      .map(m => ({ m, d: distanceUnits(attacker.x, attacker.y, m.x, m.y) })).filter(t => t.d <= reach + 1e-6).sort((a, b) => a.d - b.d);
+  // Select one of your units (or several), then right-click an enemy unit: every selected unit that can reach it
+  // attacks, one after another, with no dialogue. Hovering the enemy first rings it (red: the attack would go in;
+  // grey: it would not, and the right-click says why). The red dashed ring round a selected unit is its reach.
+  let reachBonus = {};   // nation (lower case) -> { cat: { Artillery: 1 }, unit: { fieldgun: 1 } }: research range bonuses
+  async function loadReachBonus() {
+    if (!gameOn()) { reachBonus = {}; return; }
+    try { reachBonus = (await api.get(`${base}/game/reach`)).bonus || {}; } catch { reachBonus = {}; }
+    syncFireRange(); updateMoveRange(); syncMarches();
+  }
+  /** A unit's attack reach in campaign units, as the server works it out ((range + research) × km per range point). */
+  function attackReachOf(m) {
+    if (!gameOn() || state.game.settings.waiveMovement) return Infinity;
+    const t = window.UnitTypes?.resolve(m.data?.unitType), b = reachBonus[String(m.data?.nation || '').toLowerCase()];
+    const bonus = b && t ? (Number(b.cat?.[t.cat]) || 0) + (Number(b.unit?.[t.id]) || 0) : 0;
+    return Math.max(0, (Number(m.data?.range) || 0) + bonus) * (Number(state.game.settings.kmPerRange) || 50);
+  }
+  /** Whether `a` may fight `m` at all: not the same nation, not an ally, and a submerged submarine only by destroyers. */
+  function hostileTo(a, m) {
+    const mine = String(a.data?.nation || '').toLowerCase(), theirs = String(m.data?.nation || '').toLowerCase();
+    if (mine && mine === theirs) return false;
+    if (m.data?.submerged && window.UnitTypes?.resolve(a.data?.unitType)?.id !== 'destroyer' && state.role !== 'gm') return false;
+    if (!gameOn() || !mine || !theirs) return true;
+    const fa = (state.factions || []).find(f => f.name.toLowerCase() === mine), fb = (state.factions || []).find(f => f.name.toLowerCase() === theirs);
+    if (!fa || !fb) return true;
+    const [x, y] = fa.id < fb.id ? [fa.id, fb.id] : [fb.id, fa.id];
+    return !(state.relations || []).some(r => r.a === x && r.b === y && r.status === 'alliance');
+  }
+  /** Why a unit cannot attack this turn (null when it can), as the server would say. */
+  function cannotFire(m) {
+    if (Number(m.data?.strength ?? 100) <= 0) return `${m.name} has no strength left`;
+    if (m.data?.aboard) return `${m.name} is aboard a convoy: land it first`;
+    if (!gameOn() || state.role === 'gm') return null;
+    if (cutOff(m) && window.UnitTypes?.resolve(m.data?.unitType)?.cat !== 'Emplacements') return `${m.name} is out of supply and cannot attack`;
+    const ap = Number(m.data?.ap) || 0;
+    if (ap <= 0) return `${m.name} has no action points and cannot attack`;
+    if ((Number(m.data?.apUsed) || 0) >= ap) return `${m.name} has used its action points this turn`;
+    return null;
+  }
+  /**
+   * An attack on `target` by the selected units: { ready, blocked } (blocked: why each other one cannot), or null when
+   * no selected unit of yours could ever fight it (then a right-click opens its panel instead).
+   */
+  function attackPlan(target) {
+    if (target.type !== 'unit' || Number(target.data?.strength ?? 100) <= 0 || target.data?.aboard) return null;
+    const ids = (state.selectedIds || []).length > 1 ? state.selectedIds : (state.selectedId != null ? [state.selectedId] : []);
+    const list = ids.map(id => state.markers.get(id)).filter(m => m && m.type === 'unit' && m.id !== target.id && canEdit(m) && hostileTo(m, target));
+    if (!list.length) return null;
+    const u = state.lobby?.scaleLabel || 'km', ready = [], blocked = [];
+    for (const m of list) {
+      let why = cannotFire(m);
+      if (!why) {
+        const d = distanceUnits(m.x, m.y, target.x, target.y), reach = attackReachOf(m);
+        if (d > reach + 1e-6) why = `${target.name} is ${fmtNum(d)} ${u} away; ${m.name} reaches ${fmtNum(reach)} ${u}`;
+      }
+      if (why) blocked.push(why); else ready.push(m);
+    }
+    return { ready, blocked };
+  }
+  /** Every ready unit attacks in turn (stopping once the target is destroyed); the log keeps every roll. */
+  async function launchAttack(target, plan) {
+    if (attacksClosed()) { toast('Movement phase: attacks open in the battle phase'); return; }
+    if (!plan.ready.length) { toast(plan.blocked.length > 1 ? `None of them can attack ${target.name}: ${plan.blocked[0]}` : plan.blocked[0], 5000); return; }
+    renderer.clearTarget();
+    const done = [];
+    for (const a of plan.ready) {
+      try {
+        const d = await api.post(`${base}/combat`, { attackerId: a.id, defenderId: target.id });
+        done.push(d);
+        if (d.returnFire && !state.events.some(x => x.id === d.returnFire.id)) state.events.push(d.returnFire);
+        if (!state.events.some(x => x.id === d.event.id)) { state.events.push(d.event); renderLog(true); }
+        if (Number(d.event.data?.losses?.[target.id]?.to) <= 0) break;
+      } catch (err) { done.push({ error: `${a.name}: ${err.message}` }); }
+    }
+    const ok = done.filter(d => d.event);
+    if (ok.length === 1 && done.length === 1) {
+      const d = ok[0];
+      toast(d.event.message + (d.captureNote ? ` · ${d.captureNote}` : '') + (d.returnFire ? ` · ${d.returnFire.message}` : ''), 8000);
+    } else {
+      const won = ok.filter(d => d.event.data?.outcome === 'attacker').length, last = ok[ok.length - 1];
+      const left = last ? Number(last.event.data?.losses?.[target.id]?.to) : null;
+      const errs = done.filter(d => d.error).map(d => d.error);
+      toast(`${ok.length} attack${ok.length === 1 ? '' : 's'} on ${target.name}: ${won} succeeded` + (left === null || Number.isNaN(left) ? '' : left <= 0 ? `, ${target.name} destroyed` : `, ${target.name} at ${left}%`)
+        + (last?.captureNote ? ` · ${last.captureNote}` : '') + (errs.length ? ` · ${errs.slice(0, 2).join('; ')}` : '') + ' (rolls in the log)', 8000);
+    }
+  }
+  /** The red dashed ring: the selected unit's attack reach (the lead's, with several selected). */
+  function syncFireRange() {
+    const ids = (state.selectedIds || []).length > 1 ? state.selectedIds : (state.selectedId != null ? [state.selectedId] : []);
+    const lead = state.markers.get(state.selectedId) || state.markers.get(ids[0]);
+    if (!lead || lead.type !== 'unit' || !canEdit(lead) || !gameOn() || state.game.settings.waiveMovement || Number(lead.data?.strength ?? 100) <= 0) { renderer.hideFireRange(); return; }
+    const reach = attackReachOf(lead);
+    if (!(reach > 0)) { renderer.hideFireRange(); return; }
+    const [rx, ry] = kmToWorld(lead.x, lead.y, reach);
+    renderer.showFireRange(lead.x, lead.y, rx, ry, !attacksClosed() && !cannotFire(lead));
+  }
+
+  // ---- Railway sabotage: a unit's ⛓ Cut railway… lists the track within its reach ----------------------
+  function openRailCut(attacker) {
+    const why = cannotFire(attacker);
+    if (why && state.role !== 'gm') { toast(why); return; }
+    const reach = attackReachOf(attacker), limited = reach !== Infinity, u = state.lobby?.scaleLabel || 'km';
     const railTargets = railTargetsFor(attacker, reach);
-    if (!targets.length && !railTargets.length) { toast(limited ? `No enemy units or railways within ${attacker.name}'s reach (${fmtNum(reach)} ${unitLabel})` : 'No enemy units to attack'); return; }
-    $('#combatIntro').textContent = `${attacker.name} (attack ${attacker.data?.attack ?? 0}, strength ${attacker.data?.strength ?? 100}%${limited ? `, reach ${fmtNum(reach)} ${unitLabel}` : ''})`;
-    const unitOpts = targets.map(({ m, d }) =>
-      `<option value="${m.id}">${esc(m.name)} — ${esc(m.data?.nation || 'Unaligned')}, defend ${m.data?.defend ?? 0}, strength ${m.data?.strength ?? 100}%${cutOff(m) ? ', out of supply' : ''} (${fmtNum(d)} ${esc(state.lobby?.scaleLabel || '')} away)${esc(matchText(m))}</option>`).join('');
-    const railOpts = railTargets.map(t => `<option value="rail:${t.rail.id}:${t.x}:${t.y}">${t.own ? 'Blow up' : 'Cut'} ${esc(shapeName(t.rail))} ${esc(t.place)}${t.holder ? ` — ${esc(t.holder)}` : ''} (${fmtNum(t.d)} ${esc(state.lobby?.scaleLabel || '')} away)</option>`).join('');
-    $('#combatTarget').innerHTML = (unitOpts && railOpts) ? `<optgroup label="Units">${unitOpts}</optgroup><optgroup label="Railways">${railOpts}</optgroup>` : (unitOpts || railOpts);
-    const c = state.lobby?.settings?.combat || { die: 20, baseLoss: 10, marginMult: 2, winnerLoss: 5 };
-    const unitRule = `Each side rolls d${c.die} and adds attack or defend. Loser loses ${c.baseLoss}% + ${c.marginMult}% per point of margin; winner loses ${c.winnerLoss}%.`;
-    const gs = state.game?.settings || {}, u = state.lobby?.scaleLabel || 'km';
-    const railRule = own => own
-      ? `Your own side's track: blown up without a roll. It closes ${fmtNum((gs.railCutKm ?? 10) * 2)} ${u} of line until repaired.`
-      : `d20 + attack against d20 + the line's defence (${gs.railDefence ?? 4}) + the defend of its best guard within ${gs.railGuardKm ?? 30} ${u}. Success closes ${fmtNum((gs.railCutKm ?? 10) * 2)} ${u} of track until repaired; no one loses strength.`;
+    if (!railTargets.length) { toast(limited ? `No railways within ${attacker.name}'s reach (${fmtNum(reach)} ${u})` : 'No railways to cut'); return; }
+    const wornA = wornOf(attacker);
+    $('#combatIntro').textContent = `${attacker.name} (attack ${attacker.data?.attack ?? 0}${wornA ? ` −${wornA} worn` : ''}, strength ${attacker.data?.strength ?? 100}%${limited ? `, reach ${fmtNum(reach)} ${u}` : ''})`;
+    $('#combatTarget').innerHTML = railTargets.map(t => `<option value="${t.rail.id}:${t.x}:${t.y}">${t.own ? 'Blow up' : 'Cut'} ${esc(shapeName(t.rail))} ${esc(t.place)}${t.holder ? ` — ${esc(t.holder)}` : ''} (${fmtNum(t.d)} ${esc(u)} away)</option>`).join('');
+    const gs = state.game?.settings || {};
     const syncRule = () => {
-      const v = $('#combatTarget').value;
-      $('#combatRule').textContent = v.startsWith('rail:') ? railRule($('#combatTarget').selectedOptions[0]?.textContent.startsWith('Blow up')) : unitRule;
+      const own = $('#combatTarget').selectedOptions[0]?.textContent.startsWith('Blow up');
+      $('#combatRule').textContent = own
+        ? `Your own side's track: blown up without a roll. It closes ${fmtNum((gs.railCutKm ?? 10) * 2)} ${u} of line until repaired.`
+        : `d20 + attack against d20 + the line's defence (${gs.railDefence ?? 4}) + the defend of its best guard within ${gs.railGuardKm ?? 30} ${u}. Success closes ${fmtNum((gs.railCutKm ?? 10) * 2)} ${u} of track until repaired; no one loses strength.`;
     };
     $('#combatTarget').onchange = syncRule;
     syncRule();
     $('#combatForm').onsubmit = async e => {
       e.preventDefault();
       try {
-        const val = $('#combatTarget').value;
-        if (val.startsWith('rail:')) {
-          const [, sid, x, y] = val.split(':');
-          const r = await api.post(`${base}/game/rail/cut`, { unitId: attacker.id, shapeId: Number(sid), x: Number(x), y: Number(y) });
-          closeModals();
-          toast(r.event.message, 6000);
-          if (r.shape) upsertShape(r.shape);
-          if (!state.events.some(x => x.id === r.event.id)) { state.events.push(r.event); renderLog(true); }
-          return;
-        }
-        const d = await api.post(`${base}/combat`, { attackerId: attacker.id, defenderId: Number(val) });
+        const [sid, x, y] = $('#combatTarget').value.split(':');
+        const r = await api.post(`${base}/game/rail/cut`, { unitId: attacker.id, shapeId: Number(sid), x: Number(x), y: Number(y) });
         closeModals();
-        toast(d.event.message + (d.captureNote ? ` · ${d.captureNote}` : '') + (d.returnFire ? ` · ${d.returnFire.message}` : ''), 8000);
-        if (d.returnFire && !state.events.some(x => x.id === d.returnFire.id)) state.events.push(d.returnFire);
-        if (!state.events.some(x => x.id === d.event.id)) { state.events.push(d.event); renderLog(true); }
+        toast(r.event.message, 6000);
+        if (r.shape) upsertShape(r.shape);
+        if (!state.events.some(x => x.id === r.event.id)) { state.events.push(r.event); renderLog(true); }
       } catch (err) { toast(err.message); }
     };
     $('#combatModal').classList.add('open');
@@ -2775,6 +3263,7 @@
     $('#panelIcon').textContent = PANELS[state.panel][0];
     $('#panelTitle').textContent = PANELS[state.panel][1];
     if (state.panel === 'log') { const el = $('#logList'); el.scrollTop = el.scrollHeight; }
+    if (state.panel === 'markers' && listsStale) renderMarkerListsNow();
   }
   /** A panel whose rail button was just hidden (game mode off, role changed) closes. */
   function syncRail() {
@@ -2854,7 +3343,7 @@
   try {
     await loadLobby();
     await loadFactions();
-    GameUI.init({ state, renderer, base, $, $$, flagImg, openPanel, loadMarkers, loadTerritories, loadProvinces, removeBorderDrawings, armBrush, armFactory, notify, renderReady, onRail: syncRail, onLayout: () => renderer.app.resize(), isGm: () => state.role === 'gm' });
+    GameUI.init({ state, renderer, base, $, $$, flagImg, openPanel, loadMarkers, corpsHtml, loadTerritories, loadProvinces, removeBorderDrawings, armBrush, armFactory, notify, renderReady, onRail: syncRail, onLayout: () => renderer.app.resize(), isGm: () => state.role === 'gm' });
     await GameUI.load().catch(err => console.warn('game state', err));
     syncRailButton();
     await loadTerritories();
@@ -2865,6 +3354,9 @@
     await loadEvents();
     await loadHistory();
     syncTrails();
+    loadCorps();
+    loadReachBonus();
+    if (isEarth() && window.Reach) Reach.loadMask(`${base}/landmask`).then(() => { reachChanged(); });
     await Comms.init({ state, me, base, renderer, notify, GameUI });
     loadPings();
     loadBattles();

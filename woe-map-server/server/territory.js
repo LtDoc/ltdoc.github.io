@@ -202,11 +202,17 @@ function isLand(lobby, x, y) {
   }
   return false;
 }
+const coastMemo = new Map();   // "W×H|x|y|km" -> bool: the land never changes, and places are asked about again and again
 /** Coastal test: any point on a circle of `km` around (x, y) is sea. */
 function isCoastal(lobby, x, y, km = 30) {
   if (!geo.isEarth(lobby)) return true;
+  const key = `${lobby.map_width}x${lobby.map_height}|${x}|${y}|${km}`;
+  if (coastMemo.has(key)) return coastMemo.get(key);
   const ring = circle(lobby, x, y, km, 24)[0][0];
-  return ring.some(p => !isLand(lobby, p[0], p[1]));
+  const out = ring.some(p => !isLand(lobby, p[0], p[1]));
+  if (coastMemo.size > 50000) coastMemo.clear();
+  coastMemo.set(key, out);
+  return out;
 }
 
 // ---- Land raster (fast land / sea tests for ships, craters and spawn points) ------------------------
@@ -246,6 +252,40 @@ function landMask(lobby) {
   const mask = { W, H, cell: MASK_CELL, data };
   cache.set(key, mask);
   return mask;
+}
+/**
+ * The land raster run-length encoded for the browser's movement reach (public/js/reach.js): Uint32 W, H, cell, then per
+ * row a Uint16 count and that many Uint16 run lengths, water first (about 90 KB for the Earth map). Cached; null for
+ * image maps.
+ */
+function landMaskRuns(lobby) {
+  const m = landMask(lobby);
+  if (!m) return null;
+  const key = `maskruns:${lobby.map_width}x${lobby.map_height}`;
+  if (cache.has(key)) return cache.get(key);
+  const rows = [];
+  let total = 12;
+  for (let r = 0; r < m.H; r++) {
+    const runs = [];
+    let prev = 0, len = 0;
+    for (let c = 0; c < m.W; c++) {
+      const v = m.data[r * m.W + c];
+      if (v !== prev) { runs.push(len); len = 0; prev = v; }
+      len++;
+    }
+    runs.push(len);
+    rows.push(runs);
+    total += 2 + runs.length * 2;
+  }
+  const buf = Buffer.alloc(total);
+  buf.writeUInt32LE(m.W, 0); buf.writeUInt32LE(m.H, 4); buf.writeUInt32LE(m.cell, 8);
+  let o = 12;
+  for (const runs of rows) {
+    buf.writeUInt16LE(runs.length, o); o += 2;
+    for (const n of runs) { buf.writeUInt16LE(n, o); o += 2; }
+  }
+  cache.set(key, buf);
+  return buf;
 }
 /** Fast land test from the raster (image maps: always land). */
 function landAt(lobby, x, y) {
@@ -357,13 +397,15 @@ function landClip(lobby, multi) {
 // ---- Storage ---------------------------------------------------------------------------------
 function serialize(row) { return { factionId: row.faction_id, geometry: access.safeJson(row.geometry) || [], updatedAt: row.updated_at }; }
 function all(lobbyId) { return q.all.all(lobbyId).map(serialize); }
+let writes = 0;   // free-form territory changes, for ownershipKey
 function write(lobbyId, factionId, geometry, opts) {
+  writes++;
   const g = clean(geometry, opts?.tol, opts?.minArea);
   if (!g.length) { q.remove.run(lobbyId, factionId); return { factionId, geometry: [], updatedAt: now() }; }
   q.upsert.run(lobbyId, factionId, JSON.stringify(g), now());
   return { factionId, geometry: g, updatedAt: now() };
 }
-function clear(lobbyId) { q.clear.run(lobbyId); }
+function clear(lobbyId) { writes++; q.clear.run(lobbyId); }
 
 /** Faction id owning a point, NEUTRAL for neutral land, null for nobody (sea or unclaimed). */
 function ownerAt(terrs, x, y) {
@@ -403,6 +445,10 @@ function ownerLookup(lobby) {
   const terrs = all(lobby.id);
   if (!terrs.length) return null;
   return (x, y) => ownerAt(terrs, x, y);
+}
+/** Changes whenever ground changes hands (provinces or free-form territories): a key for caches built on ownerLookup. */
+function ownershipKey(lobby) {
+  return provinces().has(lobby.id) ? `p${provinces().ownersKey(lobby.id)}` : `t${writes}`;
 }
 
 // ---- Seeding and GM tools -------------------------------------------------------------------
@@ -569,7 +615,8 @@ function isLandUnit(m) {
 }
 
 /**
- * The capture rule after a land unit's committed move (§5.2). `relation(a, b)` returns peace|war|alliance.
+ * The capture rule after a land unit's committed move (§5.2). `relation(a, b)` returns peace|war|alliance;
+ * `markers` is the campaign's serialized markers, or a function returning them (called only when needed).
  * Returns null when nothing happens, else { changed: territories, flips: [{marker, nation}], cities: [names], held }.
  * Defended ground does not fall: a province (or, without provinces, the ground within the capture radius) with a
  * defender in it stays with its owner until the defenders are beaten. Landing in one, the front holds.
@@ -584,6 +631,7 @@ function capture(lobby, g, unit, factions, markers, relation) {
   if (owner === null || owner === mine.id) return null;
   if (owner === NEUTRAL) { if (!g.settings.occupyNeutrals) return null; }
   else if (relation(mine.id, owner) !== 'war') return null;
+  if (typeof markers === 'function') markers = markers();   // loaded only for a move onto ground it could take
   const s = g.settings;
   const radius = Number(s.captureRadiusKm) || 30;
   const ownerName = owner === NEUTRAL ? '' : (factions.find(f => f.id === owner)?.name || '').toLowerCase();
@@ -634,5 +682,5 @@ function capture(lobby, g, unit, factions, markers, relation) {
   return { held: false, changed, owners, flips, cities: cities.map(c => c.name), owner, mine };
 }
 
-module.exports = { assignHistory, historyNames, landMask, landAt, nearWater, shipCourseError, landCourseError, nearestWater, nearestLand, NEUTRAL, all, write, clear, carve, circle, landClip, ownerAt, seedFromYear, assignArea, brush, ownershipChanges, capture, isLandUnit, earthYears, clean,
-  trenchOwner, trenchOwnershipChanges, trenchCover, distanceToPath, isLand, isCoastal, landFor, lakesFor, loadGz, world, bboxOf, pointInMulti, overlaps, ownerLookup };
+module.exports = { assignHistory, historyNames, landMask, landMaskRuns, landAt, nearWater, shipCourseError, landCourseError, nearestWater, nearestLand, NEUTRAL, all, write, clear, carve, circle, landClip, ownerAt, seedFromYear, assignArea, brush, ownershipChanges, capture, isLandUnit, earthYears, clean,
+  trenchOwner, trenchOwnershipChanges, trenchCover, distanceToPath, isLand, isCoastal, landFor, lakesFor, loadGz, world, bboxOf, pointInMulti, overlaps, ownerLookup, ownershipKey };

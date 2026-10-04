@@ -218,6 +218,12 @@ view. Details: `docs/UI.md`.
   small (3) in the middle of their fields. Shown from 150 % zoom, in full detail from 500 %. Shelled towns show the
   damage: houses near a crater are burnt-out shells or rubble, and this turn's hits set them burning, with flames
   and tall smoke columns.
+- **Resource works on the ground.** Under each resource node its works are drawn the same way
+  (`public/js/resource-art.js`): grain estates of hedged fields round a village (ripe wheat painted with the sprites
+  in `public/sprites/fields`), cotton in rows, horse paddocks, rubber plantations, forest with clear-cuts and a
+  sawmill, pit heads with spoil heaps and miners' terraces, stepped open pits, oil leases crowded with derricks,
+  nitrate oficinas. They grow with the node's yield and show its improvements (docs/ECONOMY.md); a town's fields
+  keep off them and they keep off a town's centre.
 - Any marker can use an uploaded image or external URL as its icon instead. Prefer uploads: an external
   image host must send CORS headers for WebGL to use it, and when it does not the marker silently falls back
   to the drawn sprite. Uploaded icons are shrunk to 256 px in the browser first.
@@ -298,12 +304,18 @@ which side is the **rear**. The real width is honoured when you zoom in close; z
 drops below about 10 screen pixels so the line stays readable (that minimum is a vertex-shader uniform, so
 zooming never rebuilds a mesh).
 
+**While the game runs players only plan trenches**: engineers and pioneers dig a planned trench 10 km a turn (and
+reinforce a dug one), for timber, finished at End turn; sappers blow up a section of an enemy trench in the battle
+phase; a dug trench cannot be redrawn. Details: `docs/WARFARE.md`.
+
 Trenches also play: a trench **belongs to the faction whose territory most of its centreline lies in**
 (recomputed whenever borders move, with the ownership of towns and nodes), and a unit attacked while within
 the **cover range** (20 km) of a dug or reinforced trench of its own faction (or of an unowned trench) adds the
 trench's **cover bonus** to its defend roll: +2 dug, +4 reinforced, planned trenches give nothing. The combat
 log shows the bonus, the unit's popup shows the cover it currently enjoys, and the range and bonuses are
-campaign rules (⚖ Rules → Trenches). An enemy's trench never shelters you.
+campaign rules (⚖ Rules → Trenches). An enemy's trench never shelters you. A **manned** trench (a defender of its
+side within the cover range of the crossing) also stops enemy land units at its line: they halt just short of it
+and must beat the defenders, blow a gap or go round (docs/WARFARE.md).
 
 Rendering (`public/js/trench.js`) is a triangulated ribbon, not a line: each centreline point becomes a
 left/right vertex pair at ±half-width (slightly varied along the path) on a mitred normal, sharp corners are
@@ -365,7 +377,9 @@ movement limits and action points. Switching it off pauses all of that and keeps
 design is in `docs/GAME-DESIGN.md`.
 
 - **Turns.** Weekly by default (fortnight, month and season are options). The turn widget (bottom right) shows the turn,
-  the game date and the deadline. Everyone acts during the turn; the GM presses **End turn** there, which
+  the game date, the phase and the deadline. Each turn has a **movement phase** (units move; attacks wait) and a
+  **battle phase** the GM opens with **⚔ Battle phase** (attacks open; units hold their positions), with a banner,
+  toast and chime for everyone when it changes (rule switch; docs/WARFARE.md). The GM then presses **End turn**, which
   pays income, resets every unit's movement and action points, advances the date and posts a private turn
   summary to each faction (and the GM). **Undo last turn** restores treasuries and the calendar from a
   snapshot taken before the resolution (the last five are kept); units stay where they are.
@@ -402,8 +416,10 @@ design is in `docs/GAME-DESIGN.md`.
   colour and the owner follow the faction. **Factories** are markers with an industry level 1–5. Both are
   locked by default like towns. Ownership by territory arrives in phase 2; until then the GM sets it.
 - **Movement.** A unit may move `movement × distance per movement point` per turn (50 km by default on the
-  Earth map, map units elsewhere). Click a unit or hero to see a green ring of how far it may still go
-  this turn, then right-click the map inside it to move there (players no longer drag units in game mode; the GM
+  Earth map, map units elsewhere). Click a unit or hero to see a green area of where it may still go
+  this turn (shaped by the coast, No Man's Land and manned enemy trenches), then right-click the map inside it to
+  move there. Right-click beyond it for a **marching order**: the unit goes on at each End turn (by rail where
+  quicker) until it arrives, its route drawn with one leg a turn and the turn it reaches each point (docs/COMMS.md) (players no longer drag units in game mode; the GM
 still can).
   Each move leaves a trail in the unit's colour until End turn. A formation moves as one and is limited
   by its slowest unit. Units that have moved carry an amber dot (red when their allowance is spent). The GM
@@ -417,8 +433,11 @@ still can).
   that has attacked (a unit, or a railway) cannot move again until the next turn, so move first, then attack. The
   GM and the waive switch are not limited.
   Players cannot edit their units' stats, type or faction while game mode is on.
-- **Upkeep** is built in but off: when enabled every unit costs grain per turn and vehicles, aircraft and
-  ships cost oil; a faction that runs out has its three strongest units lose 10 % strength.
+- **Upkeep** is built in but off: when enabled each town feeds a home army for free (8 units per capital, 3 per city,
+  1 per village) and every unit beyond that eats 0.2 grain a turn; ships burn coal (0.25) and aircraft, tanks,
+  armoured cars and submarines oil (0.5). A faction that runs out has its three strongest units that need the
+  resource lose 10 % strength. The numbers are balanced against the 1914 powers' resource regions and armies
+  (docs/ECONOMY.md), so small nations can feed the army that defends them.
 - **Rules** (⚖ Rules window): distance per movement point, waive limits, base money/RP/manpower, city and factory
   income rates, upkeep, starting stockpiles, public treasuries, the capture radius and city district (30 km
   and 75 km by default, so a single unit takes about one province and a city its immediate neighbours),
@@ -459,13 +478,17 @@ still can).
 
 ### Supply, support units and matchups (game mode)
 
-Land units are **supplied or cut off**, kept up to date live as units, places and railways change: places supply units within 30 km, and **Supply
+Land units are **linked to supply or cut off**, kept up to date live as units, places and railways change, and carry **3 turns of
+supplies** (3/3), topped up whenever they are linked: places supply units in their streets or within 30 km (not a port
+**blockaded** by enemy warships within 50 km), and **Supply
 Columns** supply units within 100 km once linked (fed by a friendly capital within 600 km, a city within 400 km,
 a village within 200 km, or a railhead or another linked column within 150 km, so columns can be strung out
 far from home). **Convoys** (transport ships) supply troops within 100 km and feed columns within 200 km anywhere,
 so invasions can be supplied; selecting a unit draws its supply line back to its source.
-A cut-off unit (red badge) cannot move or attack and takes double losses when beaten; from its second End turn
-cut off it loses a quarter of its remaining strength each turn and below 10 % surrenders under a white flag. **Field hospitals** heal
+A cut-off unit (amber badge) lives on what it carries, one turn's worth at each End turn, moving and fighting as usual,
+so a breakthrough or wide flank can outrun its columns. At 0/3 it is out of supply (red badge): it cannot move or attack,
+takes double losses when beaten, loses a quarter of its remaining strength at each End turn and below 10 % surrenders
+under a white flag. **Field hospitals** heal
 units around them each turn, **HQs** add attack and defend, **engineers** add defend and **signals** help
 artillery. **Matchups** add strengths and weaknesses to attacks: cavalry is weak against entrenched troops and
 machine guns but strong against artillery, tanks break wire and machine guns, anti-aircraft hits aircraft,
@@ -475,9 +498,10 @@ numbers and the full table: `docs/UNITS.md`.
 ### Long-term growth (game mode)
 
 Nations can grow their income without cutting their army, slowly. From **Nation → Production → Development**
-(or a town's or factory's popup) they can **upgrade factories** (level 1–5, each level +2 money a turn and a
-build slot) and **develop towns** (capital up to 5, city 4, village 2; each level +3 money and +1 RP a turn, a
-build slot every second level). Each step costs more and takes longer (3–12 turns), one project per site, and
+(or a town's, factory's or resource node's popup) they can **upgrade factories** (level 1–5, each level +2 money a
+turn and a build slot), **develop towns** (capital up to 5, city 4, village 2; each level +3 money and +1 RP a turn,
+a build slot every second level) and **improve resource works** (0–3, each level +25 % of the node's yield, costing
+more the richer the node; sappers can wreck them again, their own side's to deny them to the enemy). Each step costs more and takes longer (3–12 turns), one project per site, and
 the levels stay with the place if it is captured. The **Economy** research branch (1915–1919) adds small,
 compounding income bonuses and makes the projects cheaper; existing campaigns receive it automatically.
 Details and numbers: `docs/ECONOMY.md`.
@@ -523,7 +547,10 @@ Details and numbers: `docs/ECONOMY.md`.
 - **Provinces (Earth map).** **Cut provinces only** (👑 GM panel → World; pick the year and a size, 100 km by
   default; the year defaults to the one the Earth map shows) slices the land into provinces that follow that year's state borders and the coastline: one
   around every major city plus a jittered grid inside each state, every cell clipped to the coast and cut
-  along the border, fragments merged into their neighbour. **Lakes are water**, like the sea: provinces stop at
+  along the border, fragments merged into their neighbour. Coastal slivers and small islands the coarse historical
+  borders miss go to the nearest country's province, not to whichever cell reaches across the sea for them (the Channel
+  Islands, Pantelleria, Thasos, Lemnos and Samos to their 1914 holders); provinces cut before this are put right the
+  first time the campaign loads, owners kept (`strays_fixed`). **Lakes are water**, like the sea: provinces stop at
   their shores (islands in them are land), and the server's land tests treat them as water, so no craters on
   them, ships may sail on them, and lakeside cities count as coastal. Provinces cut before this have their lakes
   cut out the first time the lobby loads (`lakes_cut`); one lying wholly in a lake is dropped. The whole world is about 15,000 provinces and
@@ -602,8 +629,8 @@ join it, and lines that cross or end within 20 km of other track are joined into
 with the pixel-art tile from the train sheet, and trains run back and forth along every open stretch. A unit going
 by rail is shown boarding a train in its colours that runs along the line and drops it off (no movement line is
 drawn for the trip). In game mode land units and heroes ride any open track held by their side, an ally or no one
-at 4× their normal pace (selecting a unit highlights the track it can still reach). A unit's **Attack…** list also
-offers railway sections in reach: d20 + attack against d20 + the line's defence and its best guard; a success
+at 4× their normal pace (selecting a unit highlights the track it can still reach). A unit's **⛓ Cut railway…**
+lists railway sections in reach: d20 + attack against d20 + the line's defence and its best guard; a success
 closes 20 km of line, marked with smoke, until the GM or a nearby unit of the holder repairs it. Full rules:
 `docs/RAILWAYS.md`.
 
@@ -618,9 +645,11 @@ Details: `docs/UNITS.md`.
 Type `/roll 2d6+3 optional note` (or `/r d20`) in the chat, or use the 🎲 button. Rolls happen on the server with
 a cryptographic RNG and are logged for everyone, so nobody can fudge them. Up to 20 dice of up to 1000 sides.
 
-A unit's popup has **Attack…** for its owner or a GM. Pick a target (enemy units only, sorted by distance; the
-attacker's own nation, destroyed units, troops aboard a convoy and, in game mode, its allies are never offered or
-accepted) and the server rolls:
+To attack, select your unit (left-click; a dashed red ring shows its reach) and **right-click an enemy unit**: a
+ring marks the target as you hover it, and the attack goes in at once, with no dialogue. A selected group
+attacks with every unit that can reach the target. The attacker's own nation, destroyed units, troops aboard a
+convoy and, in game mode, its allies cannot be attacked (a right-click on them opens their panel). The server
+rolls:
 each side rolls the campaign's combat die and adds attack or defend. The loser loses *base loss* + *margin ×
 extra per point* of strength, the winner loses the *winner's loss*, ties cost both half the base. The defaults
 (d20, 10 %, 2 %, 5 %) live in campaign settings. Results go to the log, both units shake and an explosion
@@ -631,6 +660,13 @@ from: attrition at End turn, a hospital (green "+10"), or the GM. The strength c
 are ordinary history entries, so a bad fight can be reverted. A unit at zero strength is greyed out and burns
 with a looping fire-and-smoke sprite until a GM deletes it or restores its strength (an edit or a revert both
 work).
+
+**Worn units fight worse:** −1 attack and defend for every 20 % of strength lost, as attacker or defender (the log
+shows it). **🩹 Replenish** takes on up to 50 % strength for the manpower and money of a new unit in proportion,
+in friendly territory with no enemy within 50 km; the unit then spends the turn refitting. **Corps** group a
+nation's units and form them up on a line the player draws, front-line troops along it, artillery behind, all
+facing the enemy. **Submarines dive**: submerged, only destroyers close by see or attack them, and they surface to
+attack. Details: `docs/WARFARE.md`.
 
 **Coastal batteries and fortress guns return fire** on a ship that attacks them: straight after its attack, if both still stand and the
 ship is within the battery's reach, the battery rolls a free shot back (no action point; its attack, tech, general,
@@ -781,7 +817,8 @@ All persistent changes go through the REST API, which validates, records history
 Shift-drag a selected drawing to move it · `G` grid · `F` fit ·
 `Esc` cancel/close · `Delete` delete selected marker or drawing (if allowed) · wheel to zoom · drag empty map to pan ·
 drag a marker to move it (if allowed; in game mode left-click a unit to select it, then right-click the map inside
-its ring to move it there) · right-click a unit or hero for its panel · `R` railway ·
+its ring to move it there) · with your units selected, right-click an enemy unit to attack it · right-click a
+unit or hero for its panel · `R` railway ·
 `P` ping (GM) · `1`–`9`, `0` open the menu panels (Nation, Production, Research, Diplomacy, Map, Place, People,
 Log, History, GM) · `Esc` with nothing selected closes the open panel.
 
@@ -810,6 +847,8 @@ public/
   js/naming.js    ordinal styles by faction keyword and the next-free-number rule (shared with the server)
   js/game-data.js the ten resources, default rules and calendar helpers (shared with the server)
   js/game-ui.js   turn widget, nation bar, Nation / Production / Diplomacy and GM panels, treasury editor
+  js/resource-art.js  resource nodes' works drawn from above (fields, pits, derricks, forest…), grown from name, yield and works
+  js/reach.js     a selected unit's movement area: rays over the server's land raster, No Man's Land and manned trenches
   icons/          painted resource and goods icons used by nodes, factories and the treasury
 server/game.js    game rows, faction treasuries, income, End turn / undo, movement and action-point rules
 server/routes/game.js  /api/lobbies/:id/game routes
@@ -817,11 +856,14 @@ server/geo.js     server-side projection and great-circle distance (mirrors eart
 server/territory.js  faction territories: seeding from a year, brush/assign, the capture rule, ownership of places
 server/production.js  build queues, costs, sites, coastal and industry rules, factory placement
 server/research.js  tech tree storage, research queue and the effects engine
+server/routes/orders.js  unit orders: replenish, dive, engineers' digging, sappers (trenches, wrecking works), corps and corps lines
+server/trenches.js  trench sections (dig, reinforce, blow up) along a centreline
 defaults/techtree-ww1.json  the default WW1 research tree
   js/stats-editor.js  GM table of per-campaign unit stat overrides (+/- steppers), shared by both pages
   js/cost-editor.js  GM table of production costs
   js/research-ui.js  research section, tech tree modal and the GM tech editor
   sprites/        pixel-art sheets and atlas.json (generated)
+  sprites/fields/ wheat textures for the grain estates' ripe fields
   js/map.js       app logic: REST + WebSocket sync, menu rail and panels, forms, popups, history, combat, notifications
   earth/          land, lakes, rivers, borders (gzipped JSON, public domain)
 scripts/
@@ -842,10 +884,29 @@ redrawing the whole scene 145 times a second and kept a CPU core busy for a stat
 With many units: tokens off screen are not drawn or animated, and on the Earth map at 100 % zoom and below
 unit icons are replaced by one small dot per unit in its faction's colour (a single shape, redrawn only when
 units or the zoom change); a unit's icon, textures and flag are only built the first time it is shown. The
-Map panel list and the nation panels are rebuilt at most once per frame however many markers change, so loading a
-campaign or moving a formation no longer rebuilds them once per marker (with 1,300 markers that alone froze the
-page for about 17 s). Provinces are drawn as two meshes built once (fills and borders) and recoloured in place
-when owners change: see `public/js/province-layer.js`.
+small shapes every token draws alike (shadow, selection ring, strength bar, flag backing, moved dot, supply
+badge) share one PixiJS `GraphicsContext` per distinct shape instead of each token holding its own copy (with
+3,000 units on screen that took the page from about 640 MB to 460 MB). The Map panel list is only built while
+that panel is open, and it and the nation panels are rebuilt at most once per frame however many markers change, so
+loading a campaign or moving a formation no longer rebuilds them once per marker (with 1,300 markers that alone
+froze the page for about 17 s). Provinces are drawn as two meshes built once (fills and borders) and recoloured in
+place when owners change: see `public/js/province-layer.js`.
+
+### Server load
+
+Node runs requests one at a time, so anything slow after a change holds up every player. Supply and fog of war
+are worked out about 0.1 s after a change, and changes from several players inside that window share one pass.
+Supply finds places, columns, convoys and railheads near each unit through a spatial index (`geo.index`), and the
+ground under each stretch of track is looked up once and kept until ground changes hands
+(`territory.ownershipKey`). A single unit's move or edit is patched into the fog-of-war state rather than
+reloading every marker. Distances parse the campaign settings once, not on every call. Measured on a test
+campaign with 3,000 units, 13 nations, 242 railway lines and 9 players connected: placing a unit used to hold the
+server for 1.3–2.3 s afterwards and now returns in about 15 ms; eight players moving at the same moment all got
+their answer within about 0.1 s instead of up to 1.8 s.
+
+Memory: an Earth campaign's provinces take about 25 MB of the server's heap while it is in use. A campaign nobody
+has had open for 30 minutes gives back its provinces, fog-of-war state and railway network (`ws.sweepIdle`);
+they are rebuilt from the database when someone opens it again.
 
 ## Known limitations
 

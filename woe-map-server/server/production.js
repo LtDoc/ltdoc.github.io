@@ -3,7 +3,7 @@
  * Production (docs/GAME-DESIGN.md §6.4): factions queue units at the cities and factories they own and pay
  * the cost up front; End turn advances every build and spawns finished units beside their site. Players can
  * also build factories near a city or town they own, and run long-term projects (docs/ECONOMY.md): upgrading a
- * factory's level or developing a town. Routes live in routes/game.js.
+ * factory's level, developing a town or improving a resource node's works. Routes live in routes/game.js.
  */
 const GameData = require('../public/js/game-data');
 const UnitTypes = require('../public/js/units');
@@ -61,7 +61,7 @@ function costWith(g, fx, typeId) {
 function projectCostFor(g, fx, marker) {
   const lv = GameData.projectLevel(marker);
   if (!lv) return null;
-  let cost = lv.level >= lv.max ? null : research.applyCost(fx, lv.id, 'Projects', GameData.projectCost(lv.id, lv.step));
+  let cost = lv.level >= lv.max ? null : research.applyCost(fx, lv.id, 'Projects', GameData.projectCost(lv.id, lv.step, marker));
   if (cost) for (const k of Object.keys(cost)) cost[k] = Math.round(cost[k]);   // whole numbers after discounts
   return { ...lv, cost };
 }
@@ -74,7 +74,7 @@ function queue(lobby, g, faction, state, markers, { typeId, siteId, x, y }, fx) 
   if (GameData.PROJECTS[typeId]) {
     // Long-term project at one of the faction's factories or towns: one at a time per site, no build slot used.
     const m = markers.find(x => x.id === Number(siteId));
-    if (!m || GameData.projectFor(m) !== typeId || !sameNation(m.data?.nation, faction.name)) throw new Error(`Pick one of your ${typeId === 'upgradeFactory' ? 'factories' : 'towns'}`);
+    if (!m || GameData.projectFor(m) !== typeId || !sameNation(m.data?.nation, faction.name)) throw new Error(`Pick one of your ${{ upgradeFactory: 'factories', developTown: 'towns', improveResource: 'resource nodes' }[typeId]}`);
     const p = projectCostFor(g, fx, m);
     if (!p.cost) throw new Error(`${m.name} is already at its highest level (${p.max})`);
     if (queueOf.some(q => GameData.PROJECTS[q.typeId] && q.siteId === m.id)) throw new Error(`${m.name} already has a project under way`);

@@ -10,6 +10,10 @@
  *   - Sources: living units and active heroes (range by type or category, `settings.vision`, plus research
  *     `vision` effects) and towns by size. Submarines are only seen within `subSpotKm` of a source.
  *
+ * Submerged submarines (data.submerged, routes/orders.js) are hidden in any game, fog or not: another side sees one only
+ * while one of its destroyers is within `subDetectKm` of it (or a spy's reveal names it). With fog off the state then
+ * tracks just the submarines, so the same pushes add and remove them as destroyers close in or draw off.
+ *
  * The server decides: canSee (lobbyAccess.js) asks `sees()`, so a unit outside vision never reaches a browser
  * (first load, live updates, history, drags, battles). When vision changes, `schedulePush` sends each player the
  * units that came into or went out of sight, their fog overlay, and the last known positions ("ghosts") of
@@ -32,6 +36,8 @@ const q = {
     (SELECT IFNULL(MAX(updated_at), 0) FROM game WHERE lobby_id = ?) || '|' ||
     (SELECT IFNULL(GROUP_CONCAT(a || '-' || b || status), '') FROM relations WHERE lobby_id = ?) || '|' ||
     (SELECT IFNULL(GROUP_CONCAT(id || name), '') FROM factions WHERE lobby_id = ?) AS fp`),
+  othersFp: db.prepare('SELECT COUNT(*) AS n, IFNULL(MAX(updated_at), 0) AS t FROM markers WHERE lobby_id = ? AND id != ?'),
+  anySubmerged: db.prepare("SELECT COUNT(*) AS n FROM markers WHERE lobby_id = ? AND type = 'unit' AND json_extract(data, '$.submerged') = 1"),
   ghosts: db.prepare('SELECT * FROM fog_ghosts WHERE lobby_id = ? AND nation = ?'),
   allGhosts: db.prepare('SELECT * FROM fog_ghosts WHERE lobby_id = ?'),
   putGhost: db.prepare(`INSERT INTO fog_ghosts (lobby_id, nation, marker_id, x, y, name, type, unit_type, color, flag_nation, turn, seen_at)
@@ -52,6 +58,31 @@ function currentTick() {
 }
 function fingerprint(lobbyId) { return q.fingerprint.get(lobbyId, lobbyId, lobbyId, lobbyId, lobbyId, lobbyId).fp; }
 function invalidate(lobbyId) { cache.delete(Number(lobbyId)); }
+function cached() { return [...cache.keys()]; }
+/**
+ * One marker has just been written (moved, edited, placed or deleted; `before`/`after` serialized, null when
+ * absent): patch it into the cached state instead of reloading every marker, so the visibility checks that follow
+ * stay cheap. Only its nation's sight is worked out again. False when there is no state to patch.
+ */
+function patchMarker(lobbyId, before, after) {
+  const st = cache.get(lobbyId);
+  if (!st || !st.track) return false;
+  if (!!before?.data?.submerged !== !!after?.data?.submerged) return false;   // a submarine dived or surfaced: what is tracked changes
+  const id = (after || before).id;
+  // Only when this write is the sole change since the state was built: the fingerprint as it was before it
+  // (every other marker, plus this one as it stood) must match. Anything else changed too: rebuild instead.
+  const fp = fingerprint(lobbyId), rest = fp.slice(fp.indexOf('|'));
+  const o = q.othersFp.get(lobbyId, id);
+  const was = before ? `${o.n + 1}:${Math.max(o.t, before.updatedAt)}` : `${o.n}:${o.t}`;
+  if (st.fp !== was + rest) return false;
+  const i = st.markers.findIndex(m => m.id === id);
+  if (after) { if (i >= 0) st.markers[i] = after; else st.markers.push(after); }
+  else if (i >= 0) st.markers.splice(i, 1);
+  for (const m of [before, after]) if (m) st.nations.delete(norm(m.data?.nation));
+  st.hunters = null;   // destroyers may have moved (sonar)
+  st.fp = fp;
+  return true;
+}
 
 function state(lobbyId) {
   lobbyId = Number(lobbyId);
@@ -62,8 +93,10 @@ function state(lobbyId) {
   if (st && st.fp === fp) { st.tick = t; return st; }
   const game = require('./game');
   const g = game.get(lobbyId), lobby = access.getLobby(lobbyId);
-  st = { lobbyId, tick: t, fp, lobby, g, settings: g.settings, on: !!(lobby && g.enabled && g.settings.fogOfWar), nations: new Map(), sides: new Map() };
-  if (st.on) {
+  st = { lobbyId, tick: t, fp, lobby, g, settings: g.settings, on: !!(lobby && g.enabled && g.settings.fogOfWar), nations: new Map(), sides: new Map(), provAt: new Map() };
+  st.subs = !!(lobby && g.enabled) && q.anySubmerged.get(lobbyId).n > 0;
+  st.track = st.on || st.subs;
+  if (st.track) {
     const provinces = require('./provinces');
     st.factions = game.q.factions.all(lobbyId);
     st.byName = new Map(st.factions.map(f => [norm(f.name), f]));
@@ -74,7 +107,8 @@ function state(lobbyId) {
       if (r.status !== 'alliance') continue;
       for (const [a, b] of [[r.a, r.b], [r.b, r.a]]) { if (!st.allies.has(a)) st.allies.set(a, new Set()); st.allies.get(a).add(b); }
     }
-    if (!st.pv) { try { st.lookup = require('./territory').ownerLookup(lobby); } catch { st.lookup = null; } }
+    if (!st.on) st.pv = null;
+    else if (!st.pv) { try { st.lookup = require('./territory').ownerLookup(lobby); } catch { st.lookup = null; } }
   }
   cache.set(lobbyId, st);
   return st;
@@ -141,7 +175,7 @@ function nationVision(st, nation) {
     const c = st.pv.get(st.lobbyId), G = st.pv.GRID;
     for (const p of c.list) if (p.factionId === f.id) nv.provinces.add(p.id);
     for (const s of nv.sources) {
-      const here = st.pv.at(st.lobbyId, s.x, s.y);
+      const here = provinceAt(st, s.x, s.y);
       if (here) nv.provinces.add(here.id);
       for (let gx = Math.floor((s.x - s.rx) / G); gx <= Math.floor((s.x + s.rx) / G); gx++)
         for (let gy = Math.floor((s.y - s.ry) / G); gy <= Math.floor((s.y + s.ry) / G); gy++)
@@ -160,9 +194,16 @@ function nearSource(st, nv, x, y, capKm = Infinity) {
   }
   return false;
 }
+/** The province under a point, remembered for the life of the state (every side asks about the same units). */
+function provinceAt(st, x, y) {
+  const k = x + ',' + y;
+  let p = st.provAt.get(k);
+  if (p === undefined) { p = st.pv.at(st.lobbyId, x, y); st.provAt.set(k, p); }
+  return p;
+}
 /** Is a point in sight of a side? `sub`: a submarine, only spotted close in. */
 function inVision(st, side, x, y, sub = false) {
-  const prov = st.pv && !sub ? st.pv.at(st.lobbyId, x, y) : null;
+  const prov = st.pv && !sub ? provinceAt(st, x, y) : null;
   const owner = !st.pv && !sub && st.lookup ? st.lookup(x, y) : null;
   for (const n of side) {
     const nv = nationVision(st, n);
@@ -179,25 +220,47 @@ function inVision(st, side, x, y, sub = false) {
 /** Fog on for this campaign? */
 function on(lobbyId) { return !!lobbyId && state(lobbyId).on; }
 const fogged = m => m && (m.type === 'unit' || m.type === 'hero');
-/** Under fog, is this unit or hero another side's (so vision decides whether the viewer sees it)? */
+const isSub = m => m?.type === 'unit' && UnitTypes.resolve(m.data?.unitType)?.id === 'submarine';
+/** Is vision deciding who sees this marker? Under fog every unit and hero; otherwise only submarines, while any is submerged. */
+const tracked = (st, m) => (st.on ? fogged(m) : st.subs && isSub(m));
+/** Is this unit or hero another side's, and tracked (so vision decides whether the viewer sees it)? */
 function foreign(viewer, m) {
   if (!viewer || viewer.role === 'gm' || !viewer.lobbyId || !fogged(m)) return false;
   const st = state(viewer.lobbyId);
-  if (!st.on) return false;
+  if (!st.track || !tracked(st, m)) return false;
   return !sideOf(st, viewer.nation).has(norm(m.data?.nation));
 }
-/** Vision step of canSee: true unless fog hides this unit from the viewer. */
+/** Is a point within subDetectKm of one of the side's destroyers (the only ships that find a submerged submarine)? */
+function sonar(st, side, x, y) {
+  if (!st.hunters) {
+    st.hunters = st.markers.filter(m => m.type === 'unit' && !m.data?.aboard && Number(m.data?.strength ?? 100) > 0 && UnitTypes.resolve(m.data?.unitType)?.id === 'destroyer');
+  }
+  const km = Number(st.settings.subDetectKm ?? 20);
+  return st.hunters.some(h => side.has(norm(h.data?.nation)) && geo.distance(st.lobby, h.x, h.y, x, y) <= km);
+}
+/** Vision step of canSee: true unless fog (or the sea) hides this unit from the viewer. */
 function sees(viewer, m) {
   if (!foreign(viewer, m)) return true;
   if (m.data?.aboard) return false;   // another side's troops aboard a convoy: what it carries is not seen
-  const st = state(viewer.lobbyId);
-  const sub = m.type === 'unit' && UnitTypes.resolve(m.data?.unitType)?.id === 'submarine';
-  return inVision(st, sideOf(st, viewer.nation), m.x, m.y, sub);
+  const st = state(viewer.lobbyId), side = sideOf(st, viewer.nation);
+  if (m.data?.submerged) return sonar(st, side, m.x, m.y);
+  if (!st.on) return true;
+  return inVision(st, side, m.x, m.y, isSub(m));
 }
-/** A foreign unit as a viewer may receive it: without the trail, supply link or travel plans that would show where it has been or is going. */
+/** Is a unit on the viewer's side (its nation or an ally)? For orders no one else may read, fog or no fog. */
+function ownSide(viewer, m) {
+  if (!viewer || viewer.role === 'gm') return true;
+  const lobby = access.getLobby(viewer.lobbyId);
+  return !!lobby && require('./supply').friendsResolver(lobby)(viewer.nation).has(norm(m.data?.nation));
+}
+/**
+ * A foreign unit as a viewer may receive it: without the trail, supply link or travel plans that would show where it has
+ * been or is going. Marching orders (data.goal) are the owner's side's alone, fog or no fog.
+ */
 function redact(m, viewer) {
+  if (m.data?.goal && !ownSide(viewer, m)) { const { goal, ...rest } = m.data; m = { ...m, data: rest }; }
   if (!foreign(viewer, m) || !m.data) return m;
-  const { trail, supplyFrom, travel, postedTo, ride, ...data } = m.data;
+  const { trail, supplyFrom, travel, postedTo, ride, dig, corps, ...data } = m.data;
   return { ...m, data };
 }
 /** Under fog, does a viewer see this unit's history and drag previews? Only its own side (and the GM) do. */
@@ -261,11 +324,12 @@ function visibleForeign(st, nation) {
 function updateGhosts(st) {
   if (!lastSeen.has(st.lobbyId)) lastSeen.set(st.lobbyId, new Map());
   const memo = lastSeen.get(st.lobbyId), changed = new Set(), t = now();
+  const onMap = new Set(st.markers.map(m => m.id));
   for (const f of st.factions) {
     const n = norm(f.name), seen = visibleForeign(st, n), prev = memo.get(n), side = sideOf(st, n);
     if (prev) {
       for (const [id, m] of prev) {
-        if (seen.has(id) || !st.markers.some(x => x.id === id)) continue;   // still seen, or gone from the map (destroyed, removed)
+        if (seen.has(id) || !onMap.has(id)) continue;   // still seen, or gone from the map (destroyed, removed)
         // Only when our sight has left the spot: an enemy seen walking away is known not to be there.
         if (inVision(st, side, m.x, m.y)) continue;
         q.putGhost.run(st.lobbyId, n, id, m.x, m.y, m.name, m.type, m.data?.unitType || '', m.color || '#888888', m.data?.nation || '', st.g.turn, t);
@@ -282,24 +346,28 @@ function updateGhosts(st) {
 
 // ---- Pushing changes to players ------------------------------------------------------------------------------
 const pending = new Set();
-/** After the current request has finished writing: recompute vision and send each player what changed. */
-function schedulePush(lobbyId) {
+const PUSH_MS = 100;   // moves landing within this of each other (several players at once) share one recompute
+/**
+ * Shortly after the current request has finished writing: recompute vision and send each player what changed.
+ * The state is brought up to date at once (patched for a single marker given as `before`/`after`, else dropped),
+ * so visibility checks in the meantime see the new positions.
+ */
+function schedulePush(lobbyId, before = null, after = null) {
   lobbyId = Number(lobbyId);
-  invalidate(lobbyId);
+  if (!(before || after) || !patchMarker(lobbyId, before, after)) invalidate(lobbyId);
   if (pending.has(lobbyId)) return;
   pending.add(lobbyId);
-  setImmediate(() => {
+  setTimeout(() => {
     pending.delete(lobbyId);
     try { pushNow(lobbyId); } catch (e) { console.warn('fog of war update failed', e); }
-  });
+  }, PUSH_MS);
 }
 function pushNow(lobbyId) {
-  invalidate(lobbyId);
-  const st = state(lobbyId);
-  if (st.on) updateGhosts(st);
+  const st = state(lobbyId);   // current: rebuilt after any change (schedulePush drops it, the fingerprint catches the rest)
+  if (st.on) require('./game').transaction(() => updateGhosts(st));
   require('./ws').syncFog(lobbyId);
 }
 /** Fog switched on or off: forget what each side last saw, so no ghosts appear from before. */
 function reset(lobbyId) { lastSeen.delete(Number(lobbyId)); q.clearGhosts.run(Number(lobbyId)); invalidate(lobbyId); }
 
-module.exports = { on, sees, foreign, redact, sameSide, sideNames, rangeFor, overlay, invalidate, schedulePush, reset, state };
+module.exports = { on, sees, foreign, redact, sameSide, sideNames, rangeFor, overlay, invalidate, cached, schedulePush, reset, state };

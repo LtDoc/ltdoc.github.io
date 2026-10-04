@@ -68,6 +68,7 @@ function unitsNear(lobby, markers, x, y, km, isFriend) {
   for (const m of markers) {
     if (m.adminOnly || !['unit', 'hero'].includes(m.type)) continue;
     if (m.type === 'hero' && m.data?.role === 'spy') continue;
+    if (m.data?.submerged) continue;   // a submerged submarine is found only by destroyers
     if (isFriend(m.data?.nation)) continue;
     const d = geo.distance(lobby, x, y, m.x, m.y);
     if (d <= km) out.push({ marker: m, km: Math.round(d) });

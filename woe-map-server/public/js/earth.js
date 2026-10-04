@@ -76,7 +76,7 @@ const EarthMap = {
     for (const poly of land.polygons) {
       const [outer, ...holes] = poly;
       landG.poly(flat(outer)).fill(st.land);
-      for (const h of holes) landG.poly(flat(h)).cut();
+      if (holes.length) { for (const h of holes) landG.poly(flat(h)); landG.cut(); }   // one cut for all holes (see cutHoles in map-renderer.js)
     }
     container.addChild(landG);
 
@@ -98,7 +98,7 @@ const EarthMap = {
           const pts = flat(outer);
           if (opts.tint !== false) {
             tintG.poly(pts).fill({ color, alpha: 0.28 });
-            for (const h of holes) tintG.poly(flat(h)).cut();
+            if (holes.length) { for (const h of holes) tintG.poly(flat(h)); tintG.cut(); }
           }
           stateRings.push(pts);
           // label anchor: centroid of the largest ring
@@ -121,7 +121,7 @@ const EarthMap = {
       for (const poly of lakes.polygons) {
         const [outer, ...holes] = poly;
         lakeG.poly(flat(outer)).fill(st.lake);
-        for (const h of holes) lakeG.poly(flat(h)).cut();
+        if (holes.length) { for (const h of holes) lakeG.poly(flat(h)); lakeG.cut(); }
       }
       container.addChild(lakeG);
     }

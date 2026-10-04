@@ -13,10 +13,10 @@ const research = require('./research');
 
 const q = {
   game: db.prepare('SELECT * FROM game WHERE lobby_id = ?'),
-  upsertGame: db.prepare(`INSERT INTO game (lobby_id, enabled, turn, date, turn_step, deadline, settings, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  upsertGame: db.prepare(`INSERT INTO game (lobby_id, enabled, turn, date, turn_step, deadline, settings, phase, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(lobby_id) DO UPDATE SET enabled = excluded.enabled, turn = excluded.turn, date = excluded.date,
-      turn_step = excluded.turn_step, deadline = excluded.deadline, settings = excluded.settings, updated_at = excluded.updated_at`),
+      turn_step = excluded.turn_step, deadline = excluded.deadline, settings = excluded.settings, phase = excluded.phase, updated_at = excluded.updated_at`),
   factions: db.prepare('SELECT * FROM factions WHERE lobby_id = ? ORDER BY name COLLATE NOCASE'),
   faction: db.prepare('SELECT * FROM factions WHERE id = ? AND lobby_id = ?'),
   state: db.prepare('SELECT * FROM faction_state WHERE faction_id = ?'),
@@ -29,16 +29,19 @@ const q = {
   clearBattles: db.prepare('DELETE FROM battles WHERE lobby_id = ? AND turn <= ?'),
   clearCraters: db.prepare('DELETE FROM craters WHERE lobby_id = ? AND expires_turn <= ?'),
   nmlAreas: db.prepare(`SELECT points FROM shapes WHERE lobby_id = ? AND kind = 'area' AND json_extract(data, '$.noMansLand') = 1`),
+  trenchShapes: db.prepare(`SELECT id, label, points, data FROM shapes WHERE lobby_id = ? AND kind = 'trench'`),
   // New turn: movement and action points back (and units that attacked may move again); heldTurns counts the turns a unit has stayed put (it digs in: rifle
   // pits, then wire, in the battle scenes).
   resetUnits: db.prepare(`UPDATE markers SET data = json_remove(json_set(data, '$.movedKm', 0, '$.apUsed', 0, '$.heldTurns',
     CASE WHEN COALESCE(json_extract(data, '$.movedKm'), 0) > 0 OR json_extract(data, '$.ride') IS NOT NULL THEN 0 ELSE COALESCE(json_extract(data, '$.heldTurns'), 0) + 1 END),
-    '$.trail', '$.ride', '$.attacked'), updated_at = ? WHERE lobby_id = ? AND type IN ('unit', 'hero')`),
+    '$.trail', '$.ride', '$.attacked', '$.dig'), updated_at = ? WHERE lobby_id = ? AND type IN ('unit', 'hero')`),
   clearReveals: db.prepare(`UPDATE markers SET data = json_remove(data, '$.revealTo'), updated_at = ? WHERE lobby_id = ? AND json_extract(data, '$.revealTo') IS NOT NULL`),
   setStrength: db.prepare(`UPDATE markers SET data = json_set(data, '$.strength', ?), updated_at = ? WHERE id = ?`),
   markerOne: db.prepare('SELECT * FROM markers WHERE id = ?'),
-  setAttrition: db.prepare(`UPDATE markers SET data = json_set(data, '$.strength', ?, '$.unsuppliedTurns', ?, '$.surrendered', json(?)), updated_at = ? WHERE id = ?`),
-  setSupplied: db.prepare(`UPDATE markers SET data = json_set(data, '$.supplied', json(?), '$.supplyFrom', json(?)), updated_at = ? WHERE id = ?`),
+  setAttrition: db.prepare(`UPDATE markers SET data = json_set(data, '$.strength', ?, '$.unsuppliedTurns', ?, '$.surrendered', json(?), '$.supplies', ?), updated_at = ? WHERE id = ?`),
+  setSupplied: db.prepare(`UPDATE markers SET data = json_set(data, '$.supplied', json(?), '$.supplyFrom', json(?), '$.supplies', ?), updated_at = ? WHERE id = ?`),
+  setBlockaded: db.prepare(`UPDATE markers SET data = json_set(data, '$.blockaded', json('true')), updated_at = ? WHERE id = ?`),
+  clearBlockaded: db.prepare(`UPDATE markers SET data = json_remove(data, '$.blockaded'), updated_at = ? WHERE id = ?`),
   relations: db.prepare('SELECT * FROM relations WHERE lobby_id = ?'),
   relation: db.prepare('SELECT * FROM relations WHERE lobby_id = ? AND a = ? AND b = ?'),
   setRelation: db.prepare(`INSERT INTO relations (lobby_id, a, b, status, since_turn) VALUES (?, ?, ?, ?, ?)
@@ -73,24 +76,32 @@ const q = {
 };
 
 const num = (v, f = 0) => { const n = Number(v); return Number.isFinite(n) ? n : f; };
-/** node:sqlite has no transaction helper: run fn inside BEGIN/COMMIT, rolling back on error. */
+/**
+ * node:sqlite has no transaction helper: run fn inside BEGIN/COMMIT, rolling back on error. Inside another
+ * transaction (End turn) fn simply joins it.
+ */
+let txDepth = 0;
 function transaction(fn) {
+  if (txDepth || db.isTransaction) return fn();
+  txDepth++;
   db.exec('BEGIN');
-  try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; }
+  try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; } finally { txDepth--; }
 }
 const round = n => Math.round(n * 10) / 10;
 
 // ---- Game row -------------------------------------------------------------------------
 function get(lobbyId) {
   const row = q.game.get(lobbyId);
-  if (!row) return { lobbyId, enabled: false, turn: 1, date: '1914-07-28', turnStep: 'week', deadline: '', settings: { ...GameData.DEFAULT_SETTINGS } };
+  if (!row) return { lobbyId, enabled: false, turn: 1, date: '1914-07-28', turnStep: 'week', deadline: '', phase: 'move', settings: { ...GameData.DEFAULT_SETTINGS } };
   return serializeGame(row);
 }
 function serializeGame(row) {
+  const settings = GameData.mergeSettings(GameData.DEFAULT_SETTINGS, access.safeJson(row.settings));
   return {
     lobbyId: row.lobby_id, enabled: !!row.enabled, turn: row.turn, date: row.date, turnStep: row.turn_step,
-    deadline: row.deadline, settings: GameData.mergeSettings(GameData.DEFAULT_SETTINGS, access.safeJson(row.settings)),
-    updatedAt: row.updated_at,
+    deadline: row.deadline, settings, updatedAt: row.updated_at,
+    // Movement or battle phase; without phased turns everything is allowed all turn ('open').
+    phase: settings.phases === false ? 'open' : (row.phase === 'battle' ? 'battle' : 'move'),
   };
 }
 function save(g) {
@@ -99,8 +110,30 @@ function save(g) {
   for (const [k, v] of Object.entries(g.settings || {})) {
     if (JSON.stringify(v) !== JSON.stringify(GameData.DEFAULT_SETTINGS[k])) diff[k] = v;
   }
-  q.upsertGame.run(g.lobbyId, g.enabled ? 1 : 0, g.turn, g.date, g.turnStep, g.deadline || '', JSON.stringify(diff), now());
+  q.upsertGame.run(g.lobbyId, g.enabled ? 1 : 0, g.turn, g.date, g.turnStep, g.deadline || '', JSON.stringify(diff), g.phase === 'battle' ? 'battle' : 'move', now());
   return get(g.lobbyId);
+}
+
+// ---- Phased turns -----------------------------------------------------------------------
+const PHASE_LABEL = { move: 'movement phase', battle: 'battle phase' };
+/**
+ * Phased turns (settings.phases): units move in the movement phase and fight in the battle phase. Returns an error
+ * string when `kind` ('move' or 'attack') is closed in the current phase, else null. The GM is never limited.
+ */
+function phaseError(g, isGm, kind, name) {
+  if (!g.enabled || isGm || g.phase === 'open') return null;
+  if (kind === 'move' && g.phase === 'battle') return `Battle phase: ${name ? `${name} holds its position` : 'units hold their positions'} until the movement phase of the next turn`;
+  if (kind === 'attack' && g.phase === 'move') return 'Movement phase: attacks open when the GM starts the battle phase';
+  return null;
+}
+
+// ---- Worn units ------------------------------------------------------------------------------
+/** Combat penalty of a worn unit: −1 attack and defend for every settings.wornStep % of strength it has lost. */
+function wornPenalty(settings, m) {
+  const step = num(settings?.wornStep, 20);
+  if (step <= 0 || m?.type !== 'unit') return 0;
+  const lost = 100 - Math.max(0, Math.min(100, num(m.data?.strength, 100)));
+  return Math.floor(lost / step + 1e-9);
 }
 
 // ---- Faction state --------------------------------------------------------------------
@@ -172,9 +205,10 @@ function incomeFor(lobby, g, faction, state, markers) {
       continue;
     }
     if (m.type === 'resource' && GameData.byKey[m.data.kind]) {
-      const y = num(m.data.yield);
+      // Improvements (long-term projects) add a share of the base yield per level.
+      const y = GameData.resourceYield(m, s), extra = Math.round((y - num(m.data.yield)) * 10) / 10;
       inc.resources[m.data.kind] += y;
-      if (y) inc.notes.push(`${m.name}: +${y} ${GameData.byKey[m.data.kind].name.toLowerCase()}`);
+      if (y) inc.notes.push(`${m.name}: +${y} ${GameData.byKey[m.data.kind].name.toLowerCase()}${extra > 0 ? ` (${extra} from its works)` : ''}`);
     } else if (m.type === 'town') {
       const c = s.cityIncome[m.data.size] || s.cityIncome.village;
       inc.money += num(c.money); inc.rp += num(c.rp); inc.manpower += num(c.manpower);
@@ -191,11 +225,20 @@ function incomeFor(lobby, g, faction, state, markers) {
   for (const k of GameData.RESOURCE_KEYS) inc.resources[k] += num(mods.resources?.[k]);
   research.applyIncome(research.effectsFor(research.list(lobby.id), state.techs || []), inc);
   if (s.upkeep) {
-    for (const u of mine.filter(m => m.type === 'unit' && num(m.data.strength, 100) > 0)) {
-      inc.upkeep.grain += num(s.upkeepGrain);
-      const t = UnitTypes.resolve(u.data.unitType);
-      if (t && (GameData.OIL_CATEGORIES.has(t.cat) || GameData.OIL_TYPES.has(t.id))) inc.upkeep.oil += num(s.upkeepOil);
+    // The nation's towns feed a home army for free; units beyond it eat grain. Ships burn coal; engines burn oil.
+    const units = mine.filter(m => m.type === 'unit' && num(m.data.strength, 100) > 0 && !m.data?.surrendered);
+    const free = s.upkeepFree || {};
+    const allowance = mine.filter(m => m.type === 'town').reduce((a, t) => a + num(free[t.data?.size] ?? free.village, 0), 0);
+    const fed = Math.max(0, units.length - allowance);
+    inc.upkeep.grain += round(fed * num(s.upkeepGrain));
+    let ships = 0, engines = 0;
+    for (const u of units) {
+      const fuel = GameData.fuelOf(UnitTypes.resolve(u.data.unitType));
+      if (fuel === 'coal') ships++; else if (fuel === 'oil') engines++;
     }
+    inc.upkeep.coal += round(ships * num(s.upkeepCoal));
+    inc.upkeep.oil += round(engines * num(s.upkeepOil));
+    inc.notes.push(`Upkeep: ${units.length} unit${units.length === 1 ? '' : 's'}, ${Math.min(units.length, allowance)} fed by its towns (${allowance} allowed)${fed ? `, ${fed} more eat ${round(fed * num(s.upkeepGrain))} grain` : ''}${ships ? `; ${ships} ship${ships === 1 ? '' : 's'} burn ${round(ships * num(s.upkeepCoal))} coal` : ''}${engines ? `; ${engines} engine${engines === 1 ? '' : 's'} burn ${round(engines * num(s.upkeepOil))} oil` : ''}`);
   }
   return inc;
 }
@@ -380,9 +423,11 @@ function endTurn(lobby, hooks = {}) {
         queued: (state.production || []).map(item => ({ type: buildLabel(item), site: item.siteName || '', turnsLeft: item.turnsLeft })),
       } });
     }
-    // Shortages bite: up to three of the faction's strongest units lose 10 % strength per short resource.
+    // Shortages bite: up to three of the faction's strongest units that need the missing resource lose 10 % strength
+    // (coal: ships; oil: aircraft and motor vehicles; anything else: any unit).
     for (const hit of strengthHits) {
-      const units = markers.filter(m => m.type === 'unit' && String(m.data?.nation || '').toLowerCase() === hit.faction.name.toLowerCase() && num(m.data.strength, 100) > 0)
+      const needs = m => (hit.resource === 'coal' || hit.resource === 'oil') ? GameData.fuelOf(UnitTypes.resolve(m.data?.unitType)) === hit.resource : true;
+      const units = markers.filter(m => m.type === 'unit' && String(m.data?.nation || '').toLowerCase() === hit.faction.name.toLowerCase() && num(m.data.strength, 100) > 0 && needs(m))
         .sort((a, b) => num(b.data.attack) - num(a.data.attack)).slice(0, 3);
       for (const u of units) {
         const st = Math.max(0, num(u.data.strength, 100) - 10);
@@ -398,7 +443,7 @@ function endTurn(lobby, hooks = {}) {
       applySupply(lobby, g.settings);
       for (const a of applyAttrition(lobby, g.settings, summaries)) {
         const u = markers.find(m => m.id === a.id);
-        if (u) { u.data.strength = a.to; u.data.supplied = false; }
+        if (u) { u.data.strength = a.to; u.data.supplied = false; u.data.supplies = a.supplies; }
       }
     }
     // Field hospitals heal damaged friendly units around them (docs/UNITS.md).
@@ -421,16 +466,17 @@ function endTurn(lobby, hooks = {}) {
     g.date = GameData.stepDate(g.date, g.turnStep);
     q.clearCraters.run(lobby.id, g.turn);   // shell craters fade after ten turns
     g.deadline = '';
+    g.phase = 'move';   // a new turn opens with its movement phase
     save(g);
     // One report per faction, kept for the last 60 turns, for the turn report modal.
     for (const s of summaries) {
       if (s.data.healed?.length) s.text += `, field hospitals restored ${s.data.healed.length} unit${s.data.healed.length === 1 ? '' : 's'}`;
       if (s.data.attrition?.length) {
         const gone = s.data.attrition.filter(a => a.surrendered), worn = s.data.attrition.filter(a => !a.surrendered);
-        if (worn.length) s.text += `, attrition (out of supply): ${worn.slice(0, 6).map(a => `${a.name} ${a.from}→${a.to}%`).join(', ')}${worn.length > 6 ? ', …' : ''}`;
+        if (worn.length) s.text += `, attrition (out of supplies): ${worn.slice(0, 6).map(a => `${a.name} ${a.from}→${a.to}%`).join(', ')}${worn.length > 6 ? ', …' : ''}`;
         if (gone.length) s.text += `, ⚑ surrendered for want of supply: ${gone.map(a => a.name).join(', ')}`;
       }
-      if (s.data.unsupplied?.length) s.text += `, ${s.data.unsupplied.length} unit${s.data.unsupplied.length === 1 ? '' : 's'} out of supply (${s.data.unsupplied.slice(0, 6).join(', ')}${s.data.unsupplied.length > 6 ? ', …' : ''})`;
+      if (s.data.unsupplied?.length) s.text += `, ${s.data.unsupplied.length} unit${s.data.unsupplied.length === 1 ? '' : 's'} cut off (${s.data.unsupplied.slice(0, 6).map(u => typeof u === 'string' ? u : `${u.name} ${u.supplies}/${u.of}`).join(', ')}${s.data.unsupplied.length > 6 ? ', …' : ''})`;
       q.insertReport.run(lobby.id, ended.turn, s.faction.id, JSON.stringify({ ...s.data, turn: ended.turn, date: ended.date, nextDate: g.date, text: s.text }), now());
     }
     q.pruneReports.run(lobby.id, ended.turn - 60);
@@ -439,59 +485,75 @@ function endTurn(lobby, hooks = {}) {
 }
 
 /**
- * Work out supply for every land unit and store it on the marker (data.supplied), writing only changes.
+ * Work out supply for every land unit and store it on the marker (data.supplied), writing only changes. A unit linked
+ * to supply is topped up to supplyStock at once (data.supplies); one cut off keeps what it carries (End turn uses it).
  * Optional `summaries` get each faction's list of cut-off units. Returns { supplied, unsupplied, changed }.
  */
 function applySupply(lobby, settings, summaries) {
   const markers = q.markers.all(lobby.id).map(access.serializeMarker);
-  const result = require('./supply').compute(lobby, settings, markers);
+  const supply = require('./supply'), result = supply.compute(lobby, settings, markers), max = supply.stockMax(settings);
   let supplied = 0, unsupplied = 0;
-  const changed = [], changes = [];
-  for (const m of markers) {
-    const r = result.get(m.id);
-    if (!r) continue;
-    if (r.supplied) supplied++; else unsupplied++;
-    const from = r.from ? { id: r.from.id ?? null, name: r.from.name || '', kind: r.from.kind } : null;
-    const sameFrom = JSON.stringify(m.data?.supplyFrom ?? null) === JSON.stringify(from);
-    if ((m.data?.supplied !== false) !== r.supplied || m.data?.supplied === undefined || !sameFrom) {
-      q.setSupplied.run(JSON.stringify(r.supplied), JSON.stringify(from), now(), m.id);
-      changed.push(m.id);
-      changes.push({ before: m, after: access.serializeMarker(q.markerOne.get(m.id)) });
+  const changed = [], changes = [], blockades = [];
+  transaction(() => {   // one commit for every changed unit, not one each
+    for (const m of markers) {
+      // Towns: blockaded or not (supply.js), kept on the town for its popup and badge.
+      if (m.type === 'town' && !!m.data?.blockaded !== result.blockaded.has(m.id)) {
+        const on = result.blockaded.has(m.id);
+        (on ? q.setBlockaded : q.clearBlockaded).run(now(), m.id);
+        changed.push(m.id);
+        changes.push({ before: m, after: access.serializeMarker(q.markerOne.get(m.id)) });
+        blockades.push({ town: m, on });
+        continue;
+      }
+      const r = result.get(m.id);
+      if (!r) continue;
+      if (r.supplied) supplied++; else unsupplied++;
+      const from = r.from ? { id: r.from.id ?? null, name: r.from.name || '', kind: r.from.kind } : null;
+      const sameFrom = JSON.stringify(m.data?.supplyFrom ?? null) === JSON.stringify(from);
+      const stock = r.supplied ? max : Math.min(max, Math.max(0, Math.round(num(m.data?.supplies, max))));
+      if ((m.data?.supplied !== false) !== r.supplied || m.data?.supplied === undefined || !sameFrom || num(m.data?.supplies, -1) !== stock) {
+        q.setSupplied.run(JSON.stringify(r.supplied), JSON.stringify(from), stock, now(), m.id);
+        changed.push(m.id);
+        changes.push({ before: m, after: access.serializeMarker(q.markerOne.get(m.id)) });
+      }
+      if (!r.supplied && summaries) {
+        const s = summaries.find(x => x.faction.name.toLowerCase() === String(m.data?.nation || '').toLowerCase());
+        if (s) (s.data.unsupplied = s.data.unsupplied || []).push({ name: m.name, supplies: stock, of: max });
+      }
     }
-    if (!r.supplied && summaries) {
-      const s = summaries.find(x => x.faction.name.toLowerCase() === String(m.data?.nation || '').toLowerCase());
-      if (s) (s.data.unsupplied = s.data.unsupplied || []).push(m.name);
-    }
-  }
-  return { supplied, unsupplied, changed, changes, result };
+  });
+  return { supplied, unsupplied, changed, changes, blockades, result };
 }
 
 /**
- * Attrition at End turn: a land unit still cut off counts its turns without supply. The first costs nothing;
- * from the second on it loses attritionRate % of its remaining strength each turn, and below
- * attritionDisbandBelow % it surrenders (strength 0, white flag). Supplied units start counting again.
+ * Attrition at End turn: a land unit still cut off counts its turns without supply and uses one of the supplies it
+ * carries (data.supplies, up to supplyStock). With none left it loses attritionRate % of its remaining strength each
+ * turn, and below attritionDisbandBelow % it surrenders (strength 0, white flag). Supplied units start counting again
+ * (and were topped up by applySupply).
  */
 function applyAttrition(lobby, settings, summaries) {
   const rate = Number(settings.attritionRate ?? 25) / 100, floor = Number(settings.attritionDisbandBelow ?? 10);
+  const max = require('./supply').stockMax(settings);
   const out = [];
   for (const m of q.markers.all(lobby.id).map(access.serializeMarker)) {
     if (m.type !== 'unit' || m.data?.supplied === undefined || num(m.data?.strength, 100) <= 0) continue;
     if (!require('./supply').needsSupply(m)) continue;
     if (m.data.supplied !== false) {
-      if (num(m.data.unsuppliedTurns)) q.setAttrition.run(num(m.data.strength, 100), 0, 'false', now(), m.id);
+      if (num(m.data.unsuppliedTurns)) q.setAttrition.run(num(m.data.strength, 100), 0, 'false', num(m.data.supplies, max), now(), m.id);
       continue;
     }
     const turns = num(m.data.unsuppliedTurns) + 1;
-    const from = num(m.data.strength, 100);
-    let to = from, surrendered = false;
-    if (turns >= 2 && rate > 0) {
+    const from = num(m.data.strength, 100), left = Math.min(max, Math.max(0, Math.round(num(m.data.supplies, max))));
+    let to = from, surrendered = false, supplies = left;
+    if (left > 0) supplies = left - 1;   // lives on what it carries
+    else if (rate > 0) {
       to = Math.round(from * (1 - rate));
       if (to < floor) { to = 0; surrendered = true; }
     }
-    q.setAttrition.run(to, turns, surrendered ? 'true' : 'false', now(), m.id);
+    q.setAttrition.run(to, turns, surrendered ? 'true' : 'false', supplies, now(), m.id);
     const s = summaries && summaries.find(x => x.faction.name.toLowerCase() === String(m.data?.nation || '').toLowerCase());
     if (s && to < from) (s.data.attrition = s.data.attrition || []).push({ name: m.name, from, to, turns, surrendered });
-    out.push({ id: m.id, name: m.name, nation: m.data?.nation, from, to, turns, surrendered });
+    out.push({ id: m.id, name: m.name, nation: m.data?.nation, from, to, turns, surrendered, supplies });
   }
   return out;
 }
@@ -522,6 +584,7 @@ function undoTurn(lobby) {
     // Recurring trades go back to where they stood (deliveries are inside the restored treasuries).
     if (Array.isArray(data.trades)) for (const t of data.trades) q.updateTrade.run(t.status, t.turnsLeft, t.log, null, t.id);
     g.turn = data.game.turn; g.date = data.game.date;
+    g.phase = 'battle';   // back where End turn was pressed
     save(g);
     q.deleteSnapshot.run(snap.id);
     q.deleteReports.run(lobby.id, data.game.turn);
@@ -531,7 +594,9 @@ function undoTurn(lobby) {
 
 // ---- Rules applied by the marker routes --------------------------------------------------
 /**
- * Check a unit move against its remaining allowance. Returns { x, y, clamped, movedKm, cost, route, error }.
+ * Check a unit move against its remaining allowance. Returns { x, y, clamped, movedKm, cost, route, error, fatal (the
+ * error is the course itself, open water or a manned trench, not this turn's movement or phase), blocked (a
+ * manned enemy trench stopped it), to (the target it was cut back to, when a clamped move would also have met one) }.
  * A land unit or hero takes the railway when walking to the track, riding at settings.railSpeed and walking
  * off is cheaper than going straight (server/rails.js); `cost` is what the move spends, `route` the rail trip.
  * GMs, disabled game mode and the waive switch pass straight through.
@@ -570,6 +635,76 @@ function walkCost(lobby, settings, x0, y0, x1, y1) {
   return { cost, slowed, frac: budget => { let acc = 0; for (let i = 0; i < n; i++) { if (acc + w[i] >= budget) return (i + (budget - acc) / w[i]) / n; acc += w[i]; } return 1; } };
 }
 
+/** Where segment a→b crosses segment c→d: the fraction along a→b (0..1), or null. */
+function segCross(ax, ay, bx, by, c, d) {
+  const rx = bx - ax, ry = by - ay, sx = d[0] - c[0], sy = d[1] - c[1], den = rx * sy - ry * sx;
+  if (Math.abs(den) < 1e-12) return null;
+  const qx = c[0] - ax, qy = c[1] - ay, t = (qx * sy - qy * sx) / den, u = (qx * ry - qy * rx) / den;
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? t : null;
+}
+/**
+ * Manned trenches hold the line (docs/WARFARE.md): a land unit cannot cross a dug (or reinforced) trench of a nation it
+ * is at war with where a land unit of that trench's side (its nation or an ally) stands within trenchRangeKm of the
+ * crossing, the distance that gives trench cover. Unmanned stretches, gaps sappers blew and planned trenches let it
+ * through; so does going round the end. `pts` is the move's path ([[x, y], …]). Returns the first blocking crossing
+ * { k (segment), t (fraction along it), trench, holder } or null.
+ */
+function trenchBlock(lobby, g, marker, pts) {
+  const territory = require('./territory');
+  if (g.settings.trenchBlocks === false || !territory.isLandUnit(marker)) return null;
+  const norm = s => String(s || '').trim().toLowerCase(), nation = norm(marker.data?.nation);
+  if (!nation) return null;
+  const factions = q.factions.all(lobby.id), me = factions.find(f => norm(f.name) === nation);
+  if (!me) return null;
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const lo = [Math.min(...xs), Math.min(...ys)], hi = [Math.max(...xs), Math.max(...ys)];
+  const enemy = q.trenchShapes.all(lobby.id).map(r => ({ id: r.id, label: r.label, points: access.safeJson(r.points), data: access.safeJson(r.data) || {} })).filter(s => {
+    if (!Array.isArray(s.points) || s.points.length < 2 || !s.data.state || s.data.state === 'plan' || !s.data.nation) return false;
+    if (Math.max(...s.points.map(p => p[0])) < lo[0] || Math.min(...s.points.map(p => p[0])) > hi[0] || Math.max(...s.points.map(p => p[1])) < lo[1] || Math.min(...s.points.map(p => p[1])) > hi[1]) return false;
+    const f = factions.find(x => norm(x.name) === norm(s.data.nation));
+    return !!f && f.id !== me.id && relationStatus(lobby.id, me.id, f.id) === 'war';
+  });
+  if (!enemy.length) return null;
+  const range = num(g.settings.trenchRangeKm, 20);
+  let markers = null, friendsOf = null;
+  const manned = (holder, x, y) => {
+    markers = markers || q.markers.all(lobby.id).map(access.serializeMarker);
+    friendsOf = friendsOf || require('./supply').friendsResolver(lobby);
+    const side = friendsOf(holder);
+    return markers.some(m => m.id !== marker.id && territory.isLandUnit(m) && num(m.data?.strength, 100) > 0 && side.has(norm(m.data?.nation)) && geo.distance(lobby, m.x, m.y, x, y) <= range);
+  };
+  for (let k = 1; k < pts.length; k++) {
+    const [ax, ay] = pts[k - 1], [bx, by] = pts[k], hits = [];
+    for (const s of enemy) for (let i = 1; i < s.points.length; i++) {
+      const t = segCross(ax, ay, bx, by, s.points[i - 1], s.points[i]);
+      if (t !== null) hits.push({ t, s, x: ax + (bx - ax) * t, y: ay + (by - ay) * t });
+    }
+    hits.sort((a, b) => a.t - b.t);
+    for (const h of hits) {
+      if (k === 1 && geo.distance(lobby, ax, ay, h.x, h.y) < 0.5) continue;   // standing on the line already
+      if (manned(h.s.data.nation, h.x, h.y)) return { k, t: h.t, trench: h.s, holder: h.s.data.nation };
+    }
+  }
+  return null;
+}
+/**
+ * Cut a move short of a manned enemy trench: { x, y, path (with the factors kept), note } just under 1 km before the
+ * crossing, or null when nothing blocks it.
+ */
+function haltAtTrench(lobby, g, marker, path) {
+  const tb = trenchBlock(lobby, g, marker, path);
+  if (!tb) return null;
+  const [ax, ay] = path[tb.k - 1], [bx, by] = path[tb.k], L = geo.distance(lobby, ax, ay, bx, by);
+  const t = Math.max(0, tb.t - (L > 0 ? 1 / L : 0));
+  const x = round(ax + (bx - ax) * t), y = round(ay + (by - ay) * t);
+  const name = tb.trench.label ? ` (${tb.trench.label})` : '';
+  return {
+    x, y, path: [...path.slice(0, tb.k), path[tb.k].length > 2 ? [x, y, path[tb.k][2]] : [x, y]],
+    note: `${marker.name} was halted at ${tb.holder}'s manned trench${name}: beat its defenders or go round`,
+    stuck: `${marker.name} cannot cross ${tb.holder}'s manned trench${name}: beat its defenders, or go round`,
+  };
+}
+
 /** Turns the dead of a fight lie on the field: the turn of the fight and the two after it. */
 const REMAINS_TURNS = 3;
 
@@ -577,7 +712,7 @@ function checkMove(lobby, g, isGm, marker, x, y) {
   // Ships stay at sea (or in harbour) for players in any mode; the GM can still place them anywhere.
   if (!isGm && marker.type === 'unit' && UnitTypes.resolve(marker.data?.unitType)?.cat === 'Naval') {
     const err = require('./territory').shipCourseError(lobby, marker.x, marker.y, x, y);
-    if (err) return { error: `${marker.name}: ${err}` };
+    if (err) return { error: `${marker.name}: ${err}`, fatal: true };
   }
   // Land units keep off the water for players in any mode (seas and lakes need a convoy); the GM can place them
   // anywhere. The end must be on land; walking, the way there must not cross open water (by rail, the track decides).
@@ -585,13 +720,16 @@ function checkMove(lobby, g, isGm, marker, x, y) {
   const landUnit = !isGm && territory.isLandUnit(marker);
   const wet = direct => (landUnit ? territory.landCourseError(lobby, marker.x, marker.y, x, y, direct) : null);
   let err = wet(false);
-  if (err) return { error: `${marker.name}: ${err}` };
+  if (err) return { error: `${marker.name}: ${err}`, fatal: true };
+  if (['unit', 'hero'].includes(marker.type) && (err = phaseError(g, isGm, 'move', marker.name))) return { error: err };
   if (!g.enabled || isGm || g.settings.waiveMovement || !['unit', 'hero'].includes(marker.type)) {
-    if ((err = wet(true))) return { error: `${marker.name}: ${err}` };
-    return { x, y, clamped: false };
+    if ((err = wet(true))) return { error: `${marker.name}: ${err}`, fatal: true };
+    const halt = g.enabled && !isGm ? haltAtTrench(lobby, g, marker, [[marker.x, marker.y], [x, y]]) : null;
+    if (halt && geo.distance(lobby, marker.x, marker.y, halt.x, halt.y) < 0.5) return { error: halt.stuck, fatal: true };
+    return halt ? { x: halt.x, y: halt.y, clamped: false, blocked: halt.note } : { x, y, clamped: false };
   }
   if (marker.data?.attacked) return { error: `${marker.name} attacked this turn and cannot move until next turn` };
-  if (marker.type === 'unit' && marker.data?.supplied === false && g.settings.supplyEnabled !== false) return { error: `${marker.name} is out of supply and cannot move until a Supply Column reaches it` };
+  if (marker.type === 'unit' && require('./supply').exhausted(marker) && g.settings.supplyEnabled !== false) return { error: `${marker.name} is out of supply (it has used up the supplies it carries) and cannot move until a Supply Column reaches it` };
   const dist = geo.distance(lobby, marker.x, marker.y, x, y);
   if (dist < 1e-6) return { x, y, clamped: false };
   const bonus = research.statBonus(factionEffects(lobby.id, marker.data?.nation), UnitTypes.resolve(marker.data?.unitType)).movement;
@@ -600,20 +738,28 @@ function checkMove(lobby, g, isGm, marker, x, y) {
   const remaining = Math.max(0, allowance - used);
   const unit = geo.isEarth(lobby) ? 'km' : (lobby.scale_label || 'units');
   if (remaining <= 0.01) return { error: `${marker.name} has no movement left this turn (${round(allowance)} ${unit} per turn)` };
-  const route = require('./rails').plan(lobby, g.settings, marker, x, y);
-  if (!route && (err = wet(true))) return { error: `${marker.name}: ${err}` };
+  let route = require('./rails').plan(lobby, g.settings, marker, x, y);
+  if (!route && (err = wet(true))) return { error: `${marker.name}: ${err}`, fatal: true };
+  // A manned enemy trench across the way: the move ends just short of it.
+  const halt = haltAtTrench(lobby, g, marker, route ? route.path : [[marker.x, marker.y], [x, y]]);
+  let blocked;
+  if (halt) {
+    if (geo.distance(lobby, marker.x, marker.y, halt.x, halt.y) < 0.5) return { error: halt.stuck, fatal: true };
+    x = halt.x; y = halt.y; blocked = halt.note;
+    if (route) route = { ...route, path: halt.path, cost: halt.path.slice(1).reduce((c, p, i) => c + geo.distance(lobby, halt.path[i][0], halt.path[i][1], p[0], p[1]) * (p[2] ?? 1), 0) };
+  }
   // Walking: No Man's Land costs several times its distance.
   const walk = route ? null : walkCost(lobby, g.settings, marker.x, marker.y, x, y);
   const cost = route ? route.cost : walk.cost, slowed = !!walk?.slowed;
-  if (cost <= remaining + 1e-6) return { x, y, clamped: false, movedKm: round(used + cost), cost, route, slowed, path: route ? route.path.map(p => [p[0], p[1]]) : null };
+  if (cost <= remaining + 1e-6) return { x, y, clamped: false, movedKm: round(used + cost), cost, route, slowed, blocked, path: route ? route.path.map(p => [p[0], p[1]]) : null };
   if (route) {
     const w = require('./rails').walk(lobby, route.path, remaining);
-    return { x: round(w.x), y: round(w.y), clamped: true, movedKm: round(allowance), remaining, dist: round(cost), cost, route, path: w.points };
+    return { x: round(w.x), y: round(w.y), clamped: true, movedKm: round(allowance), remaining, dist: round(cost), cost, route, path: w.points, to: halt ? [x, y] : null };   // ran out before the trench
   }
   const t = walk.frac(remaining), cx = round(marker.x + (x - marker.x) * t), cy = round(marker.y + (y - marker.y) * t);
   // Run out of movement part-way: not in the middle of a strait.
   if (landUnit && territory.landCourseError(lobby, cx, cy, cx, cy, false)) return { error: `${marker.name} would stop in the water short of the far shore: move it to the near side first` };
-  return { x: cx, y: cy, clamped: true, movedKm: round(allowance), remaining, dist: round(cost), cost, slowed };
+  return { x: cx, y: cy, clamped: true, movedKm: round(allowance), remaining, dist: round(cost), cost, slowed, to: halt ? [x, y] : null };
 }
 
 /** Attack reach of a unit in campaign units: (range + tech bonus) × kmPerRange. */
@@ -633,7 +779,9 @@ function checkRange(lobby, g, isGm, attacker, defender) {
 /** Whether a unit may attack this turn; returns an error string or null. */
 function checkAttack(g, isGm, marker) {
   if (!g.enabled || isGm) return null;
-  if (marker.data?.supplied === false && g.settings.supplyEnabled !== false && UnitTypes.resolve(marker.data?.unitType)?.cat !== 'Emplacements') return `${marker.name} is out of supply and cannot attack`;
+  const pe = phaseError(g, isGm, 'attack');
+  if (pe) return pe;
+  if (require('./supply').exhausted(marker) && g.settings.supplyEnabled !== false && UnitTypes.resolve(marker.data?.unitType)?.cat !== 'Emplacements') return `${marker.name} is out of supply (it has used up the supplies it carries) and cannot attack`;
   const ap = num(marker.data.ap);
   if (ap <= 0) return `${marker.name} has no action points and cannot attack`;
   if (num(marker.data.apUsed) >= ap) return `${marker.name} has used its action points this turn`;
@@ -641,12 +789,13 @@ function checkAttack(g, isGm, marker) {
 }
 
 /** Fields a player may not change on their own unit while the game is running. */
-const PROTECTED_UNIT_FIELDS = ['attack', 'defend', 'ap', 'range', 'movement', 'strength', 'unitType', 'nation', 'movedKm', 'apUsed', 'trail', 'supplied', 'supplyFrom', 'unsuppliedTurns', 'surrendered', 'aboard', 'ride', 'heldTurns', 'attacked'];
+const PROTECTED_UNIT_FIELDS = ['attack', 'defend', 'ap', 'range', 'movement', 'strength', 'unitType', 'nation', 'movedKm', 'apUsed', 'trail', 'supplied', 'supplyFrom', 'supplies', 'unsuppliedTurns', 'surrendered', 'aboard', 'ride', 'heldTurns', 'attacked',
+  'dig', 'submerged', 'replenishedTurn', 'corps', 'facing'];   // set by orders (routes/orders.js), not by editing
 
 module.exports = {
   REMAINS_TURNS,
   get, save, serializeGame, ensureState, serializeState, writeState, factionStates, incomeFor, endTurn, undoTurn, reports,
-  checkMove, checkAttack, checkRange, attackRange, PROTECTED_UNIT_FIELDS, emptyResources, q, applySupply, applyAttrition,
+  checkMove, trenchBlock, checkAttack, checkRange, attackRange, phaseError, wornPenalty, PHASE_LABEL, PROTECTED_UNIT_FIELDS, emptyResources, q, applySupply, applyAttrition,
   relationStatus, setRelation, relations, diplomacy, serializeDiplomacy, factionEffects,
-  TRADE_KEYS, trades, serializeTrade, exchange, shortOf, goodsText, goodName, cancelTradesBetween,
+  TRADE_KEYS, trades, serializeTrade, exchange, shortOf, goodsText, goodName, cancelTradesBetween, transaction,
 };

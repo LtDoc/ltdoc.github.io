@@ -1,13 +1,17 @@
 # Supply, support units and matchups
 
-Built 30 Sep 2026. Shared matchup table: `public/js/matchups.js`. Supply and support rules: `server/supply.js`;
+Built 30 Sep 2026. Phased turns, worn units, replacements, corps, engineers' trenches, blockades and submerged
+submarines (3 Oct 2026): docs/WARFARE.md. Shared matchup table: `public/js/matchups.js`. Supply and support rules: `server/supply.js`;
 End-turn hooks and movement/attack checks: `server/game.js`; combat: `server/routes/lobbies.js` (`POST /combat`).
 All distances and bonuses are campaign rules (⚖ Rules → Supply & support).
 
 ## Supply
 
-Every land unit (infantry, mounted, artillery, support, and custom types) is either **supplied** or **cut off**.
-Ships, aircraft, heroes and **emplacements** do not need supply.
+Every land unit (infantry, mounted, artillery, support, and custom types) is either **linked** to supply or **cut
+off**, and carries **supplies for 3 turns** (**3/3**; ⚖ Rules → Supply carried, `supplyStock`). Linked, it is topped
+up to 3/3 at once. Cut off, it lives on what it carries, using one at each End turn, and it moves and fights as usual
+meanwhile: room for a breakthrough or a wide flank to outrun its columns for a while. Only at **0/3** is it **out of
+supply** (below). Ships, aircraft, heroes and **emplacements** do not need supply.
 
 ## Emplacements
 
@@ -26,8 +30,11 @@ Coastal batteries, fortress guns and AA emplacements fire from range like artill
 they shell their target, are spared the reply when repelled, and signals units spot for them. Heavy, siege and
 railway guns get +1 against any emplacement.
 
-- **Towns are the nodes.** A unit within **30 km** of a friendly town (its nation's or an ally's) is supplied
-  directly, as a garrison.
+- **Towns are the nodes.** A unit in a friendly town (its nation's or an ally's) is supplied directly, as a
+  garrison: anywhere in the town's drawn streets, or within **30 km** of its centre, whichever reaches further (a
+  capital is drawn up to ~55 km from its centre north to south on the Earth map, so the 30 km alone left part of it
+  unsupplied). A **blockaded** port (enemy warships within 50 km, none of its side's) supplies nothing
+  until the blockade is lifted (docs/WARFARE.md).
 - **Supply Columns carry it forward.** A Supply Column (unit type *Supply / logistics*) is **linked** when a
   friendly place is close enough for its size: **capitals within 600 km, cities within 400 km, villages within
   200 km**. A column is also linked within **150 km** of open friendly
@@ -58,27 +65,33 @@ railway guns get +1 against any emplacement.
   supplied when linked.
 - **Live:** supply is recomputed whenever something that can move a supply line changes (a unit or place is
   moved, created, removed or changes hands, a railway is cut or repaired, war or an alliance changes) and every
-  open map gets the new status at once. Bringing a column up frees cut-off units the same turn, so they can
-  move and fight again. End turn, switching game mode on and **Recalculate supply now** also recompute it.
+  open map gets the new status at once. Bringing a column up, or marching into a friendly town, tops a unit up to
+  3/3 that turn, so a unit out of supply can move and fight again. End turn, switching game mode on and
+  **Recalculate supply now** also recompute it.
 
-A **cut-off** unit:
+A **cut-off** unit with supplies left (amber badge, a dot for each turn's worth; its panel: "2/3 · CUT OFF") moves
+and fights normally, but gets no replacements and no hospital care, and uses one turn's supplies at each End turn.
+
+An **out-of-supply** unit (cut off at 0/3):
 - cannot move (the move is refused; clicking it shows a red ring and says why);
 - cannot attack or sabotage railways;
 - takes **double losses** when an attack on it succeeds;
 - gets no healing from field hospitals or medical tech;
-- suffers **attrition** at End turn: the first End turn cut off costs nothing; from the second on it loses
-  **25 %** of its remaining strength each turn (100 → 75 → 56 → 42 …); below **10 %** it **surrenders**:
-  strength 0, a **white flag** over the counter instead of smoke. Its panel counts the turns cut off; turn
-  reports list the strength lost and any surrender. Getting supply back resets the count.
+- suffers **attrition** at each End turn still cut off: it loses **25 %** of its remaining strength each turn
+  (100 → 75 → 56 → 42 …); below **10 %** it **surrenders**: strength 0, a **white flag** over the counter instead
+  of smoke. Its panel counts the turns cut off; turn reports list the strength lost and any surrender. Getting
+  supply back tops it up to 3/3 and resets the count.
 
-It shows a red no-entry badge and is slightly dimmed; its panel says "OUT OF SUPPLY". A supplied unit's panel
+So a unit cut off from turn 1 lives on its supplies through three End turns and first loses strength at the
+fourth. It shows a red no-entry badge and is slightly dimmed; its panel says "0/3 · OUT OF SUPPLY". A supplied unit's panel
 says where its supply comes from ("supplied by 2nd Supply Column"), and selecting it draws its supply line: a
 dashed amber line through each column back to the place, convoy or railhead it starts from. Turn reports list each
-nation's cut-off units. The GM is never limited, and the rules switch turns supply off entirely.
+nation's cut-off units with what they have left ("cut off (9e RI 1/3)"). The GM is never limited, and the rules switch turns supply off entirely.
 
 ## Support units
 
-Support units help friendly units (their nation's and allies') around them while they are alive and supplied.
+Support units help friendly units (their nation's and allies') around them while they are alive and not out of
+supply (a cut-off one still works while it has supplies left).
 Selecting one shows its reach on the map; its panel says what it does.
 
 | Unit | Effect | Reach |
@@ -87,7 +100,7 @@ Selecting one shows its reach on the map; its panel says what it does.
 | Supply / logistics (Supply Column) | supplies land units (above) | 100 km (fed from capitals 600 km, cities 400 km, villages 200 km) |
 | Medical / field hospital | heals damaged units by 10 % strength at each End turn (not destroyed ones) | 40 km |
 | Headquarters | +1 attack and +1 defend | 40 km |
-| Engineers, pioneers, sappers | +1 defend | 20 km |
+| Engineers, pioneers, sappers | +1 defend; engineers and pioneers dig and reinforce trenches, sappers blow up enemy ones and wreck resource works (docs/WARFARE.md) | 20 km |
 | Signals | +1 attack for artillery (spotting) | 60 km |
 
 The best support unit of each kind counts once; these stack with generals, tech and trench cover, and appear in
@@ -337,6 +350,6 @@ emptiest line between them, shrunk by half). Ship sizes are not to true scale: a
 
 Supply on/off · a place feeds a column within: capital (600 km), city (400 km), village (200 km) · column supplies
 within (100 km) · railhead / column chain (150 km) · garrison within a place (30 km) · convoy feeds columns within (200 km) ·
-convoy supplies units within (100 km) · attrition (25 % a turn from the 2nd turn cut off) · surrenders below (10 %) ·
+convoy supplies units within (100 km) · supplies carried (3 turns) · attrition (25 % a turn once out of supplies) · surrenders below (10 %) ·
 hospital heals within (40 km) and by (10 %) · HQ within (40 km) and bonus (+1) · engineers within (20 km) and
 +defend (1) · signals within (60 km) and +artillery attack (1).

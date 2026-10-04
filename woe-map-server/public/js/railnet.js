@@ -80,13 +80,18 @@
     const inserts = list.map(() => []);                  // per rail: { seg, t, key }
     const links = [];                                     // [keyA, keyB]
     const midJoin = Math.min(o.joinKm, o.midJoinKm ?? DEFAULTS.midJoinKm);
+    const boxes = list.map(r => bboxOf(r.points));
     list.forEach((a, ai) => {
       a.points.forEach(([x, y], vi) => {
-        const end = vi === 0 || vi === a.points.length - 1;
+        const end = vi === 0 || vi === a.points.length - 1, reach = end ? o.joinKm : midJoin;
+        // Map px that reach spans here (with room to spare): a rail whose box lies farther off cannot be in reach.
+        const my = 1.5 * reach / (dist(x, y, x, y + 1) || 1), mx = 1.5 * reach / (dist(x, y, x + 1, y) || 1);
         list.forEach((b, bi) => {
           if (bi === ai) return;
+          const B = boxes[bi];
+          if (x < B[0] - mx || x > B[2] + mx || y < B[1] - my || y > B[3] + my) return;
           const p = project(b.points, x, y, kx);
-          if (!p || dist(x, y, p.x, p.y) > (end ? o.joinKm : midJoin)) return;
+          if (!p || dist(x, y, p.x, p.y) > reach) return;
           const key = `j${ai}:${vi}>${bi}`;
           inserts[bi].push({ seg: p.i, t: p.t, x: p.x, y: p.y, key });
           links.push([`v${ai}:${vi}`, key]);
@@ -94,7 +99,6 @@
       });
     });
     // Crossings: two lines drawn over each other meet where they cross, vertex or not.
-    const boxes = list.map(r => bboxOf(r.points));
     for (let ai = 0; ai < list.length; ai++) for (let bi = ai + 1; bi < list.length; bi++) {
       const A = boxes[ai], B = boxes[bi];
       if (A[0] > B[2] || B[0] > A[2] || A[1] > B[3] || B[1] > A[3]) continue;

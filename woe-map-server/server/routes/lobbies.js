@@ -163,28 +163,32 @@ function broadcastLobby(lobby) {
 
 /** Record history and push both the entity change and the history entry to the right viewers. */
 /**
- * Supply is live (docs/UNITS.md): changes to units, places or railways (and to relations) recompute it once
- * the current request has finished writing, and the markers whose status changed are pushed to every viewer.
+ * Supply is live (docs/UNITS.md): changes to units, places or railways (and to relations) recompute it shortly
+ * after the current request has finished writing (changes within SUPPLY_MS of each other, such as several players
+ * moving at once, share one pass), and the markers whose status changed are pushed to every viewer.
  */
 const supplyPending = new Set();
+const SUPPLY_MS = 100;
 function scheduleSupply(lobbyId) {
   if (supplyPending.has(lobbyId)) return;
   supplyPending.add(lobbyId);
-  setImmediate(() => {
+  setTimeout(() => {
     supplyPending.delete(lobbyId);
     try {
       const g = game.get(lobbyId);
       if (!g.enabled || g.settings.supplyEnabled === false) return;
       const lobby = access.getLobby(lobbyId);
       if (!lobby) return;
-      for (const c of game.applySupply(lobby, g.settings).changes) hub.broadcastEntity(lobbyId, 'marker', c.before, c.after, null);
+      const r = game.applySupply(lobby, g.settings);
+      for (const c of r.changes) hub.broadcastEntity(lobbyId, 'marker', c.before, c.after, null);
+      for (const b of r.blockades) logEvent(lobbyId, null, 'system', b.on ? `⚓ ${b.town.name} is blockaded: enemy warships lie off its coast, and it supplies no troops until the blockade is lifted` : `⚓ The blockade of ${b.town.name} is lifted`);
     } catch (e) { console.warn('supply refresh failed', e); }
-  });
+  }, SUPPLY_MS);
 }
 function commitChange(req, entity, action, before, after, reverts = null) {
   const subject = after || before;
   if ((entity === 'marker' && ['unit', 'town'].includes(subject.type)) || (entity === 'shape' && subject.kind === 'rail')) scheduleSupply(req.lobby.id);
-  if (entity === 'marker' && ['unit', 'hero', 'town'].includes(subject.type)) vision.schedulePush(req.lobby.id);   // fog of war: sight moved
+  if (entity === 'marker' && ['unit', 'hero', 'town'].includes(subject.type)) vision.schedulePush(req.lobby.id, before, after);   // fog of war: sight moved
   const entry = hist.record({
     lobbyId: req.lobby.id, userId: req.user.id, entity, entityId: (after || before).id, action, before, after, reverts,
   });
@@ -319,7 +323,7 @@ function afterMove(req, unit) {
   const g = game.get(req.lobby.id);
   if (!g.enabled || unit.type !== 'unit') return null;
   const factions = q.factions.all(req.lobby.id).map(access.serializeFaction);
-  const markers = q.markers.all(req.lobby.id).map(access.serializeMarker);
+  const markers = () => q.markers.all(req.lobby.id).map(access.serializeMarker);
   const territory = require('../territory');
   let r;
   try { r = territory.capture(req.lobby, g, unit, factions, markers, (a, b) => game.relationStatus(req.lobby.id, a, b)); }
@@ -335,8 +339,52 @@ function afterMove(req, unit) {
   return r.cities.length ? `${unit.name} takes ${r.cities.join(', ')}!` : null;
 }
 
+/** Create a drawing for an order (engineers' trench sections), recording history and broadcasting. */
+function createShape(req, s) {
+  const t = now();
+  const id = q.insertShape.run(null, req.lobby.id, s.kind, s.label || '', JSON.stringify(s.points), s.color || '#8d6e63', s.width ?? 0.5, s.adminOnly ? 1 : 0,
+    s.visibleTo && s.visibleTo.length ? JSON.stringify(s.visibleTo) : null, s.createdBy ?? req.user.id, t, t, s.locked ? 1 : 0, s.data ? JSON.stringify(s.data) : null).lastInsertRowid;
+  const shape = access.serializeShape(q.shape.get(id, req.lobby.id));
+  commitChange(req, 'shape', 'create', null, shape);
+  return shape;
+}
+/** Rewrite a drawing's points and data (a trench cut into sections), recording history and broadcasting. */
+function reshapeShape(req, before, points, data) {
+  q.updateShape.run(before.kind, before.label, JSON.stringify(points), before.color, before.width, before.adminOnly ? 1 : 0,
+    before.visibleTo ? JSON.stringify(before.visibleTo) : null, now(), before.locked ? 1 : 0, data ? JSON.stringify(data) : null, before.id);
+  const after = access.serializeShape(q.shape.get(before.id, req.lobby.id));
+  commitChange(req, 'shape', 'update', before, after);
+  return after;
+}
+function removeShape(req, before) {
+  q.deleteShape.run(before.id);
+  commitChange(req, 'shape', 'delete', before, null);
+}
+/**
+ * Move one unit or hero by the player's rules (allowance, phase, water, rail), as a click-move does, merging `extra` into
+ * its data (a marching order is cleared unless `extra.goal` keeps it). `opts.asPlayer`: the owner's rules even when the
+ * GM's request runs it (End turn). Returns { after, clamped, blocked, note } or { error, fatal }.
+ */
+function moveMarkerTo(req, before, x, y, extra = {}, opts = {}) {
+  const g = game.get(req.lobby.id), isGm = req.lobbyRole === 'gm' && !opts.asPlayer;
+  if (before.locked) return { error: `${before.name} is locked` };
+  if (before.data?.aboard) return { error: `${before.name} is aboard a convoy` };
+  if (!inBounds(req, x, y)) return { error: `${before.name}: off the map` };
+  if (x === before.x && y === before.y) return { after: writeMarker(req, before, { data: { goal: null, ...extra } }), clamped: false, note: null };
+  const chk = game.checkMove(req.lobby, g, isGm, before, x, y);
+  if (chk.error) return { error: chk.error, fatal: !!chk.fatal };
+  const data = { goal: null, heldTurns: 0, ...extra };
+  if (chk.movedKm !== undefined) data.movedKm = chk.movedKm;
+  const ride = rideOf(chk.route, chk.path);
+  if (ride) { data.ride = ride; if (g.enabled) data.trail = [[chk.x, chk.y]]; }
+  else if (g.enabled && ['unit', 'hero'].includes(before.type)) data.trail = extendTrail(before, chk.x, chk.y, chk.path);
+  const after = writeMarker(req, before, { x: chk.x, y: chk.y, data });
+  if (isConvoy(after)) moveCargo(req, after);
+  return { after, clamped: !!chk.clamped, blocked: chk.blocked || null, route: chk.route || null, note: [chk.blocked, afterMove(req, after)].filter(Boolean).join(' · ') || null };
+}
+
 // Game layer (turns, treasuries, territories, diplomacy): routes/game.js, sharing this router's lobby middleware.
-router.use('/:id/game', require('./game')({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById, createMarker, writeMarker, writeShape, canEditMarker, scheduleSupply }));
+router.use('/:id/game', require('./game')({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById, createMarker, writeMarker, writeShape, canEditMarker, scheduleSupply, createShape, reshapeShape, removeShape, moveMarkerTo, trenchNation }));
 
 router.get('/:id', (req, res) => {
   const online = new Set(hub.presence(req.lobby.id).map(u => u.id));
@@ -801,6 +849,10 @@ function transitData(d) {
     const on = clamp(Math.round(num(d.ride.on, 1)), 0, path.length - 1), off = clamp(Math.round(num(d.ride.off, path.length - 1)), on, path.length - 1);
     out.ride = { at: num(d.ride.at), path, on, off };
   }
+  // A marching order (routes/orders.js): where it is heading, walked a turn at a time.
+  if (d.goal && typeof d.goal === 'object' && Number.isFinite(Number(d.goal.x)) && Number.isFinite(Number(d.goal.y))) {
+    out.goal = { x: Math.round(Number(d.goal.x) * 10) / 10, y: Math.round(Number(d.goal.y) * 10) / 10, turn: Math.round(num(d.goal.turn)) };
+  }
   return out;
 }
 /**
@@ -834,9 +886,17 @@ function sanitizeData(type, data) {
     });
     if (d.supplied === false || d.supplied === true) out.supplied = d.supplied;   // set at End turn (docs/UNITS.md)
     if (num(d.unsuppliedTurns) > 0) out.unsuppliedTurns = Math.round(num(d.unsuppliedTurns));
+    if (d.supplies !== undefined && d.supplies !== null) out.supplies = clamp(Math.round(num(d.supplies)), 0, 99);   // turns of supplies it carries
     if (d.surrendered === true) out.surrendered = true;
     if (num(d.heldTurns) > 0) out.heldTurns = Math.round(num(d.heldTurns));   // turns stood still (dug in)
     if (d.attacked === true) out.attacked = true;   // game mode: attacked this turn, so cannot move until the next
+    // Orders (routes/orders.js): an engineer's trench work this turn, a submarine under water, the turn a unit last took on
+    // replacements, its corps, and the way its line faces (radians, map space).
+    if (d.dig && typeof d.dig === 'object' && ['dig', 'reinforce'].includes(d.dig.mode)) out.dig = { mode: d.dig.mode, turn: num(d.dig.turn) };
+    if (d.submerged === true) out.submerged = true;
+    if (num(d.replenishedTurn) > 0) out.replenishedTurn = Math.round(num(d.replenishedTurn));
+    if (num(d.corps) > 0) out.corps = Math.round(num(d.corps));
+    if (d.facing !== undefined && d.facing !== null && d.facing !== '' && Number.isFinite(Number(d.facing))) out.facing = Math.round(Number(d.facing) * 1000) / 1000;
     if (d.supplyFrom && typeof d.supplyFrom === 'object') out.supplyFrom = { id: d.supplyFrom.id == null ? null : num(d.supplyFrom.id), name: clean(d.supplyFrom.name, 60), kind: clean(d.supplyFrom.kind, 12) };
     if (Array.isArray(d.trail)) out.trail = cleanTrail(d.trail);
     Object.assign(out, transitData(d));
@@ -844,6 +904,7 @@ function sanitizeData(type, data) {
     out.kind = GameData.byKey[d.kind] ? d.kind : 'grain';
     out.yield = clamp(num(d.yield, 1), 0, 50);
     out.nation = clean(d.nation, 60);
+    if (num(d.improved) > 0) out.improved = clamp(Math.round(num(d.improved)), 0, 3);   // improvement level (docs/ECONOMY.md)
   } else if (type === 'factory') {
     out.nation = clean(d.nation, 60);
     out.industry = clamp(Math.round(num(d.industry, 1)), 1, 5);
@@ -853,6 +914,7 @@ function sanitizeData(type, data) {
     if (d.industry !== undefined && d.industry !== '') out.industry = clamp(Math.round(num(d.industry, 0)), 0, 10);   // game mode: production and income weight
     if (num(d.developed) > 0) out.developed = clamp(Math.round(num(d.developed)), 0, 5);   // long-term development level (docs/ECONOMY.md)
     if (d.major) out.major = true;
+    if (d.blockaded === true) out.blockaded = true;   // enemy warships off its coast: it supplies no troops (server/supply.js)
   } else if (type === 'poi') {
     out.category = clean(d.category, 40);
   } else if (type === 'scenery') {
@@ -968,7 +1030,7 @@ router.patch('/:id/markers/:mid', (req, res) => {
     for (const k of game.PROTECTED_UNIT_FIELDS) delete b.data[k];
   }
   if (b.data && typeof b.data === 'object' && !isGm) {
-    delete b.data.revealTo; delete b.data.aboard; delete b.data.ride;
+    delete b.data.revealTo; delete b.data.aboard; delete b.data.ride; delete b.data.goal;
     if (before.type === 'hero') for (const k of PROTECTED_HERO_FIELDS) delete b.data[k];
   }
   if (before.type === 'hero' && (x !== before.x || y !== before.y)) {
@@ -984,7 +1046,7 @@ router.patch('/:id/markers/:mid', (req, res) => {
     const mv = game.checkMove(req.lobby, g, isGm, before, x, y);
     if (mv.error) return res.status(409).json({ error: mv.error });
     x = mv.x; y = mv.y;
-    b.data = { ...(b.data || {}), heldTurns: 0 };   // on the move: no longer dug in
+    b.data = { ...(b.data || {}), heldTurns: 0, facing: null, goal: null };   // on the move: no longer dug in, nor facing its corps line, nor on a march
     if (mv.movedKm !== undefined) b.data = { ...(b.data || {}), movedKm: mv.movedKm };
     // By rail: no trail across the map (the train animation shows the trip); the trail starts again where it got off.
     const ride = rideOf(mv.route, mv.path);
@@ -992,6 +1054,7 @@ router.patch('/:id/markers/:mid', (req, res) => {
     else if (g.enabled && ['unit', 'hero'].includes(before.type)) b.data = { ...(b.data || {}), trail: extendTrail(before, x, y, mv.path) };
     if (mv.clamped) clampNote = `${before.name} could only move ${Math.round(mv.remaining)} of ${mv.dist} this turn`;
     if (mv.slowed) mudNote = `${before.name} was slowed by No Man's Land`;
+    if (mv.blocked) mudNote = [mudNote, mv.blocked].filter(Boolean).join(' · ');
     if (mv.route) railNote = `${before.name} went by rail (${Math.round(mv.route.railKm)} ${geo.isEarth(req.lobby) ? 'km' : (req.lobby.scale_label || 'units')} of track${mv.clamped ? ', stopped short' : ''})`;
   }
   let iconFile = before.iconFile;
@@ -1035,27 +1098,32 @@ router.post('/:id/markers/move', (req, res) => {
     if (x === before.x && y === before.y) { out.push(before); continue; }
     const chk = game.checkMove(req.lobby, g, isGm, before, x, y);
     if (chk.error) { errors.push(chk.error); continue; }
-    plan.push({ before, x, y, chk });
+    plan.push({ before, x: chk.to ? chk.to[0] : x, y: chk.to ? chk.to[1] : y, chk });
   }
   // A formation moves as one: if any unit would be clamped, scale every move by the slowest unit's fraction.
   let t = 1;
   for (const p of plan) if (p.chk.clamped) t = Math.min(t, p.chk.remaining / p.chk.dist);
+  const halted = plan.filter(p => p.chk.blocked);
+  for (const p of halted) { p.x = p.chk.x; p.y = p.chk.y; }
   if (t < 1) errors.push(`Formation moved ${Math.round(t * 100)}% of the way: the slowest unit ran out of movement`);
   let byRail = 0;
   for (const p of plan) {
-    let x = t < 1 ? Math.round((p.before.x + (p.x - p.before.x) * t) * 10) / 10 : p.x;
-    let y = t < 1 ? Math.round((p.before.y + (p.y - p.before.y) * t) * 10) / 10 : p.y;
+    const tt = p.chk.blocked ? 1 : t;   // halted at a trench: it stops there, the formation's scaling aside
+    let x = tt < 1 ? Math.round((p.before.x + (p.x - p.before.x) * tt) * 10) / 10 : p.x;
+    let y = tt < 1 ? Math.round((p.before.y + (p.y - p.before.y) * tt) * 10) / 10 : p.y;
     let path = p.chk.path || null;
     if (p.chk.route) {
       byRail++;
-      if (t < 1) { const w = rails.walk(req.lobby, p.chk.route.path, p.chk.cost * t); x = Math.round(w.x * 10) / 10; y = Math.round(w.y * 10) / 10; path = w.points; }
+      if (tt < 1) { const w = rails.walk(req.lobby, p.chk.route.path, p.chk.cost * tt); x = Math.round(w.x * 10) / 10; y = Math.round(w.y * 10) / 10; path = w.points; }
     }
     if (p.chk.movedKm !== undefined || (g.enabled && ['unit', 'hero'].includes(p.before.type)) || p.before.data?.heldTurns) {
       const data = { ...p.before.data };
       delete data.heldTurns;   // on the move: no longer dug in
+      delete data.facing;      // …nor facing its corps line
+      delete data.goal;        // …nor on a march (moved by hand)
       if (p.chk.movedKm !== undefined) {
         const used = num(p.before.data.movedKm);
-        const spent = p.chk.cost !== undefined ? p.chk.cost * t : geo.distance(req.lobby, p.before.x, p.before.y, x, y);
+        const spent = p.chk.cost !== undefined ? p.chk.cost * tt : geo.distance(req.lobby, p.before.x, p.before.y, x, y);
         data.movedKm = Math.round((used + spent) * 10) / 10;
       }
       const ride = rideOf(p.chk.route, path);
@@ -1069,7 +1137,7 @@ router.post('/:id/markers/move', (req, res) => {
     if (isConvoy(after)) moveCargo(req, after);
     out.push(after);
   }
-  const notes = out.map(m => afterMove(req, m)).filter(Boolean);
+  const notes = [...halted.map(p => p.chk.blocked), ...out.map(m => afterMove(req, m)).filter(Boolean)];
   if (byRail) notes.unshift(`${byRail} unit${byRail === 1 ? '' : 's'} went by rail`);
   res.json({ markers: out, errors, note: notes.join(' · ') || null });
 });
@@ -1206,6 +1274,8 @@ router.post('/:id/shapes', (req, res) => {
   const visibleTo = isGm ? parseVisibleTo(b.visibleTo) : null;
   const data = shapeData(kind, b.data, null, isGm, isGm || !game.get(req.lobby.id).enabled);
   if (data && kind === 'trench') data.nation = trenchNation(req, points);
+  // While the game runs players only plan trenches: engineers dig them, a section a turn (routes/orders.js).
+  if (data && kind === 'trench' && !isGm && game.get(req.lobby.id).enabled) data.state = 'plan';
   const t = now();
   const id = q.insertShape.run(null, req.lobby.id, kind, label, JSON.stringify(points), color, width, adminOnly, visibleTo, req.user.id, t, t, b.locked ? 1 : 0, data ? JSON.stringify(data) : null).lastInsertRowid;
   const shape = access.serializeShape(q.shape.get(id, req.lobby.id));
@@ -1220,6 +1290,9 @@ router.patch('/:id/shapes/:sid', (req, res) => {
   const b = req.body || {};
   const isGm = req.lobbyRole === 'gm';
   if (before.kind === 'rail' && !isGm && game.get(req.lobby.id).enabled) return res.status(403).json({ error: 'Only the GM changes railways while the game is running' });
+  // A dug trench is earthworks: only engineers (a section a turn) and sappers change it while the game runs.
+  const dugTrench = before.kind === 'trench' && !isGm && game.get(req.lobby.id).enabled && (before.data?.state || 'dug') !== 'plan';
+  if (dugTrench && b.points !== undefined) return res.status(403).json({ error: 'A dug trench cannot be redrawn: plan a new trench and have engineers dig it' });
   let points = b.points !== undefined ? parsePoints(req, before.kind, b.points) : before.points;
   if (!points) return res.status(400).json({ error: 'Bad points' });
   if (before.kind === 'rail' && b.points !== undefined) points = rails.snapEnds(req.lobby, game.get(req.lobby.id).settings, points, before.id);
@@ -1234,6 +1307,7 @@ router.patch('/:id/shapes/:sid', (req, res) => {
   const locked = b.locked !== undefined ? (b.locked ? 1 : 0) : (before.locked ? 1 : 0);
   const data = b.data !== undefined ? shapeData(before.kind, b.data, before.data, isGm, isGm || !game.get(req.lobby.id).enabled) : (before.data && Object.keys(before.data).length ? { ...before.data } : null);
   if (data && before.kind === 'trench') data.nation = trenchNation(req, points);
+  if (data && before.kind === 'trench' && !isGm && game.get(req.lobby.id).enabled) data.state = before.data?.state || 'dug';   // players cannot dig by editing
   q.updateShape.run(before.kind, label, JSON.stringify(points), color, width, adminOnly, visibleTo, now(), locked, data ? JSON.stringify(data) : null, before.id);
   const after = access.serializeShape(q.shape.get(before.id, req.lobby.id));
   commitChange(req, 'shape', 'update', before, after);
@@ -1413,6 +1487,12 @@ function livePings(lobbyId) {
   return list;
 }
 router.get('/:id/pings', (req, res) => res.json({ pings: livePings(req.lobby.id) }));
+/** The land raster for the movement reach drawn in the browser (public/js/reach.js); 204 on maps without a sea. */
+router.get('/:id/landmask', (req, res) => {
+  const buf = require('../territory').landMaskRuns(req.lobby);
+  if (!buf) return res.status(204).end();
+  res.set('Cache-Control', 'private, max-age=86400').type('application/octet-stream').send(buf);
+});
 router.post('/:id/pings', (req, res) => {
   if (req.lobbyRole !== 'gm') return res.status(403).json({ error: 'Only the GM can ping the map' });
   const x = num(req.body?.x, NaN), y = num(req.body?.y, NaN);
@@ -1504,6 +1584,22 @@ function sideLog(req, nation, message) {
   const set = new Set(names.map(n => n.toLowerCase()));
   return logEvent(req.lobby.id, req.user.id, 'system', message, { audience: { nations: names, users: [req.user.id] } },
     ws => ws.lobbyRole === 'gm' || ws.user.id === req.user.id || set.has(String(ws.nation || '').toLowerCase()));
+}
+/**
+ * A unit under attack calls off its marching order, and so does the rest of its corps: the march has met the enemy.
+ * Only its own side hears of it (marching orders are theirs alone, fog or no fog).
+ */
+function haltMarches(req, d, by) {
+  const corps = num(d.data?.corps), nation = String(d.data?.nation || '').toLowerCase();
+  const hit = q.markers.all(req.lobby.id).map(access.serializeMarker).filter(m => m.data?.goal && (m.id === d.id ||
+    (corps && m.type === 'unit' && num(m.data?.corps) === corps && String(m.data?.nation || '').toLowerCase() === nation)));
+  if (!hit.length) return [];
+  for (const m of hit) writeMarker(req, m, { data: { goal: null } });
+  const side = nation ? require('../supply').friendsResolver(req.lobby)(nation) : new Set();
+  const names = hit.map(m => m.name);
+  logEvent(req.lobby.id, req.user.id, 'system', `🚩 ${d.name} came under attack from ${by.name}: ${names.join(', ')} ${names.length === 1 ? 'halts its' : 'halt their'} march`,
+    { audience: { nations: [...side], users: [] } }, ws => ws.lobbyRole === 'gm' || side.has(String(ws.nation || '').toLowerCase()));
+  return hit.map(m => m.id);
 }
 /** Troops aboard sail with their convoy. */
 function moveCargo(req, convoy) {
@@ -1642,9 +1738,14 @@ router.get('/:id/convoy-requests', (req, res) => {
  * Embark units on a convoy. Your own units on your own convoy board at once. Allied units go through a request:
  * the convoy's nation asks the units' nation, or the units' nation asks the convoy's; they board when it agrees.
  */
+/** Boarding and landing are movement: closed in the battle phase (phased turns). */
+function convoyPhaseError(req) { return game.phaseError(game.get(req.lobby.id), req.lobbyRole === 'gm', 'move'); }
+
 router.post('/:id/convoys/:cid/embark', (req, res) => {
   const convoy = loadConvoy(req, res);
   if (!convoy) return;
+  const pe = convoyPhaseError(req);
+  if (pe) return res.status(409).json({ error: pe });
   const gm = req.lobbyRole === 'gm', v = viewerOf(req), mine = req.member?.nation || '';
   const controls = canEditMarker(req, convoy), C = convoy.data?.nation || '';
   const now_ = [], asks = new Map(), errors = [];   // asks: nation to ask -> unit ids
@@ -1675,6 +1776,8 @@ router.post('/:id/convoys/:cid/embark', (req, res) => {
 router.post('/:id/convoys/:cid/disembark', (req, res) => {
   const convoy = loadConvoy(req, res);
   if (!convoy) return;
+  const pe = convoyPhaseError(req);
+  if (pe) return res.status(409).json({ error: pe });
   const gm = req.lobbyRole === 'gm', mine = req.member?.nation || '', C = convoy.data?.nation || '';
   const cargo = cargoOf(req.lobby.id, convoy.id);
   if (!cargo.length) return res.status(400).json({ error: `Nobody is aboard ${convoy.name}` });
@@ -1719,6 +1822,8 @@ router.post('/:id/convoy-requests/:rid/:action', (req, res) => {
     return res.json({ request: finish('declined', gm ? 'declined by the GM' : `declined by ${mine}`) });
   }
   if (action !== 'approve') return res.status(400).json({ error: 'Unknown action' });
+  const pe = convoyPhaseError(req);
+  if (pe) return res.status(409).json({ error: pe });
   r.approved = gm ? [...r.to] : [...r.approved, asked];
   if (r.to.some(n => !r.approved.some(a => lc(a) === lc(n)))) {   // others still to answer
     qr.set.run(JSON.stringify(r.approved), 'pending', '', null, r.id);
@@ -1779,10 +1884,14 @@ router.post('/:id/combat', (req, res) => {
   }
   const apError = game.checkAttack(g, req.lobbyRole === 'gm', a);
   if (apError) return res.status(409).json({ error: apError });
+  if (d.data?.submerged && req.lobbyRole !== 'gm' && UnitTypes.resolve(a.data?.unitType)?.id !== 'destroyer') return res.status(409).json({ error: `${d.name} is submerged: only destroyers can attack it` });
   const rangeError = game.checkRange(req.lobby, g, req.lobbyRole === 'gm', a, d);
   if (rangeError) return res.status(409).json({ error: rangeError });
   // Spent even if the attack is repelled; and having attacked, the unit stays where it is until next turn.
   if (g.enabled) a.data = { ...a.data, apUsed: num(a.data.apUsed) + 1, attacked: true };
+  // A submarine surfaces to attack and stays up for the rest of the turn.
+  const surfaced = !!a.data?.submerged;
+  if (surfaced) { const { submerged, ...rest } = a.data; a.data = rest; }
   // Fog of war: the fight is news only to the two sides, and firing gives the attacker away: the defender's
   // side sees it until End turn (the same reveal a spy's recon gives).
   const fogSides = vision.on(req.lobby.id) ? [...new Set([...(vision.sideNames(req.lobby.id, a.data?.nation) || []), ...(vision.sideNames(req.lobby.id, d.data?.nation) || [])])] : null;
@@ -1807,10 +1916,12 @@ router.post('/:id/combat', (req, res) => {
   const supD = g.enabled ? supplyRules.supportBonus(req.lobby, g.settings, allMarkers, d, friendsOf) : { attack: 0, defend: 0, notes: [] };
   const typeA = UnitTypes.resolve(a.data?.unitType), typeD = UnitTypes.resolve(d.data?.unitType);
   const match = Matchups.matchup(typeA, typeD, { entrenched: !!cover });
-  const atk = num(a.data.attack) + bonusA.attack + (genA ? genA.bonus : 0) + supA.attack + match.mod;
-  const def = num(d.data.defend) + bonusD.defend + (cover ? cover.bonus : 0) + (genD ? genD.bonus : 0) + supD.defend;
+  // Worn units fight worse: −1 attack and defend per wornStep % of strength lost (docs/UNITS.md).
+  const wornA = g.enabled ? game.wornPenalty(g.settings, a) : 0, wornD = g.enabled ? game.wornPenalty(g.settings, d) : 0;
+  const atk = num(a.data.attack) + bonusA.attack + (genA ? genA.bonus : 0) + supA.attack + match.mod - wornA;
+  const def = num(d.data.defend) + bonusD.defend + (cover ? cover.bonus : 0) + (genD ? genD.bonus : 0) + supD.defend - wornD;
   // Cut off from supply, the defender breaks more easily: a successful attack does double damage.
-  const cutOffD = g.enabled && g.settings.supplyEnabled !== false && d.data?.supplied === false && UnitTypes.resolve(d.data?.unitType)?.cat !== 'Emplacements';
+  const cutOffD = g.enabled && g.settings.supplyEnabled !== false && supplyRules.exhausted(d) && UnitTypes.resolve(d.data?.unitType)?.cat !== 'Emplacements';
   const aRoll = crypto.randomInt(1, cfg.die + 1), dRoll = crypto.randomInt(1, cfg.die + 1);
   const aTotal = aRoll + atk, dTotal = dRoll + def;
   const margin = aTotal - dTotal;
@@ -1829,7 +1940,7 @@ router.post('/:id/combat', (req, res) => {
     const from = clamp(num(m.data.strength, 100), 0, 100);
     const to = clamp(from - loss, 0, 100);
     losses[m.id] = { name: m.name, from, to, loss: from - to };
-    if (to === from && !(m === a && g.enabled)) return m;   // the attacker is always rewritten in game mode (AP spent)
+    if (to === from && !(m === a && (g.enabled || surfaced))) return m;   // the attacker is always rewritten in game mode (AP spent) or when it surfaced
     const data = { ...m.data, strength: to };
     q.updateMarker.run(m.type, m.name, m.x, m.y, m.iconFile, m.iconFile ? null : m.iconUrl, m.color, m.adminOnly ? 1 : 0,
       m.visibleTo ? JSON.stringify(m.visibleTo) : null, m.ownerId, JSON.stringify(data), now(), m.locked ? 1 : 0, m.id);
@@ -1839,12 +1950,15 @@ router.post('/:id/combat', (req, res) => {
   };
   const aAfter = apply(a, aLoss), dAfter = apply(d, dLoss);
   for (const m of [aAfter, dAfter]) if (isConvoy(m) && num(m.data?.strength, 100) <= 0) sinkCargo(req, m, 'was sunk');
+  // Attacked, the defender stops marching, and so does the rest of its corps.
+  haltMarches(req, dAfter, a);
 
   const fmt = (m, l) => `${m.name} ${l.loss ? `loses ${l.loss}% (${l.from}→${l.to}${l.to === 0 ? ', destroyed' : ''})` : 'is unharmed'}`;
   const notes = [bonusA.attack ? `attacker +${bonusA.attack} tech` : '', genA ? `attacker +${genA.bonus} ${genA.hero.name}` : '',
     bonusD.defend ? `defender +${bonusD.defend} tech` : '', genD ? `defender +${genD.bonus} ${genD.hero.name}` : '', cover ? `+${cover.bonus} trench cover` : '',
     ...supA.notes.map(n => `attacker ${n}`), ...supD.notes.filter(n => !/spotting/.test(n)).map(n => `defender ${n}`), ...(supD.defendNotes || []).map(n => `defender ${n}`),
     ...match.notes.map(n => `${n.mod > 0 ? '+' : ''}${n.mod} ${n.text}`),
+    wornA ? `attacker −${wornA} worn (${num(a.data.strength, 100)}%)` : '', wornD ? `defender −${wornD} worn (${num(d.data.strength, 100)}%)` : '',
     cutOffD ? `${d.name} is out of supply${outcome === 'attacker' ? ': double losses' : ''}` : '',
     sparedA ? 'guns out of reach of the reply' : ''].filter(Boolean);
   const text = `⚔ ${a.name} attacked ${d.name}: ${aRoll}+${atk}=${aTotal} vs ${dRoll}+${def}=${dTotal}${notes.length ? ` (${notes.join(', ')})` : ''} → ` +

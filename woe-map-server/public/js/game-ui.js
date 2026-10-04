@@ -18,6 +18,9 @@ const GameUI = (() => {
     $('#nationFaction').onchange = () => { renderNation(); loadProduction(); };
     $('#btnGameToggle').onclick = toggleGame;
     $('#btnEndTurn').onclick = endTurn;
+    $('#btnPhase').onclick = () => setPhase('battle');
+    $('#btnPhaseBattle').onclick = () => setPhase('battle');
+    $('#btnPhaseMove').onclick = () => setPhase('move');
     $('#btnUndoTurn').onclick = undoTurn;
     $('#btnSupplyNow').onclick = async () => {
       try { const r = await api.post(`${ctx.base}/game/supply/recompute`, {}); toast(`Supply: ${r.supplied} supplied, ${r.unsupplied} cut off`); await ctx.loadMarkers(); }
@@ -322,30 +325,32 @@ const GameUI = (() => {
   function projectGain(p) {
     const s = g().settings;
     if (p.project === 'upgradeFactory') return `+${s.factoryIncome.money} money${s.factoryIncome.rp ? `, +${s.factoryIncome.rp} RP` : ''} a turn, +1 build slot`;
+    if (p.project === 'improveResource') return `${GameData.worksName(p.resource, p.level + 1)}: +${Math.round((p.yield || 0) * (s.resourceImproveRate ?? 0.25) * 10) / 10} ${(GameData.byKey[p.resource]?.name || '').toLowerCase()} a turn`;
     const d = s.townDevIncome || {};
     const parts = [d.money ? `+${d.money} money` : '', d.rp ? `+${d.rp} RP` : '', d.manpower ? `+${d.manpower} manpower` : ''].filter(Boolean);
     return `${parts.join(', ') || 'no income'} a turn${(p.level + 1) % 2 === 0 ? ', +1 build slot' : ''}`;
   }
-  /** Long-term projects (docs/ECONOMY.md): upgrade factories, develop towns. Running ones first. */
+  /** Long-term projects (docs/ECONOMY.md): upgrade factories, develop towns, improve resource nodes. Running ones first. */
   function developmentHtml(actor) {
     const list = (prod.projects || []).slice();
     if (!list.length) return '';
-    const rank = k => ({ capital: 0, city: 1, factory: 2, village: 3 }[k] ?? 4);
-    list.sort((a, b) => (!!b.active - !!a.active) || rank(a.kind) - rank(b.kind) || a.name.localeCompare(b.name));
+    const rank = k => ({ capital: 0, city: 1, factory: 2, village: 3, resource: 4 }[k] ?? 5);
+    list.sort((a, b) => (!!b.active - !!a.active) || rank(a.kind) - rank(b.kind) || (b.yield || 0) - (a.yield || 0) || a.name.localeCompare(b.name));
     const st = prod.state;
     const running = list.filter(p => p.active).length;
     const rows = list.map(p => {
-      const head = `<b>${esc(p.name)}</b> <span class="hint">${esc(p.kind)} · level ${p.level}/${p.max}</span>`;
-      if (p.active) return `<div class="diplo"><span class="grow">${head}<br><span class="hint">${p.project === 'upgradeFactory' ? 'Upgrading' : 'Developing'} to level ${p.active.toLevel}: ${p.active.queuedTurn !== undefined && p.active.queuedTurn >= g().turn ? `starts at End turn · ${p.active.turnsLeft} turn${p.active.turnsLeft === 1 ? '' : 's'}` : `${p.active.turnsLeft} turn${p.active.turnsLeft === 1 ? '' : 's'} left`}</span></span>${actor ? `<button class="small secondary" data-cancelbuild="${p.active.id}" title="Cancel and refund">×</button>` : ''}</div>`;
-      if (!p.cost) return `<div class="diplo"><span class="grow">${head} <span class="hint">· fully developed</span></span></div>`;
+      const kind = p.kind === 'resource' ? `${(GameData.byKey[p.resource]?.name || 'resource').toLowerCase()} +${p.yield}` : p.kind;
+      const head = `<b>${esc(p.name)}</b> <span class="hint">${esc(kind)} · level ${p.level}/${p.max}</span>`;
+      if (p.active) return `<div class="diplo"><span class="grow">${head}<br><span class="hint">${{ upgradeFactory: 'Upgrading', improveResource: 'Improving' }[p.project] || 'Developing'} to level ${p.active.toLevel}: ${p.active.queuedTurn !== undefined && p.active.queuedTurn >= g().turn ? `starts at End turn · ${p.active.turnsLeft} turn${p.active.turnsLeft === 1 ? '' : 's'}` : `${p.active.turnsLeft} turn${p.active.turnsLeft === 1 ? '' : 's'} left`}</span></span>${actor ? `<button class="small secondary" data-cancelbuild="${p.active.id}" title="Cancel and refund">×</button>` : ''}</div>`;
+      if (!p.cost) return `<div class="diplo"><span class="grow">${head} <span class="hint">· fully ${p.kind === 'resource' ? 'improved' : 'developed'}</span></span></div>`;
       const short = [];
       for (const k of GameData.RESOURCE_KEYS) if ((st.resources[k] || 0) < p.cost[k]) short.push(GameData.byKey[k].name.toLowerCase());
       if (st.money < p.cost.money) short.push('money');
       if (st.manpower < p.cost.manpower) short.push('manpower');
-      return `<div class="diplo"><span class="grow">${head}<br><span class="hint">Level ${p.level + 1}: ${esc(projectGain(p))} · ${esc(GameData.costLabel(p.cost))}</span>${short.length ? `<br><span class="hint" style="color:#ff9f80">short of ${esc(short.join(', '))}</span>` : ''}</span>${actor ? `<button class="small" data-project="${p.project}" data-site="${p.id}" ${short.length ? 'disabled' : ''}>${p.project === 'upgradeFactory' ? 'Upgrade' : 'Develop'}</button>` : ''}</div>`;
+      return `<div class="diplo"><span class="grow">${head}<br><span class="hint">Level ${p.level + 1}: ${esc(projectGain(p))} · ${esc(GameData.costLabel(p.cost))}</span>${short.length ? `<br><span class="hint" style="color:#ff9f80">short of ${esc(short.join(', '))}</span>` : ''}</span>${actor ? `<button class="small" data-project="${p.project}" data-site="${p.id}" ${short.length ? 'disabled' : ''}>${{ upgradeFactory: 'Upgrade', improveResource: 'Improve' }[p.project] || 'Develop'}</button>` : ''}</div>`;
     }).join('');
     return `<div class="box devlist"><h4>Development <span class="hint">${running ? `${running} under way · ` : ''}long-term growth</span></h4>
-      <p class="hint">Slow projects that pay back over many turns: each factory level adds income and a build slot; each town level adds income, and every second one a build slot. One project per site; each step costs more and takes longer than the last.</p>${rows}</div>`;
+      <p class="hint">Slow projects that pay back over many turns: each factory level adds income and a build slot; each town level adds income, and every second one a build slot; each level of a resource node's works adds ${Math.round((g().settings.resourceImproveRate ?? 0.25) * 100)} % of its yield. One project per site; each step costs more and takes longer than the last.</p>${rows}</div>`;
   }
   /** The project row for a site (for the map popup), when the production view is loaded. */
   function projectInfo(siteId) { return (prod?.projects || []).find(p => p.id === siteId) || null; }
@@ -355,7 +360,7 @@ const GameUI = (() => {
       const r = await api.post(`${ctx.base}/game/production`, { typeId, siteId, factionId });
       if (prod && r.factionId === prod.factionId) prod = r;
       const p = (r.projects || []).find(x => x.id === siteId);
-      toast(p && p.active ? `${typeId === 'upgradeFactory' ? 'Upgrading' : 'Developing'} ${p.name} to level ${p.active.toLevel} (${p.active.turnsLeft} turns)` : 'Project started');
+      toast(p && p.active ? `${{ upgradeFactory: 'Upgrading', improveResource: 'Improving' }[typeId] || 'Developing'} ${p.name} to level ${p.active.toLevel} (${p.active.turnsLeft} turns)` : 'Project started');
       renderNation();
       return r;
     } catch (err) { toast(err.message); return null; }
@@ -403,7 +408,7 @@ const GameUI = (() => {
     try {
       prod = await api.post(`${ctx.base}/game/production`, { typeId, siteId, factionId: e ? e.faction.id : undefined });
       const p = GameData.PROJECTS[typeId] ? projectInfo(siteId) : null;
-      toast(p && p.active ? `${p.project === 'upgradeFactory' ? 'Upgrading' : 'Developing'} ${p.name} to level ${p.active.toLevel} (${p.active.turnsLeft} turns)` : 'Queued');
+      toast(p && p.active ? `${{ upgradeFactory: 'Upgrading', improveResource: 'Improving' }[p.project] || 'Developing'} ${p.name} to level ${p.active.toLevel} (${p.active.turnsLeft} turns)` : 'Queued');
       renderNation(); renderBuildList();
       ctx.onProjects?.();
     } catch (err) { toast(err.message); }
@@ -446,7 +451,8 @@ const GameUI = (() => {
     $('#rail [data-tab="game"]').hidden = !gm;
     $('#railRules').hidden = !gm;
     $('#turnWidget').hidden = !on;
-    $('#btnEndTurn').hidden = !gm;
+    $('#btnEndTurn').hidden = !gm || (game?.phase === 'move');
+    $('#btnPhase').hidden = !gm || game?.phase !== 'move';
     $('#btnReadyTurn').hidden = gm || !state.myFactionId;
     if (ctx.onRail) ctx.onRail();
     updateHud();
@@ -460,6 +466,11 @@ const GameUI = (() => {
     const dl = GameData.deadlineInfo(game.deadline);
     $('#twTurn').textContent = `Turn ${game.turn}`;
     $('#twDate').textContent = GameData.fmtDate(game.date);
+    const ph = $('#twPhase');
+    ph.textContent = game.phase === 'battle' ? '⚔ Battle phase' : game.phase === 'move' ? '🚩 Movement phase' : '';
+    ph.className = `tw-phase ${game.phase || ''}`;
+    ph.title = game.phase === 'battle' ? 'Attacks are open; units hold their positions until the next turn' : game.phase === 'move' ? 'Units move; attacks open in the battle phase' : '';
+    document.body.dataset.phase = game.phase || '';
     const el = $('#turnLabel');
     el.textContent = dl ? dl.text : '';
     el.classList.toggle('overdue', !!(dl && dl.overdue));
@@ -514,7 +525,7 @@ const GameUI = (() => {
     }).join('');
     const units = [...state.markers.values()].filter(m => m.type === 'unit' && String(m.data?.nation || '').toLowerCase() === e.faction.name.toLowerCase());
     const cats = {};
-    let cut = 0;
+    let cut = 0, out = 0;
     for (const u of units) {
       const t = window.UnitTypes ? UnitTypes.resolve(u.data?.unitType) : null;
       const cat = t ? t.cat : 'Other';
@@ -522,7 +533,7 @@ const GameUI = (() => {
       cats[cat].n++;
       if (Number(u.data?.movedKm) > 0) cats[cat].moved++;
       if (Number(u.data?.apUsed) > 0) cats[cat].spent++;
-      if (u.data?.supplied === false && Number(u.data?.strength ?? 100) > 0) cut++;
+      if (u.data?.supplied === false && Number(u.data?.strength ?? 100) > 0) { cut++; if (Number(u.data?.supplies ?? 1) <= 0) out++; }
     }
     const lastTurn = [...state.events].reverse().find(ev => ev.kind === 'turn' && String(ev.data?.faction || '').toLowerCase() === e.faction.name.toLowerCase());
     const hasReport = (state.reports?.reports || []).some(r => r.factionId === e.faction.id);
@@ -554,9 +565,10 @@ const GameUI = (() => {
         ${inc.notes && inc.notes.length ? `<details class="sub"><summary>Where it comes from</summary><ul class="hintlist">${inc.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul></details>` : ''}
       </div>
       ${capturedHtml}
-      <div class="box"><h4>Forces <span class="hint">${units.length} unit${units.length === 1 ? '' : 's'}${cut ? ` · <span style="color:#ff9f80">${cut} out of supply</span>` : ''}</span></h4>
+      <div class="box"><h4>Forces <span class="hint">${units.length} unit${units.length === 1 ? '' : 's'}${cut ? ` · <span style="color:#ff9f80">${cut} cut off${out ? `, ${out} out of supplies` : ''}</span>` : ''}</span></h4>
         ${Object.keys(cats).length ? `<table class="treasury"><tbody>${Object.entries(cats).map(([c, v]) => `<tr><td>${esc(c)}</td><td class="num">${v.n}</td><td class="hint">${v.moved ? `${v.moved} moved` : ''}${v.spent ? `${v.moved ? ', ' : ''}${v.spent} attacked` : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="hint">No units on the map.</p>'}
         ${heroesHtml(e)}
+        ${ctx.corpsHtml ? ctx.corpsHtml(e) : ''}
       </div>
       <div class="box">${ResearchUI.sectionHtml(e)}</div>
       ${othersHtml}
@@ -630,6 +642,9 @@ const GameUI = (() => {
     if ($('#btnGameToggle').parentElement !== slot) slot.appendChild($('#btnGameToggle'));
     if (on) {
       $('#turnInfo').textContent = `Turn ${game.turn} · ${GameData.fmtDate(game.date)}`;
+      $('#phaseRow').hidden = game.phase === 'open';
+      $('#phaseInfo').textContent = game.phase === 'battle' ? '⚔ Battle phase: attacks open, units hold' : '🚩 Movement phase: units move, attacks wait';
+      $('#btnPhaseMove').hidden = game.phase !== 'battle'; $('#btnPhaseBattle').hidden = game.phase !== 'move';
       if (document.activeElement !== $('#turnStep')) $('#turnStep').value = game.turnStep;
       if (document.activeElement !== $('#turnDeadline')) { const dl = GameData.deadlineInfo(game.deadline); $('#turnDeadline').value = dl && dl.at ? toLocalInput(dl.at) : ''; }
       $('#btnTurnReports').disabled = !(state.reports && state.reports.turn);
@@ -659,14 +674,17 @@ const GameUI = (() => {
     const s = game.settings;
     const set = (id, v) => { const el = $(id); if (el && document.activeElement !== el) { if (el.type === 'checkbox') el.checked = !!v; else el.value = v; } };
     set('#ruleKmPerMove', s.kmPerMove); set('#ruleKmPerRange', s.kmPerRange); set('#ruleNoMansLand', s.noMansLandCost ?? 3); set('#ruleWaive', s.waiveMovement); set('#ruleUpkeep', s.upkeep);
-    set('#ruleUpkeepGrain', s.upkeepGrain); set('#ruleUpkeepOil', s.upkeepOil);
+    set('#ruleUpkeepGrain', s.upkeepGrain); set('#ruleUpkeepOil', s.upkeepOil); set('#ruleUpkeepCoal', s.upkeepCoal ?? 0.25);
+    set('#ruleUpkeepFreeCapital', s.upkeepFree?.capital ?? 8); set('#ruleUpkeepFreeCity', s.upkeepFree?.city ?? 3); set('#ruleUpkeepFreeVillage', s.upkeepFree?.village ?? 1);
     set('#ruleBaseMoney', s.baseMoney); set('#ruleBaseRp', s.baseRp); set('#ruleBaseManpower', s.baseManpower);
     set('#rulePublic', s.publicTreasury); set('#ruleCapturedIdle', s.capturedIdle);
-    set('#ruleFog', s.fogOfWar); set('#ruleSubSpot', s.subSpotKm ?? 20);
+    set('#ruleFog', s.fogOfWar); set('#ruleSubSpot', s.subSpotKm ?? 20); set('#ruleSubDetect', s.subDetectKm ?? 20); set('#ruleBlockade', s.blockadeKm ?? 50);
+    set('#rulePhases', s.phases !== false); set('#ruleWornStep', s.wornStep ?? 20); set('#ruleReplenishMax', s.replenishMax ?? 50); set('#ruleReplenishEnemy', s.replenishEnemyKm ?? 50); set('#ruleCorpsDepth', s.corpsDepthKm ?? 15);
+    set('#ruleTrenchSection', s.trenchSectionKm ?? 10); set('#ruleTrenchDig', s.trenchDigKm ?? 20); set('#ruleTrenchDemolish', s.trenchDemolishDefence ?? 2); set('#ruleTrenchDigTimber', s.trenchDigTimber ?? 4); set('#ruleTrenchReinfTimber', s.trenchReinforceTimber ?? 6);
     for (const el of document.querySelectorAll('[data-vis]')) if (document.activeElement !== el) el.value = s.vision?.[el.dataset.vis] ?? '';
-    set('#ruleTrenchRange', s.trenchRangeKm); set('#ruleTrenchDug', s.trenchBonusDug); set('#ruleTrenchReinforced', s.trenchBonusReinforced);
+    set('#ruleTrenchBlocks', s.trenchBlocks !== false); set('#ruleTrenchRange', s.trenchRangeKm); set('#ruleTrenchDug', s.trenchBonusDug); set('#ruleTrenchReinforced', s.trenchBonusReinforced);
     set('#ruleCaptureRadius', s.captureRadiusKm); set('#ruleCityRadius', s.cityRadiusKm); set('#ruleOccupyNeutrals', s.occupyNeutrals);
-    set('#ruleSupplyOn', s.supplyEnabled !== false); set('#ruleSupplyTown', s.supplyTownKm); set('#ruleSupplyLink', s.supplyLinkKm); set('#ruleConvoyLink', s.convoyLinkKm ?? 200); set('#ruleAttrition', s.attritionRate ?? 25); set('#ruleDisband', s.attritionDisbandBelow ?? 10); set('#ruleConvoyRange', s.convoyRangeKm ?? 100);
+    set('#ruleSupplyOn', s.supplyEnabled !== false); set('#ruleSupplyTown', s.supplyTownKm); set('#ruleSupplyLink', s.supplyLinkKm); set('#ruleConvoyLink', s.convoyLinkKm ?? 200); set('#ruleAttrition', s.attritionRate ?? 25); set('#ruleSupplyStock', s.supplyStock ?? 3); set('#ruleDisband', s.attritionDisbandBelow ?? 10); set('#ruleConvoyRange', s.convoyRangeKm ?? 100);
     set('#ruleConvoyCap', s.convoyCapacity ?? 10); set('#ruleConvoyBoard', s.convoyBoardKm ?? 30); set('#ruleConvoyLand', s.convoyLandKm ?? 100);
     const lb = s.supplyLinkBySize || {}; set('#ruleLinkCapital', lb.capital ?? 600); set('#ruleLinkCity', lb.city ?? 400); set('#ruleLinkVillage', lb.village ?? 200); set('#ruleSupplyRange', s.supplyRangeKm);
     set('#ruleHospitalKm', s.hospitalKm); set('#ruleHospitalHeal', s.hospitalHeal); set('#ruleHqKm', s.hqKm); set('#ruleHqBonus', s.hqBonus);
@@ -679,6 +697,7 @@ const GameUI = (() => {
     $('#earthSeedRow').hidden = state.lobby?.mapKind !== 'earth';
     for (const size of ['capital', 'city', 'village']) for (const k of ['money', 'rp', 'manpower']) set(`#rule_${size}_${k}`, s.cityIncome[size][k]);
     set('#ruleFactoryMoney', s.factoryIncome.money); set('#ruleFactoryRp', s.factoryIncome.rp);
+    set('#ruleImproveRate', Math.round((s.resourceImproveRate ?? 0.25) * 100));
     set('#ruleDevMoney', s.townDevIncome?.money ?? 3); set('#ruleDevRp', s.townDevIncome?.rp ?? 1); set('#ruleDevManpower', s.townDevIncome?.manpower ?? 0);
     set('#ruleStartRes', s.startStock.resources); set('#ruleStartMoney', s.startStock.money); set('#ruleStartMp', s.startStock.manpower);
   }
@@ -698,6 +717,12 @@ const GameUI = (() => {
       toast(on ? (d.setupStarted ? 'Game mode on; setting up the world…' : 'Game mode on') : 'Game mode off');
       if (d.setupError) toast(d.setupError);
     } catch (err) { toast(err.message); }
+  }
+  /** GM: open the battle phase (or go back to movement). */
+  async function setPhase(phase) {
+    if (phase === 'battle' && !confirm(`Start the battle phase of turn ${g().turn}? Movement closes for everyone and attacks open.`)) return;
+    try { const d = await api.post(`${ctx.base}/game/phase`, { phase }); ctx.state.game = d.game; refresh(); }
+    catch (err) { toast(err.message); }
   }
   async function endTurn() {
     const game = g();
@@ -731,14 +756,17 @@ const GameUI = (() => {
     const v = id => Number($(id).value);
     const settings = {
       kmPerMove: v('#ruleKmPerMove'), kmPerRange: v('#ruleKmPerRange'), noMansLandCost: v('#ruleNoMansLand'), waiveMovement: $('#ruleWaive').checked, upkeep: $('#ruleUpkeep').checked,
-      upkeepGrain: v('#ruleUpkeepGrain'), upkeepOil: v('#ruleUpkeepOil'),
+      upkeepGrain: v('#ruleUpkeepGrain'), upkeepOil: v('#ruleUpkeepOil'), upkeepCoal: v('#ruleUpkeepCoal'),
+      upkeepFree: { capital: v('#ruleUpkeepFreeCapital'), city: v('#ruleUpkeepFreeCity'), village: v('#ruleUpkeepFreeVillage') },
       baseMoney: v('#ruleBaseMoney'), baseRp: v('#ruleBaseRp'), baseManpower: v('#ruleBaseManpower'), publicTreasury: $('#rulePublic').checked,
       capturedIdle: $('#ruleCapturedIdle').checked,
-      fogOfWar: $('#ruleFog').checked, subSpotKm: v('#ruleSubSpot'),
+      fogOfWar: $('#ruleFog').checked, subSpotKm: v('#ruleSubSpot'), subDetectKm: v('#ruleSubDetect'), blockadeKm: v('#ruleBlockade'),
+      phases: $('#rulePhases').checked, wornStep: v('#ruleWornStep'), replenishMax: v('#ruleReplenishMax'), replenishEnemyKm: v('#ruleReplenishEnemy'), corpsDepthKm: v('#ruleCorpsDepth'),
+      trenchSectionKm: v('#ruleTrenchSection'), trenchDigKm: v('#ruleTrenchDig'), trenchDemolishDefence: v('#ruleTrenchDemolish'), trenchDigTimber: v('#ruleTrenchDigTimber'), trenchReinforceTimber: v('#ruleTrenchReinfTimber'),
       vision: Object.fromEntries([...document.querySelectorAll('[data-vis]')].map(el => [el.dataset.vis, Number(el.value) || 0])),
-      trenchRangeKm: v('#ruleTrenchRange'), trenchBonusDug: v('#ruleTrenchDug'), trenchBonusReinforced: v('#ruleTrenchReinforced'),
+      trenchBlocks: $('#ruleTrenchBlocks').checked, trenchRangeKm: v('#ruleTrenchRange'), trenchBonusDug: v('#ruleTrenchDug'), trenchBonusReinforced: v('#ruleTrenchReinforced'),
       captureRadiusKm: v('#ruleCaptureRadius'), cityRadiusKm: v('#ruleCityRadius'), occupyNeutrals: $('#ruleOccupyNeutrals').checked,
-      supplyEnabled: $('#ruleSupplyOn').checked, supplyTownKm: v('#ruleSupplyTown'), supplyLinkKm: v('#ruleSupplyLink'), convoyLinkKm: v('#ruleConvoyLink'), attritionRate: v('#ruleAttrition'), attritionDisbandBelow: v('#ruleDisband'), convoyRangeKm: v('#ruleConvoyRange'), convoyCapacity: v('#ruleConvoyCap'), convoyBoardKm: v('#ruleConvoyBoard'), convoyLandKm: v('#ruleConvoyLand'), supplyLinkBySize: { capital: v('#ruleLinkCapital'), city: v('#ruleLinkCity'), village: v('#ruleLinkVillage') }, supplyRangeKm: v('#ruleSupplyRange'),
+      supplyEnabled: $('#ruleSupplyOn').checked, supplyTownKm: v('#ruleSupplyTown'), supplyLinkKm: v('#ruleSupplyLink'), convoyLinkKm: v('#ruleConvoyLink'), attritionRate: v('#ruleAttrition'), supplyStock: v('#ruleSupplyStock'), attritionDisbandBelow: v('#ruleDisband'), convoyRangeKm: v('#ruleConvoyRange'), convoyCapacity: v('#ruleConvoyCap'), convoyBoardKm: v('#ruleConvoyBoard'), convoyLandKm: v('#ruleConvoyLand'), supplyLinkBySize: { capital: v('#ruleLinkCapital'), city: v('#ruleLinkCity'), village: v('#ruleLinkVillage') }, supplyRangeKm: v('#ruleSupplyRange'),
       hospitalKm: v('#ruleHospitalKm'), hospitalHeal: v('#ruleHospitalHeal'), hqKm: v('#ruleHqKm'), hqBonus: v('#ruleHqBonus'),
       engineerKm: v('#ruleEngKm'), engineerDefend: v('#ruleEngDefend'), signalsKm: v('#ruleSigKm'), signalsArtillery: v('#ruleSigArt'),
       railSpeed: v('#ruleRailSpeed'), railCutKm: v('#ruleRailCut'), railDefence: v('#ruleRailDefence'), railGuardKm: v('#ruleRailGuard'), railRepairKm: v('#ruleRailRepair'), railJoinKm: v('#ruleRailJoin'),
@@ -747,6 +775,7 @@ const GameUI = (() => {
       factoryRangeKm: v('#ruleFactoryRange'), coastalKm: v('#ruleCoastal'), researchLead: v('#ruleResearchLead'),
       cityIncome: {}, factoryIncome: { money: v('#ruleFactoryMoney'), rp: v('#ruleFactoryRp') },
       townDevIncome: { money: v('#ruleDevMoney'), rp: v('#ruleDevRp'), manpower: v('#ruleDevManpower') },
+      resourceImproveRate: v('#ruleImproveRate') / 100,
       startStock: { resources: v('#ruleStartRes'), money: v('#ruleStartMoney'), manpower: v('#ruleStartMp') },
     };
     for (const size of ['capital', 'city', 'village']) settings.cityIncome[size] = { money: v(`#rule_${size}_money`), rp: v(`#rule_${size}_rp`), manpower: v(`#rule_${size}_manpower`) };

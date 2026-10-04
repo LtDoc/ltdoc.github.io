@@ -28,6 +28,9 @@ function railShapes(lobbyId) {
 }
 
 const cache = new Map();   // lobbyId -> { key, net }
+/** Drop a campaign's network from memory (rebuilt when next needed). */
+function forget(lobbyId) { cache.delete(Number(lobbyId)); }
+function cached() { return [...cache.keys()]; }
 /** The lobby's network, rebuilt only when a rail or a rule it depends on changes. */
 function network(lobby, settings) {
   const shapes = railShapes(lobby.id);
@@ -47,20 +50,41 @@ function num(v, d) { const n = Number(v); return Number.isFinite(n) ? n : d; }
  * Which track a nation may ride: its own and its allies' ground, neutral ground and the sea (bridges,
  * ferries). Another power's railways are closed to it, at peace or at war. Without territories, all track.
  */
-function usableFor(lobby, nation) {
+function usableFor(lobby, nation, net) {
   const territory = require('./territory');
   const game = require('./game');
-  const lookup = territory.ownerLookup(lobby);
-  if (!lookup) return null;
+  const owners = net && edgeOwners(lobby, net) ? net._owners.byEdge : null;
+  let lookup = owners ? undefined : territory.ownerLookup(lobby);   // for track not in the network: looked up when first needed
+  if (!owners && !lookup) return null;
   const n = String(nation || '').toLowerCase();
   const factions = game.q.factions.all(lobby.id);
   const me = factions.find(f => f.name.toLowerCase() === n);
   const friends = new Set(me ? [me.id] : []);
   if (me) for (const f of factions) if (f.id !== me.id && game.relationStatus(lobby.id, me.id, f.id) === 'alliance') friends.add(f.id);
   return e => {
-    const owner = lookup(e.mx, e.my);
+    if (owners && owners.has(e)) { const owner = owners.get(e); return owner === null || friends.has(owner); }
+    if (lookup === undefined) lookup = territory.ownerLookup(lobby);
+    const owner = lookup ? lookup(e.mx, e.my) : null;
     return owner === null || owner === undefined || owner === territory.NEUTRAL || friends.has(owner);
   };
+}
+
+/**
+ * The ground under each edge of a network (a faction id, or null for neutral ground and the sea), looked up once
+ * and kept on the network until ground changes hands, so moves and supply do not test every stretch of track
+ * against the borders again. Null when the campaign has no territories: all track is open.
+ */
+function edgeOwners(lobby, net) {
+  const territory = require('./territory');
+  const key = territory.ownershipKey(lobby);
+  if (net._owners && net._owners.key === key) return net._owners.list;
+  const lookup = territory.ownerLookup(lobby);
+  const list = lookup ? net.edges.map(e => {
+    const owner = lookup(e.mx, e.my);
+    return owner === null || owner === undefined || owner === territory.NEUTRAL ? null : owner;
+  }) : null;
+  net._owners = { key, list, byEdge: list ? new Map(net.edges.map((e, i) => [e, list[i]])) : null };
+  return list;
 }
 
 /** Land units and heroes ride trains; ships and aircraft do not. */
@@ -74,7 +98,7 @@ function plan(lobby, settings, marker, x, y) {
   if (!canRide(marker)) return null;
   const net = network(lobby, settings);
   if (!net.edges.length) return null;
-  return RailNet.route(net, { x: marker.x, y: marker.y }, { x, y }, { usable: usableFor(lobby, marker.data?.nation), speed: num(settings.railSpeed, 4) });
+  return RailNet.route(net, { x: marker.x, y: marker.y }, { x, y }, { usable: usableFor(lobby, marker.data?.nation, net), speed: num(settings.railSpeed, 4) });
 }
 
 /** Walk a route until the budget runs out. */
@@ -132,4 +156,4 @@ function length(lobby, rail) {
   return s;
 }
 
-module.exports = { network, plan, walk, usableFor, canRide, nearestOn, cutAt, length, metric, railShapes, snapEnds };
+module.exports = { network, forget, cached, plan, walk, usableFor, edgeOwners, canRide, nearestOn, cutAt, length, metric, railShapes, snapEnds };

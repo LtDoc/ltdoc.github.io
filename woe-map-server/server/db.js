@@ -207,6 +207,7 @@ CREATE TABLE IF NOT EXISTS provinces (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_provinces_lobby ON provinces(lobby_id);
+CREATE INDEX IF NOT EXISTS idx_provinces_lobby_updated ON provinces(lobby_id, updated_at);   -- fog of war's change check
 
 CREATE TABLE IF NOT EXISTS turn_reports (
   id         INTEGER PRIMARY KEY,
@@ -362,6 +363,20 @@ CREATE TABLE IF NOT EXISTS fog_ghosts (
   seen_at     INTEGER NOT NULL,
   PRIMARY KEY (lobby_id, nation, marker_id)
 );
+
+-- Corps (docs/UNITS.md): a nation's named group of units that forms up on a line. Members carry data.corps = id.
+CREATE TABLE IF NOT EXISTS corps (
+  id         INTEGER PRIMARY KEY,
+  lobby_id   INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  nation     TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  line       TEXT,                                  -- JSON [[x, y], ...]: the front it last formed on
+  front      TEXT NOT NULL DEFAULT 'left',          -- which side of the line (walking it from its first point) the enemy is on
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_corps_lobby ON corps(lobby_id);
 `);
 
 // ---- Lightweight migrations for databases created by earlier versions -------------
@@ -375,8 +390,10 @@ addColumnIfMissing('shapes', 'locked', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('shapes', 'data', 'TEXT');   // per-kind extras (trench: facing, state, zigzag)
 addColumnIfMissing('events', 'data', 'TEXT');
 addColumnIfMissing('game', 'deadline_notified', "TEXT NOT NULL DEFAULT ''");
+addColumnIfMissing('game', 'phase', "TEXT NOT NULL DEFAULT 'move'");   // movement | battle phase of the turn (settings.phases)
 addColumnIfMissing('factions', 'uniform', "TEXT NOT NULL DEFAULT ''");   // army of the figures in battles: '' (from the name), american, anzac, arab, british, french, german, ottoman, russian (once grey, beige, green)
-addColumnIfMissing('provinces', 'lakes_cut', 'INTEGER NOT NULL DEFAULT 0');   // lakes cut out of it (provinces cut before lakes were water had them inside)
+addColumnIfMissing('provinces', 'lakes_cut', 'INTEGER NOT NULL DEFAULT 0');
+addColumnIfMissing('provinces', 'strays_fixed', 'INTEGER NOT NULL DEFAULT 0');   // land the borders miss moved to the nearest state (provinces.settleStrays)   // lakes cut out of it (provinces cut before lakes were water had them inside)
 addColumnIfMissing('battles', 'cover', 'INTEGER NOT NULL DEFAULT 0');   // the defender fought from trench cover (drawn behind wire)
 addColumnIfMissing('battles', 'losses', 'TEXT');   // JSON { a, d: { from, to, type, nation } }: who fell, for the dead left lying (REMAINS_TURNS)
 addColumnIfMissing('provinces', 'year', 'INTEGER NOT NULL DEFAULT 0');   // borders year the province was cut from (0 = before this column: 1914)   // "<deadline>|<stage>" of the last reminder sent

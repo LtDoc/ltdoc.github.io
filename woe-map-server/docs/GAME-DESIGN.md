@@ -1,6 +1,6 @@
 # WoE Strategy Map: game layer design
 
-Status: **agreed 26 Sep 2026; all five phases built 26 Sep 2026** (turns and economy, territory and war, production and cities, research, and the polish phase: turn reports, deadline countdown and reminders, captured-this-turn effects, public treasuries, Firebase import of the old tree and nations). The ⚠ marks show where a decision was needed; section 12 records the answers.
+Status: **agreed 26 Sep 2026; all five phases built 26 Sep 2026**; movement and battle phases, worn units, replacements, corps, engineers' trenches, blockades, submerged submarines, the upkeep balance and resource works (improvements, scorched earth, the works drawn on the map) added 3 Oct 2026 (docs/WARFARE.md, docs/ECONOMY.md) (turns and economy, territory and war, production and cities, research, and the polish phase: turn reports, deadline countdown and reminders, captured-this-turn effects, public treasuries, Firebase import of the old tree and nations). The ⚠ marks show where a decision was needed; section 12 records the answers.
 
 ## 1. Goal and principles
 
