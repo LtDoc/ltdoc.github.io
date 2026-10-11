@@ -13,6 +13,7 @@ const hub = require('../ws');
 const hist = require('../history');
 const vision = require('../vision');   // fog of war
 const { imageSize } = require('../imageSize');
+const azgaar = require('../azgaar');
 const UnitTypes = require('../../public/js/units');   // shared catalogue: formation names and default stats
 const Naming = require('../../public/js/naming');     // shared ordinal rules for sequential unit names
 
@@ -29,6 +30,14 @@ const fileFilter = (req, file, cb) => cb(null, !!EXT[file.mimetype]);
 // Map images may be large (they are shrunk in the browser first); icons and flags are capped at 5 MB.
 const upload = multer({ storage, limits: { fileSize: config.maxUploadBytes, files: 1 }, fileFilter });
 const uploadSmall = multer({ storage, limits: { fileSize: 5 * 1024 * 1024, files: 1 }, fileFilter });
+const uploadAzgaar = multer({
+  storage: multer.diskStorage({
+    destination: config.uploadsDir,
+    filename: (req, file, cb) => cb(null, crypto.randomBytes(12).toString('hex') + '.json'),
+  }),
+  limits: { fileSize: 30 * 1024 * 1024, files: 1 },
+  fileFilter: (req, file, cb) => cb(null, /\.json$/i.test(file.originalname)),
+});
 
 const FLAGS_DIR = path.join(config.root, 'public', 'flags');
 function bundledFlags() {
@@ -47,9 +56,8 @@ const q = {
     SELECT l.* FROM lobbies l
     JOIN lobby_members m ON m.lobby_id = l.id WHERE m.user_id = ?
     ORDER BY l.created_at DESC`),
-  allLobbies: db.prepare('SELECT * FROM lobbies ORDER BY created_at DESC'),
   byCode: db.prepare('SELECT * FROM lobbies WHERE join_code = ?'),
-  insertLobby: db.prepare('INSERT INTO lobbies (name, join_code, owner_id, created_at) VALUES (?, ?, ?, ?)'),
+  insertLobby: db.prepare('INSERT INTO lobbies (name, join_code, owner_id, unit_pack, created_at) VALUES (?, ?, ?, ?, ?)'),
   updateLobby: db.prepare('UPDATE lobbies SET name = ?, scale_label = ?, units_per_px = ?, settings = ? WHERE id = ?'),
   updateMap: db.prepare('UPDATE lobbies SET map_file = ?, map_width = ?, map_height = ? WHERE id = ?'),
   rotateCode: db.prepare('UPDATE lobbies SET join_code = ? WHERE id = ?'),
@@ -94,7 +102,7 @@ const q = {
 
   events: db.prepare(`
     SELECT e.*, u.display_name FROM events e LEFT JOIN users u ON u.id = e.user_id
-    WHERE e.lobby_id = ? AND e.id > ? ORDER BY e.id DESC LIMIT ?`),
+    WHERE e.lobby_id = ? AND e.id > ? AND e.kind NOT IN ('chat', 'announce') ORDER BY e.id DESC LIMIT ?`),
   insertEvent: db.prepare('INSERT INTO events (lobby_id, user_id, kind, message, data, created_at) VALUES (?, ?, ?, ?, ?, ?)'),
   event: db.prepare('SELECT e.*, u.display_name FROM events e LEFT JOIN users u ON u.id = e.user_id WHERE e.id = ?'),
 };
@@ -104,10 +112,11 @@ const Heroes = require('../../public/js/heroes');
 const Matchups = require('../../public/js/matchups');
 const heroRules = require('../heroes');
 /** Hero fields only the GM (or the rules) may change: players move and command heroes, they do not rewrite them. */
-const PROTECTED_HERO_FIELDS = ['role', 'stars', 'perception', 'intelligence', 'movement', 'ap', 'nation', 'status', 'postedTo', 'travel', 'capturedBy', 'movedKm', 'apUsed', 'trail'];
+const PROTECTED_HERO_FIELDS = ['traits', 'role', 'stars', 'perception', 'intelligence', 'movement', 'ap', 'nation', 'status', 'postedTo', 'travel', 'capturedBy', 'movedKm', 'apUsed', 'trail'];
 const game = require('../game');
 const rails = require('../rails');
 const GameData = require('../../public/js/game-data');
+const discordWebhook = require('../discordWebhook');
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const PALETTE = ['#3498db', '#e74c3c', '#2ecc71', '#9b59b6', '#f1c40f', '#1abc9c', '#e67e22', '#ecf0f1', '#95a5a6', '#d35400'];
 
@@ -187,7 +196,8 @@ function scheduleSupply(lobbyId) {
 }
 function commitChange(req, entity, action, before, after, reverts = null) {
   const subject = after || before;
-  if ((entity === 'marker' && ['unit', 'town'].includes(subject.type)) || (entity === 'shape' && subject.kind === 'rail')) scheduleSupply(req.lobby.id);
+  const affectsSupply = m => m && (m.type === 'town' || m.type === 'hero' || (m.type === 'unit' && Number(m.data?.strength ?? 100) > 0));
+  if ((entity === 'marker' && (affectsSupply(before) || affectsSupply(after))) || (entity === 'shape' && subject.kind === 'rail')) scheduleSupply(req.lobby.id);
   if (entity === 'marker' && ['unit', 'hero', 'town'].includes(subject.type)) vision.schedulePush(req.lobby.id, before, after);   // fog of war: sight moved
   const entry = hist.record({
     lobbyId: req.lobby.id, userId: req.user.id, entity, entityId: (after || before).id, action, before, after, reverts,
@@ -209,10 +219,14 @@ router.get('/flags/bundled', (req, res) => {
 
 // ---- Lobby list / create / join ---------------------------------------------------
 router.get('/', (req, res) => {
-  const rows = req.user.role === 'admin' ? q.allLobbies.all() : q.myLobbies.all(req.user.id);
+  // Your own campaigns, site admin or not: every campaign is on the admin page (GET /api/auth/lobbies).
+  const rows = q.myLobbies.all(req.user.id);
   const lobbies = rows.map(l => {
     const out = access.serializeLobby(l, access.getRole(l, req.user));
     out.memberCount = q.memberCount.get(l.id).n;
+    // A co-GM of a shut campaign may ask the site admins to take it over (once at a time).
+    out.canTakeOver = out.suspended && out.yourRole === 'gm' && l.owner_id !== req.user.id;
+    if (out.canTakeOver) out.takeover = qt.mine.get(l.id, req.user.id)?.status || null;
     return out;
   });
   res.json({ lobbies });
@@ -221,9 +235,14 @@ router.get('/', (req, res) => {
 router.post('/', (req, res) => {
   const name = clean(req.body?.name, 60);
   if (!name) return res.status(400).json({ error: 'Campaign needs a name' });
+  const unitPack = req.body?.unitPack === undefined ? UnitTypes.DEFAULT_PACK : req.body.unitPack;
+  if (!UnitTypes.forPack(unitPack)) return res.status(400).json({ error: 'Unknown unit pack' });
+  if (unitPack !== UnitTypes.DEFAULT_PACK && !db.prepare('SELECT 1 FROM user_packs WHERE user_id = ? AND pack_id = ?').get(req.user.id, unitPack)) {
+    return res.status(403).json({ error: 'You do not own this pack' });
+  }
   let id;
   for (let tries = 0; ; tries++) {
-    try { id = q.insertLobby.run(name, genCode(), req.user.id, now()).lastInsertRowid; break; }
+    try { id = q.insertLobby.run(name, genCode(), req.user.id, unitPack, now()).lastInsertRowid; break; }
     catch (e) { if (!/UNIQUE/.test(String(e.message)) || tries >= 4) throw e; }
   }
   q.insertMember.run(id, req.user.id, 'gm', '', '#e67e22', now());
@@ -243,20 +262,63 @@ router.post('/join', (req, res) => {
   res.json({ lobby: access.serializeLobby(lobby, access.getRole(lobby, req.user)) });
 });
 
+// ---- Takeovers and transfers (README, "Accounts and roles") ---------------------------------------
+const qt = {
+  mine: db.prepare("SELECT status FROM takeovers WHERE lobby_id = ? AND user_id = ? AND status = 'open'"),
+  insert: db.prepare('INSERT INTO takeovers (lobby_id, lobby_name, user_id, note, created_at) VALUES (?, ?, ?, ?, ?)'),
+  setOwner: db.prepare('UPDATE lobbies SET owner_id = ? WHERE id = ?'),
+  setMemberRole: db.prepare('UPDATE lobby_members SET role = ? WHERE lobby_id = ? AND user_id = ?'),
+};
+/** Hand a campaign to another user: they become owner and GM; the old owner stays a member, as a player. */
+function transferOwner(lobby, user, actor) {
+  const old = lobby.owner_id;
+  qt.setOwner.run(user.id, lobby.id);
+  q.insertMember.run(lobby.id, user.id, 'gm', '', '#e67e22', now());
+  qt.setMemberRole.run('gm', lobby.id, user.id);
+  if (old && old !== user.id) qt.setMemberRole.run('player', lobby.id, old);
+  logEvent(lobby.id, actor.id, 'system', `${actor.displayName} made ${user.display_name || user.displayName} the owner of the campaign`);
+  hub.broadcast(lobby.id, { type: 'members' });
+  hub.refreshRoles(lobby.id);
+}
+/** A co-GM of a campaign whose owner was suspended asks the site admins to take it over. */
+router.post('/:id/takeover', (req, res) => {
+  const lobby = access.getLobby(req.params.id);
+  if (!lobby) return res.status(404).json({ error: 'No such campaign' });
+  if (!access.ownerSuspended(lobby)) return res.status(400).json({ error: 'The campaign is open: nothing to take over' });
+  const m = access.getMember(lobby.id, req.user.id);
+  if (!m || m.role !== 'gm' || lobby.owner_id === req.user.id) return res.status(403).json({ error: 'Only a game master of the campaign can ask to take it over' });
+  if (qt.mine.get(lobby.id, req.user.id)) return res.status(409).json({ error: 'You have already asked; the site admins will answer' });
+  qt.insert.run(lobby.id, lobby.name, req.user.id, clean(req.body?.note, 500), now());
+  res.status(201).json({ ok: true });
+});
+
 // ---- Per-lobby middleware -----------------------------------------------------------
 router.param('id', (req, res, next, id) => {
   const lobby = access.getLobby(id);
   if (!lobby) return res.status(404).json({ error: 'No such campaign' });
   const role = access.getRole(lobby, req.user);
   if (!role) return res.status(403).json({ error: 'You are not a member of this campaign' });
+  // The owner suspended: the campaign is shut to everyone; only a takeover request gets through (a co-GM's).
+  const leavingSelf = req.method === 'DELETE' && Number(req.params.userId) === req.user.id && /\/members\/\d+$/.test(req.path);
+  if (access.ownerSuspended(lobby) && !/\/takeover$/.test(req.path) && !leavingSelf) return res.status(423).json({ error: access.SUSPENDED_LOBBY, suspended: true });
   req.lobby = lobby; req.lobbyRole = role; req.member = access.getMember(lobby.id, req.user.id);
+  req.realRole = role;
+  // One boundary covers every nested campaign route, before uploads or handlers run.
+  // Personal read receipts and leaving the campaign do not alter its game state.
+  if (role === 'observer') {
+    const readReceipt = req.method === 'POST' && /\/chats\/[^/]+\/read$/.test(req.path);
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !leavingSelf && !readReceipt) {
+      return res.status(403).json({ error: 'Observers have read-only access' });
+    }
+    req.lobbyRole = 'gm'; // Reuse GM filtering for every read, including nested game/story routes.
+  }
   // "View as player": a GM's page sends X-View-As (a faction id) and is then served as that nation's player.
   const as = access.viewAsFaction(lobby, role, req.get('x-view-as'));
   if (as) {
     req.viewAs = as; req.lobbyRole = 'player';
     req.member = { ...(req.member || { lobby_id: lobby.id, user_id: req.user.id, color: as.color, joined_at: 0 }), role: 'player', nation: as.name };
   }
-  next();
+  UnitTypes.runWithPack(lobby.unit_pack, next);
 });
 
 function requireGm(req, res, next) {
@@ -273,10 +335,21 @@ function requireGm(req, res, next) {
  */
 function setMarkerNation(req, before, nation, captured = false) {
   const data = { ...before.data, nation };
+  let ownerId = before.ownerId, color = before.color;
+  if (require('../territory').isCapturableEmplacement(before) && String(before.data?.nation || '').toLowerCase() !== String(nation || '').toLowerCase()) {
+    ownerId = nation ? access.getMembers(req.lobby.id).find(m => String(m.nation || '').toLowerCase() === nation.toLowerCase())?.user_id || null : null;
+    const faction = q.factions.all(req.lobby.id).find(f => f.name.toLowerCase() === String(nation || '').toLowerCase());
+    color = faction?.color || before.color;
+    data.goal = null;
+  }
+  if (['resource', 'factory'].includes(before.type)) {
+    ownerId = nation ? access.getMembers(req.lobby.id).find(m => m.role === 'player' && String(m.nation || '').toLowerCase() === nation.toLowerCase())?.user_id || null : null;
+    color = '#95a5a6';
+  }
   const g = game.get(req.lobby.id);
   if (captured && g.enabled && String(before.data?.nation || '') !== String(nation || '')) { data.capturedTurn = g.turn; data.capturedFrom = String(before.data?.nation || ''); }
-  q.updateMarker.run(before.type, before.name, before.x, before.y, before.iconFile, before.iconFile ? null : before.iconUrl, before.color,
-    before.adminOnly ? 1 : 0, before.visibleTo ? JSON.stringify(before.visibleTo) : null, before.ownerId, JSON.stringify(data), now(), before.locked ? 1 : 0, before.id);
+  q.updateMarker.run(before.type, before.name, before.x, before.y, before.iconFile, before.iconFile ? null : before.iconUrl, color,
+    before.adminOnly ? 1 : 0, before.visibleTo ? JSON.stringify(before.visibleTo) : null, ownerId, JSON.stringify(data), now(), before.locked ? 1 : 0, before.id);
   const after = access.serializeMarker(q.marker.get(before.id, req.lobby.id));
   commitChange(req, 'marker', 'update', before, after);
   return after;
@@ -285,13 +358,18 @@ function shapeById(req, id, all) {
   if (all) return q.shapes.all(req.lobby.id).map(access.serializeShape);
   const row = q.shape.get(id, req.lobby.id); return row ? access.serializeShape(row) : null;
 }
-/** Rewrite a marker's position and data (heroes' missions and travel), recording history and broadcasting. */
+/**
+ * Rewrite a marker's position and data (heroes' missions and travel), recording history and broadcasting. `patch.color` and
+ * `patch.ownerId` (null: the GM's) change hands too (units going over to rebels).
+ */
 function writeMarker(req, before, patch) {
   const x = patch.x !== undefined ? patch.x : before.x, y = patch.y !== undefined ? patch.y : before.y;
+  const color = patch.color !== undefined && COLOR_RE.test(patch.color) ? patch.color : before.color;
+  const ownerId = patch.ownerId !== undefined ? patch.ownerId : before.ownerId;
   const data = sanitizeData(before.type, { ...before.data, ...(patch.data || {}), ...(x !== before.x || y !== before.y ? { heldTurns: 0 } : {}) });
   const adminOnly = patch.adminOnly !== undefined ? (patch.adminOnly ? 1 : 0) : (before.adminOnly ? 1 : 0);
-  q.updateMarker.run(before.type, before.name, x, y, before.iconFile, before.iconFile ? null : before.iconUrl, before.color,
-    adminOnly, before.visibleTo ? JSON.stringify(before.visibleTo) : null, before.ownerId, JSON.stringify(data), now(), before.locked ? 1 : 0, before.id);
+  q.updateMarker.run(before.type, before.name, x, y, before.iconFile, before.iconFile ? null : before.iconUrl, color,
+    adminOnly, before.visibleTo ? JSON.stringify(before.visibleTo) : null, ownerId, JSON.stringify(data), now(), before.locked ? 1 : 0, before.id);
   const after = access.serializeMarker(q.marker.get(before.id, req.lobby.id));
   commitChange(req, 'marker', 'update', before, after);
   return after;
@@ -390,13 +468,13 @@ router.get('/:id', (req, res) => {
   const online = new Set(hub.presence(req.lobby.id).map(u => u.id));
   const members = access.getMembers(req.lobby.id).map(m => ({ ...access.serializeMember(m), online: online.has(m.user_id) }));
   res.json({
-    lobby: access.serializeLobby(req.lobby, req.lobbyRole),
+    lobby: access.serializeLobby(req.lobby, req.realRole === 'observer' ? 'observer' : req.lobbyRole),
     members,
     you: {
-      id: req.user.id, displayName: req.user.displayName, role: req.lobbyRole,
+      id: req.user.id, displayName: req.user.displayName, role: req.realRole === 'observer' ? 'observer' : req.lobbyRole,
       member: req.viewAs ? { ...(members.find(m => m.userId === req.user.id) || { userId: req.user.id, displayName: req.user.displayName, color: req.viewAs.color }), role: 'player', nation: req.viewAs.name }
         : members.find(m => m.userId === req.user.id) || null,
-      realRole: req.viewAs ? 'gm' : req.lobbyRole,
+      realRole: req.realRole,
       viewAs: req.viewAs ? access.serializeFaction(req.viewAs) : null,
     },
   });
@@ -422,7 +500,7 @@ router.patch('/:id', requireGm, (req, res) => {
         winnerLoss: clamp(num(c.winnerLoss, 5), 0, 100),
       };
     }
-    // Per-campaign unit stat overrides: { typeId: [attack, defend, ap, range, movement] }. A null entry
+    // Per-campaign unit stat overrides: { typeId: [attack, defend, ap, range, movement, AC, penetration] }. A null entry
     // removes that type's override (back to the catalogue); an empty object clears them all.
     if (b.settings.unitStats !== undefined) {
       const src = b.settings.unitStats;
@@ -430,10 +508,10 @@ router.patch('/:id', requireGm, (req, res) => {
       else if (typeof src === 'object') {
         const out = b.settings.replaceUnitStats ? {} : { ...(settings.unitStats || {}) };
         for (const [key, val] of Object.entries(src).slice(0, 200)) {
-          if (!/^[a-z0-9_-]{1,40}$/.test(key)) continue;
+          if (!/^[a-z0-9_-]{1,40}$/.test(key) || !UnitTypes.forPack(req.lobby.unit_pack)?.exact(key)) continue;
           if (val === null) { delete out[key]; continue; }
-          if (!Array.isArray(val) || val.length !== 5) continue;
-          out[key] = val.map(v => clamp(Math.round(num(v, 0) * 10) / 10, -99, 999));
+          if (!Array.isArray(val) || ![5, 7].includes(val.length)) continue;
+          out[key] = val.map((v, i) => clamp(Math.round(num(v, 0) * 10) / 10, i >= 5 ? 0 : -99, 999));
         }
         if (Object.keys(out).length) settings.unitStats = out; else delete settings.unitStats;
       }
@@ -445,6 +523,22 @@ router.patch('/:id', requireGm, (req, res) => {
   res.json({ lobby: access.serializeLobby(lobby, req.lobbyRole) });
 });
 
+router.get('/:id/discord-webhook', requireGm, (req, res) => res.json(discordWebhook.status(req.lobby.id)));
+
+router.put('/:id/discord-webhook', requireGm, (req, res) => {
+  try { res.json(discordWebhook.save(req.lobby.id, req.body?.url)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.delete('/:id/discord-webhook', requireGm, (req, res) => res.json(discordWebhook.clear(req.lobby.id)));
+
+router.post('/:id/discord-webhook/test', requireGm, async (req, res) => {
+  const result = await discordWebhook.deliver(req.lobby.id, req.lobby.name, {
+    kind: 'test', title: 'Webhook test', description: 'Discord notifications are connected to this campaign.',
+  });
+  res.status(result.ok ? 200 : 502).json(result.ok ? discordWebhook.status(req.lobby.id) : { error: result.error });
+});
+
 router.post('/:id/code', requireGm, (req, res) => {
   const code = genCode();
   q.rotateCode.run(code, req.lobby.id);
@@ -454,6 +548,10 @@ router.post('/:id/code', requireGm, (req, res) => {
 
 router.post('/:id/map', requireGm, upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Upload a PNG, JPEG, WebP or GIF image' });
+  if (access.safeJson(req.lobby.settings).azgaar) {
+    removeUpload(req.file.filename);
+    return res.status(409).json({ error: 'An imported Azgaar map has nations and settlements; use a new campaign for another map' });
+  }
   let size = null;
   try { size = imageSize(req.file.path); } catch { /* fall through */ }
   const width = size?.width || num(req.body?.width);
@@ -467,14 +565,70 @@ router.post('/:id/map', requireGm, upload.single('file'), (req, res) => {
   if (old && old !== req.file.filename) removeUpload(old);
   // An uploaded image replaces a generated Earth map.
   const settings = access.safeJson(req.lobby.settings);
-  if (settings.earth) {
-    delete settings.earth; delete settings.projection;
+  if (settings.earth || settings.azgaar) {
+    delete settings.earth; delete settings.projection; delete settings.azgaar;
     q.updateLobby.run(req.lobby.name, req.lobby.scale_label, req.lobby.units_per_px, JSON.stringify(settings), req.lobby.id);
   }
   const lobby = access.getLobby(req.lobby.id);
   logEvent(lobby.id, req.user.id, 'system', `${req.user.displayName} changed the map image`);
   broadcastLobby(lobby);
   res.json({ lobby: access.serializeLobby(lobby, req.lobbyRole) });
+});
+
+/** Import Azgaar's Full JSON map as a vector base, nation-owned land cells and town markers. */
+router.post('/:id/map/azgaar', requireGm, uploadAzgaar.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Upload an Azgaar Full JSON export (.json)' });
+  const fail = (status, message) => { removeUpload(req.file.filename); return res.status(status).json({ error: message }); };
+  // Replacing content silently would leave players, units and drawings at coordinates from the old map.
+  if (q.factions.all(req.lobby.id).length || q.markers.all(req.lobby.id).length || q.shapes.all(req.lobby.id).length ||
+      db.prepare('SELECT 1 FROM provinces WHERE lobby_id = ? LIMIT 1').get(req.lobby.id) ||
+      db.prepare('SELECT 1 FROM territories WHERE lobby_id = ? LIMIT 1').get(req.lobby.id)) {
+    return fail(409, 'Import into a campaign without factions, markers, drawings or territories');
+  }
+  let plan;
+  try { plan = azgaar.prepare(JSON.parse(fs.readFileSync(req.file.path, 'utf8'))); }
+  catch (e) { return fail(400, e instanceof SyntaxError ? 'The file is not valid JSON' : e.message); }
+  const insertProvince = db.prepare(`INSERT INTO provinces
+    (lobby_id, name, state, subject, biome_color, cx, cy, faction_id, geometry, updated_at, year, lakes_cut, strays_fixed)
+    VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?, 0, 1, 1)`);
+  const old = req.lobby.map_file;
+  try {
+    db.exec('BEGIN');
+    try {
+      const factionIds = new Map();
+      const t = now();
+      for (const state of plan.states) {
+        const id = q.insertFaction.run(req.lobby.id, state.name, state.color, null, null, t).lastInsertRowid;
+        factionIds.set(state.id, id);
+      }
+      for (const cell of plan.land) {
+        insertProvince.run(req.lobby.id, `Cell ${cell.id}`, String(cell.state), cell.biomeColor, cell.x, cell.y,
+          factionIds.get(cell.state) || 0, JSON.stringify(cell.geometry), t);
+      }
+      for (const burg of plan.burgs) {
+        const faction = plan.states.find(s => s.id === burg.state);
+        const data = { size: burg.size, nation: faction?.name || '' };
+        q.insertMarker.run(null, req.lobby.id, 'town', burg.name, burg.x, burg.y, null, null,
+          faction?.color || '#8f9c89', 0, null, null, JSON.stringify(data), t, t, 1);
+      }
+      const settings = access.safeJson(req.lobby.settings);
+      delete settings.earth; delete settings.projection;
+      settings.azgaar = { name: plan.name, states: plan.states.length };
+      q.updateMap.run(null, plan.width, plan.height, req.lobby.id);
+      q.updateLobby.run(req.lobby.name, req.lobby.scale_label, req.lobby.units_per_px, JSON.stringify(settings), req.lobby.id);
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+  } catch (e) { return fail(400, `Could not import the map: ${e.message}`); }
+  removeUpload(req.file.filename);
+  if (old) removeUpload(old);
+  require('../provinces').invalidate(req.lobby.id);
+  const lobby = access.getLobby(req.lobby.id);
+  broadcastLobby(lobby);
+  hub.broadcast(lobby.id, { type: 'factions' });
+  hub.broadcast(lobby.id, { type: 'provinces' });
+  hub.broadcast(lobby.id, { type: 'reload', what: 'markers' });
+  logEvent(lobby.id, req.user.id, 'system', `${req.user.displayName} imported ${plan.name || 'an Azgaar map'} with ${plan.states.length} nations and ${plan.burgs.length} settlements`);
+  res.status(201).json({ lobby: access.serializeLobby(lobby, req.lobbyRole), nations: plan.states.length, settlements: plan.burgs.length });
 });
 
 /** Years of historical borders bundled in public/earth (world_<year>.json.gz). */
@@ -659,6 +813,9 @@ router.post('/:id/shapes/import-borders', requireGm, (req, res) => {
 
 /** Switch the campaign to the bundled vector Earth map (equirectangular, W × W/2 pixels). */
 router.post('/:id/map/earth', requireGm, (req, res) => {
+  if (access.safeJson(req.lobby.settings).azgaar) {
+    return res.status(409).json({ error: 'An imported Azgaar map has nations and settlements; use a new campaign for another map' });
+  }
   const b = req.body || {};
   const width = [4096, 8192, 16384, 32768].includes(Number(b.width)) ? Number(b.width) : 8192;
   const height = width / 2;
@@ -675,6 +832,7 @@ router.post('/:id/map/earth', requireGm, (req, res) => {
     showGraticule: !!b.showGraticule,
   };
   const settings = { ...access.safeJson(req.lobby.settings), earth, projection: 'equirect' };
+  delete settings.azgaar;
   const old = req.lobby.map_file;
   q.updateMap.run(null, width, height, req.lobby.id);
   // Equator scale: 40075 km around the globe = `width` px. The measure tool uses true great-circle distances.
@@ -686,15 +844,20 @@ router.post('/:id/map/earth', requireGm, (req, res) => {
   res.json({ lobby: access.serializeLobby(lobby, req.lobbyRole) });
 });
 
+/** Delete a campaign and everything in it (its uploads too); everyone in it is shown out. */
+function destroyLobby(lobby) {
+  const files = [...q.markerFiles.all(lobby.id).map(r => r.icon_file), ...q.factionFiles.all(lobby.id).map(r => r.flag_file)];
+  q.deleteLobby.run(lobby.id);
+  removeUpload(lobby.map_file);
+  files.forEach(removeUpload);
+  hub.broadcast(lobby.id, { type: 'kicked', lobbyId: lobby.id });
+}
 router.delete('/:id', (req, res) => {
+  // The owner; a site admin in the campaign may too (as the site's moderator; from outside it, the admin page).
   if (req.lobby.owner_id !== req.user.id && req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Only the owner can delete a campaign' });
   }
-  const files = [...q.markerFiles.all(req.lobby.id).map(r => r.icon_file), ...q.factionFiles.all(req.lobby.id).map(r => r.flag_file)];
-  q.deleteLobby.run(req.lobby.id);
-  removeUpload(req.lobby.map_file);
-  files.forEach(removeUpload);
-  hub.broadcast(req.lobby.id, { type: 'kicked', lobbyId: req.lobby.id });
+  destroyLobby(req.lobby);
   res.json({ ok: true });
 });
 
@@ -792,7 +955,7 @@ router.patch('/:id/members/:userId', requireGm, (req, res) => {
   if (!m) return res.status(404).json({ error: 'Not a member' });
   const b = req.body || {};
   const role = b.role !== undefined ? b.role : m.role;
-  if (!['gm', 'player'].includes(role)) return res.status(400).json({ error: 'Bad role' });
+  if (!['gm', 'player', 'observer'].includes(role)) return res.status(400).json({ error: 'Bad role' });
   if (userId === req.lobby.owner_id && role !== 'gm') return res.status(400).json({ error: 'The owner is always a GM' });
   const nation = b.nation !== undefined ? clean(b.nation, 40) : m.nation;
   const color = b.color !== undefined && COLOR_RE.test(b.color) ? b.color : m.color;
@@ -884,6 +1047,9 @@ function sanitizeData(type, data) {
       strength: clamp(num(d.strength, 100), 0, 100),
       movedKm: Math.max(0, num(d.movedKm)), apUsed: Math.max(0, num(d.apUsed)),   // game mode: used this turn
     });
+    for (const key of ['armourClass', 'penetration']) {
+      if (d[key] !== undefined && d[key] !== null && d[key] !== '') out[key] = clamp(num(d[key]), 0, 999);
+    }
     if (d.supplied === false || d.supplied === true) out.supplied = d.supplied;   // set at End turn (docs/UNITS.md)
     if (num(d.unsuppliedTurns) > 0) out.unsuppliedTurns = Math.round(num(d.unsuppliedTurns));
     if (d.supplies !== undefined && d.supplies !== null) out.supplies = clamp(Math.round(num(d.supplies)), 0, 99);   // turns of supplies it carries
@@ -892,7 +1058,8 @@ function sanitizeData(type, data) {
     if (d.attacked === true) out.attacked = true;   // game mode: attacked this turn, so cannot move until the next
     // Orders (routes/orders.js): an engineer's trench work this turn, a submarine under water, the turn a unit last took on
     // replacements, its corps, and the way its line faces (radians, map space).
-    if (d.dig && typeof d.dig === 'object' && ['dig', 'reinforce'].includes(d.dig.mode)) out.dig = { mode: d.dig.mode, turn: num(d.dig.turn) };
+    if (d.dig && typeof d.dig === 'object' && ['dig', 'reinforce', 'rail'].includes(d.dig.mode)) out.dig = { mode: d.dig.mode, turn: num(d.dig.turn) };
+    if (d.pool !== undefined && d.pool !== null && d.pool !== '') out.pool = clamp(Math.round(num(d.pool) * 10) / 10, 0, 100000);   // a Supply Column's or convoy's supplies (server/goods.js)
     if (d.submerged === true) out.submerged = true;
     if (num(d.replenishedTurn) > 0) out.replenishedTurn = Math.round(num(d.replenishedTurn));
     if (num(d.corps) > 0) out.corps = Math.round(num(d.corps));
@@ -915,6 +1082,10 @@ function sanitizeData(type, data) {
     if (num(d.developed) > 0) out.developed = clamp(Math.round(num(d.developed)), 0, 5);   // long-term development level (docs/ECONOMY.md)
     if (d.major) out.major = true;
     if (d.blockaded === true) out.blockaded = true;   // enemy warships off its coast: it supplies no troops (server/supply.js)
+    // Goods and unrest (server/goods.js): its stores, how restless it is, and the End turns left before a critical town revolts.
+    if (d.goods && typeof d.goods === 'object') out.goods = Object.fromEntries(GameData.GOODS_KEYS.map(k => [k, clamp(Math.round(num(d.goods[k]) * 10) / 10, 0, 1e6)]));
+    if (num(d.unrest) > 0) out.unrest = clamp(Math.round(num(d.unrest)), 0, 100);
+    if (num(d.unrestTurns) > 0) out.unrestTurns = clamp(Math.round(num(d.unrestTurns)), 0, 50);
   } else if (type === 'poi') {
     out.category = clean(d.category, 40);
   } else if (type === 'scenery') {
@@ -925,7 +1096,7 @@ function sanitizeData(type, data) {
   } else if (type === 'hero') {
     const def = Heroes.defaults(d.role, d.stars);
     Object.assign(out, {
-      nation: clean(d.nation, 60), role: def.role, stars: def.stars, title: clean(d.title, 60),
+      nation: clean(d.nation, 60), role: def.role, stars: def.stars, traits: Heroes.cleanTraits(def.role, d.traits), title: clean(d.title, 60),
       perception: clamp(num(d.perception, def.perception), 0, 20), intelligence: clamp(num(d.intelligence, def.intelligence), 0, 20),
       movement: clamp(num(d.movement, def.movement), 0, 20), ap: clamp(num(d.ap, def.ap), 0, 5),
       status: Heroes.STATUS[d.status] ? d.status : 'active',
@@ -961,17 +1132,28 @@ function loadMarker(req, res) {
  * Create a marker for the acting user (shared by the POST route and production). Throws { status, message }.
  *  skips the role check (finished builds belong to the faction, not the GM).
  */
+// Economic markers belong to the ground beneath them, including neutral provinces.
+function nodeOwnership(req, x, y) {
+  const factionId = require('../territory').ownerLookup(req.lobby)?.(x, y);
+  const faction = q.factions.all(req.lobby.id).find(f => f.id === factionId);
+  const nation = faction?.name || '';
+  const ownerId = nation ? access.getMembers(req.lobby.id).find(m => m.role === 'player' && String(m.nation || '').toLowerCase() === nation.toLowerCase())?.user_id || null : null;
+  return { nation, ownerId };
+}
+
 function createMarker(req, b, system = false) {
   const fail = (status, message) => { const e = new Error(message); e.status = status; throw e; };
   const isGm = req.lobbyRole === 'gm' || system;
   const type = MARKER_TYPES.includes(b.type) ? b.type : null;
   if (!type) fail(400, 'Bad marker type');
   if (!isGm && type !== 'player') fail(403, 'Players can only add their own player marker');
+  const catalogue = UnitTypes.forPack(req.lobby.unit_pack);
+  if (type === 'unit' && !catalogue?.exact(b.data?.unitType)) fail(400, 'Choose a unit from this campaign’s unit pack');
   let name = clean(b.name, 60) || (type === 'scenery' ? 'Scenery' : '');
   if (!name && type === 'unit' && b.autoName) {
     // Quick add: "<ordinal> <formation>", numbered per faction and formation, ordinal style from the faction name.
     const d = (b.data && typeof b.data === 'object') ? b.data : {};
-    const ut = UnitTypes.resolve(d.unitType);
+    const ut = catalogue.exact(d.unitType);
     const formation = ut ? ut.unit : (clean(d.unitType, 40) || 'Unit');
     const nation = clean(d.nation, 60).toLowerCase();
     const names = q.markers.all(req.lobby.id)
@@ -983,16 +1165,20 @@ function createMarker(req, b, system = false) {
     if (defaults) for (const k of UnitTypes.STAT_KEYS) if (d[k] === undefined || d[k] === '') d[k] = defaults[k];
     b.data = d;
   }
+  const node = ['resource', 'factory'].includes(type);
+  if (node) name = type === 'factory' ? 'Factory' : (clean(b.data?.kind, 40).toLowerCase() || 'grain');
   if (!name) fail(400, 'Marker needs a name');
   const x = num(b.x), y = num(b.y);
   if (!inBounds(req, x, y)) fail(400, 'Position is off the map');
-  const color = COLOR_RE.test(b.color || '') ? b.color : (req.member?.color || '#3498db');
+  const ownership = node ? nodeOwnership(req, x, y) : null;
+  if (node) b.data = { ...(b.data || {}), nation: ownership.nation };
+  const color = node ? '#95a5a6' : COLOR_RE.test(b.color || '') ? b.color : (req.member?.color || '#3498db');
   const adminOnly = isGm && b.adminOnly ? 1 : 0;
   const visibleTo = isGm ? parseVisibleTo(b.visibleTo) : null;
-  const ownerId = isGm ? (b.ownerId ? num(b.ownerId, null) : null) : req.user.id;
+  const ownerId = node ? ownership.ownerId : isGm ? (b.ownerId ? num(b.ownerId, null) : null) : req.user.id;
   const iconUrl = clean(b.iconUrl, 500) || null;
   // Towns, POIs and scenery start locked (they rarely move); units and players start unlocked.
-  const locked = b.locked !== undefined ? (b.locked ? 1 : 0) : (['town', 'poi', 'scenery', 'resource', 'factory'].includes(type) ? 1 : 0);
+  const locked = b.locked !== undefined ? (b.locked ? 1 : 0) : (['town', 'poi', 'scenery'].includes(type) ? 1 : 0);
   const t = now();
   const id = q.insertMarker.run(null, req.lobby.id, type, name, x, y, null, iconUrl, color, adminOnly, visibleTo, ownerId,
     JSON.stringify(sanitizeData(type, b.data)), t, t, locked).lastInsertRowid;
@@ -1015,11 +1201,15 @@ router.patch('/:id/markers/:mid', (req, res) => {
   const b = req.body || {};
   const isGm = req.lobbyRole === 'gm';
   const type = isGm && MARKER_TYPES.includes(b.type) ? b.type : before.type;
-  const name = (b.name !== undefined ? clean(b.name, 60) : before.name) || (type === 'scenery' ? 'Scenery' : '');
+  const node = ['resource', 'factory'].includes(type);
+  const name = node ? (type === 'factory' ? 'Factory' : clean(b.data?.kind ?? before.data?.kind ?? 'grain', 40).toLowerCase()) : (b.name !== undefined ? clean(b.name, 60) : before.name) || (type === 'scenery' ? 'Scenery' : '');
   if (!name) return res.status(400).json({ error: 'Marker needs a name' });
   let x = b.x !== undefined ? num(b.x, before.x) : before.x;
   let y = b.y !== undefined ? num(b.y, before.y) : before.y;
   if (!inBounds(req, x, y)) return res.status(400).json({ error: 'Position is off the map' });
+  if (before.type === 'town' && (x !== before.x || y !== before.y)) {
+    return res.status(409).json({ error: 'Towns cannot be moved' });
+  }
   if (before.locked && (x !== before.x || y !== before.y) && b.locked !== false) {
     return res.status(409).json({ error: `${before.name} is locked; unlock it first` });
   }
@@ -1064,11 +1254,16 @@ router.patch('/:id/markers/:mid', (req, res) => {
     if (u && u !== before.iconUrl) { iconUrl = u; iconFile = null; }      // external URL replaces the upload
     else if (!u && !iconFile) iconUrl = null;
   }
-  const color = b.color !== undefined && COLOR_RE.test(b.color) ? b.color : before.color;
+  const color = node ? '#95a5a6' : b.color !== undefined && COLOR_RE.test(b.color) ? b.color : before.color;
   const adminOnly = isGm && b.adminOnly !== undefined ? (b.adminOnly ? 1 : 0) : (before.adminOnly ? 1 : 0);
   const visibleTo = isGm && b.visibleTo !== undefined ? parseVisibleTo(b.visibleTo) : (before.visibleTo ? JSON.stringify(before.visibleTo) : null);
-  const ownerId = isGm && b.ownerId !== undefined ? (b.ownerId ? num(b.ownerId, null) : null) : before.ownerId;
+  const ownership = node ? nodeOwnership(req, x, y) : null;
+  const ownerId = node ? ownership.ownerId : isGm && b.ownerId !== undefined ? (b.ownerId ? num(b.ownerId, null) : null) : before.ownerId;
   const data = b.data !== undefined ? sanitizeData(type, { ...before.data, ...b.data }) : sanitizeData(type, before.data);
+  if (node) data.nation = ownership.nation;
+  if (type === 'unit' && (before.type !== 'unit' || data.unitType !== before.data?.unitType)
+      && !UnitTypes.forPack(req.lobby.unit_pack)?.exact(data.unitType))
+    return res.status(400).json({ error: 'Choose a unit from this campaign’s unit pack' });
   const locked = b.locked !== undefined ? (b.locked ? 1 : 0) : (before.locked ? 1 : 0);
   q.updateMarker.run(type, name, x, y, iconFile, iconUrl, color, adminOnly, visibleTo, ownerId, JSON.stringify(data), now(), locked, before.id);
   const after = access.serializeMarker(q.marker.get(before.id, req.lobby.id));
@@ -1090,7 +1285,7 @@ router.post('/:id/markers/move', (req, res) => {
     const row = q.marker.get(Number(mv.id), req.lobby.id);
     const before = row && access.serializeMarker(row);
     if (!before || !access.canSee(before, v)) { errors.push(`${mv.id}: not found`); continue; }
-    if (!canEditMarker(req, before) || before.locked) { errors.push(`${before.name}: not movable`); continue; }
+    if (!canEditMarker(req, before) || before.locked || before.type === 'town') { errors.push(`${before.name}: not movable`); continue; }
     if (before.type === 'hero' && before.data?.status === 'travelling' && !isGm) { errors.push(`${before.name}: travelling`); continue; }
     if (before.data?.aboard) { errors.push(`${before.name}: aboard a convoy`); continue; }
     const x = num(mv.x, before.x), y = num(mv.y, before.y);
@@ -1181,6 +1376,21 @@ router.post('/:id/markers/:mid/icon', uploadSmall.single('file'), (req, res) => 
   res.json({ marker: after });
 });
 
+// Recheck confirmed wrecks so a unit restored while the dialog was open is preserved.
+router.post('/:id/markers/clear-dead', requireGm, (req, res) => {
+  if (!Array.isArray(req.body?.markerIds) || !req.body.markerIds.every(Number.isSafeInteger)) return res.status(400).json({ error: 'Expected the dead unit IDs to clear' });
+  const ids = new Set(req.body.markerIds);
+  const dead = q.markers.all(req.lobby.id).map(access.serializeMarker)
+    .filter(m => ids.has(m.id) && m.type === 'unit' && Number(m.data?.strength ?? 100) <= 0);
+  const turn = game.get(req.lobby.id).turn;
+  for (const before of dead) {
+    q.deleteMarker.run(before.id);
+    qb.dropFor.run(req.lobby.id, before.id, before.id, turn);
+    commitChange(req, 'marker', 'delete', before, null);
+  }
+  res.json({ removed: dead.map(m => m.id), count: dead.length });
+});
+
 router.delete('/:id/markers/:mid', (req, res) => {
   const before = loadMarker(req, res);
   if (!before) return;
@@ -1196,7 +1406,8 @@ router.delete('/:id/markers/:mid', (req, res) => {
 // ---- Shapes (drawing layer) ---------------------------------------------------------------
 router.get('/:id/shapes', (req, res) => {
   const v = viewerOf(req);
-  res.json({ shapes: q.shapes.all(req.lobby.id).map(access.serializeShape).filter(s => access.canSee(s, v)) });
+  // Under fog of war another side's trench comes as the pieces of it in sight (vision.shapeViews).
+  res.json({ shapes: q.shapes.all(req.lobby.id).map(access.serializeShape).filter(s => access.canSee(s, v)).flatMap(s => vision.shapeViews(v, s)) });
 });
 
 function canEditShape(req, s) {
@@ -1216,11 +1427,12 @@ function shapeData(kind, raw, before, isGm, mayTag = isGm) {
   }
   if (kind === 'rail') {
     const prev = Array.isArray(before?.cuts) ? before.cuts : [];
+    const plan = isGm && raw && raw.state !== undefined ? raw.state === 'plan' : before?.state === 'plan';
     const cuts = isGm && raw && Array.isArray(raw.cuts)
       ? raw.cuts.filter(c => c && Number.isFinite(Number(c.x)) && Number.isFinite(Number(c.y))).slice(0, 200)
         .map(c => ({ id: clean(c.id, 20) || Math.random().toString(36).slice(2, 10), x: Number(c.x), y: Number(c.y), turn: num(c.turn, 0), by: clean(c.by, 60), at: clean(c.at, 40) }))
       : prev;
-    return { cuts };
+    return plan ? { cuts: [], state: 'plan', nation: clean(raw?.nation ?? before?.nation, 60) } : { cuts };
   }
   if (kind !== 'trench') return null;
   const d = (raw && typeof raw === 'object') ? raw : {}, prev = before || {};
@@ -1263,7 +1475,9 @@ router.post('/:id/shapes', (req, res) => {
   const isGm = req.lobbyRole === 'gm';
   const kind = ['line', 'area', 'trench', 'rail'].includes(b.kind) ? b.kind : null;
   if (!kind) return res.status(400).json({ error: 'Drawing must be a line, an area, a trench or a railway' });
-  if (kind === 'rail' && !isGm && game.get(req.lobby.id).enabled) return res.status(403).json({ error: 'Only the GM lays railways while the game is running' });
+  // While the game runs players only plan railways: engineers and railway troops build them, a section a turn.
+  const railPlan = kind === 'rail' && !isGm && game.get(req.lobby.id).enabled;
+  if (railPlan && !req.member?.nation) return res.status(403).json({ error: 'You need a nation to plan a railway' });
   let points = parsePoints(req, kind, b.points);
   if (!points) return res.status(400).json({ error: 'Bad points (need 2+ for a line, 3+ for an area, all on the map)' });
   if (kind === 'rail') points = rails.snapEnds(req.lobby, game.get(req.lobby.id).settings, points, null);
@@ -1276,6 +1490,7 @@ router.post('/:id/shapes', (req, res) => {
   if (data && kind === 'trench') data.nation = trenchNation(req, points);
   // While the game runs players only plan trenches: engineers dig them, a section a turn (routes/orders.js).
   if (data && kind === 'trench' && !isGm && game.get(req.lobby.id).enabled) data.state = 'plan';
+  if (railPlan) { data.cuts = []; data.state = 'plan'; data.nation = clean(req.member.nation, 60); }
   const t = now();
   const id = q.insertShape.run(null, req.lobby.id, kind, label, JSON.stringify(points), color, width, adminOnly, visibleTo, req.user.id, t, t, b.locked ? 1 : 0, data ? JSON.stringify(data) : null).lastInsertRowid;
   const shape = access.serializeShape(q.shape.get(id, req.lobby.id));
@@ -1289,7 +1504,7 @@ router.patch('/:id/shapes/:sid', (req, res) => {
   if (!canEditShape(req, before)) return res.status(403).json({ error: 'You cannot edit that drawing' });
   const b = req.body || {};
   const isGm = req.lobbyRole === 'gm';
-  if (before.kind === 'rail' && !isGm && game.get(req.lobby.id).enabled) return res.status(403).json({ error: 'Only the GM changes railways while the game is running' });
+  if (before.kind === 'rail' && !isGm && game.get(req.lobby.id).enabled && before.data?.state !== 'plan') return res.status(403).json({ error: 'Only the GM changes built railways while the game is running: plan a new line and have engineers build it' });
   // A dug trench is earthworks: only engineers (a section a turn) and sappers change it while the game runs.
   const dugTrench = before.kind === 'trench' && !isGm && game.get(req.lobby.id).enabled && (before.data?.state || 'dug') !== 'plan';
   if (dugTrench && b.points !== undefined) return res.status(403).json({ error: 'A dug trench cannot be redrawn: plan a new trench and have engineers dig it' });
@@ -1318,7 +1533,7 @@ router.delete('/:id/shapes/:sid', (req, res) => {
   const before = loadShape(req, res);
   if (!before) return;
   if (!canEditShape(req, before)) return res.status(403).json({ error: 'You cannot delete that drawing' });
-  if (before.kind === 'rail' && req.lobbyRole !== 'gm' && game.get(req.lobby.id).enabled) return res.status(403).json({ error: 'Only the GM removes railways while the game is running' });
+  if (before.kind === 'rail' && req.lobbyRole !== 'gm' && game.get(req.lobby.id).enabled && before.data?.state !== 'plan') return res.status(403).json({ error: 'Only the GM removes built railways while the game is running' });
   q.deleteShape.run(before.id);
   commitChange(req, 'shape', 'delete', before, null);
   res.json({ ok: true });
@@ -1390,9 +1605,14 @@ router.post('/:id/history/:hid/revert', (req, res) => {
   res.json({ entry: e, [entry.entity]: after });
 });
 
-// ---- Private chats (docs/COMMS.md) -----------------------------------------------------------------
-// OOC chat is the lobby's chat events and GM announcements are 'announce' events; private chats between
-// members live here and only their members receive or read them (the GM too, only when a member).
+// ---- Chats (docs/COMMS.md) -------------------------------------------------------------------------
+// Three kinds of chat behind one API, each addressed by a key: 'ooc' (everyone; its messages are the lobby's
+// chat and roll events, so the Log shows them too), 'gm' (announcements: everyone reads, the GM writes; the
+// 'announce' events) and 'c<id>' (a private chat in chat_channels/chat_messages, read only by its members, the
+// GM included only when invited). Every chat keeps a read mark per member (chat_reads): unread counts and read
+// receipts come from the server, so they agree between devices and survive a reload.
+const ROOMS = { ooc: ['chat', 'roll'], gm: ['announce', 'announce'] };
+const chat = require('../chat');
 const qc = {
   channels: db.prepare('SELECT * FROM chat_channels WHERE lobby_id = ? ORDER BY last_at DESC'),
   channel: db.prepare('SELECT * FROM chat_channels WHERE id = ? AND lobby_id = ?'),
@@ -1402,30 +1622,83 @@ const qc = {
   touchChannel: db.prepare('UPDATE chat_channels SET last_at = ? WHERE id = ?'),
   messages: db.prepare(`SELECT c.*, u.display_name FROM chat_messages c LEFT JOIN users u ON u.id = c.user_id
     WHERE c.channel_id = ? AND c.id < ? ORDER BY c.id DESC LIMIT ?`),
+  messagesAfter: db.prepare(`SELECT c.*, u.display_name FROM chat_messages c LEFT JOIN users u ON u.id = c.user_id
+    WHERE c.channel_id = ? AND c.id > ? ORDER BY c.id ASC LIMIT ?`),
   message: db.prepare('SELECT c.*, u.display_name FROM chat_messages c LEFT JOIN users u ON u.id = c.user_id WHERE c.id = ?'),
-  insertMessage: db.prepare('INSERT INTO chat_messages (lobby_id, channel_id, user_id, message, created_at) VALUES (?, ?, ?, ?, ?)'),
+  insertMessage: db.prepare('INSERT INTO chat_messages (lobby_id, channel_id, user_id, message, data, created_at) VALUES (?, ?, ?, ?, ?, ?)'),
+  anyMessage: db.prepare('SELECT c.*, u.display_name FROM chat_messages c LEFT JOIN users u ON u.id = c.user_id WHERE c.id = ? AND c.lobby_id = ?'),
+  wipeMessage: db.prepare('UPDATE chat_messages SET message = ?, data = ? WHERE id = ?'),
+  wipeEvent: db.prepare('UPDATE events SET message = ?, data = ? WHERE id = ?'),
+  insertReport: db.prepare(`INSERT INTO reports (lobby_id, lobby_name, reporter_id, user_id, user_name, channel, message_id, message_text, reason, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+  recentReports: db.prepare('SELECT COUNT(*) AS n FROM reports WHERE reporter_id = ? AND created_at > ?'),
+  lastPrivate: db.prepare('SELECT MAX(id) AS id FROM chat_messages WHERE channel_id = ?'),
+  unreadPrivate: db.prepare('SELECT COUNT(*) AS n FROM chat_messages WHERE channel_id = ? AND id > ? AND (user_id IS NULL OR user_id != ?)'),
+  roomMessages: db.prepare(`SELECT e.*, u.display_name FROM events e LEFT JOIN users u ON u.id = e.user_id
+    WHERE e.lobby_id = ? AND e.kind IN (?, ?) AND e.id < ? ORDER BY e.id DESC LIMIT ?`),
+  roomMessagesAfter: db.prepare(`SELECT e.*, u.display_name FROM events e LEFT JOIN users u ON u.id = e.user_id
+    WHERE e.lobby_id = ? AND e.kind IN (?, ?) AND e.id > ? ORDER BY e.id ASC LIMIT ?`),
+  lastRoom: db.prepare('SELECT MAX(id) AS id, MAX(created_at) AS at FROM events WHERE lobby_id = ? AND kind IN (?, ?)'),
+  unreadRoom: db.prepare('SELECT COUNT(*) AS n FROM events WHERE lobby_id = ? AND kind IN (?, ?) AND id > ? AND (user_id IS NULL OR user_id != ?)'),
+  reads: db.prepare('SELECT user_id, channel, last_id, read_at FROM chat_reads WHERE lobby_id = ?'),
+  myRead: db.prepare('SELECT last_id FROM chat_reads WHERE lobby_id = ? AND user_id = ? AND channel = ?'),
+  upsertRead: db.prepare(`INSERT INTO chat_reads (lobby_id, user_id, channel, last_id, read_at) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(lobby_id, user_id, channel) DO UPDATE SET last_id = MAX(last_id, excluded.last_id), read_at = excluded.read_at`),
 };
 function serializeChannel(c) {
-  return { id: c.id, name: c.name, members: access.safeJson(c.members) || [], createdBy: c.created_by, createdAt: c.created_at, lastAt: c.last_at };
+  return { key: `c${c.id}`, kind: 'private', id: c.id, name: c.name, members: access.safeJson(c.members) || [], createdBy: c.created_by, createdAt: c.created_at, lastAt: c.last_at };
 }
-function serializeChat(m) {
-  return { id: m.id, channelId: m.channel_id, userId: m.user_id, displayName: m.display_name || 'System', message: m.message, createdAt: m.created_at };
+/** A private message, or a room event, as the chat shows it. data: { gif?, deleted? } (docs/COMMS.md). */
+function serializeChat(m, key) {
+  const data = m.data ? access.safeJson(m.data) : null;
+  const extra = data ? { data: Object.fromEntries(['gif', 'deleted', 'mentions', 'replyTo', 'clientId'].filter(k => data[k] != null).map(k => [k, data[k]])) } : {};
+  const result = { id: m.id, channel: key || `c${m.channel_id}`, userId: m.user_id, displayName: m.display_name || 'System', message: m.message, createdAt: m.created_at, kind: key && chat.isRoom(key) ? m.kind : m.user_id ? 'chat' : 'system', ...extra };
+  return chat.decorate(result, m.lobby_id);
 }
-/** The channel, if the caller is one of its members. */
-function myChannel(req, res) {
-  const row = qc.channel.get(Number(req.params.cid), req.lobby.id);
+const chatKey = s => { const k = String(s || ''); return chat.isRoom(k) ? k : /^c?\d+$/.test(k) ? `c${Number(k.replace(/^c/, ''))}` : null; };
+/** The chat behind a key, if the caller is one of its members (everyone is a member of the rooms). */
+function chatFor(req, res, keyParam) {
+  const key = chatKey(keyParam);
+  if (key && ROOMS[key]) return { key, kind: key, members: access.getMembers(req.lobby.id).map(m => m.user_id), lastAt: 0 };
+  const row = key && qc.channel.get(Number(key.slice(1)), req.lobby.id);
   const c = row && serializeChannel(row);
   if (!c || !c.members.includes(req.user.id)) { res.status(404).json({ error: 'No such chat' }); return null; }
   return c;
 }
 const toMembers = c => ws => c.members.includes(ws.user.id);
+/** The chat with what the caller needs to list it: its last message, their unread count and everyone's read marks. */
+function chatInfo(req, c, reads) {
+  const my = qc.myRead.get(req.lobby.id, req.user.id, c.key)?.last_id || 0;
+  let lastId, unread, lastAt = c.lastAt;
+  if (ROOMS[c.key]) {
+    const last = qc.lastRoom.get(req.lobby.id, ...ROOMS[c.key]);
+    lastId = last?.id || 0; lastAt = last?.at || 0;
+    unread = qc.unreadRoom.get(req.lobby.id, ...ROOMS[c.key], my, req.user.id).n;
+  } else {
+    lastId = qc.lastPrivate.get(c.id)?.id || 0;
+    unread = qc.unreadPrivate.get(c.id, my, req.user.id).n;
+  }
+  const seen = (reads || qc.reads.all(req.lobby.id)).filter(r => r.channel === c.key && r.user_id !== req.user.id && c.members.includes(r.user_id))
+    .map(r => ({ userId: r.user_id, lastId: r.last_id, at: r.read_at }));
+  return { ...c, lastAt, lastId, unread, myRead: my, reads: seen, mentions: chat.mentionCount(req.lobby.id, c.key, req.user.id, my), notifications: chat.preference(req.lobby.id, req.user.id, c.key) };
+}
 
 router.get('/:id/chats', (req, res) => {
-  res.json({ channels: qc.channels.all(req.lobby.id).map(serializeChannel).filter(c => c.members.includes(req.user.id)) });
+  const reads = qc.reads.all(req.lobby.id);
+  const rooms = Object.keys(ROOMS).map(k => chatInfo(req, chatFor(req, res, k), reads));
+  const priv = qc.channels.all(req.lobby.id).map(serializeChannel).filter(c => c.members.includes(req.user.id)).map(c => chatInfo(req, c, reads));
+  res.json({ channels: [...rooms, ...priv] });
 });
 
 /** Open a chat with other members of the campaign (players or the GM). */
 router.post('/:id/chats', (req, res) => {
+  const token = chat.tokenOf(req.body?.clientId);
+  const previous = chat.request(req.lobby.id, req.user.id, token);
+  if (previous) {
+    const c = chatFor(req, res, previous.channel);
+    if (c) return res.json({ channel: chatInfo(req, c) });
+    return;
+  }
   const ids = new Set(access.getMembers(req.lobby.id).map(m => m.user_id));
   const members = [...new Set([req.user.id, ...(Array.isArray(req.body?.members) ? req.body.members.map(Number) : [])])].filter(id => ids.has(id)).slice(0, 30);
   if (members.length < 2) return res.status(400).json({ error: 'Pick at least one other person' });
@@ -1433,48 +1706,195 @@ router.post('/:id/chats', (req, res) => {
   const name = clean(req.body?.name, 60);
   const same = qc.channels.all(req.lobby.id).map(serializeChannel)
     .find(c => !name && !c.name && c.members.length === members.length && members.every(id => c.members.includes(id)));
-  if (same) return res.json({ channel: same });
+  if (same) { chat.remember(req.lobby.id, req.user.id, token, same.key); return res.json({ channel: chatInfo(req, same) }); }
   const t = now();
   const id = qc.insertChannel.run(req.lobby.id, name, JSON.stringify(members), req.user.id, t, t).lastInsertRowid;
   const channel = serializeChannel(qc.channel.get(id, req.lobby.id));
+  chat.remember(req.lobby.id, req.user.id, token, channel.key);
   hub.broadcast(req.lobby.id, { type: 'chatChannel', channel }, toMembers(channel));
-  res.status(201).json({ channel });
+  res.status(201).json({ channel: chatInfo(req, channel) });
 });
 
-/** Leave a chat; the last member out deletes it. */
+/** Leave a private chat; the last member out deletes it. */
 router.post('/:id/chats/:cid/leave', (req, res) => {
-  const c = myChannel(req, res);
+  const c = chatFor(req, res, req.params.cid);
   if (!c) return;
+  if (ROOMS[c.key]) return res.status(400).json({ error: 'Everyone is in this chat' });
   const members = c.members.filter(id => id !== req.user.id);
   if (!members.length) qc.deleteChannel.run(c.id);
   else {
     qc.updateChannel.run(c.name, JSON.stringify(members), now(), c.id);
     const channel = serializeChannel(qc.channel.get(c.id, req.lobby.id));
-    const mid = qc.insertMessage.run(req.lobby.id, c.id, null, `${req.user.displayName} left the chat`, now()).lastInsertRowid;
+    const mid = qc.insertMessage.run(req.lobby.id, c.id, null, `${req.user.displayName} left the chat`, null, now()).lastInsertRowid;
     hub.broadcast(req.lobby.id, { type: 'chatChannel', channel }, toMembers(channel));
     hub.broadcast(req.lobby.id, { type: 'chatMessage', message: serializeChat(qc.message.get(mid)) }, toMembers(channel));
   }
+  hub.broadcast(req.lobby.id, { type: 'chatLeft', channel: c.key }, ws => ws.user.id === req.user.id);
   res.json({ ok: true });
 });
 
+/** A page of messages: the newest before `before` (older pages), or everything after `after` (catching up). */
 router.get('/:id/chats/:cid/messages', (req, res) => {
-  const c = myChannel(req, res);
+  const c = chatFor(req, res, req.params.cid);
   if (!c) return;
-  const before = num(req.query.before, Number.MAX_SAFE_INTEGER), limit = clamp(num(req.query.limit, 100), 1, 200);
-  res.json({ messages: qc.messages.all(c.id, before, limit).reverse().map(serializeChat) });
+  const limit = Math.floor(clamp(num(req.query.limit, 60), 1, 200));
+  if (req.query.around) {
+    const anchor = chat.row(req.lobby.id, c.key, Number(req.query.around));
+    if (!anchor) return res.status(404).json({ error: 'No such message in this chat' });
+    const older = chat.rows(req.lobby.id, c.key, { before: anchor.id + 1, limit: 30 });
+    const newer = chat.rows(req.lobby.id, c.key, { after: anchor.id, limit: 30 });
+    return res.json({ messages: [...older.rows, ...newer.rows].map(m => serializeChat(m, c.key)), more: older.more, newer: newer.more });
+  }
+  const result = chat.rows(req.lobby.id, c.key, { limit,
+    after: req.query.after == null ? undefined : num(req.query.after, 0),
+    before: req.query.before == null ? undefined : num(req.query.before, Number.MAX_SAFE_INTEGER),
+    q: clean(req.query.q, 80), mentioned: req.query.mentions === '1' ? req.user.id : undefined, pins: req.query.pins === '1' });
+  res.json({ messages: result.rows.map(m => serializeChat(m, c.key)), more: result.more });
 });
 
+/**
+ * Say something: a room message goes through the lobby chat (rolls included), a private one to its members. A GIF
+ * (body.gif, from the KLIPY picker: routes/klipy.js) rides in the message's data, with "GIF: title" as its text.
+ */
 router.post('/:id/chats/:cid/messages', (req, res) => {
-  const c = myChannel(req, res);
+  const c = chatFor(req, res, req.params.cid);
   if (!c) return;
-  const message = clean(req.body?.message, 1000);
+  if (c.key === 'gm' && req.lobbyRole !== 'gm') return res.status(403).json({ error: 'Only the GM posts in the GM channel' });
+  const token = chat.tokenOf(req.body?.clientId);
+  const previous = chat.request(req.lobby.id, req.user.id, token);
+  if (previous) {
+    if (previous.channel !== c.key || !previous.message_id) return res.status(409).json({ error: 'This send belongs to another chat' });
+    const row = chat.row(req.lobby.id, c.key, previous.message_id);
+    return row ? res.json({ message: serializeChat(row, c.key) }) : res.status(409).json({ error: 'The original message is no longer available' });
+  }
+  const gif = req.body?.gif ? require('./klipy').cleanGif(req.body.gif) : null;
+  if (req.body?.gif && !gif) return res.status(400).json({ error: 'That GIF cannot be sent' });
+  const message = gif ? `GIF: ${gif.title || 'a GIF'}` : clean(req.body?.message, 1000);
+  let data;
+  try { data = chat.metadata(message, access.getMembers(req.lobby.id).filter(m => c.members.includes(m.user_id)), req.body?.replyTo, req.lobby.id, c.key); }
+  catch (e) { return res.status(400).json({ error: e.message }); }
+  if (token) data.clientId = token;
+  if (gif) data.gif = gif;
+  if (ROOMS[c.key]) {
+    const ev = roomMessage(req, res, c.key, gif, data);
+    if (ev) {
+      chat.remember(req.lobby.id, req.user.id, token, c.key, ev.id);
+      res.status(201).json({ message: serializeChat(q.event.get(ev.id), c.key) });
+    }
+    return;
+  }
   if (!message) return res.status(400).json({ error: 'Empty message' });
   const t = now();
-  const id = qc.insertMessage.run(req.lobby.id, c.id, req.user.id, message, t).lastInsertRowid;
+  const id = qc.insertMessage.run(req.lobby.id, c.id, req.user.id, message, JSON.stringify(data), t).lastInsertRowid;
+  chat.remember(req.lobby.id, req.user.id, token, c.key, id);
   qc.touchChannel.run(t, c.id);
   const msg = serializeChat(qc.message.get(id));
   hub.broadcast(req.lobby.id, { type: 'chatMessage', message: msg }, toMembers(c));
   res.status(201).json({ message: msg });
+});
+
+/**
+ * Delete a message: a site admin or the campaign's owner may delete any message in the campaign (a private chat's
+ * too, by id, as a report names it), anyone their own. The message stays as "(message deleted)" so pages and read
+ * marks keep their place; its chat's members get the changed message.
+ */
+router.delete('/:id/chats/:cid/messages/:mid', (req, res) => {
+  const key = chatKey(req.params.cid), mid = Number(req.params.mid);
+  if (!key || !Number.isFinite(mid)) return res.status(404).json({ error: 'No such message' });
+  const mod = req.user.role === 'admin' || req.lobby.owner_id === req.user.id;
+  const room = !!ROOMS[key];
+  const row = room ? q.event.get(mid) : qc.anyMessage.get(mid, req.lobby.id);
+  if (!row || (room && (row.lobby_id !== req.lobby.id || !ROOMS[key].includes(row.kind)))) return res.status(404).json({ error: 'No such message' });
+  const c = room ? chatFor(req, res, key) : serializeChannel(qc.channel.get(row.channel_id, req.lobby.id));
+  if (!c) return;
+  if (!mod && row.user_id !== req.user.id) return res.status(403).json({ error: 'Only the campaign owner or a site admin deletes other people\'s messages' });
+  if (!mod && !c.members.includes(req.user.id)) return res.status(404).json({ error: 'No such message' });
+  res.json({ ok: true, message: wipeMessage(req.lobby, key, mid, req.user) });
+});
+/**
+ * Wipe a message to "(message deleted)" and tell its chat; the message as it now stands, or null when there is no
+ * such message in the campaign. Also the site admins' way, from a report (routes/auth.js).
+ */
+function wipeMessage(lobby, key, mid, actor) {
+  const room = !!ROOMS[key];
+  const row = room ? q.event.get(mid) : qc.anyMessage.get(mid, lobby.id);
+  if (!row || (room && (row.lobby_id !== lobby.id || !ROOMS[key].includes(row.kind)))) return null;
+  const c = room ? { key, members: access.getMembers(lobby.id).map(m => m.user_id) } : serializeChannel(qc.channel.get(row.channel_id, lobby.id));
+  const data = { ...(row.data ? access.safeJson(row.data) || {} : {}), deleted: { by: actor.id, byName: actor.displayName, at: now() } };
+  delete data.gif;
+  const text = '(message deleted)';
+  if (room) { qc.wipeEvent.run(text, JSON.stringify(data), mid); if (row.kind === 'roll') hub.broadcast(lobby.id, { type: 'event', event: serializeEvent(q.event.get(mid)) }); }
+  else qc.wipeMessage.run(text, JSON.stringify(data), mid);
+  db.prepare('DELETE FROM chat_pins WHERE lobby_id = ? AND channel = ? AND message_id = ?').run(lobby.id, c.key, mid);
+  const msg = room ? serializeChat({ ...q.event.get(mid) }, key) : serializeChat(qc.message.get(mid));
+  hub.broadcast(lobby.id, { type: 'chatMessage', message: msg, update: true }, toMembers(c));
+  return msg;
+}
+
+/** Report a member to the site admins (docs/COMMS.md, "Reporting"): optionally about one message, whose text is kept. */
+router.post('/:id/reports', (req, res) => {
+  const campaign = !!req.body?.campaign, userId = campaign ? null : Number(req.body?.userId), reason = clean(req.body?.reason, 500);
+  const target = campaign ? null : access.getMembers(req.lobby.id).find(m => m.user_id === userId);
+  if (!campaign && !target) return res.status(400).json({ error: 'Report someone in this campaign' });
+  if (userId === req.user.id) return res.status(400).json({ error: 'You cannot report yourself' });
+  if (!reason) return res.status(400).json({ error: 'Say what the report is about' });
+  if (qc.recentReports.get(req.user.id, now() - 3600000).n >= 10) return res.status(429).json({ error: 'Too many reports in an hour' });
+  const key = chatKey(req.body?.channel), mid = Number(req.body?.messageId);
+  let text = '';
+  if (key && Number.isFinite(mid)) {
+    const row = ROOMS[key] ? q.event.get(mid) : qc.anyMessage.get(mid, req.lobby.id);
+    if (row && row.user_id === userId && (ROOMS[key] ? row.lobby_id === req.lobby.id : true)) text = String(row.message || '').slice(0, 1000);
+  }
+  qc.insertReport.run(req.lobby.id, req.lobby.name, req.user.id, userId, target ? target.display_name : '', key || '', text ? mid : null, text, reason, now());
+  res.status(201).json({ ok: true });
+});
+
+/** Read up to a message: the mark goes to the chat's other members as a read receipt. */
+router.post('/:id/chats/:cid/read', (req, res) => {
+  const c = chatFor(req, res, req.params.cid);
+  if (!c) return;
+  const latest = chat.rows(req.lobby.id, c.key, { limit: 1 }).rows.at(-1)?.id || 0;
+  const lastId = Math.min(latest, Math.max(0, Math.floor(num(req.body?.lastId, 0))));
+  const t = now();
+  qc.upsertRead.run(req.lobby.id, req.user.id, c.key, lastId, t);
+  const last = qc.myRead.get(req.lobby.id, req.user.id, c.key)?.last_id || 0;
+  hub.broadcast(req.lobby.id, { type: 'chatRead', channel: c.key, userId: req.user.id, lastId: last, at: t }, toMembers(c));
+  res.json({ ok: true, lastId: last, channel: chatInfo(req, c) });
+});
+
+router.post('/:id/chats/:cid/unread', (req, res) => {
+  const c = chatFor(req, res, req.params.cid); if (!c) return;
+  const before = Number(req.body?.beforeId);
+  if (!chat.row(req.lobby.id, c.key, before)) return res.status(404).json({ error: 'No such message' });
+  const last = chat.rows(req.lobby.id, c.key, { before, limit: 1 }).rows.at(-1)?.id || 0;
+  qc.upsertRead.run(req.lobby.id, req.user.id, c.key, 0, now());
+  db.prepare('UPDATE chat_reads SET last_id = ? WHERE lobby_id = ? AND user_id = ? AND channel = ?').run(last, req.lobby.id, req.user.id, c.key);
+  hub.broadcast(req.lobby.id, { type: 'chatRead', channel: c.key, userId: req.user.id, lastId: last, at: now(), reset: true }, toMembers(c));
+  res.json({ channel: chatInfo(req, c) });
+});
+router.patch('/:id/chats/:cid/preferences', (req, res) => {
+  const c = chatFor(req, res, req.params.cid); if (!c) return;
+  const mode = req.body?.notifications;
+  if (!['all', 'mentions', 'muted'].includes(mode)) return res.status(400).json({ error: 'Choose all, mentions or muted' });
+  chat.setPreference(req.lobby.id, req.user.id, c.key, mode);
+  hub.broadcast(req.lobby.id, { type: 'chatPreference', channel: c.key, notifications: mode }, ws => ws.user.id === req.user.id);
+  res.json({ notifications: mode });
+});
+router.post('/:id/chats/:cid/messages/:mid/pin', (req, res) => {
+  const c = chatFor(req, res, req.params.cid); if (!c) return;
+  if (ROOMS[c.key] && req.lobbyRole !== 'gm') return res.status(403).json({ error: 'Only the GM pins room messages' });
+  const row = chat.row(req.lobby.id, c.key, Number(req.params.mid));
+  if (!row || access.safeJson(row.data).deleted) return res.status(404).json({ error: 'No such message' });
+  if (req.body?.pinned === false) db.prepare('DELETE FROM chat_pins WHERE lobby_id = ? AND channel = ? AND message_id = ?').run(req.lobby.id, c.key, row.id);
+  else {
+    const count = db.prepare('SELECT COUNT(*) AS n FROM chat_pins WHERE lobby_id = ? AND channel = ?').get(req.lobby.id, c.key).n;
+    const existing = db.prepare('SELECT 1 FROM chat_pins WHERE lobby_id = ? AND channel = ? AND message_id = ?').get(req.lobby.id, c.key, row.id);
+    if (count >= 20 && !existing) return res.status(400).json({ error: 'Unpin a message first (20 pins per chat)' });
+    db.prepare('INSERT OR IGNORE INTO chat_pins VALUES (?, ?, ?)').run(req.lobby.id, c.key, row.id);
+  }
+  const message = serializeChat(row, c.key);
+  hub.broadcast(req.lobby.id, { type: 'chatMessage', message, update: true }, toMembers(c));
+  res.json({ message });
 });
 
 // ---- GM map pings ----------------------------------------------------------------------------
@@ -1525,13 +1945,16 @@ router.get('/:id/events', (req, res) => {
 
 const ROLL_RE = /^\/(?:roll|r)\s+(\d{0,2})d(\d{1,4})(?:\s*([+-])\s*(\d{1,4}))?\s*(.*)$/i;
 
-router.post('/:id/chat', (req, res) => {
-  const message = clean(req.body?.message, 500);
-  if (!message) return res.status(400).json({ error: 'Empty message' });
-  if (req.body?.channel === 'gm') {
+/** A line in a room ('ooc', with /roll, or 'gm'): the event logged, or null after an error response. */
+function roomMessage(req, res, room, gif = null, data = {}) {
+  if (room === 'gm' && req.lobbyRole !== 'gm') { res.status(403).json({ error: 'Only the GM posts in the GM channel' }); return null; }
+  const message = gif ? `GIF: ${gif.title || 'a GIF'}` : clean(req.body?.message, 1000);
+  if (!message) { res.status(400).json({ error: 'Empty message' }); return null; }
+  if (gif) return roomEvent(req, room, room === 'gm' ? 'announce' : 'chat', message, { ...data, gif });
+  if (room === 'gm') {
     // GM channel: announcements everyone reads and only the GM writes.
-    if (req.lobbyRole !== 'gm') return res.status(403).json({ error: 'Only the GM posts in the GM channel' });
-    return res.status(201).json({ event: logEvent(req.lobby.id, req.user.id, 'announce', message) });
+    if (req.lobbyRole !== 'gm') { res.status(403).json({ error: 'Only the GM posts in the GM channel' }); return null; }
+    return roomEvent(req, 'gm', 'announce', message, data);
   }
   const m = ROLL_RE.exec(message);
   if (m) {
@@ -1543,10 +1966,27 @@ router.post('/:id/chat', (req, res) => {
     const total = rolls.reduce((a, b) => a + b, 0) + mod;
     const expr = `${n}d${sides}${mod ? (mod > 0 ? '+' : '-') + Math.abs(mod) : ''}`;
     const text = `🎲 rolled ${expr} → [${rolls.join(', ')}]${mod ? ` ${mod > 0 ? '+' : '-'} ${Math.abs(mod)}` : ''} = ${total}${note ? ` (${note})` : ''}`;
-    return res.status(201).json({ event: logEvent(req.lobby.id, req.user.id, 'roll', text, { n, sides, mod, rolls, total, note }) });
+    return roomEvent(req, 'ooc', 'roll', text, { clientId: data.clientId, replyTo: data.replyTo, n, sides, mod, rolls, total, note });
   }
-  if (message.startsWith('/')) return res.status(400).json({ error: 'Unknown command. Try /roll 2d6+3' });
-  res.status(201).json({ event: logEvent(req.lobby.id, req.user.id, 'chat', message) });
+  if (message.startsWith('/')) { res.status(400).json({ error: 'Unknown command. Try /roll 2d6+3' }); return null; }
+  return roomEvent(req, 'ooc', 'chat', message, data);
+}
+/** Log a room line and mark it read for its author. */
+function roomEvent(req, room, kind, message, data) {
+  const id = q.insertEvent.run(req.lobby.id, req.user.id, kind, message, JSON.stringify(data || {}), now()).lastInsertRowid;
+  const ev = serializeEvent(q.event.get(id));
+  // Only rolls are game events. Chat/announcements have one delivery path.
+  if (kind === 'roll') hub.broadcast(req.lobby.id, { type: 'event', event: ev });
+  hub.broadcast(req.lobby.id, { type: 'chatMessage', message: serializeChat(q.event.get(id), room) });
+  if (kind === 'announce') discordWebhook.emit(req.lobby.id, req.lobby.name, {
+    kind: 'announcement', title: '📣 GM announcement', description: message,
+    fields: [{ name: 'From', value: req.user.displayName, inline: true }],
+  });
+  return ev;
+}
+router.post('/:id/chat', (req, res) => {
+  const ev = roomMessage(req, res, req.body?.channel === 'gm' ? 'gm' : 'ooc');
+  if (ev) res.status(201).json({ event: ev });
 });
 
 // ---- Battle effects (gunfire, shelling) --------------------------------------------------------
@@ -1845,20 +2285,18 @@ router.post('/:id/convoy-requests/:rid/:action', (req, res) => {
   } catch (e) { return res.status(409).json({ error: e.message, request: finish('failed', e.message) }); }
 });
 
-/** This turn's battles the viewer may see (hidden ones: the GM and the attacking player). */
+/**
+ * This turn's battles the viewer may see: hidden ones only the GM and the attacking player; under fog of war a fight
+ * is seen by the two sides in it, and by anyone else only with both ends in their sight, and a crater only on ground
+ * in sight (vision.fightSeen, craterSeen).
+ */
 router.get('/:id/battles', (req, res) => {
-  const g = game.get(req.lobby.id);
-  const gm = req.lobbyRole === 'gm';
-  const mine = b => gm || !b.hidden || b.user_id === req.user.id;
-  // Fog of war: a fight is seen by the two sides in it (and the GM), not by everyone.
-  const side = !gm && vision.on(req.lobby.id) ? new Set((vision.sideNames(req.lobby.id, req.member?.nation) || []).map(n => n.toLowerCase())) : null;
-  const nationOf = side ? (() => { const by = new Map(q.markers.all(req.lobby.id).map(r => [r.id, String(access.safeJson(r.data).nation || '').toLowerCase()])); return id => by.get(id) || ''; })() : null;
-  const ours = b => !side || b.user_id === req.user.id || side.has(nationOf(b.attacker_id)) || side.has(nationOf(b.defender_id));
+  const g = game.get(req.lobby.id), v = viewerOf(req);
   res.json({
-    battles: qb.all.all(req.lobby.id, g.turn, Date.now()).filter(b => mine(b) && ours(b)).map(b => serializeBattle(b, req.lobby)),
+    battles: qb.all.all(req.lobby.id, g.turn, Date.now()).filter(b => vision.fightSeen(v, b)).map(b => serializeBattle(b, req.lobby)),
     // Earlier fights whose dead still lie on the field (the map lays them out where the lines stood).
-    past: qb.past.all(req.lobby.id, g.turn - (game.REMAINS_TURNS - 1), g.turn, Date.now(), Date.now() - 30 * 60000).filter(b => mine(b) && ours(b)).map(b => serializeBattle(b)),
-    craters: qb.craters.all(req.lobby.id, g.turn, Date.now()).filter(mine).map(serializeCrater),
+    past: qb.past.all(req.lobby.id, g.turn - (game.REMAINS_TURNS - 1), g.turn, Date.now(), Date.now() - 30 * 60000).filter(b => vision.fightSeen(v, b)).map(b => serializeBattle(b)),
+    craters: qb.craters.all(req.lobby.id, g.turn, Date.now()).filter(c => vision.craterSeen(v, c)).map(serializeCrater),
   });
 });
 
@@ -1901,6 +2339,8 @@ router.post('/:id/combat', (req, res) => {
   }
 
   const cfg = access.serializeLobby(req.lobby, 'player').settings.combat;
+  const unitStats = access.safeJson(req.lobby.settings).unitStats;
+  const armour = require('../armour');
   const research = require('../research');
   const fxA = game.factionEffects(req.lobby.id, a.data?.nation), fxD = game.factionEffects(req.lobby.id, d.data?.nation);
   const bonusA = research.statBonus(fxA, UnitTypes.resolve(a.data?.unitType)), bonusD = research.statBonus(fxD, UnitTypes.resolve(d.data?.unitType));
@@ -1917,9 +2357,12 @@ router.post('/:id/combat', (req, res) => {
   const typeA = UnitTypes.resolve(a.data?.unitType), typeD = UnitTypes.resolve(d.data?.unitType);
   const match = Matchups.matchup(typeA, typeD, { entrenched: !!cover });
   // Worn units fight worse: −1 attack and defend per wornStep % of strength lost (docs/UNITS.md).
-  const wornA = g.enabled ? game.wornPenalty(g.settings, a) : 0, wornD = g.enabled ? game.wornPenalty(g.settings, d) : 0;
-  const atk = num(a.data.attack) + bonusA.attack + (genA ? genA.bonus : 0) + supA.attack + match.mod - wornA;
-  const def = num(d.data.defend) + bonusD.defend + (cover ? cover.bonus : 0) + (genD ? genD.bonus : 0) + supD.defend - wornD;
+  const coverA = require('../territory').trenchCover(req.lobby, g.settings, a, q.shapes.all(req.lobby.id).map(access.serializeShape));
+  const traitsA = heroRules.effects(req.lobby, g.settings, allMarkers, a, { enemyType: typeD, enemyEntrenched: !!cover, entrenched: !!coverA });
+  const traitsD = heroRules.effects(req.lobby, g.settings, allMarkers, d, { enemyType: typeA, enemyEntrenched: !!coverA, entrenched: !!cover });
+  const wornA = g.enabled ? Math.max(0, game.wornPenalty(g.settings, a) - traitsA.worn) : 0, wornD = g.enabled ? Math.max(0, game.wornPenalty(g.settings, d) - traitsD.worn) : 0;
+  const atk = num(a.data.attack) + bonusA.attack + (genA ? genA.bonus : 0) + supA.attack + traitsA.attack + match.mod - wornA;
+  const def = num(d.data.defend) + bonusD.defend + (cover ? cover.bonus : 0) + (genD ? genD.bonus : 0) + supD.defend + traitsD.defend - wornD;
   // Cut off from supply, the defender breaks more easily: a successful attack does double damage.
   const cutOffD = g.enabled && g.settings.supplyEnabled !== false && supplyRules.exhausted(d) && UnitTypes.resolve(d.data?.unitType)?.cat !== 'Emplacements';
   const aRoll = crypto.randomInt(1, cfg.die + 1), dRoll = crypto.randomInt(1, cfg.die + 1);
@@ -1930,6 +2373,10 @@ router.post('/:id/combat', (req, res) => {
   else if (margin < 0) { aLoss = cfg.baseLoss - margin * cfg.marginMult; dLoss = cfg.winnerLoss; outcome = 'defender'; }
   else { aLoss = dLoss = Math.ceil(cfg.baseLoss / 2); outcome = 'tie'; }
   aLoss = Math.round(aLoss); dLoss = Math.round(dLoss);
+  const aPenetrates = armour.canPenetrate(a, d, unitStats);
+  const dPenetrates = armour.canPenetrate(d, a, unitStats);
+  if (!aPenetrates) dLoss = 0;
+  if (!dPenetrates) aLoss = 0;
   // Artillery fires from range: a repelled or drawn bombardment costs the guns nothing.
   const artilleryA = UnitTypes.firesFromRange(UnitTypes.resolve(a.data?.unitType));
   const sparedA = artilleryA && outcome !== 'attacker' && aLoss > 0;
@@ -1957,28 +2404,41 @@ router.post('/:id/combat', (req, res) => {
   const notes = [bonusA.attack ? `attacker +${bonusA.attack} tech` : '', genA ? `attacker +${genA.bonus} ${genA.hero.name}` : '',
     bonusD.defend ? `defender +${bonusD.defend} tech` : '', genD ? `defender +${genD.bonus} ${genD.hero.name}` : '', cover ? `+${cover.bonus} trench cover` : '',
     ...supA.notes.map(n => `attacker ${n}`), ...supD.notes.filter(n => !/spotting/.test(n)).map(n => `defender ${n}`), ...(supD.defendNotes || []).map(n => `defender ${n}`),
+    traitsA.attack ? `attacker +${traitsA.attack} traits (${traitsA.notes.filter(n => n.fields.attack).map(n => n.name + ' / ' + n.hero).join(', ')})` : '',
+    traitsD.defend ? `defender +${traitsD.defend} traits (${traitsD.notes.filter(n => n.fields.defend).map(n => n.name + ' / ' + n.hero).join(', ')})` : '',
     ...match.notes.map(n => `${n.mod > 0 ? '+' : ''}${n.mod} ${n.text}`),
     wornA ? `attacker −${wornA} worn (${num(a.data.strength, 100)}%)` : '', wornD ? `defender −${wornD} worn (${num(d.data.strength, 100)}%)` : '',
     cutOffD ? `${d.name} is out of supply${outcome === 'attacker' ? ': double losses' : ''}` : '',
+    !aPenetrates ? `${a.name} penetration ${armour.stat(a, 'penetration', unitStats)} cannot pierce ${d.name} AC ${armour.stat(d, 'armourClass', unitStats)}` : '',
+    !dPenetrates ? `${d.name} penetration ${armour.stat(d, 'penetration', unitStats)} cannot pierce ${a.name} AC ${armour.stat(a, 'armourClass', unitStats)}` : '',
     sparedA ? 'guns out of reach of the reply' : ''].filter(Boolean);
   const text = `⚔ ${a.name} attacked ${d.name}: ${aRoll}+${atk}=${aTotal} vs ${dRoll}+${def}=${dTotal}${notes.length ? ` (${notes.join(', ')})` : ''} → ` +
-    (outcome === 'tie' ? 'stalemate. ' : outcome === 'attacker' ? 'attack succeeds. ' : 'attack repelled. ') +
+    (outcome === 'tie' ? 'stalemate. ' : outcome === 'attacker' ? (aPenetrates ? 'attack succeeds. ' : 'armour holds. ') : 'attack repelled. ') +
     `${fmt(d, losses[d.id])}; ${fmt(a, losses[a.id])}`;
   const hidden = !!(a.adminOnly || d.adminOnly || a.visibleTo || d.visibleTo);
-  const data = { attackerId: a.id, defenderId: d.id, aRoll, dRoll, aTotal, dTotal, margin, outcome, losses, hidden };
+  const data = { attackerId: a.id, defenderId: d.id, aRoll, dRoll, aTotal, dTotal, margin, outcome, losses, hidden, aPenetrates, dPenetrates };
   const fogSet = fogSides && !hidden ? new Set(fogSides.map(n => n.toLowerCase())) : null;
   if (fogSet) data.audience = { nations: fogSides, users: [req.user.id] };
+  // Under fog the two sides hear of the fight (and read its report); the fight itself also shows to an onlooker with
+  // both ends in sight (vision.fightSeen), who gets no report.
   const audience = hidden ? (ws => ws.lobbyRole === 'gm' || ws.user.id === req.user.id)
     : fogSet ? (ws => ws.lobbyRole === 'gm' || ws.user.id === req.user.id || fogSet.has(String(ws.nation || '').toLowerCase())) : null;
+  const onlookers = b => (audience ? (ws => audience(ws) || (!hidden && vision.fightSeen(hub.viewerOf(ws), b))) : null);
   const event = logEvent(req.lobby.id, req.user.id, 'combat', text, data, audience);
   // The fight stays on the map for the rest of the turn: gunfire between the two, or shells around the target.
   const typeOfA = UnitTypes.resolve(a.data?.unitType);
   const kind = UnitTypes.firesFromRange(typeOfA) || typeOfA?.cat === 'Naval' ? 'shells' : 'gunfire';
+  // A fort fires its guns (the mortar in its yard) at anything in reach; an enemy within the garrison's rifle range
+  // (fortRifleRange) takes a volley from the walls as well (below).
+  const rifleKm = num(g.settings.kmPerRange, 50) * num(g.settings.fortRifleRange, 1);
+  const volley = typeA?.id === 'fortress' && num(aAfter.data?.strength, 100) > 0 && num(dAfter.data?.strength, 100) > 0 &&
+    geo.distance(req.lobby, a.x, a.y, d.x, d.y) <= rifleKm;
   // Who fell, for the dead left lying afterwards (the units may be gone by then).
   const side = m => ({ from: losses[m.id].from, to: losses[m.id].to, type: m.data?.unitType || '', nation: m.data?.nation || '' });
   const bid = qb.insert.run(req.lobby.id, g.turn, a.id, d.id, kind, a.x, a.y, d.x, d.y, hidden ? 1 : 0, req.user.id, g.enabled ? null : Date.now() + 5 * 60000, now(), cover ? 1 : 0,
-    JSON.stringify({ a: side(a), d: side(d) })).lastInsertRowid;
-  hub.broadcast(req.lobby.id, { type: 'battle', battle: serializeBattle(qb.one.get(bid), req.lobby) }, audience);
+    JSON.stringify({ a: side(a), d: side(d), ...(volley ? { volley: true } : {}) })).lastInsertRowid;
+  const fight = qb.one.get(bid);
+  hub.broadcast(req.lobby.id, { type: 'battle', battle: serializeBattle(fight, req.lobby) }, onlookers(fight));
   // A bombardment leaves four or five craters around the target, for ten turns.
   if (kind === 'shells') {
     const made = [];
@@ -1999,7 +2459,7 @@ router.post('/:id/combat', (req, res) => {
         g.enabled ? null : Date.now() + 24 * 3600000, hidden ? 1 : 0, req.user.id, now()).lastInsertRowid;
       made.push(serializeCrater(qb.crater.get(cid)));
     }
-    if (made.length) hub.broadcast(req.lobby.id, { type: 'craters', craters: made }, audience);
+    if (made.length) hub.broadcast(req.lobby.id, { type: 'craters', craters: made }, onlookers(fight));
   }
   // Coastal batteries and fortress guns answer the ships that fire on them: a shot straight back, free (no action point), while both still
   // stand and the ship is within the battery's reach. It rolls like an attack (the battery's attack, tech, general,
@@ -2009,10 +2469,13 @@ router.post('/:id/combat', (req, res) => {
   if (['coastal', 'fortress'].includes(typeD?.id) && typeA?.cat === 'Naval' && num(dAfter.data?.strength, 100) > 0 && num(aAfter.data?.strength, 100) > 0 &&
       !game.checkRange(req.lobby, g, false, dAfter, aAfter)) {
     const b = dAfter, s = aAfter, mB = Matchups.matchup(typeD, typeA);
-    const atkB = num(b.data.attack) + bonusD.attack + (genD ? genD.bonus : 0) + supD.attack + mB.mod;
-    const defS = num(s.data.defend) + bonusA.defend + (genA ? genA.bonus : 0) + supA.defend;
+    const traitsB = heroRules.effects(req.lobby, g.settings, allMarkers, b, { enemyType: typeA });
+    const traitsS = heroRules.effects(req.lobby, g.settings, allMarkers, s, { enemyType: typeD });
+    const atkB = num(b.data.attack) + bonusD.attack + (genD ? genD.bonus : 0) + supD.attack + traitsB.attack + mB.mod;
+    const defS = num(s.data.defend) + bonusA.defend + (genA ? genA.bonus : 0) + supA.defend + traitsS.defend;
     const r1 = crypto.randomInt(1, cfg.die + 1), r2 = crypto.randomInt(1, cfg.die + 1), m2 = (r1 + atkB) - (r2 + defS);
-    const from = clamp(num(s.data.strength, 100), 0, 100), to = clamp(from - (m2 > 0 ? Math.round(cfg.baseLoss + m2 * cfg.marginMult) : 0), 0, 100);
+    const returnPenetrates = armour.canPenetrate(b, s, unitStats);
+    const from = clamp(num(s.data.strength, 100), 0, 100), to = clamp(from - (m2 > 0 && returnPenetrates ? Math.round(cfg.baseLoss + m2 * cfg.marginMult) : 0), 0, 100);
     let sAfter = s;
     if (to !== from) {
       q.updateMarker.run(s.type, s.name, s.x, s.y, s.iconFile, s.iconFile ? null : s.iconUrl, s.color, s.adminOnly ? 1 : 0,
@@ -2023,22 +2486,66 @@ router.post('/:id/combat', (req, res) => {
     }
     const bStr = clamp(num(b.data.strength, 100), 0, 100);
     const rLosses = { [s.id]: { name: s.name, from, to, loss: from - to }, [b.id]: { name: b.name, from: bStr, to: bStr, loss: 0 } };
-    const rNotes = [bonusD.attack ? `+${bonusD.attack} tech` : '', genD ? `+${genD.bonus} ${genD.hero.name}` : '', ...mB.notes.map(n => `${n.mod > 0 ? '+' : ''}${n.mod} ${n.text}`)].filter(Boolean);
+    const rNotes = [bonusD.attack ? `+${bonusD.attack} tech` : '', genD ? `+${genD.bonus} ${genD.hero.name}` : '', ...mB.notes.map(n => `${n.mod > 0 ? '+' : ''}${n.mod} ${n.text}`),
+      !returnPenetrates ? `${b.name} penetration ${armour.stat(b, 'penetration', unitStats)} cannot pierce ${s.name} AC ${armour.stat(s, 'armourClass', unitStats)}` : ''].filter(Boolean);
     const rText = `🎯 ${b.name} returned fire on ${s.name}: ${r1}+${atkB}=${r1 + atkB} vs ${r2}+${defS}=${r2 + defS}${rNotes.length ? ` (${rNotes.join(', ')})` : ''} → ` +
-      (m2 > 0 ? `hit: ${fmt(s, rLosses[s.id])}` : `missed: ${s.name} is unharmed`);
+      (m2 > 0 && returnPenetrates ? `hit: ${fmt(s, rLosses[s.id])}` : `${m2 > 0 ? 'armour holds' : 'missed'}: ${s.name} is unharmed`);
     const rEvent = logEvent(req.lobby.id, req.user.id, 'combat', rText, { attackerId: b.id, defenderId: s.id, aRoll: r1, dRoll: r2, aTotal: r1 + atkB, dTotal: r2 + defS,
-      margin: m2, outcome: m2 > 0 ? 'attacker' : 'defender', losses: rLosses, hidden, returnFire: true, ...(data.audience ? { audience: data.audience } : {}) }, audience);
+      margin: m2, outcome: m2 > 0 && returnPenetrates ? 'attacker' : 'defender', losses: rLosses, hidden, returnFire: true, penetrates: returnPenetrates, ...(data.audience ? { audience: data.audience } : {}) }, audience);
     // The battery's guns shell the ship for the rest of the turn too.
     const rid = qb.insert.run(req.lobby.id, g.turn, b.id, s.id, 'shells', b.x, b.y, s.x, s.y, hidden ? 1 : 0, req.user.id, g.enabled ? null : Date.now() + 5 * 60000, now(), 0,
       JSON.stringify({ a: { from: bStr, to: bStr, type: b.data?.unitType || '', nation: b.data?.nation || '' }, d: { from, to, type: s.data?.unitType || '', nation: s.data?.nation || '' } })).lastInsertRowid;
-    hub.broadcast(req.lobby.id, { type: 'battle', battle: serializeBattle(qb.one.get(rid), req.lobby) }, audience);
+    const reply = qb.one.get(rid);
+    hub.broadcast(req.lobby.id, { type: 'battle', battle: serializeBattle(reply, req.lobby) }, onlookers(reply));
     returnFire = rEvent;
+  }
+  // The fort's garrison: a second attack in the same action, rolled as infantry (the Infantry type's attack, its tech,
+  // the fort's general and support, the infantry matchup) against the same defence. Close fighting: the usual losses
+  // both ways.
+  let garrisonEvent = null;
+  if (volley) {
+    const tI = UnitTypes.resolve('infantry'), statsI = UnitTypes.defaults(tI, access.serializeLobby(req.lobby, 'player').settings?.unitStats) || { attack: 4 };
+    const fNow = access.serializeMarker(q.marker.get(a.id, req.lobby.id)), dNow = access.serializeMarker(q.marker.get(d.id, req.lobby.id));
+    const bonusI = research.statBonus(fxA, tI), mI = Matchups.matchup(tI, typeD, { entrenched: !!cover });
+    const traitsI = heroRules.effects(req.lobby, g.settings, allMarkers, fNow, { type: tI, enemyType: typeD, enemyEntrenched: !!cover });
+    const atkI = num(statsI.attack, 4) + bonusI.attack + (genA ? genA.bonus : 0) + supA.attack + traitsI.attack + mI.mod - (g.enabled ? Math.max(0, game.wornPenalty(g.settings, fNow) - traitsI.worn) : 0);
+    const r1 = crypto.randomInt(1, cfg.die + 1), r2 = crypto.randomInt(1, cfg.die + 1), m2 = (r1 + atkI) - (r2 + def);
+    let fl, dl;
+    if (m2 > 0) { dl = (cfg.baseLoss + m2 * cfg.marginMult) * (cutOffD ? 2 : 1); fl = cfg.winnerLoss; }
+    else if (m2 < 0) { fl = cfg.baseLoss - m2 * cfg.marginMult; dl = cfg.winnerLoss; }
+    else fl = dl = Math.ceil(cfg.baseLoss / 2);
+    const garrisonPenetrates = armour.canPenetrate({ data: { unitType: tI.name, penetration: statsI.penetration } }, dNow, unitStats);
+    if (!garrisonPenetrates) dl = 0;
+    if (!armour.canPenetrate(dNow, fNow, unitStats)) fl = 0;
+    const gLosses = {};
+    const hit = (m, loss) => {
+      const from = clamp(num(m.data.strength, 100), 0, 100), to = clamp(from - Math.round(loss), 0, 100);
+      gLosses[m.id] = { name: m.name, from, to, loss: from - to };
+      if (to === from) return m;
+      q.updateMarker.run(m.type, m.name, m.x, m.y, m.iconFile, m.iconFile ? null : m.iconUrl, m.color, m.adminOnly ? 1 : 0,
+        m.visibleTo ? JSON.stringify(m.visibleTo) : null, m.ownerId, JSON.stringify({ ...m.data, strength: to }), now(), m.locked ? 1 : 0, m.id);
+      const after = access.serializeMarker(q.marker.get(m.id, req.lobby.id));
+      commitChange(req, 'marker', 'update', m, after);
+      return after;
+    };
+    hit(dNow, dl); hit(fNow, fl);
+    losses[d.id] = { ...losses[d.id], to: gLosses[d.id].to };
+    const gNotes = [bonusI.attack ? `+${bonusI.attack} tech` : '', genA ? `+${genA.bonus} ${genA.hero.name}` : '', ...mI.notes.map(n => `${n.mod > 0 ? '+' : ''}${n.mod} ${n.text}`),
+      !garrisonPenetrates ? `garrison penetration ${statsI.penetration} cannot pierce ${dNow.name} AC ${armour.stat(dNow, 'armourClass', unitStats)}` : ''].filter(Boolean);
+    const gText = `🏰 ${a.name}'s garrison fired on ${d.name} from the walls: ${r1}+${atkI}=${r1 + atkI} vs ${r2}+${def}=${r2 + def}${gNotes.length ? ` (${gNotes.join(', ')})` : ''} → ` +
+      (m2 === 0 ? 'stalemate. ' : m2 > 0 ? (garrisonPenetrates ? 'the volley tells. ' : 'armour holds. ') : 'beaten off. ') + `${fmt(dNow, gLosses[d.id])}; ${fmt(fNow, gLosses[a.id])}`;
+    garrisonEvent = logEvent(req.lobby.id, req.user.id, 'combat', gText, { attackerId: a.id, defenderId: d.id, aRoll: r1, dRoll: r2, aTotal: r1 + atkI, dTotal: r2 + def,
+      margin: m2, outcome: m2 > 0 && garrisonPenetrates ? 'attacker' : m2 < 0 ? 'defender' : 'tie', losses: gLosses, hidden, garrison: true, penetrates: garrisonPenetrates, ...(data.audience ? { audience: data.audience } : {}) }, audience);
   }
   // Defended ground falls once its defenders are beaten: an attacker standing on enemy ground that destroys a
   // defender takes the ground now if no other defender holds it (territory.capture).
   let captureNote = null;
-  if (g.enabled && losses[d.id].to === 0 && num(aAfter.data?.strength, 100) > 0) captureNote = afterMove(req, aAfter);
-  res.status(201).json({ event, captureNote, returnFire });
+  const aFinal = access.serializeMarker(q.marker.get(a.id, req.lobby.id));
+  if (g.enabled && losses[d.id].to === 0 && num(aFinal.data?.strength, 100) > 0 && typeA?.cat !== 'Emplacements') captureNote = afterMove(req, aFinal);
+  res.status(201).json({ event, captureNote, returnFire, garrisonEvent });
 });
 
 module.exports = router;
+module.exports.destroyLobby = destroyLobby;
+module.exports.wipeMessage = wipeMessage;
+module.exports.transferOwner = transferOwner;

@@ -5,6 +5,7 @@
   const lobbyId = Number(location.pathname.match(/\/map\/(\d+)/)?.[1] || new URLSearchParams(location.search).get('lobby'));
   if (!lobbyId) { location.replace('/lobbies.html'); return; }
   const me = await requireUser();
+  await window.CampaignMusic.initialize(me.id);
   const $ = s => document.querySelector(s);
   const $$ = s => [...document.querySelectorAll(s)];
   const base = `/api/lobbies/${lobbyId}`;
@@ -29,6 +30,44 @@
     game: null, gameFactions: [], myFactionId: null, canUndo: false, placing: null,
   };
   const gameOn = () => !!state.game?.enabled;
+  const readOnly = () => state.realRole === 'observer';
+  // Keep the GM's viewing panels, faction picker and data, but no editing affordances.
+  const observerViewIds = new Set(['btnSettings', 'railRules', 'btnZoomOut', 'btnZoomIn', 'btnFit',
+    'btnSelect', 'btnMeasure', 'btnGrid', 'btnMusic', 'btnBattleSound', 'btnNotify', 'btnAudio',
+    'btnCopyCode', 'btnLeave', 'searchInput', 'techFilter', 'buildFilter', 'nationFaction',
+    'journalFaction', 'governmentFaction', 'campaignMusicVolume', 'chatSearch', 'chatSearchBtn',
+    'chatSearchClose', 'chatClose', 'chatMore', 'chatLater', 'chatReload', 'chatFindClose', 'chatFindMore',
+    'newsMore', 'btnModeCancel', 'panelClose', 'notifBtn', 'notifClear', 'chatToggle', 'chatSideBtn',
+    'chatBig', 'chatMin', 'chatShowMentions', 'chatShowPins', 'btnTurnReports', 'governmentReload']);
+  function observerMayUse(el) {
+    if (el.matches('[data-treaty-open]') || ['close', 'back', 'edit'].includes(el.dataset.treaty)) return true;
+    if (observerViewIds.has(el.id) || el.matches('[data-close], .close, input[type="search"]')) return true;
+    if (el.dataset.tab && el.dataset.tab !== 'add') return true;
+    if (['center', 'history', 'gocut', 'showship'].includes(el.dataset.act)) return true;
+    if (['tab', 'open', 'close', 'search', 'more', 'jump'].includes(el.dataset.a)) return true;
+    return el.matches('[data-opentree], [data-herofind], [data-report], [data-nav], [data-page], [data-marker], [data-shape], [data-chan], [data-jump], [data-result], [data-dismiss], #chatSearchForm button');
+  }
+  function observerControls() {
+    if (!readOnly()) return;
+    for (const el of $$('button, input, select, textarea')) {
+      if (!observerMayUse(el) && !el.disabled) el.disabled = true;
+    }
+    for (const el of $$('[data-tab="add"], #btnDrawLine, #btnDrawArea, #btnDrawTrench, #btnDrawRail, #btnPing')) el.hidden = true;
+  }
+  new MutationObserver(observerControls).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled', 'hidden'] });
+  document.addEventListener('click', e => {
+    const el = e.target.closest('button, a, input, select, textarea');
+    if (!readOnly() || !el || observerMayUse(el)) return;
+    // Ordinary links still open documents and downloads; action links must be explicitly view-only.
+    if (el.tagName === 'A' && el.getAttribute('href') && el.getAttribute('href') !== '#' && !Object.keys(el.dataset).length) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+  }, true);
+  document.addEventListener('keydown', e => {
+    if (readOnly() && ['l', 'a', 't', 'r', 'p', '6', 'delete', 'backspace'].includes(e.key.toLowerCase())) {
+      if (e.target.matches('input, textarea')) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+    }
+  }, true);
   let panelHinted = false;   // the "right-click for the panel" tip shows once per visit
 
   // ---- Renderer -------------------------------------------------------------------
@@ -37,7 +76,7 @@
   await renderer.init();
   window.woe = { renderer, state }; // handy for debugging from the console
   $('#rendererLabel').textContent = renderer.rendererType.toUpperCase();
-  renderer.canDrag = m => canEdit(m) && !m.locked;
+  renderer.canDrag = m => canEdit(m) && !m.locked && m.type !== 'town';
   renderer.gameDate = () => (gameOn() ? state.game.date : null);   // the battle figures dress for the year and season
   renderer.gameTurn = () => (gameOn() ? state.game.turn : null);   // craters weather and stop smoking as turns pass
   renderer.skirmish?.setStore(`woe.remains.${lobbyId}`);   // the dead left on the field, kept in this browser per campaign
@@ -47,14 +86,16 @@
   renderer.unitsToPx = (x, y, units) => units / (distanceUnits(x, y, x + 1, y) || 1);   // km (or map units) → px, locally
   Object.defineProperty(renderer, 'railCutKm', { get: () => Number(state.game?.settings?.railCutKm) || 10 });
 
-  /** Mirrors the server's access.canControl: viewing as a nation, a GM commands that nation's units and heroes. */
+  /** Mirrors access.canControl: players command their nation's units and heroes as well as owned markers. */
   function canEdit(m) {
+    if (readOnly()) return false;
     if (state.role === 'gm') return true;
-    if (m.adminOnly) return false;
+    if (m.adminOnly || ['resource', 'factory'].includes(m.type)) return false;
+    if ((m.type === 'unit' || m.type === 'hero') && state.member?.nation?.trim() && String(m.data?.nation || '').trim().toLowerCase() === state.member.nation.trim().toLowerCase()) return true;
     if (state.viewAs && (m.type === 'unit' || m.type === 'hero')) return String(m.data?.nation || '').trim().toLowerCase() === state.viewAs.name.trim().toLowerCase();
     return m.ownerId === me.id;
   }
-  function canEditShape(s) { return state.role === 'gm' || (s.createdBy === me.id && !s.adminOnly); }
+  function canEditShape(s) { return !readOnly() && (state.role === 'gm' || (s.createdBy === me.id && !s.adminOnly)); }
   function round1(n) { return Math.round(n * 10) / 10; }
   function colorNum(hex) { return parseInt(String(hex || '#3498db').slice(1), 16) || 0x3498db; }
   function isEarth() { return state.lobby?.settings?.projection === 'equirect' && state.lobby?.mapKind === 'earth'; }
@@ -142,7 +183,7 @@
   }
   let railCache = null;
   function railNet() {
-    const rails = [...state.shapes.values()].filter(s => s.kind === 'rail' && !s.adminOnly);
+    const rails = [...state.shapes.values()].filter(s => s.kind === 'rail' && !s.adminOnly && s.data?.state !== 'plan');
     const o = railOpts();
     const key = `${rails.map(r => `${r.id}:${r.updatedAt}`).join(',')}|${o.joinKm}|${o.cutKm}`;
     if (railCache && railCache.key === key) return railCache.net;
@@ -169,7 +210,7 @@
     if (!window.RailNet || remaining <= 0) return;
     const net = railNet();
     if (!net.edges.length) return;
-    const segs = RailNet.reach(net, { x: lead.x, y: lead.y }, remaining, { usable: railUsable(lead.data?.nation), speed: railOpts().speed });
+    const segs = RailNet.reach(net, { x: lead.x, y: lead.y }, remaining, { usable: railUsable(lead.data?.nation), speed: railOpts().speed * heroTraitsFor(lead).rail, walkSpeed: heroTraitsFor(lead).walk });
     const out = segs.map(r => {
       const e = net.edges[r.edge], A = net.nodes[e.a], B = net.nodes[e.b];
       return [A.x + (B.x - A.x) * r.from, A.y + (B.y - A.y) * r.from, A.x + (B.x - A.x) * r.to, A.y + (B.y - A.y) * r.to];
@@ -226,6 +267,12 @@
     return [...best.values()].map(t => ({ ...t, rail: state.shapes.get(t.railId), place: nearPlace(t.x, t.y) }))
       .filter(t => t.rail).sort((a, b) => (a.own - b.own) || (a.d - b.d));
   }
+  /** Popup rows for a planned railway: whose it is and how it gets built. */
+  function railPlanRows(s) {
+    const S = state.game?.settings || {}, u = state.lobby?.scaleLabel || 'km';
+    return stat('Planned by', s.data?.nation || '—') + stat('Length', `${fmtNum(pathUnits(s.points))} ${u}`)
+      + stat('Building', `engineers, pioneers or railway troops within ${S.trenchDigKm ?? 20} ${u} lay ${S.railBuildKm ?? 15} ${u} a turn at End turn, for ${S.railBuildIron ?? 5} iron and ${S.railBuildTimber ?? 5} timber a section (🛤 Lay track in their panel). Trains run only on track that is laid.`);
+  }
   /** Popup rows for a railway: speed, and each cut with Show / Repair. */
   function railPopupRows(s) {
     const g = state.game?.settings || {};
@@ -238,34 +285,77 @@
       return `<div class="railcut"><span>💥 Cut ${esc(nearPlace(c.x, c.y))}${c.turn ? ` · turn ${esc(c.turn)}` : ''}${c.by ? ` · by ${esc(c.by)}` : ''}</span>
         <button class="small secondary" data-act="gocut" data-cut="${esc(c.id)}">Show</button>${who ? `<button class="small" data-act="repair" data-cut="${esc(c.id)}" title="${esc(who === true ? 'Repair as GM' : `Send ${who.name} to repair it (uses its action)`)}">🛠 Repair</button>` : ''}</div>`;
     }).join('')}</div>`;
+    rows += stat('Repairs', `Select engineers, pioneers or railway troops and choose Repair railway. Crews need one action point and must be within ${g.railRepairKm ?? 30} ${state.lobby?.scaleLabel || 'km'} on friendly or neutral ground.`);
     return rows;
   }
-  /** Who can mend a cut: true for the GM, else the player's nearest unit or hero within the repair range. */
+  function canRepairRail(m) {
+    const d = m.data || {};
+    return m.type === 'unit' && ['engineers', 'pioneers', 'railway'].includes(window.UnitTypes?.resolve(d.unitType)?.id)
+      && canEdit(m) && Number(d.strength ?? 100) > 0 && !d.surrendered && !d.aboard
+      && (state.role === 'gm' || !gameOn() || Number(d.apUsed || 0) < Math.max(1, Number(d.ap ?? 1)));
+  }
+  function canRepairCut(m, c) {
+    if (!canRepairRail(m)) return false;
+    if (state.role === 'gm') return true;
+    const owner = renderer.territoryOwnerAt(c.x, c.y);
+    return distanceUnits(m.x, m.y, c.x, c.y) <= Number(state.game?.settings?.railRepairKm ?? 30) + 1e-6
+      && (owner == null || owner === 0 || friendIds(m.data?.nation).ids.has(owner));
+  }
+  /** Who can mend a cut: true for the GM, else the nearest available engineering crew. */
   function repairCrew(c) {
     if (state.role === 'gm') return true;
     const range = Number(state.game?.settings?.railRepairKm ?? 30);
     let best = null, bd = Infinity;
     for (const m of state.markers.values()) {
-      if (!['unit', 'hero'].includes(m.type) || !canEdit(m)) continue;
+      if (!canRepairCut(m, c)) continue;
       const d = distanceUnits(m.x, m.y, c.x, c.y);
       if (d <= range && d < bd) { bd = d; best = m; }
     }
     return best;
   }
-  async function repairRail(s, cutId) {
+  async function repairRail(s, cutId, crew = null) {
     const c = (s.data?.cuts || []).find(x => x.id === cutId);
     if (!c) return;
-    const who = repairCrew(c);
-    if (!who) { toast(`No unit of yours within ${state.game?.settings?.railRepairKm ?? 30} ${state.lobby?.scaleLabel || 'km'} of the break`); return; }
+    const who = crew || repairCrew(c);
+    if (!who || (who !== true && !canRepairCut(who, c))) { toast('No available engineering crew within repair range on friendly or neutral ground'); return; }
     const d = await api.post(`${base}/game/rail/repair`, { shapeId: s.id, cutId, unitId: who === true ? undefined : who.id });
     if (d.shape) upsertShape(d.shape);
+    if (d.marker) upsertMarker(d.marker);
     toast(d.event.message);
     if (!state.events.some(x => x.id === d.event.id)) { state.events.push(d.event); renderLog(true); }
+    renderPopup();
+  }
+  function openRailRepair(crew) {
+    if (!canRepairRail(crew)) { toast('This crew cannot repair now: it must be active, ashore and have an action point available'); return; }
+    const targets = [];
+    for (const rail of state.shapes.values()) {
+      if (rail.kind !== 'rail' || rail.data?.state === 'plan') continue;
+      for (const cut of rail.data?.cuts || []) if (canRepairCut(crew, cut)) targets.push({ rail, cut, distance: distanceUnits(crew.x, crew.y, cut.x, cut.y) });
+    }
+    targets.sort((a, b) => a.distance - b.distance);
+    if (!targets.length) { toast(`No repairable railway breaks within ${state.game?.settings?.railRepairKm ?? 30} ${state.lobby?.scaleLabel || 'km'} on friendly or neutral ground`); return; }
+    $('#railRepairIntro').textContent = `${crew.name}: repair one break using one action point. Track reopens immediately.`;
+    $('#railRepairTarget').innerHTML = targets.map((t, i) => `<option value="${i}">${esc(shapeName(t.rail))} ${esc(nearPlace(t.cut.x, t.cut.y))} (${fmtNum(t.distance)} ${esc(state.lobby?.scaleLabel || 'km')} away)</option>`).join('');
+    $('#railRepairForm').onsubmit = async e => {
+      e.preventDefault();
+      const button = $('#railRepairForm button[type="submit"]');
+      button.disabled = true;
+      try {
+        const target = targets[Number($('#railRepairTarget').value)];
+        await repairRail(state.shapes.get(target.rail.id) || target.rail, target.cut.id, state.markers.get(crew.id) || crew);
+        closeModals();
+      } catch (err) { toast(err.message); }
+      finally { button.disabled = false; }
+    };
+    $('#railRepairModal').classList.add('open');
   }
   /** Players cannot lay track while the game is running. */
   function syncRailButton() {
     const btn = $('#btnDrawRail');
-    if (btn) btn.hidden = gameOn() && state.role !== 'gm';
+    if (btn) {
+      const plan = gameOn() && state.role !== 'gm';
+      btn.title = plan ? 'Plan a railway: engineers, pioneers and railway troops lay it a section a turn (iron and timber)' : 'Draw a railway';
+    }
     $('#btnPing').hidden = state.role !== 'gm';
   }
 
@@ -276,13 +366,71 @@
   /** What a unit has left of the supplies it carries (full when not yet worked out). */
   const stockOf = m => { const v = Number(m.data?.supplies); return Number.isFinite(v) ? v : stockMax(); };
   /** Out of supply: cut off with nothing left of what it carries. Cannot move or attack, double losses when beaten. */
-  function cutOff(m) { return !!m && m.type === 'unit' && supplyOn() && m.data?.supplied === false && stockOf(m) <= 0; }
+  const deadUnit = m => m?.type === 'unit' && Number(m.data?.strength ?? 100) <= 0;
+  function cutOff(m) { return !!m && m.type === 'unit' && !deadUnit(m) && supplyOn() && m.data?.supplied === false && stockOf(m) <= 0; }
   const ENGINEER_IDS = ['engineers', 'pioneers', 'sappers'];
+  // ---- Goods (docs/ECONOMY.md): what towns hold and make, what columns and convoys carry --------------------------------
+  const goodsOn = () => gameOn() && state.game?.settings?.goodsEnabled !== false;
+  /** A town's store of a good (a town not yet counted starts with goodsStartTurns turns of half its output). */
+  function townStock(t, key) {
+    const v = t.data?.goods?.[key], S = state.game?.settings || {};
+    return v === undefined || v === null ? Math.round(Number(S.goodsStartTurns ?? 4) * GameData.townOutput(t, S) * 0.5 * 10) / 10 : Number(v);
+  }
+  /** A Supply Column's or convoy's supplies (full when not yet counted). */
+  function poolOf(m) {
+    const max = GameData.poolMax(window.UnitTypes?.resolve(m.data?.unitType)?.id, state.game?.settings);
+    const v = m.data?.pool;
+    return max === null ? 0 : (v === undefined || v === null ? max : Number(v));
+  }
+  /** The town or fort of its own nation a column stands at (a town's streets, or within supplyTownKm), or null. */
+  function depotTown(m) {
+    const km = Number(state.game?.settings?.supplyTownKm ?? 30), px = { capital: 11.2, city: 5.6, village: 1.7 };
+    let best = null, bd = Infinity;
+    for (const t of state.markers.values()) {
+      const fort = t.type === 'unit' && t.id !== m.id && window.UnitTypes?.resolve(t.data?.unitType)?.id === 'fortress' && Number(t.data?.strength ?? 100) > 0;
+      if ((t.type !== 'town' && !fort) || String(t.data?.nation || '').toLowerCase() !== String(m.data?.nation || '').toLowerCase()) continue;
+      const d = distanceUnits(m.x, m.y, t.x, t.y);
+      if ((d <= km || (!fort && Math.hypot(m.x - t.x, m.y - t.y) <= (px[t.data?.size] ?? px.village))) && d < bd) { bd = d; best = t; }
+    }
+    return best;
+  }
+  /** A destroyed Supply Column with supplies left within salvageKm, or null. */
+  function wreckNear(m) {
+    const km = Number(state.game?.settings?.salvageKm ?? 30);
+    for (const w of state.markers.values()) {
+      if (w.id === m.id || w.type !== 'unit' || Number(w.data?.strength ?? 100) > 0 || window.UnitTypes?.resolve(w.data?.unitType)?.id !== 'supply') continue;
+      if (poolOf(w) > 0 && distanceUnits(m.x, m.y, w.x, w.y) <= km) return w;
+    }
+    return null;
+  }
+  /** Unit panel: what a Supply Column or convoy carries (a destroyed column's are there for the taking). */
+  function poolRow(m) {
+    if (!goodsOn()) return '';
+    const max = GameData.poolMax(window.UnitTypes?.resolve(m.data?.unitType)?.id, state.game?.settings);
+    if (max === null) return '';
+    const p = poolOf(m), dead = Number(m.data?.strength ?? 100) <= 0;
+    if (dead) return p > 0 && window.UnitTypes?.resolve(m.data?.unitType)?.id === 'supply' ? stat('Wreck', `${fmtNum(p)} supplies left: any Supply Column within ${state.game.settings.salvageKm ?? 30} ${state.lobby?.scaleLabel || 'km'} can salvage them`) : '';
+    if (window.UnitTypes?.resolve(m.data?.unitType)?.id === 'fortress') return stat('Stores', `${fmtNum(p)} / ${max} supplies${p <= 0 ? ' · EMPTY: supplies no one' : ''} · a depot like a town: land units within ${state.game.settings.supplyTownKm ?? 30} ${state.lobby?.scaleLabel || 'km'} draw on it, it feeds Supply Columns within ${state.game.settings.fortLinkKm ?? 200} ${state.lobby?.scaleLabel || 'km'}, and it restocks at End turn from your nearest town within ${state.game.settings.goodsLinkKm ?? 500} ${state.lobby?.scaleLabel || 'km'}`);
+    return stat('Supplies', `${fmtNum(p)} / ${max}${p <= 0 ? ' · EMPTY: supplies no one' : ''} · its units and itself draw ${state.game.settings.unitDraw ?? 1} each a turn; it refills at End turn from the town it is linked to`);
+  }
+  /** Town panel: its stores, what it makes, and its unrest. */
+  function townGoodsRows(t) {
+    if (!goodsOn() || !t.data?.nation) return '';
+    const S = state.game.settings || {}, out = GameData.townOutput(t, S), need = Math.round(out * Number(S.consumerNeed ?? 0.5) * 10) / 10;
+    const unrest = Number(t.data?.unrest || 0), crit = Number(S.unrestCritical ?? 75), turns = Number(t.data?.unrestTurns || 0);
+    let rows = stat('Stores', GameData.GOODS.map(x => `${fmtNum(townStock(t, x.key))} ${x.short}`).join(' · '))
+      + stat('Makes', `${fmtNum(out)} goods a turn, split by its nation's war economy; its people consume ${fmtNum(need)} consumer goods`);
+    rows += `<div class="stat"><span class="muted">Unrest</span><span class="unrestbar wide${unrest >= crit ? ' critical' : ''}"><i style="width:${Math.min(100, unrest)}%"></i><s style="left:${crit}%"></s></span><b>${Math.round(unrest)}</b></div>`;
+    if (unrest >= crit) rows += stat('🔥 Critical', `it rises in revolt ${turns <= 1 ? 'at the next End turn' : `in ${turns} End turns`} unless its consumer goods are met and its unrest falls below ${crit}`);
+    return rows;
+  }
   /** What a support unit does for those around it, with its reach in km (null for other units). */
   function supportRole(m) {
+    if (deadUnit(m)) return null;
     const s = state.game?.settings || {}, id = window.UnitTypes?.resolve(m.data?.unitType)?.id, u = state.lobby?.scaleLabel || 'km';
     if (id === 'supply') {
       const lb = s.supplyLinkBySize || {};
+      if (goodsOn()) return { km: Number(s.supplyRangeKm ?? 100), text: `supplies friendly land units within ${s.supplyRangeKm ?? 100} ${u} from what it carries, linked or not; it refills at End turn when linked: within ${lb.capital ?? 600} ${u} of a friendly capital, ${lb.city ?? 400} ${u} of a city, ${lb.village ?? 200} ${u} of a village, or ${s.supplyLinkKm ?? 150} ${u} of a railhead or another linked column` };
       return { km: Number(s.supplyRangeKm ?? 100), text: `supplies friendly land units within ${s.supplyRangeKm ?? 100} ${u} when linked: within ${lb.capital ?? 600} ${u} of a friendly capital, ${lb.city ?? 400} ${u} of a city, ${lb.village ?? 200} ${u} of a village, or ${s.supplyLinkKm ?? 150} ${u} of a railhead or another linked column` };
     }
     if (id === 'transport') return { km: Number(s.convoyRangeKm ?? 100), text: `a floating supply base: supplies friendly land units within ${s.convoyRangeKm ?? 100} ${u} and feeds Supply Columns within ${s.convoyLinkKm ?? 200} ${u}, anywhere (invasions)` };
@@ -294,35 +442,18 @@
   }
   /** Popup rows: supply status, support role, and what the type is strong and weak against. */
   function unitDoctrineRows(m) {
+    if (deadUnit(m)) return '';
     let rows = '';
     const t = window.UnitTypes?.resolve(m.data?.unitType);
-    const land = !t || ['Infantry', 'Mounted & mobile', 'Artillery', 'Emplacements', 'Support'].includes(t.cat);
-    if (supplyOn() && t?.cat === 'Emplacements') rows += stat('Supply', 'none needed (a fixed work with its own stores)');
-    else if (supplyOn() && land) {
-      const st = state.game?.settings || {}, cutTurns = Number(m.data?.unsuppliedTurns) || 0, left = stockOf(m), of = stockMax();
-      const since = cutTurns ? ` for ${cutTurns} turn${cutTurns === 1 ? '' : 's'}` : '';
-      rows += stat('Supply', m.data?.surrendered && Number(m.data?.strength ?? 100) <= 0 ? '⚑ SURRENDERED for want of supply'
-        : m.data?.supplied === false && left <= 0
-          ? `${left}/${of} · OUT OF SUPPLY${since}: cannot move or attack; double losses when beaten; loses ${st.attritionRate ?? 25}% strength at each End turn still cut off, surrenders below ${st.attritionDisbandBelow ?? 10}%`
-          : m.data?.supplied === false
-            ? `${left}/${of} · CUT OFF${since}: living on what it carries, one used at each End turn cut off (no replacements or hospital care meanwhile); at 0/${of} it is out of supply`
-            : m.data?.supplied === true ? `${of}/${of} · supplied${supplySourceText(m.data.supplyFrom)}` : 'not yet worked out');
-    }
     const role = supportRole(m);
     if (role && gameOn()) rows += stat('Support', role.text + (cutOff(m) ? ' (not while out of supply)' : ''));
     if (gameOn() && state.game?.settings?.fogOfWar) rows += stat('Vision', `${visionKm(m)} km${t?.id === 'submarine' ? ` · spotted only within ${state.game.settings.subSpotKm ?? 20} km` : ''} (plus research)`);
-    if (window.Matchups && t) {
-      const d = Matchups.describe(t);
-      if (d.strong.length || d.weak.length) {
-        rows += `<details class="sub matchups"><summary>Strengths and weaknesses</summary>${d.strong.map(x => `<div class="hint good">${esc(x)}</div>`).join('')}${d.weak.map(x => `<div class="hint bad">${esc(x)}</div>`).join('')}</details>`;
-      }
-    }
     return rows;
   }
 
-  // ---- Click to move (game mode) ------------------------------------------------------------------
+  // ---- Right-click to move ------------------------------------------------------------------------
   // Select a unit or hero to see how far it can still go; click inside the ring (or on track it can reach)
-  // to send it there. A selected group moves together, keeping its shape. The GM can still drag tokens.
+  // to send it there. A selected group gets spaced destinations around the click. The GM can still drag tokens.
   const MOVERS = ['unit', 'hero'];
   const rulesOn = () => gameOn() && !state.game?.settings?.waiveMovement;
   /** Phased turns: 'move', 'battle', or 'open' (no phases, or game mode off). */
@@ -331,7 +462,7 @@
   const holdsPosition = () => state.role !== 'gm' && phaseOf() === 'battle';
   const attacksClosed = () => state.role !== 'gm' && phaseOf() === 'move';
   function clickMoves(m) {
-    return !!m && rulesOn() && MOVERS.includes(m.type) && canEdit(m) && !m.locked && !(m.type === 'hero' && ['travelling', 'captured'].includes(m.data?.status));
+    return !!m && !deadUnit(m) && MOVERS.includes(m.type) && canEdit(m) && !m.locked && !m.data?.aboard && !m.data?.surrendered && !(m.type === 'hero' && ['travelling', 'captured'].includes(m.data?.status));
   }
   renderer.dragAllowed = m => !(rulesOn() && MOVERS.includes(m.type)) || state.role === 'gm';
   /** A turn's movement for a unit or hero, with its nation's research (as game.checkMove counts it). */
@@ -341,6 +472,7 @@
     return Math.max(0, (Number(m.data?.movement) || 0) + bonus) * (Number(state.game?.settings?.kmPerMove) || 50);
   }
   function remainingFor(m) {
+    if (deadUnit(m)) return 0;
     if (cutOff(m) || m.data?.attacked || holdsPosition()) return 0;   // attacked this turn (or the battle phase): stays put until the next
     return Math.max(0, moveAllowance(m) - (Number(m.data?.movedKm) || 0));
   }
@@ -357,10 +489,11 @@
     syncFireRange();
     const ms = movers();
     reachSegs = []; reachArea = null;
-    if (!ms) { renderer.hideRange(); return; }
+    if (!ms || !rulesOn()) { renderer.hideRange(); renderer.hideRailReach(); return; }
     const { lead, list, remaining } = ms;
-    const rx = remaining / (distanceUnits(lead.x, lead.y, lead.x + 1, lead.y) || 1);
-    const ry = remaining / (distanceUnits(lead.x, lead.y, lead.x, lead.y + 1) || 1);
+    const walkRemaining = Math.min(...list.map(m => remainingFor(m) * heroTraitsFor(m).walk));
+    const rx = walkRemaining / (distanceUnits(lead.x, lead.y, lead.x + 1, lead.y) || 1);
+    const ry = walkRemaining / (distanceUnits(lead.x, lead.y, lead.x, lead.y + 1) || 1);
     reachArea = remaining > 0.01 ? reachFor(lead, remaining) : null;
     renderer.showRange(lead.x, lead.y, rx, remaining <= 0.01, ry, reachArea);
     if (remaining > 0.01 && list.every(canRide)) reachSegs = showRailReach(lead, remaining) || [];
@@ -407,7 +540,9 @@
   }
   /** The selected unit's reach as the server will judge it, or null where the plain circle is exact (the GM, open ground). */
   function reachFor(m, remaining) {
+    if (deadUnit(m)) return null;
     if (!window.Reach || state.role === 'gm') return null;
+    remaining *= heroTraitsFor(m).walk;
     const S = state.game?.settings || {}, kind = courseKind(m);
     const key = [m.id, m.x, m.y, remaining, kind, reachVersion, Reach.ready(), S.noMansLandCost, S.trenchBlocks, S.trenchRangeKm,
       (state.relations || []).map(r => r.status[0]).join('')].join('|');
@@ -422,9 +557,23 @@
     reachMemo = { key, area };
     return area;
   }
-  /** Send the selection marching on (x, y): each keeps its place in the group; it goes as far as it can now, the rest at End turn. */
+  /** Compact grid near the click, shifted as a whole at map edges so destinations stay distinct. */
+  function groupDestinations(ms, x, y) {
+    if (ms.list.length === 1) return [{ id: ms.lead.id, x: round1(x), y: round1(y) }];
+    const columns = Math.ceil(Math.sqrt(ms.list.length)), rows = Math.ceil(ms.list.length / columns);
+    const width = state.lobby.mapWidth, height = state.lobby.mapHeight;
+    const scale = Math.max(0.01, renderer.scale || 1), tokenScale = renderer.tokenScale || 1;
+    const spacing = renderer.tokenMode === 'screen' ? 60 * tokenScale / scale : 40 * tokenScale;
+    // Fit the whole formation rather than clamping each point onto the same map edge.
+    const step = Math.min(spacing, width / Math.max(1, columns - 1), height / Math.max(1, rows - 1));
+    const spanX = (columns - 1) * step, spanY = (rows - 1) * step;
+    const left = Math.max(0, Math.min(width - spanX, x - spanX / 2));
+    const top = Math.max(0, Math.min(height - spanY, y - spanY / 2));
+    return ms.list.map((m, i) => ({ id: m.id, x: round1(left + (i % columns) * step), y: round1(top + Math.floor(i / columns) * step) }));
+  }
+  /** Each unit marches to its own spaced destination: as far as it can now, the rest at End turn. */
   async function orderMarch(ms, x, y) {
-    const moves = ms.list.map(m => ({ id: m.id, x: round1(m.x + (x - ms.lead.x)), y: round1(m.y + (y - ms.lead.y)) }));
+    const moves = groupDestinations(ms, x, y);
     try {
       const d = await api.post(`${base}/game/units/goal`, { moves });
       for (const m of d.moved || []) upsertMarker(m);
@@ -443,10 +592,10 @@
     let path = null;
     if (canRide(m) && window.RailNet) {
       const net = railNet();
-      if (net.edges.length) path = RailNet.route(net, { x: m.x, y: m.y }, { x: g.x, y: g.y }, { usable: railUsable(m.data?.nation), speed: railOpts().speed })?.path || null;
+      if (net.edges.length) path = RailNet.route(net, { x: m.x, y: m.y }, { x: g.x, y: g.y }, { usable: railUsable(m.data?.nation), speed: railOpts().speed * heroTraitsFor(m).rail, walkSpeed: heroTraitsFor(m).walk })?.path || null;
     }
     const walking = !path;
-    if (walking) path = [[m.x, m.y, 1], [g.x, g.y, 1]];
+    if (walking) path = [[m.x, m.y, 1], [g.x, g.y, 1 / heroTraitsFor(m).walk]];
     if (per <= 0) return { legs: [path.map(p => [p[0], p[1]])], turns: [null], arrives: null };
     const mult = Math.max(1, Number(state.game?.settings?.noMansLandCost ?? 3));
     const areas = walking && mult > 1 ? [...state.shapes.values()].filter(s => s.kind === 'area' && s.data?.noMansLand && (s.points || []).length >= 3).map(s => {
@@ -519,15 +668,19 @@
   // Left-click selects; right-click on the map sends the selection there. Right-click on a unit opens its panel.
   renderer.addEventListener('mapcontext', e => {
     const { x, y } = e.detail;
-    if (state.placing || renderer.mode) return;
+    if (state.placing || (renderer.mode && renderer.mode !== 'select')) return;
     const ms = movers();
     if (!ms) return;
+    if (!rulesOn()) {
+      if (ms.list.length === 1) commitMove({ id: ms.lead.id, x, y });
+      else commitMove({ id: ms.lead.id, moves: groupDestinations(ms, x, y) });
+      return;
+    }
     const c = ms.list.find(cutOff);
     if (c) { toast(`${c.name} is out of supply and cannot move until a Supply Column reaches it`); return; }
     // Beyond this turn's reach (or none left, or the battle phase): a marching order, carried on at each End turn.
-    if (holdsPosition() || ms.remaining <= 0.01 || !insideReach(ms, x, y)) { orderMarch(ms, x, y); return; }
+    if (ms.list.length > 1 || holdsPosition() || ms.remaining <= 0.01 || !insideReach(ms, x, y)) { orderMarch(ms, x, y); return; }
     if (ms.list.length === 1) commitMove({ id: ms.lead.id, x, y });
-    else commitMove({ id: ms.lead.id, moves: ms.list.map(m => ({ id: m.id, x: m.x + (x - ms.lead.x), y: m.y + (y - ms.lead.y) })) });
   });
 
   // ---- GM pings ---------------------------------------------------------------------------------------
@@ -575,33 +728,34 @@
     const sel = e.detail.id != null ? state.markers.get(e.detail.id) : null;
     if (sel && PANEL_ON_RIGHT.includes(sel.type) && state.panelFor !== sel.id && !panelHinted) {
       panelHinted = true;
-      toast(rulesOn() ? 'Right-click the map to move it there · right-click an enemy to attack it · right-click your own unit for its panel' : 'Right-click an enemy to attack it · right-click your own unit for its panel', 4000);
+      toast('Right-click the map to move it there · right-click an enemy to attack it · right-click your own unit for its panel', 4000);
     }
     renderPopup(); highlightList();
     renderer.clearTarget();
     if (renderer._marches) syncMarches();   // the selected march stands out
     updateMoveRange();
     renderSelBar();
-    if (state.selectedIds.length > 1) toast(`${state.selectedIds.length} tokens selected: ${rulesOn() ? 'right-click inside the ring to move them together' : 'drag any of them to move the group'}`, 1800);
+    if (state.selectedIds.length > 1) toast(`${state.selectedIds.length} tokens selected: right-click the map to move them to spaced destinations`, 1800);
   });
   renderer.addEventListener('mode', e => {
     $('#btnSelect').classList.toggle('active', e.detail.mode === 'select');
     if (e.detail.mode === 'select') {
       showModeHud(true);
-      $('#modeText').textContent = 'Select: drag a box around tokens (Shift adds to the selection); drag any selected token to move them all';
+      $('#modeText').textContent = 'Select: drag a box around tokens (Shift adds to the selection); right-click the map to move them all';
     } else if (!e.detail.mode) hideModeHud();
   });
   renderer.addEventListener('drag', e => wsSend({ type: 'drag', ...e.detail }));
   // Game mode: show how far the dragged unit (or the slowest of a group) may still move this turn.
   renderer.addEventListener('dragstart', e => {
     if (!gameOn() || state.role === 'gm' || state.game.settings.waiveMovement) return;
-    const units = e.detail.ids.map(id => state.markers.get(id)).filter(m => m && m.type === 'unit');
+    const units = e.detail.ids.map(id => state.markers.get(id)).filter(m => m && m.type === 'unit' && !deadUnit(m));
     if (!units.length) return;
     const km = state.game.settings.kmPerMove;
     const remaining = Math.min(...units.map(m => m.data?.attacked ? 0 : Math.max(0, (Number(m.data?.movement) || 0) * km - (Number(m.data?.movedKm) || 0))));
     const lead = state.markers.get(e.detail.id);
+    if (deadUnit(lead)) return;
     const perPx = distanceUnits(lead.x, lead.y, lead.x + 1, lead.y) || 1;   // local map units per pixel
-    renderer.showRange(lead.x, lead.y, remaining / perPx, remaining <= 0.01);
+    renderer.showRange(lead.x, lead.y, remaining * heroTraitsFor(lead).walk / perPx, remaining <= 0.01);
     if (units.every(canRide)) showRailReach(lead, remaining);
   });
   renderer.addEventListener('dragend', e => commitMove(e.detail));
@@ -733,14 +887,21 @@
   function disarmPlacing() {
     if (!state.placing) return;
     if (state.placing.corpsFront) renderer.hideCorpsLine();
+    const treatyPicker = state.placing.treatyPicker;
     state.placing = null;
     renderer.setPassThrough(false);
     $$('#qaList .qa').forEach(b => b.classList.remove('active'));
     $('#qaResPlace')?.classList.remove('active');
+    $('#addForm [data-quick="factory"]')?.classList.remove('active');
     $('#qaHeroPlace')?.classList.remove('active');
     $('#btnPing')?.classList.remove('active');
     renderer.app.canvas.style.cursor = renderer.mode ? 'crosshair' : '';
     if (!renderer.mode) $('#modeHud').classList.remove('show');
+    if (treatyPicker) treatyPicker.finish(!treatyPicker.done);
+  }
+  function armTreatyPicker(picker) {
+    disarmPlacing(); renderer.cancelMode();
+    state.placing = { treatyPicker: picker }; renderer.app.canvas.style.cursor = 'crosshair'; updatePlaceHud();
   }
   function updatePlaceHud() {
     // While placing, existing tokens and drawings let clicks through so every click lands on the map.
@@ -748,15 +909,28 @@
     if (!state.placing || renderer.mode) return;
     $('#modeHud').classList.add('show');
     $('#btnModeUndo').hidden = true; $('#btnModeClear').hidden = true; $('#btnModeDone').hidden = true;
+    if (state.placing.treatyPicker) {
+      $('#modeText').textContent = state.placing.treatyPicker.label;
+      $('#btnModeDone').hidden = false; return;
+    }
     if (state.placing.resource) {
       const r = window.GameData?.byKey[state.placing.resource];
-      $('#modeText').textContent = `Placing ${r ? r.name.toLowerCase() : 'resource'} nodes (+${state.placing.yield}/turn) for ${quickNation() || 'no one'}: click the map. Esc to stop.`;
+      $('#modeText').textContent = `Placing ${r ? r.name.toLowerCase() : 'resource'} nodes: click the map. Ownership follows the province; edit levels after placement. Esc to stop.`;
       return;
     }
     if (state.placing.brush) {
       const b = state.placing.brush;
       const what = b.km > 0 ? (renderer.provinces?.length ? `every province within ${b.km} km` : `a ${b.km} km circle`) : 'the clicked province';
       $('#modeText').textContent = `Territory brush: each click ${b.factionId ? 'gives ' + b.name : 'makes neutral'} ${what}. Esc to stop.`;
+      return;
+    }
+    if (state.placing.emplacement) {
+      const t = window.UnitTypes?.LIST.find(x => x.id === state.placing.emplacement.typeId);
+      $('#modeText').textContent = `Place ${t ? t.unit : 'the emplacement'}: click your own ground${state.placing.emplacement.typeId === 'coastal' ? ` within ${state.game?.settings?.coastalKm ?? 30} ${state.lobby?.scaleLabel || 'km'} of the sea` : ''}. Esc to cancel.`;
+      return;
+    }
+    if (state.placing.gmFactory) {
+      $('#modeText').textContent = 'Placing factories: click the map. Ownership follows the province; edit levels after placement. Esc to stop.';
       return;
     }
     if (state.placing.factory) {
@@ -777,6 +951,7 @@
   }
   renderer.addEventListener('mapclick', async e => {
     if (!state.placing) return;
+    if (state.placing.treatyPicker) { state.placing.treatyPicker.pick(e.detail.x, e.detail.y); return; }
     if (state.placing.corpsFront) { await formCorpsLine(e.detail.x, e.detail.y); return; }
     if (state.placing.ping) {
       try { const d = await api.post(`${base}/pings`, { x: round1(e.detail.x), y: round1(e.detail.y) }); showPing(d.ping, true); }
@@ -788,6 +963,10 @@
       if (await GameUI.buildFactoryAt(round1(e.detail.x), round1(e.detail.y))) disarmPlacing();
       return;
     }
+    if (state.placing.emplacement) {
+      if (await GameUI.placeEmplacementAt(state.placing.emplacement, round1(e.detail.x), round1(e.detail.y))) disarmPlacing();
+      return;
+    }
     if (state.role !== 'gm') return;
     if (state.placing.brush) {
       const b = state.placing.brush;
@@ -797,15 +976,14 @@
       } catch (err) { toast(err.message); }
       return;
     }
-    if (state.placing.resource) {
-      const r = window.GameData?.byKey[state.placing.resource];
-      const nation = quickNation();
+    if (state.placing.resource || state.placing.gmFactory) {
+      const type = state.placing.gmFactory ? 'factory' : 'resource';
       try {
         const res = await api.post(`${base}/markers`, {
-          type: 'resource', name: r ? r.name : state.placing.resource, color: quickColor(), x: round1(e.detail.x), y: round1(e.detail.y),
-          data: { kind: state.placing.resource, yield: state.placing.yield, nation },
+          type, x: round1(e.detail.x), y: round1(e.detail.y),
+          data: type === 'resource' ? { kind: state.placing.resource, yield: 3, improved: 0 } : { industry: 1 },
         });
-        upsertMarker(res.marker); toast(`Placed ${res.marker.name} (+${state.placing.yield}/turn${nation ? ' for ' + nation : ''})`);
+        upsertMarker(res.marker); toast(`Placed ${res.marker.name}${res.marker.data?.nation ? ' for ' + res.marker.data.nation : ''}`);
         if (gameOn()) GameUI.load().catch(() => {});
       } catch (err) { toast(err.message); }
       return;
@@ -815,7 +993,7 @@
       try {
         const r = await api.post(`${base}/markers`, {
           type: 'hero', name: h.name || `${nation ? nation + ' ' : ''}${role.label.toLowerCase()}`, color: quickColor(), x: round1(e.detail.x), y: round1(e.detail.y),
-          data: { ...H.defaults(h.role, h.stars), nation },
+          data: { ...H.defaults(h.role, h.stars), traits: h.traits, nation },
         });
         upsertMarker(r.marker);
         disarmPlacing();
@@ -840,8 +1018,10 @@
   // ---- Loading ------------------------------------------------------------------------
   async function loadLobby() {
     const d = await api.get(base);
-    state.lobby = d.lobby; state.members = d.members; state.role = d.you.role; state.member = d.you.member;
+    state.lobby = d.lobby; state.members = d.members; state.role = d.you.role === 'observer' ? 'gm' : d.you.role; state.member = d.you.member;
     state.realRole = d.you.realRole || d.you.role; state.viewAs = d.you.viewAs || null;
+    api.readOnlyCampaign = readOnly() ? { base, userId: me.id } : null;
+    document.body.classList.toggle('observer', readOnly());
     if (viewAsParam && !state.viewAs) {   // not a GM, or that nation is gone: back to the normal view
       delete api.headers['X-View-As'];
       const u = new URL(location.href); u.searchParams.delete('as'); history.replaceState(null, '', u.href);
@@ -853,12 +1033,13 @@
 
   function applyLobby() {
     const l = state.lobby;
-    document.title = `${l.name} · WoE Strategy Map`;
-    $('#lobbyName').textContent = l.name;
+    window.UnitTypes?.selectPack(l.unitPack || window.UnitTypes.DEFAULT_PACK);
+    document.title = `${l.name} · Rob's Strategic Warfare Roleplayer 1`;
+    $('#lobbyName').textContent = l.name + (readOnly() ? ' · Observer (read only)' : '');
     const gm = state.role === 'gm';
     $('#btnSettings').hidden = !gm;
     $('#btnEmptyUpload').hidden = !gm;
-    $('#emptyMapText').textContent = gm ? 'Upload a map image in the campaign settings to get started.' : 'The game master has not uploaded a map for this campaign yet.';
+    $('#emptyMapText').textContent = gm ? 'Import an Azgaar map or upload an image in the campaign settings to get started.' : 'The game master has not added a map for this campaign yet.';
     $('#joinCodeBlock').hidden = !gm;
     if (gm) {
       $('#joinCodeBlock').innerHTML = `<h4>Join code</h4><p><span class="code">${esc(l.joinCode)}</span> <button class="small secondary" id="btnCopyCode">Copy</button></p><p class="hint">Players enter this on the campaigns page.</p>`;
@@ -882,8 +1063,11 @@
       toast('Building the Earth…', 1500);
       try { await renderer.setEarth(l.settings.earth); }
       catch (err) { toast(`Earth map failed: ${err.message}`); await renderer.setMap(null, l.mapWidth, l.mapHeight); }
+    } else if (l.mapKind === 'azgaar') {
+      renderer.setAzgaar(l.mapWidth, l.mapHeight);
     } else {
       await renderer.setMap(l.mapUrl, l.mapWidth, l.mapHeight);
+      if (l.mapKind !== 'earth') renderer.setProvinces([]);
     }
     if (renderer.territoryViews.size && renderer.earth?.tintLayer) renderer.earth.tintLayer.visible = false;
   }
@@ -898,6 +1082,13 @@
     } catch (err) { console.warn('territories', err); }
   }
 
+  /** A finished emplacement: click the map where it should stand (the nation's own ground). */
+  function armEmplacement(item) {
+    disarmPlacing();
+    state.placing = { emplacement: item };
+    renderer.app.canvas.style.cursor = 'copy';
+    updatePlaceHud();
+  }
   /** Player factory: click the map near one of your cities or towns to start building. */
   function armFactory() {
     disarmPlacing();
@@ -913,11 +1104,12 @@
   }
   /** A unit's sight under fog of war (km), from the campaign's table; research can add to it. */
   function visionKm(m) {
+    if (deadUnit(m)) return 0;
     const v = state.game?.settings?.vision || {}, t = window.UnitTypes?.resolve(m.data?.unitType);
     return Number(v[t?.id] ?? v[t?.cat] ?? 50);
   }
   async function loadProvinces() {
-    if (!gameOn() || !isEarth()) { renderer.setProvinces([]); return; }
+    if (state.lobby?.mapKind !== 'azgaar' && (!gameOn() || !isEarth())) { renderer.setProvinces([]); return; }
     try {
       const [d, o] = await Promise.all([api.get(`${base}/game/provinces`), api.get(`${base}/game/provinces/owners`)]);
       renderer.setProvinces(d.provinces || []);
@@ -995,8 +1187,11 @@
   async function loadMembers() {
     const d = await api.get(base);
     state.members = d.members; state.member = d.you.member;
-    if (d.you.role !== state.role) { state.role = d.you.role; state.lobby = d.lobby; applyLobby(); await loadMarkers(); await loadShapes(); }
+    const role = d.you.role === 'observer' ? 'gm' : d.you.role;
+    if (d.you.realRole !== state.realRole) { location.reload(); return; }
+    if (role !== state.role) { state.role = role; state.lobby = d.lobby; applyLobby(); await loadMarkers(); await loadShapes(); }
     renderMembers();
+    renderPresence();
     renderFactions();
     refreshFormLists();
     renderNationList();
@@ -1080,7 +1275,7 @@
     if (state.selectedId === m.id) renderPopup();
     if (m.data?.goal || prev?.data?.goal) syncMarches();
     if (state.selectedId === m.id || (state.selectedIds || []).includes(m.id)) updateMoveRange();
-    else if (m.type === 'unit') reachChanged();   // it may man (or leave) a trench in the way
+    else if (m.type === 'hero' || m.type === 'unit' && (!deadUnit(m) || (prev && !deadUnit(prev)))) reachChanged();   // living guards may man or leave a trench
     gameMarkerChanged(m.type);
   }
 
@@ -1211,7 +1406,7 @@
 
   function removeMarker(id) {
     const type = state.markers.get(id)?.type, marching = !!state.markers.get(id)?.data?.goal;
-    if (type === 'unit') reachChanged();
+    if (type === 'hero' || type === 'unit' && !deadUnit(state.markers.get(id))) reachChanged();
     state.markers.delete(id);
     renderer.remove(id);
     if (marching) syncMarches();
@@ -1279,10 +1474,10 @@
         case 'joined':
           state.wsBackoff = 1000;
           state.presence = msg.users; renderPresence();
-          if (hadJoined || state.reconnected) { await loadMarkers(); await loadShapes(); await loadEvents(); await loadHistory(); }
+          if (hadJoined || state.reconnected) { await loadMarkers(); await loadShapes(); await loadEvents(); await loadHistory(); Comms.resync(); TreatiesUI.changed(); if (state.panel === 'news') News.open(); }
           hadJoined = true;
           break;
-        case 'presence': state.presence = msg.users; renderPresence(); renderMembers(); break;
+        case 'presence': state.presence = msg.users; renderPresence(); renderMembers(); Comms.refresh(); break;
         case 'marker':
           if (msg.action === 'upsert') {
             const prev = state.markers.get(msg.marker.id);
@@ -1305,29 +1500,31 @@
         case 'drag': renderer.ghostMove(msg.id, msg.x, msg.y); break;
         case 'event': {
           const e = msg.event;
-          if (!state.events.some(x => x.id === e.id)) state.events.push(e);
+          if (e.kind === 'chat' || e.kind === 'announce') break;
+          const existing = state.events.findIndex(x => x.id === e.id);
+          if (existing >= 0) state.events[existing] = e; else state.events.push(e);
           if (state.events.length > 200) state.events.shift();
           renderLog(true);
-          Comms.onEvent(e);
           if (e.kind === 'combat' && e.data) {
             const { attackerId, defenderId, outcome, losses, returnFire } = e.data;
             const gone = id => !!(losses && losses[id] && losses[id].to === 0 && losses[id].from > 0);
-            renderer.hit(defenderId, outcome !== 'defender', gone(defenderId));
-            if (!returnFire) renderer.hit(attackerId, outcome === 'defender', gone(attackerId));   // a battery firing back is not hit by it
+            if (losses?.[defenderId]?.loss > 0) renderer.hit(defenderId, outcome !== 'defender', gone(defenderId));
+            if (!returnFire && losses?.[attackerId]?.loss > 0) renderer.hit(attackerId, outcome === 'defender', gone(attackerId));
             // Losses float up from the strength change itself (strengthChanged); a side that lost nothing says so.
             for (const id of [attackerId, defenderId]) if (losses?.[id] && losses[id].loss === 0) renderer.floatText(id, 'No loss', { color: 0xd5dde3, size: 17, delay: 160 });
           }
           if (e.userId !== me.id) {
-            if (e.kind === 'chat' && !$('#chatWin').hidden) { /* reading the chat already */ }
-            else if (e.kind === 'chat') notify(e.displayName, e.message);
-            else if (e.kind === 'roll') notify(`${e.displayName} rolled`, e.message);
-            else if (e.kind === 'combat') notify('Combat', e.message);
+            if (e.kind === 'combat') notify('Combat', e.message);
             else if (e.data && e.data.deadline) { notify('Turn deadline', e.message); toast(e.message, 5000); }
           }
           break;
         }
-        case 'members': await loadMembers(); break;
+        case 'members': await loadMembers(); Comms.refresh(); break;
         case 'factions': await loadFactions(); await loadMembers(); await loadMarkers(); if (gameOn()) GameUI.load().catch(() => {}); break;
+        case 'journalChanged': if (state.panel === 'journal') Journal.load(); break;
+        case 'governmentChanged': if (state.panel === 'government') Government.changed(msg.factionId); break;
+        case 'newsChanged': News.changed(); break;
+        case 'treatiesChanged': TreatiesUI.changed(); break;
         case 'game': { const was = !!state.game?.enabled; GameUI.onGame(msg.game); syncRailButton(); syncTrails(); updateMoveRange(); if (was !== !!msg.game?.enabled) { Comms.loadTrades(); loadCorps(); } else Comms.refresh(); renderPopup(); break; }
         case 'turn': GameUI.onTurn(msg); loadBattles(); loadCorps(); loadReachBonus(); break;
         case 'phase': showPhaseBanner(msg.phase); updateMoveRange(); renderPopup(); renderSelBar(); syncMarches(); break;
@@ -1342,11 +1539,15 @@
         case 'tradesChanged': Comms.onTradesChanged(msg); break;
         case 'convoyRequests': Comms.loadConvoyRequests(); break;
         case 'chatChannel': Comms.onChatChannel(msg.channel); break;
-        case 'chatMessage': Comms.onChatMessage(msg.message); break;
+        case 'chatMessage': Comms.onChatMessage(msg.message, !!msg.update); break;
+        case 'chatRead': Comms.onChatRead(msg); break;
+        case 'chatPreference': Comms.onChatPreference(msg); break;
+        case 'chatLeft': Comms.onChatLeft(msg); break;
+        case 'typing': Comms.onTyping(msg); break;
         case 'ping': showPing(msg.ping); break;
         case 'battle': renderer.addBattle(msg.battle); break;
         case 'craters': renderer.addCraters(msg.craters); break;
-        case 'reload': if (msg.what === 'markers') { await loadMarkers(); loadVision(); } break;
+        case 'reload': if (msg.what === 'markers') { await loadMarkers(); loadVision(); } else if (msg.what === 'battles') loadBattles(); break;
         case 'vision': renderer.setFog(msg.vision); state.fog = msg.vision; break;
         case 'lobby': {
           state.lobby = { ...msg.lobby, joinCode: msg.lobby.joinCode ?? state.lobby?.joinCode, yourRole: state.role };
@@ -1354,12 +1555,13 @@
           if ($('#settingsModal').classList.contains('open')) openSettings();
           break;
         }
-        case 'role': if (state.viewAs && !msg.viewAs) { setViewAs(null); break; }   // demoted, or the nation was deleted
+        case 'role': if (readOnly() || msg.role === 'observer') { location.reload(); break; }
+          if (state.viewAs && !msg.viewAs) { setViewAs(null); break; }   // demoted, or the nation was deleted
           // Everything the server filters by role or nation is fetched again: a player promoted to GM now sees every
           // fight, hidden unit and log line, and a GM made a player stops seeing them.
           state.role = msg.role; await loadLobby(); await loadMarkers(); await loadShapes(); await loadHistory(); GameUI.load().catch(() => {});
           loadBattles(); loadVision(); loadEvents().catch(() => {}); Comms.loadConvoyRequests(); toast(`You are now a ${msg.role === 'gm' ? 'game master' : 'player'}${msg.nation ? ` of ${msg.nation}` : ''}`); break;
-        case 'kicked': alert('You are no longer part of this campaign.'); location.replace('/lobbies.html'); break;
+        case 'kicked': alert(msg.reason || 'You are no longer part of this campaign.'); location.replace(msg.reason && /suspended$/.test(msg.reason) && !msg.lobbyId ? '/login.html' : '/lobbies.html'); break;
         case 'error': toast(msg.error); break;
         default: break;
       }
@@ -1400,17 +1602,59 @@
     }
   }
   // Battle sounds (sound.js): off until switched on, remembered per browser.
+  const audioPanel = $('#audioPanel');
+  const renderAudioButton = () => {
+    const musicOn = !!window.CampaignMusic?.enabled, effectsOn = !!window.BattleSound?.enabled;
+    $('#btnAudio').classList.toggle('active', musicOn || effectsOn || notifyPref.enabled);
+    $('#btnAudio').title = `Audio settings · music ${musicOn ? 'on' : 'off'} · battle effects ${effectsOn ? 'on' : 'off'}`;
+  };
+  $('#btnAudio').onclick = () => {
+    audioPanel.hidden = !audioPanel.hidden;
+    $('#btnAudio').setAttribute('aria-expanded', String(!audioPanel.hidden));
+  };
+  document.addEventListener('pointerdown', e => {
+    if (!audioPanel.hidden && !e.target.closest('#audioWrap')) {
+      audioPanel.hidden = true;
+      $('#btnAudio').setAttribute('aria-expanded', 'false');
+    }
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !audioPanel.hidden) {
+      audioPanel.hidden = true;
+      $('#btnAudio').setAttribute('aria-expanded', 'false');
+      $('#btnAudio').focus();
+    }
+  });
+  const renderMusicButton = () => {
+    const on = !!window.CampaignMusic?.enabled;
+    $('#btnMusic').textContent = on ? 'On' : 'Off';
+    $('#btnMusic').classList.toggle('active', on);
+    $('#btnMusic').setAttribute('aria-pressed', String(on));
+    renderAudioButton();
+  };
+  $('#btnMusic').onclick = () => { window.CampaignMusic.enabled = !window.CampaignMusic.enabled; renderMusicButton(); };
+  $('#campaignMusicVolume').value = window.CampaignMusic.volume;
+  $('#campaignMusicVolumeValue').textContent = `${window.CampaignMusic.volume}%`;
+  $('#campaignMusicVolume').oninput = e => {
+    window.CampaignMusic.volume = e.target.value;
+    $('#campaignMusicVolumeValue').textContent = `${window.CampaignMusic.volume}%`;
+  };
+  renderMusicButton();
   function renderBattleSoundButton() {
     const on = !!window.BattleSound?.enabled;
     $('#btnBattleSound').classList.toggle('active', on);
-    $('#btnBattleSound').style.opacity = on ? '' : '0.55';
+    $('#btnBattleSound').textContent = on ? 'On' : 'Off';
+    $('#btnBattleSound').setAttribute('aria-pressed', String(on));
     $('#btnBattleSound').title = `Battle sounds are ${on ? 'on' : 'off'}: gunfire, shells and hooves where you are looking (click to turn ${on ? 'off' : 'on'})`;
+    renderAudioButton();
   }
   $('#btnBattleSound').onclick = () => { if (window.BattleSound) window.BattleSound.enabled = !window.BattleSound.enabled; renderBattleSoundButton(); };
   renderBattleSoundButton();
   function renderNotifyButton() {
-    $('#btnNotify').textContent = notifyPref.enabled ? '🔊' : '🔇';
+    $('#btnNotify').textContent = notifyPref.enabled ? 'On' : 'Off';
     $('#btnNotify').classList.toggle('active', notifyPref.enabled);
+    $('#btnNotify').setAttribute('aria-pressed', String(notifyPref.enabled));
+    renderAudioButton();
   }
   $('#btnNotify').onclick = async () => {
     notifyPref.enabled = !notifyPref.enabled;
@@ -1437,14 +1681,14 @@
   }
   function renderViewAsMenu() {
     const cur = state.viewAs?.id || null;
-    const players = f => state.members.filter(m => m.role !== 'gm' && String(m.nation || '').trim().toLowerCase() === f.name.trim().toLowerCase()).map(m => m.displayName);
+    const players = f => state.members.filter(m => m.role === 'player' && String(m.nation || '').trim().toLowerCase() === f.name.trim().toLowerCase()).map(m => m.displayName);
     const item = (fid, icon, name, hint) => `<button type="button" class="vitem ${fid === cur ? 'on' : ''}" data-fid="${fid || ''}">${icon}<span class="grow">${esc(name)}</span>${hint ? `<span class="hint" title="${esc(hint)}">${esc(hint)}</span>` : ''}</button>`;
     $('#viewAsMenu').innerHTML = `<div class="vhead"><strong>View as a player</strong>See the map, panels and log as that nation's player and play with only its powers: moves, attacks and orders follow the rules. This tab only.</div>`
-      + item(null, '👑', 'Game master view', '')
+      + item(null, '<i class="ti" style="--n:9"></i>', 'Game master view', '')
       + (state.factions.length ? state.factions.map(f => {
         const p = players(f);
         return item(f.id, f.flagUrl ? `<img class="flag" src="${esc(f.flagUrl)}" alt="">` : `<span class="vdot" style="background:${esc(f.color)}"></span>`, f.name, p.length ? p.join(', ') : 'no player');
-      }).join('') : '<p class="hint" style="padding:6px 12px;margin:0">No factions yet: create them on the 👥 People panel.</p>');
+      }).join('') : '<p class="hint" style="padding:6px 12px;margin:0">No factions yet: create them on the <i class="ti" style="--n:6"></i> People panel.</p>');
   }
   $('#btnViewAs').onclick = e => {
     e.stopPropagation();
@@ -1467,7 +1711,7 @@
   let allReadyWas = null;
   function renderReady() {
     const bar = $('#readyBar');
-    const players = new Set((state.members || []).filter(m => m.role !== 'gm' && m.nation).map(m => m.nation.trim().toLowerCase()));
+    const players = new Set((state.members || []).filter(m => m.role === 'player' && m.nation).map(m => m.nation.trim().toLowerCase()));
     const list = gameOn() ? (state.factions || []).filter(f => players.has(f.name.toLowerCase())) : [];
     bar.hidden = !list.length;
     const gm = state.role === 'gm';
@@ -1516,10 +1760,17 @@
 
   // ---- Presence / members ---------------------------------------------------------------
   function initials(name) { return String(name || '?').trim().split(/\s+/).map(p => p[0]).join('').slice(0, 2).toUpperCase(); }
+  function avatarClass(member) { return member?.siteRole === 'admin' ? 'site-admin' : member?.siteVip ? 'site-vip' : ''; }
+  function memberAvatar(member, extra = '') {
+    const name = member?.displayName || 'Player';
+    return `<span class="avatar ${extra} ${avatarClass(member)}" title="${esc(name)}">${member?.avatarUrl ? `<img src="${esc(member.avatarUrl)}" alt="">` : esc(initials(name))}</span>`;
+  }
 
   function renderPresence() {
-    $('#presence').innerHTML = state.presence.map(u =>
-      `<div class="avatar ${u.role === 'gm' ? 'gm' : ''}" title="${esc(u.displayName)}${u.role === 'gm' ? ' (GM)' : ''}">${esc(initials(u.displayName))}</div>`).join('');
+    $('#presence').innerHTML = state.presence.map(u => {
+      const member = state.members.find(m => m.userId === u.id) || u;
+      return memberAvatar(member, u.role === 'gm' ? 'gm' : '');
+    }).join('');
   }
 
   function flagImg(nation, big) {
@@ -1532,10 +1783,10 @@
     const gm = state.role === 'gm';
     $('#membersList').innerHTML = state.members.map(m => `
       <li data-id="${m.userId}">
-        <span class="dot" style="background:${esc(m.color)}"></span>
-        <span class="grow"><strong>${esc(m.displayName)}</strong>${m.nation ? ` <span class="hint">· ${flagImg(m.nation)} ${esc(m.nation)}</span>` : ''}</span>
+        ${memberAvatar(m, 'member-avatar')}
+        <span class="grow"><strong class="${m.siteRole === 'admin' ? 'name-site-admin' : m.siteVip ? 'name-site-vip' : ''}">${esc(m.displayName)}</strong>${m.nation ? ` <span class="hint">· ${flagImg(m.nation)} ${esc(m.nation)}</span>` : ''}</span>
         ${online.has(m.userId) ? '<span class="badge online">online</span>' : ''}
-        <span class="badge ${m.role === 'gm' ? 'gm' : ''}">${m.role === 'gm' ? 'GM' : 'Player'}</span>
+        <span class="badge ${m.role === 'gm' ? 'gm' : ''}">${m.role === 'gm' ? 'GM' : m.role === 'observer' ? 'Observer' : 'Player'}</span>
         ${gm ? `<button class="small secondary" data-act="edit" title="Edit member">✎</button>` : ''}
         ${gm && m.userId !== state.lobby.ownerId ? `<button class="small danger" data-act="kick" title="Remove">✕</button>` : ''}
       </li>`).join('');
@@ -1808,7 +2059,8 @@
           <span class="grow">${esc(m.name)}${m.type === 'unit' && m.data?.unitType ? ` <span class="hint">${esc(m.data.unitType)}</span>` : ''}${m.type === 'hero' ? ` <span class="hint">${esc(H.ROLES[m.data?.role]?.label || 'Hero')} ${H.starText(m.data?.stars)}${m.data?.nation ? ' · ' + esc(m.data.nation) : ''}${m.data?.status && m.data.status !== 'active' ? ' · ' + esc(H.STATUS[m.data.status] || '') : ''}</span>` : ''}${m.type === 'town' ? ` <span class="hint">${esc(m.data?.size || '')}</span>` : ''}${m.type === 'resource' ? ` <span class="hint">${esc(window.GameData?.byKey[m.data?.kind]?.name || m.data?.kind || '')} +${esc(m.data?.yield ?? '')}${m.data?.nation ? ' · ' + esc(m.data.nation) : ''}</span>` : ''}${m.type === 'factory' ? ` <span class="hint">level ${esc(m.data?.industry ?? 1)}${m.data?.nation ? ' · ' + esc(m.data.nation) : ''}</span>` : ''}</span>
           ${visBadge(m)}
         </li>`).join('')}</ul>`).join('');
-    const shapes = [...state.shapes.values()].filter(s => match(s.label) || (!q));
+    // An enemy trench seen in several stretches under fog (data.part) is listed once.
+    const shapes = [...state.shapes.values()].filter(s => (match(s.label) || !q) && !(s.data?.part > 0));
     if (shapes.length) {
       html += `<div class="section">Drawings <span class="hint">(${shapes.length})</span>${lockLinks('shape', shapes)}${state.role === 'gm' && shapes.length > 1 ? ` · <a href="#" data-delall="1" title="Delete every drawing you can see (e.g. imported borders you no longer need)">delete all</a>` : ''}</div><ul class="list">${shapes.map(s => `
         <li class="clickable ${s.id === state.selectedShapeId ? 'selected' : ''}" data-shape="${s.id}">
@@ -1907,7 +2159,28 @@
     const r = km / (l.unitsPerPx || 1);
     return [r, r];
   }
-  const heroReady = h => h && h.type === 'hero' && !h.adminOnly && !['captured', 'travelling'].includes(h.data?.status);
+  const heroReady = H.ready;
+  function heroTraitsFor(m, context = {}) {
+    return H.effects([...state.markers.values()], m, heroSettings(), distanceUnits, { type: m.type === 'unit' ? window.UnitTypes?.resolve(m.data?.unitType) : null, ...context });
+  }
+  function traitOptions(role, selected = '') {
+    return '<option value="">None</option>' + Object.entries(H.TRAITS).filter(([, t]) => t.role === role).map(([k, t]) => `<option value="${k}" ${k === selected ? 'selected' : ''}>${esc(t.name)} — ${esc(t.text)}</option>`).join('');
+  }
+  function syncTraitFields(p, selected) {
+    const role = document.getElementById(p + 'HeroRole')?.value || 'general';
+    const values = H.cleanTraits(role, selected || [document.getElementById(p + 'HeroTrait1')?.value, document.getElementById(p + 'HeroTrait2')?.value]);
+    for (let i = 1; i <= 2; i++) { const el = document.getElementById(p + 'HeroTrait' + i); if (el) el.innerHTML = traitOptions(role, values[i - 1]); }
+  }
+  function traitRows(m, context = {}) {
+    const t = heroTraitsFor(m, context), bonuses = [];
+    if (t.attack) bonuses.push(`+${t.attack} attack`); if (t.defend) bonuses.push(`+${t.defend} defence`);
+    if (t.worn) bonuses.push('worn penalty −1'); if (t.walk > 1) bonuses.push('+25% movement off rail');
+    if (t.supply > 1) bonuses.push('+25% supply delivery and link range'); if (t.spotting > 1) bonuses.push('+25% spotting reach');
+    if (t.build > 1) bonuses.push('+25% construction and material cost'); if (t.heal) bonuses.push('+5 healing');
+    if (t.factory) bonuses.push('+1 level of goods output'); if (t.yield > 1) bonuses.push('+15% resource yield');
+    if (t.rail > 1) bonuses.push('+25% rail distance');
+    return bonuses.length ? stat('Trait bonuses', bonuses.join(' · ')) + stat('Provided by', t.notes.map(n => `${n.name} (${n.hero})`).join(' · ')) : '';
+  }
   /** The best general of a unit's own nation within the aura, as the server computes it for combat. */
   function generalFor(u) {
     const n = String(u.data?.nation || '').toLowerCase(), km = Number(heroSettings().heroAuraKm ?? 60);
@@ -1934,7 +2207,10 @@
     const d = m.data || {}, role = H.ROLES[d.role] || H.ROLES.general, s = heroSettings(), km = state.lobby?.scaleLabel || 'km';
     let rows = nationStat(d.nation) + stat('Perception', d.perception) + stat('Intelligence', d.intelligence);
     if (d.role === 'general') rows += stat('Aura', `+${H.generalBonus(d.stars)} attack and defend within ${s.heroAuraKm ?? 60} ${km}`);
-    if (d.role === 'spy') rows += stat('Missions', `recon and hunt within ${H.missionRadiusKm(d.stars)} ${km}${gameOn() ? ` · steals up to ${(s.spyStealPerStar ?? 5) * H.stars(d.stars)} RP` : ''}`);
+    for (const k of H.cleanTraits(d.role, d.traits)) rows += stat(H.TRAITS[k].name, H.TRAITS[k].text);
+    if (d.role === 'statesman' && d.traits?.length) rows += stat('Economic posting', Number(d.movedKm || 0) > 0 ? 'Moved this turn: bonuses begin next turn if stationed here.' : 'Active while stationed here; Rail Magnate requires the capital.');
+    if (d.role === 'spy') rows += stat('Capture checks', `${H.spyPerception(m)} perception · ${H.spyIntelligence(m) + heroTraitsFor(m).intelligence} intelligence`);
+    if (d.role === 'spy') rows += stat('Missions', `recon within ${H.reconRadius(m)}, hunt within ${H.missionRadiusKm(d.stars)} ${km}${gameOn() ? ` · steals up to ${(s.spyStealPerStar ?? 5) * H.stars(d.stars) * H.theftMultiplier(m)} RP` : ''}`);
     if (d.status === 'posted') rows += rawStat('Posted to', `${flagImg(factionNameById(d.postedTo))} ${esc(factionNameById(d.postedTo) || '?')}`);
     if (d.status === 'travelling' && d.travel) rows += rawStat(d.travel.home ? 'Returning to' : 'En route to', `${esc(d.travel.toName || '?')} <span class="hint">(arrives at the end of the turn)</span>`);
     if (d.status === 'captured') rows += stat('Captured by', d.capturedBy || '?');
@@ -1958,8 +2234,9 @@
     let out = '';
     const commander = canEdit(m) && !['captured', 'travelling'].includes(d.status);
     if (commander && d.role === 'spy') {
-      out += `<button class="small" data-act="recon" title="Report every foreign unit within ${H.missionRadiusKm(d.stars)} km; contested on hostile ground">🔍 Recon</button>`;
+      out += `<button class="small" data-act="recon" title="Report every foreign unit within ${H.reconRadius(m)} km; contested on hostile ground">🔍 Recon</button>`;
       if (gameOn()) out += `<button class="small" data-act="steal" title="Take research points from the nation whose ground this spy stands on; contested by its spies">🗝 Steal research</button>`;
+      if (gameOn()) out += `<button class="small" data-act="steal-notes" title="Copy one new private journal note from the nation whose ground this spy stands on; contested by its spies">📜 Steal notes</button>`;
       out += `<button class="small" data-act="hunt" title="Try to catch enemy spies within ${H.missionRadiusKm(d.stars)} km: d20 + perception against each spy's d20 + intelligence">🕵 Hunt spies</button>`;
     }
     if (commander && d.role === 'diplomat') {
@@ -1975,9 +2252,10 @@
   }
   async function heroOrder(act, m) {
     const body = act === 'send' ? { factionId: Number($('#heroSendTo')?.value) } : {};
-    if (act === 'steal' && !confirm(`Send ${m.name} to steal research? If the other side's spies catch ${m.name}, the spy is lost.`)) return;
+    if ((act === 'steal' || act === 'steal-notes') && !confirm(`Send ${m.name} to steal ${act === 'steal' ? 'research' : 'a private note'}? If the other side's spies catch ${m.name}, the spy is lost.`)) return;
     const d = await api.post(`${base}/game/heroes/${m.id}/${act}`, body);
     toast(d.message || 'Done', d.intel ? 9000 : 6000);
+    if (act === 'steal-notes' && d.ok) { Journal.showStolen(); showPanel('journal'); }
   }
   /** "by Paris (garrison)", "by 2nd Supply Column", "by convoy …", "from a railhead". */
   function supplySourceText(f) {
@@ -2000,13 +2278,13 @@
     return pts;
   }
   function syncSupplyLine(m) {
-    if (m && m.type === 'unit' && supplyOn() && m.data?.supplied === true && m.data?.supplyFrom) renderer.showSupplyLine(supplyChain(m));
+    if (m && m.type === 'unit' && !deadUnit(m) && supplyOn() && m.data?.supplied === true && m.data?.supplyFrom) renderer.showSupplyLine(supplyChain(m));
     else renderer.hideSupplyLine();
   }
   function syncAura(m) {
     syncSupplyLine(m);
-    if (m && m.type === 'hero' && m.data?.role === 'general' && heroReady(m)) {
-      const [rx, ry] = kmToWorld(m.x, m.y, Number(heroSettings().heroAuraKm ?? 60));
+    if (m && m.type === 'hero' && (m.data?.role === 'general' || H.hasTrait(m, 'networkCoordinator') || m.data?.role === 'statesman' && m.data?.traits?.some(k => k !== 'railMagnate')) && heroReady(m)) {
+      const [rx, ry] = kmToWorld(m.x, m.y, m.data.role === 'statesman' ? 100 : m.data.role === 'spy' ? 60 : Number(heroSettings().heroAuraKm ?? 60));
       renderer.showAura(m.x, m.y, rx, ry);
       return;
     }
@@ -2017,12 +2295,88 @@
   function armHero() {
     if (state.placing?.hero) { disarmPlacing(); return; }
     disarmPlacing();
-    state.placing = { hero: { role: $('#qaHeroRole').value, stars: Number($('#qaHeroStars').value) || 1, name: $('#qaHeroName').value.trim() } };
+    state.placing = { hero: { role: $('#qaHeroRole').value, stars: Number($('#qaHeroStars').value) || 1, traits: H.cleanTraits($('#qaHeroRole').value, [$('#qaHeroTrait').value]), name: $('#qaHeroName').value.trim() } };
     $('#qaHeroPlace').classList.add('active');
     renderer.app.canvas.style.cursor = 'copy';
     updatePlaceHud();
   }
 
+  /**
+   * The unit card (docs/UI.md, "Selection card"): who it is and what it is for, its strength, stat tiles, what it has left this
+   * turn, status chips (supply, worn, cover, general, corps…), then the details that apply, and its matchups.
+   */
+  function unitCardHtml(m) {
+    const d = m.data || {}, t = window.UnitTypes?.resolve(d.unitType), G = window.UnitGuide;
+    const S = state.game?.settings || {}, u = state.lobby?.scaleLabel || 'km';
+    const defs = window.UnitTypes.defaults(d.unitType, state.lobby?.settings?.unitStats) || {};
+    const strength = Math.max(0, Math.min(100, Number(d.strength ?? 100))), dead = deadUnit(m);
+    const help = k => esc(G?.STAT_HELP?.[k] || '');
+    const role = t && G ? G.info(t.id).role : '';
+    let h = `<div class="uhead">${t && G ? G.counterImg(t, m.color) : ''}<div class="grow"><div class="utype">${esc(t ? G?.shortName(t) || t.name : d.unitType || 'Unit')}${role ? ` <span>· ${esc(role)}</span>` : ''}</div>`
+      + `<div class="unation">${d.nation ? `${flagImg(d.nation)} ${esc(d.nation)}` : '<span class="hint">no nation</span>'}</div></div>`
+      + (t && G ? `<button type="button" class="small secondary uguide" data-act="guide" title="What this type is for: stats, matchups, abilities and cost">ⓘ Guide</button>` : '') + '</div>';
+    if (d.strength !== undefined || gameOn()) {
+      const cls = dead ? 'dead' : strength >= 67 ? 'good' : strength >= 34 ? 'mid' : 'low';
+      h += `<div class="ustr ${cls}" title="Strength: losses lower it; worn units fight worse"><i style="width:${strength}%"></i><span>${dead ? (d.surrendered ? '⚑ Surrendered' : '✝ Destroyed') : `${strength}% strength`}</span></div>`;
+    }
+    // Stat tiles: distances in km when the game rules give them.
+    const km = (v, per) => gameOn() ? `${fmtNum((Number(v) || 0) * (Number(per) || 50))} ${u}` : '';
+    const ac = d.armourClass ?? defs.armourClass ?? 0, pen = d.penetration ?? defs.penetration ?? 1;
+    const tile = (k, label, v, sub) => `<div class="utile u-${k}" title="${help(k)}"><span>${label}</span><b>${esc(v ?? '–')}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</div>`;
+    h += `<div class="utiles">${tile('attack', 'Attack', d.attack)}${tile('defend', 'Defence', d.defend)}${tile('movement', 'Move', d.movement, km(d.movement, S.kmPerMove))}`
+      + `${tile('range', 'Range', d.range, km(d.range, S.kmPerRange))}${tile('ap', 'Actions', d.ap)}<div class="utile u-armour" title="${help('armourClass')}. ${help('penetration')}"><span>Armour · Pen</span><b>${esc(ac)} · ${esc(pen)}</b></div></div>`;
+    // This turn: movement left and attacks left.
+    if (gameOn() && !dead) {
+      const allow = (Number(d.movement) || 0) * (Number(S.kmPerMove) || 50), used = Number(d.movedKm) || 0, left = Math.max(0, allow - used);
+      const apMax = Number(d.ap) || 0, apLeft = Math.max(0, apMax - (Number(d.apUsed) || 0));
+      h += `<div class="uturn"><span class="ul">This turn</span><span class="umeter" title="Movement left"><i style="width:${allow ? Math.round(left / allow * 100) : 0}%"></i></span>`
+        + `<small>${d.attacked ? 'attacked: cannot move' : `${fmtNum(left)} / ${fmtNum(allow)} ${u}`}</small>`
+        + `<span class="uap" title="${apLeft} of ${apMax} attacks left">${'<i class="on"></i>'.repeat(Math.min(6, apLeft))}${'<i></i>'.repeat(Math.max(0, Math.min(6, apMax) - apLeft))}</span></div>`;
+    }
+    // Status chips; the consequences of being cut off get a line of their own.
+    const chips = [], chip = (cls, text, title) => chips.push(`<span class="uchip ${cls}" title="${esc(title || '')}">${text}</span>`);
+    let warn = '';
+    const land = !t || ['Infantry', 'Mounted & mobile', 'Artillery', 'Support'].includes(t.cat);
+    if (supplyOn() && !dead) {
+      const of = stockMax(), left = stockOf(m), turns = Number(d.unsuppliedTurns) || 0, since = turns ? ` for ${turns} turn${turns === 1 ? '' : 's'}` : '';
+      if (t?.cat === 'Emplacements') chip('', '🏰 Own stores', 'A fixed work: needs no supply');
+      else if (!land) chip('', '✓ No supply needed', 'Ships, aircraft and heroes need no supply');
+      else if (d.supplied === true) chip('good', `✓ Supplied ${of}/${of}`, `Supplied${supplySourceText(d.supplyFrom)}`);
+      else if (d.supplied === false && left > 0) {
+        chip('warn', `⚠ Cut off · ${left}/${of}`, 'Living on what it carries');
+        warn = `Cut off${since}: it uses one turn's supplies at each End turn, with no replacements or hospital care. At 0/${of} it is out of supply.`;
+      } else if (d.supplied === false) {
+        chip('bad', `⛔ Out of supply · 0/${of}`, 'Cannot move or attack');
+        warn = `Out of supply${since}: cannot move or attack, takes double losses when beaten, and loses ${S.attritionRate ?? 25}% strength at each End turn; it surrenders below ${S.attritionDisbandBelow ?? 10}%.`;
+      } else chip('', 'Supply: not yet worked out');
+    }
+    if (gameOn()) {
+      const worn = wornOf(m);
+      if (worn && !dead) chip('bad', `Worn −${worn}`, `−${worn} attack and defend at ${strength}% strength`);
+      if (Number(d.replenishedTurn) === state.game.turn) chip('', '🩹 Refitting', 'Took on replacements this turn: no more moving or attacking');
+    }
+    const cover = trenchCoverFor(m);
+    if (cover) chip('good', `⛏ Dug in +${cover.bonus}`, `+${cover.bonus} defend from ${cover.trench.label || 'a trench'}`);
+    const gen = generalFor(m);
+    if (gen) chip('good', `★ General +${gen.bonus}`, `+${gen.bonus} attack and defend from ${gen.hero.name}`);
+    if (d.corps) chip('', `⚑ ${esc(corpsName(d.corps))}`, 'Its corps');
+    if (d.submerged) chip('sub', '🌊 Submerged', `Seen only by destroyers within ${S.subDetectKm ?? 20} ${u}; it surfaces to attack`);
+    if (chips.length) h += `<div class="uchips">${chips.join('')}</div>`;
+    if (warn) h += `<p class="uwarn">${esc(warn)}</p>`;
+    // Details that apply to this unit.
+    let rows = '';
+    if (gameOn()) {
+      rows += marchRow(m);
+      if (d.dig) rows += stat('Orders', d.dig.mode === 'rail' ? `laying ${(S.railBuildKm ?? 15) * heroTraitsFor(m).build} ${u} of the planned railway at End turn (${(S.railBuildIron ?? 5) * heroTraitsFor(m).build} iron, ${(S.railBuildTimber ?? 5) * heroTraitsFor(m).build} timber)`
+        : `${d.dig.mode === 'reinforce' ? 'reinforcing' : 'digging'} ${(S.trenchSectionKm ?? 10) * heroTraitsFor(m).build} ${u} of trench at End turn (within ${S.trenchDigKm ?? 20} ${u} of it)`);
+      rows += poolRow(m);
+    }
+    rows += unitDoctrineRows(m) + traitRows(m, { entrenched: !!cover }) + convoyRows(m);
+    if (d.abilities?.length) rows += `<div class="stat"><span class="muted">Abilities</span></div><ul style="margin:2px 0 4px 16px;padding:0;font-size:12px">${d.abilities.map(a => `<li>${esc(a)}</li>`).join('')}</ul>`;
+    if (rows) h += `<div class="urows">${rows}</div>`;
+    if (t && G && !dead) h += `<div class="usec"><h5>Matchups</h5>${G.matchupHtml(t)}</div>`;
+    return h;
+  }
   function popupHtml(m) {
     const d = m.data || {};
     let body = '';
@@ -2033,41 +2387,26 @@
     } else if (m.type === 'scenery') {
       body += stat('Scale', `${d.scale ?? 1}×`) + stat('Rotation', `${d.rotation || 0}°`);
     } else if (m.type === 'unit') {
-      body += nationStat(d.nation) + stat('Unit type', d.unitType) + stat('Attack', d.attack) + stat('Defend', d.defend)
-        + stat('Action points', d.ap) + stat('Range', gameOn() ? `${d.range ?? 0} (${(Number(d.range) || 0) * (Number(state.game.settings.kmPerRange) || 50)} ${state.lobby?.scaleLabel || 'km'})` : d.range)
-        + stat('Movement', gameOn() ? `${d.movement ?? 0} (${(Number(d.movement) || 0) * (Number(state.game.settings.kmPerMove) || 50)} ${state.lobby?.scaleLabel || 'km'}/turn)` : d.movement)
-        + stat('Strength', d.strength !== undefined ? `${d.strength}%${d.strength <= 0 ? ' (destroyed)' : ''}` : '');
-      if (gameOn()) {
-        const km = state.game.settings.kmPerMove, allow = (Number(d.movement) || 0) * km, used = Number(d.movedKm) || 0;
-        body += stat('This turn', `${d.attacked ? 'attacked, cannot move' : `${fmtNum(Math.max(0, allow - used))} of ${fmtNum(allow)} ${state.lobby?.scaleLabel || 'km'} left`} · ${Math.max(0, (Number(d.ap) || 0) - (Number(d.apUsed) || 0))}/${Number(d.ap) || 0} AP`);
-        body += marchRow(m);
-      }
-      if (gameOn()) {
-        const S = state.game.settings || {}, worn = wornOf(m);
-        if (worn) body += stat('Worn', `−${worn} attack and defend (${d.strength}% strength)`);
-        if (d.dig) body += stat('Orders', `${d.dig.mode === 'reinforce' ? 'reinforcing' : 'digging'} ${S.trenchSectionKm ?? 10} ${state.lobby?.scaleLabel || 'km'} of trench at End turn (within ${S.trenchDigKm ?? 20} ${state.lobby?.scaleLabel || 'km'} of it)`);
-        if (Number(d.replenishedTurn) === state.game.turn) body += stat('Refitting', 'took on replacements this turn');
-      }
-      if (d.submerged) body += stat('Submerged', `seen only by destroyers within ${state.game?.settings?.subDetectKm ?? 20} ${state.lobby?.scaleLabel || 'km'}; surfaces to attack`);
-      if (d.corps) body += stat('Corps', corpsName(d.corps));
-      const cover = trenchCoverFor(m);
-      if (cover) body += stat('Cover', `+${cover.bonus} defend (${esc(cover.trench.label || 'trench')})`);
-      const gen = generalFor(m);
-      if (gen) body += stat('General', `+${gen.bonus} attack and defend (${gen.hero.name})`);
-      body += unitDoctrineRows(m) + convoyRows(m);
-      if (d.abilities?.length) body += `<div class="stat"><span class="muted">Abilities</span></div><ul style="margin:2px 0 4px 16px;padding:0;font-size:12px">${d.abilities.map(a => `<li>${esc(a)}</li>`).join('')}</ul>`;
+      body += unitCardHtml(m);
     } else if (m.type === 'town') {
       body += stat('Size', d.size) + nationStat(d.nation);
       if (gameOn() && d.blockaded) body += stat('Blockade', '⚓ enemy warships lie off the coast: it supplies no troops until they are driven off');
+      body += townGoodsRows(m);
       if (gameOn()) body += developmentStat(m);
     } else if (m.type === 'resource') {
       const r = window.GameData?.byKey[d.kind];
-      const y = GameData.resourceYield(m, state.game?.settings);
+      const y = GameData.resourceYield(m, state.game?.settings) * (gameOn() ? heroTraitsFor(m).yield : 1);
       body += stat('Resource', r ? r.name : d.kind) + stat('Yield per turn', y !== Number(d.yield || 0) ? `${y} (${d.yield} and its works)` : d.yield) + nationStat(d.nation);
-      if (gameOn()) body += developmentStat(m);
+      if (gameOn()) body += traitRows(m) + developmentStat(m);
       else if (d.improved) body += stat('Works', `level ${d.improved} / 3`);
     } else if (m.type === 'factory') {
-      body += stat('Industry level', `${d.industry ?? 1} / 5`) + nationStat(d.nation);
+      body += stat('Industry level', `${d.industry ?? 1} / 5`) + nationStat(d.nation) + (gameOn() ? traitRows(m) : '');
+      if (goodsOn() && d.nation) {
+        const S = state.game.settings || {}, output = GameData.factoryOutput({ ...m, data: { ...d, industry: Number(d.industry || 1) + heroTraitsFor(m).factory } }, S);
+        const policy = state.gameFactions?.find(f => String(f.faction?.name || '').toLowerCase() === String(d.nation).toLowerCase())?.goods?.warEconomy;
+        const split = policy == null ? 'split by its nation’s war economy' : `${fmtNum(output * policy / 100)} military goods · ${fmtNum(output * (1 - policy / 100))} consumer goods`;
+        body += stat('Makes per turn', `${fmtNum(output)} goods (${split}), delivered to the nearest friendly town`);
+      }
       if (gameOn()) body += developmentStat(m);
     } else if (m.type === 'poi') {
       body += stat('Category', d.category);
@@ -2075,25 +2414,28 @@
     const owner = m.ownerId && state.members.find(x => x.userId === m.ownerId);
     if (owner) body += stat('Owner', owner.displayName);
     if (m.visibleTo && m.visibleTo.length) body += stat('Visible to', m.visibleTo.join(', '));
+    if (m.type === 'town') body += '<p class="hint" style="margin:6px 0 0">Towns are fixed to their map location and cannot be moved.</p>';
     if (d.notes) body += `<p class="notes">${esc(d.notes)}</p>`;
-    let actions = `<button class="small secondary" data-act="center">Center</button>`;
-    if (canEdit(m)) actions += `<button class="small" data-act="edit">Edit</button>`;
-    if (canEdit(m)) actions += `<button class="small secondary" data-act="lock" title="${m.locked ? 'Let it be selected and dragged again' : 'Clicks and drags pass through a locked token'}">${m.locked ? '🔓 Unlock' : '🔒 Lock'}</button>`;
+    let actions = '', basics = `<button class="small secondary" data-act="center">Center</button>`;
+    if (canEdit(m)) basics += `<button class="small secondary" data-act="edit">Edit</button>`;
+    if (canEdit(m)) basics += `<button class="small secondary" data-act="lock" title="${m.locked ? 'Let it be selected and dragged again' : 'Clicks and drags pass through a locked token'}">${m.locked ? '🔓 Unlock' : '🔒 Lock'}</button>`;
     if (m.type === 'unit' && canEdit(m) && (d.strength ?? 100) > 0 && [...state.shapes.values()].some(s => s.kind === 'rail')) actions += `<button class="small danger" data-act="railcut" title="Cut (or blow up) a railway within reach. To attack a unit, select this one and right-click the enemy."${attacksClosed() ? ' disabled' : ''}>⛓ Cut railway…</button>`;
     if (m.type === 'unit' && canEdit(m) && (d.strength ?? 100) > 0) actions += unitOrderButtons(m);
     actions += developButton(m);
     if (m.type === 'hero') actions += heroActionsHtml(m);
     if (m.type === 'unit' || m.type === 'hero') actions += convoyActions(m);
-    actions += `<button class="small secondary" data-act="history">History</button>`;
-    if (state.role === 'gm') actions += `<button class="small secondary" data-act="dup">Duplicate</button>`;
-    if (canEdit(m)) actions += `<button class="small danger" data-act="del">Delete</button>`;
-    return `<h3><span class="dot" style="background:${esc(m.color)}"></span>${esc(m.name)} <span class="badge">${TYPE_LABEL[m.type] || m.type}</span>${visBadge(m)}</h3>${body}<div class="actions">${actions}</div>`;
+    basics += `<button class="small secondary" data-act="history">History</button>`;
+    if (state.role === 'gm') basics += `<button class="small secondary" data-act="dup">Duplicate</button>`;
+    if (canEdit(m)) basics += `<button class="small danger" data-act="del">Delete</button>`;
+    return `<h3><span class="dot" style="background:${esc(m.color)}"></span>${esc(m.name)} <span class="badge">${TYPE_LABEL[m.type] || m.type}</span>${visBadge(m)}</h3>${body}${actions ? `<div class="actions orders">${actions}</div>` : ''}<div class="actions minor">${basics}</div>`;
   }
 
   function shapePopupHtml(s) {
     const creator = s.createdBy && state.members.find(x => x.userId === s.createdBy);
-    let body = stat('Kind', s.kind === 'area' ? (s.data?.noMansLand ? "No Man's Land" : 'Area') : s.kind === 'trench' ? 'Trench' : s.kind === 'rail' ? 'Railway' : 'Line') + (s.kind === 'rail' ? '' : stat('Points', s.points.length));
-    if (s.kind === 'rail') body += railPopupRows(s);
+    const railPlan = s.kind === 'rail' && s.data?.state === 'plan';
+    let body = stat('Kind', s.kind === 'area' ? (s.data?.noMansLand ? "No Man's Land" : 'Area') : s.kind === 'trench' ? 'Trench' : railPlan ? 'Planned railway' : s.kind === 'rail' ? 'Railway' : 'Line') + (s.kind === 'rail' ? '' : stat('Points', s.points.length));
+    if (railPlan) body += railPlanRows(s);
+    else if (s.kind === 'rail') body += railPopupRows(s);
     if (s.kind === 'trench') {
       body += stat('State', { plan: 'planned', dug: 'dug', reinforced: 'reinforced' }[s.data?.state] || 'dug') + stat('Width', `${s.width} ${state.lobby?.scaleLabel || ''}`) + nationStat(s.data?.nation);
       const g = state.game?.settings, st = s.data?.state || 'dug';
@@ -2118,19 +2460,21 @@
     const planNote = s.kind === 'trench' && gameOn() && (s.data?.state || 'dug') === 'plan' ? `<p class="hint" style="margin:6px 0 0">Planned: engineers or pioneers within ${state.game.settings.trenchDigKm ?? 20} ${state.lobby?.scaleLabel || 'km'} dig it ${state.game.settings.trenchSectionKm ?? 10} ${state.lobby?.scaleLabel || 'km'} a turn (🛠 Dig trench in their panel; ${state.game.settings.trenchDigTimber ?? 4} timber a section).</p>` : '';
     const hint = earthworks(s) ? '<p class="hint" style="margin:6px 0 0">Dug earthworks: engineers reinforce it and sappers blow it up, a section at a time.</p>' : canEditShape(s) && !s.locked ? `<p class="hint" style="margin:6px 0 0">Drag a point to move it · grab the line to add a point · right-click (or Alt-click) a point to remove it · Move button or Shift-drag to move everything</p>`
       : (s.locked ? '<p class="hint" style="margin:6px 0 0">Locked: clicks on the map pass through it. Unlock to edit.</p>' : '');
-    return `<h3><span class="dot" style="background:${esc(s.kind === 'rail' ? '#8d8a86' : s.color)}"></span>${esc(shapeName(s))} <span class="badge">${s.kind === 'rail' ? 'Railway' : 'Drawing'}</span>${visBadge(s)}</h3>${body}${planNote}${hint}<div class="actions">${actions}</div>`;
+    return `<h3><span class="dot" style="background:${esc(s.kind === 'rail' ? '#8d8a86' : s.color)}"></span>${esc(shapeName(s))} <span class="badge">${s.kind === 'rail' ? (s.data?.state === 'plan' ? 'Planned railway' : 'Railway') : 'Drawing'}</span>${visBadge(s)}</h3>${body}${planNote}${hint}<div class="actions">${actions}</div>`;
   }
 
   async function popupAction(act, m, btn) {
     try {
       if (['board', 'embarkall', 'disembark', 'askland', 'showship'].includes(act)) await convoyAction(act, m, btn);
       else if (act === 'center') renderer.centerOn(m.x, m.y);
+      else if (act === 'guide') GameUI.openUnitGuide(window.UnitTypes?.resolve(m.data?.unitType)?.id);
       else if (act === 'edit') openEdit(m);
       else if (act === 'lock') { const d = await api.patch(`${base}/markers/${m.id}`, { locked: !m.locked }); upsertMarker(d.marker); }
       else if (act === 'railcut') openRailCut(m);
+      else if (act === 'railrepair') openRailRepair(m);
       else if (act === 'unmarch') { const d = await api.del(`${base}/game/units/${m.id}/goal`); upsertMarker(d.marker); toast(`${m.name}'s march is called off`); }
-      else if (['recon', 'steal', 'hunt', 'send', 'recall', 'expel'].includes(act)) await heroOrder(act, m);
-      else if (['replenish', 'dig', 'reinforce', 'undig', 'demolish', 'wreck', 'dive', 'surface'].includes(act)) await unitOrder(act, m);
+      else if (['recon', 'steal', 'steal-notes', 'hunt', 'send', 'recall', 'expel'].includes(act)) await heroOrder(act, m);
+      else if (['replenish', 'dig', 'reinforce', 'undig', 'demolish', 'wreck', 'dive', 'surface', 'railbuild', 'load', 'unload', 'salvage'].includes(act)) await unitOrder(act, m);
       else if (act === 'develop') { const f = (state.factions || []).find(x => x.name.toLowerCase() === String(m.data?.nation || '').toLowerCase()); await GameUI.startProject(GameData.projectFor(m), m.id, f?.id); renderPopup(); }
       else if (act === 'history') showHistoryFor('marker', m.id);
       else if (act === 'dup') {
@@ -2191,11 +2535,12 @@
         <p class="hint">Scenery is drawn at map scale: it grows and shrinks with zoom, unlike unit counters.</p>
       </div>
       <div data-for="unit">
-        <div class="grid2"><label>Faction<select id="${p}NationSel">${nationOptions()}</select></label><label>Unit type <a href="#" data-key title="Show all unit symbols">key</a><select id="${p}UnitTypeSel">${unitTypeOptions()}</select></label></div>
+        <div class="grid2"><label>Faction<select id="${p}NationSel">${nationOptions()}</select></label><label>Unit type <a href="#" data-key title="Show all unit symbols">key</a> · <a href="#" data-utguide title="What each unit type is for: stats, matchups, abilities and cost">guide</a><select id="${p}UnitTypeSel">${unitTypeOptions()}</select></label></div>
         <label id="${p}NationCustomWrap" hidden>Custom nation<input id="${p}Nation" list="nationList" maxlength="40"></label>
         <label id="${p}UnitTypeCustomWrap" hidden>Custom unit type<input id="${p}UnitType" maxlength="40" placeholder="e.g. Cossack sotnia"></label>
         <details class="sub" ${p === 'edit' ? 'open' : ''}><summary>Stats <span class="hint">from the campaign table · <a href="#" data-defaults title="Refill attack, defend, AP, range and movement from the campaign's table for this unit type">reset</a></span></summary>
           <div class="grid3"><label>Attack<input id="${p}Attack" type="number" step="any"></label><label>Defend<input id="${p}Defend" type="number" step="any"></label><label>AP<input id="${p}Ap" type="number" step="any"></label></div>
+          <div class="grid2"><label>Armour Class<input id="${p}ArmourClass" type="number" min="0" step="any"></label><label>Penetration<input id="${p}Penetration" type="number" min="0" step="any"></label></div>
           <div class="grid3"><label>Range<input id="${p}Range" type="number" step="any"></label><label>Move<input id="${p}Movement" type="number" step="any"></label><label>Strength %<input id="${p}Strength" type="number" min="0" max="100" value="100"></label></div>
           <label>Abilities <span class="hint">(one per line)</span><textarea id="${p}Abilities" rows="2"></textarea></label>
         </details>
@@ -2203,13 +2548,15 @@
       <div data-for="town"><div class="grid2">
         <label>Size<select id="${p}Size"><option value="capital">Capital</option><option value="city">City</option><option value="village">Village</option></select></label>
         <label>Faction<select id="${p}TownNationSel">${nationOptions()}</select></label>
-      </div><div class="grid2"><label>Industry <span class="hint">(game mode: 0–10)</span><input id="${p}Industry2" type="number" min="0" max="10" step="1" placeholder="by size"></label><label>Development <span class="hint">(0–5)</span><input id="${p}Developed" type="number" min="0" max="5" step="1" placeholder="0"></label></div><label id="${p}TownNationCustomWrap" hidden>Custom nation<input id="${p}TownNation" list="nationList" maxlength="40"></label></div>
+      </div><div class="grid2"><label>Industry <span class="hint">(game mode: 0–10)</span><input id="${p}Industry2" type="number" min="0" max="10" step="1" placeholder="by size"></label><label>Development <span class="hint">(0–5)</span><input id="${p}Developed" type="number" min="0" max="5" step="1" placeholder="0"></label></div><div class="grid3" data-gmgoods><label>Consumer goods<input id="${p}GoodsCg" type="number" min="0" step="any" placeholder="stores"></label><label>Military goods<input id="${p}GoodsMg" type="number" min="0" step="any" placeholder="stores"></label><label>Unrest <span class="hint">(0–100)</span><input id="${p}Unrest" type="number" min="0" max="100" step="1" placeholder="0"></label></div><label id="${p}TownNationCustomWrap" hidden>Custom nation<input id="${p}TownNation" list="nationList" maxlength="40"></label></div>
       <div data-for="poi"><label>Category<input id="${p}Category" maxlength="40" placeholder="Ruins, Mine, Fortress…"></label></div>
       <div data-for="hero">
         <div class="grid2">
           <label>Role<select id="${p}HeroRole">${H.ROLE_KEYS.map(k => `<option value="${k}">${H.ROLES[k].glyph} ${H.ROLES[k].label}</option>`).join('')}</select></label>
           <label>Stars<select id="${p}HeroStars">${[1, 2, 3, 4, 5].map(n => `<option value="${n}">${H.starText(n)}</option>`).join('')}</select></label>
         </div>
+        <label>Defining trait<select id="${p}HeroTrait1" ${isGm ? '' : 'disabled'}>${traitOptions('general')}</select></label>
+        <label>Earned trait <span class="hint">(optional, assigned by the GM)</span><select id="${p}HeroTrait2" ${isGm ? '' : 'disabled'}>${traitOptions('general')}</select></label>
         <div class="grid2"><label>Faction<select id="${p}HeroNationSel">${nationOptions()}</select></label><label>Title<input id="${p}HeroTitle" maxlength="60" placeholder="e.g. Marshal of France"></label></div>
         <label id="${p}HeroNationCustomWrap" hidden>Custom nation<input id="${p}HeroNation" list="nationList" maxlength="60"></label>
         <details class="sub"><summary>Stats <span class="hint">from the role and stars · <a href="#" data-herodefaults>reset</a></span></summary>
@@ -2243,12 +2590,22 @@
     };
     const role = document.getElementById(p + 'HeroRole'), st = document.getElementById(p + 'HeroStars');
     if (!role) return;
-    role.onchange = fill; st.onchange = fill;
+    role.onchange = () => { fill(); syncTraitFields(p); }; st.onchange = fill;
+    syncTraitFields(p);
     const link = document.querySelector(`#${p === 'add' ? 'addForm' : 'editForm'} [data-herodefaults]`);
     if (link) link.onclick = e => { e.preventDefault(); fill(); };
     if (fillNow) { st.value = '3'; fill(); }
   }
   function toggleTypeFields(form, type, setLockDefault) {
+    const node = ['resource', 'factory'].includes(type);
+    for (const suffix of ['Name', 'Color', 'Owner', 'ResNationSel', 'FacNationSel']) {
+      const label = form.querySelector(`[id$="${suffix}"]`)?.closest('label');
+      if (label) label.hidden = node;
+    }
+    for (const suffix of ['ResNationCustomWrap', 'FacNationCustomWrap']) {
+      const label = form.querySelector(`[id$="${suffix}"]`);
+      if (node && label) label.hidden = true;
+    }
     form.querySelectorAll('[data-for]').forEach(div => { div.style.display = div.dataset.for === type ? '' : 'none'; });
     if (setLockDefault) {
       const lk = form.querySelector('[id$="Locked"]');
@@ -2261,11 +2618,11 @@
     if (!U) return '<option value="__custom">Custom…</option>';
     const ov = state.lobby?.settings?.unitStats;
     return U.categories.map(cat =>
-      `<optgroup label="${esc(cat)}">${U.LIST.filter(t => t.cat === cat).map(t => `<option value="${esc(t.name)}">${esc(t.name)} — ${U.statLabel(t, ov)}</option>`).join('')}</optgroup>`
-    ).join('') + '<option value="__custom">Custom…</option>';
+      `<optgroup label="${esc(cat)}">${U.LIST.filter(t => t.cat === cat).map(t => `<option value="${esc(t.name)}">${esc(t.name)}${window.UnitGuide?.info(t.id).role ? ` · ${esc(UnitGuide.info(t.id).role)}` : ''} — ${U.statLabel(t, ov)}</option>`).join('')}</optgroup>`
+    ).join('');
   }
 
-  /** Fill attack/defend/AP/range/movement from the campaign's defaults for the selected type (custom types are left alone). */
+  /** Fill combat and movement stats from the campaign's defaults for the selected type (custom types are left alone). */
   function applyTypeDefaults(p) {
     const U = window.UnitTypes;
     if (!U) return false;
@@ -2273,6 +2630,7 @@
     if (!d) return false;
     const set = (id, val) => { const el = document.getElementById(p + id); if (el) el.value = val; };
     set('Attack', d.attack); set('Defend', d.defend); set('Ap', d.ap); set('Range', d.range); set('Movement', d.movement);
+    set('ArmourClass', d.armourClass); set('Penetration', d.penetration);
     return true;
   }
 
@@ -2287,6 +2645,8 @@
     };
     const link = sel.closest('label')?.querySelector('[data-key]');
     if (link) link.onclick = e => { e.preventDefault(); openSymbolKey(document.getElementById(p + 'Color')?.value); };
+    const guide = sel.closest('label')?.querySelector('[data-utguide]');
+    if (guide) guide.onclick = e => { e.preventDefault(); GameUI.openUnitGuide(window.UnitTypes?.resolve(sel.value)?.id); };
     const def = document.querySelector(`#${p}Form [data-defaults]`);
     if (def) def.onclick = e => { e.preventDefault(); e.stopPropagation(); if (!applyTypeDefaults(p)) toast('No catalogue defaults for a custom unit type'); };
   }
@@ -2346,7 +2706,11 @@
     if (!sel) { if (txt) txt.value = value ?? ''; return; }
     const known = [...sel.options].find(o => o.value.toLowerCase() === String(value || '').toLowerCase());
     if (known) { sel.value = known.value; wrap.hidden = true; txt.value = ''; }
-    else if (value) { sel.value = '__custom'; wrap.hidden = false; txt.value = value; }
+    else if (value) {
+      let option = [...sel.options].find(o => o.value === '__custom');
+      if (!option) { option = document.createElement('option'); option.value = '__custom'; option.textContent = 'Legacy custom unit'; sel.appendChild(option); }
+      sel.value = '__custom'; wrap.hidden = false; txt.value = value;
+    }
     else { sel.selectedIndex = 0; wrap.hidden = true; txt.value = ''; }
   }
 
@@ -2356,16 +2720,21 @@
     const data = { notes: v('Notes') };
     if (type === 'unit') Object.assign(data, {
       nation: readNation(p, 'Nation'), unitType: readUnitType(p), attack: v('Attack'), defend: v('Defend'), ap: v('Ap'), range: v('Range'),
-      movement: v('Movement'), strength: v('Strength') === '' ? 100 : v('Strength'),
+      movement: v('Movement'), armourClass: v('ArmourClass'), penetration: v('Penetration'), strength: v('Strength') === '' ? 100 : v('Strength'),
       abilities: v('Abilities').split('\n').map(s => s.trim()).filter(Boolean),
     });
-    if (type === 'town') Object.assign(data, { size: v('Size'), nation: readNation(p, 'TownNation'), industry: v('Industry2'), developed: Number(v('Developed')) || 0 });
+    if (type === 'town') {
+      Object.assign(data, { size: v('Size'), nation: readNation(p, 'TownNation'), industry: v('Industry2'), developed: Number(v('Developed')) || 0 });
+      // Goods and unrest (docs/ECONOMY.md): blank leaves the stores as they are; unrest below critical also stops the countdown.
+      if (v('GoodsCg') !== '' || v('GoodsMg') !== '') data.goods = { consumer: Number(v('GoodsCg') || 0), military: Number(v('GoodsMg') || 0) };
+      if (v('Unrest') !== '') { data.unrest = Number(v('Unrest')) || 0; if (data.unrest < Number(state.game?.settings?.unrestCritical ?? 75)) data.unrestTurns = 0; }
+    }
     if (type === 'poi') Object.assign(data, { category: v('Category') });
     if (type === 'resource') Object.assign(data, { kind: v('Kind'), yield: v('Yield') === '' ? 1 : v('Yield'), nation: readNation(p, 'ResNation'), improved: Number(v('Improved')) || 0 });
     if (type === 'factory') Object.assign(data, { industry: v('Industry') || 1, nation: readNation(p, 'FacNation') });
     if (type === 'scenery') Object.assign(data, { scale: v('Scale') || 1, rotation: v('Rotation') || 0, flip: !!document.getElementById(p + 'Flip')?.checked });
     if (type === 'hero') Object.assign(data, {
-      role: v('HeroRole'), stars: Number(v('HeroStars')) || 1, title: v('HeroTitle'), nation: readNation(p, 'HeroNation'),
+      role: v('HeroRole'), stars: Number(v('HeroStars')) || 1, traits: H.cleanTraits(v('HeroRole'), [v('HeroTrait1'), v('HeroTrait2')]), title: v('HeroTitle'), nation: readNation(p, 'HeroNation'),
       perception: v('HeroPer'), intelligence: v('HeroInt'), movement: v('HeroMove'),
     });
     const name = v('Name').trim() || (type === 'scenery' ? sceneryName(v('IconUrl')) : type === 'hero' ? (H.ROLES[v('HeroRole')] || H.ROLES.general).label : '');
@@ -2389,18 +2758,21 @@
     set('IconUrl', m.iconUrl && !m.iconUrl.startsWith('/uploads/') ? m.iconUrl : '');
     setNation(p, 'Nation', m.type === 'unit' ? d.nation : ''); setUnitType(p, d.unitType); set('Attack', d.attack); set('Defend', d.defend); set('Ap', d.ap);
     set('Range', d.range); set('Movement', d.movement); set('Strength', d.strength ?? 100);
+    set('ArmourClass', d.armourClass ?? window.UnitTypes.defaults(d.unitType, state.lobby?.settings?.unitStats)?.armourClass ?? 0);
+    set('Penetration', d.penetration ?? window.UnitTypes.defaults(d.unitType, state.lobby?.settings?.unitStats)?.penetration ?? 1);
     set('Abilities', (d.abilities || []).join('\n'));
     set('Size', d.size || 'village'); setNation(p, 'TownNation', m.type === 'town' ? d.nation : ''); set('Category', d.category); set('Notes', d.notes);
     set('Kind', d.kind || 'grain'); set('Yield', d.yield ?? 3); setNation(p, 'ResNation', m.type === 'resource' ? d.nation : '');
     set('Industry', d.industry ?? 1); setNation(p, 'FacNation', m.type === 'factory' ? d.nation : '');
     set('Industry2', m.type === 'town' ? (d.industry ?? '') : '');
     set('Developed', m.type === 'town' ? (d.developed || '') : '');
+    set('GoodsCg', m.type === 'town' && d.goods ? d.goods.consumer : ''); set('GoodsMg', m.type === 'town' && d.goods ? d.goods.military : ''); set('Unrest', m.type === 'town' ? (d.unrest || '') : '');
     set('Improved', m.type === 'resource' ? (d.improved || '') : '');
     set('Owner', m.ownerId ?? ''); set('VisibleTo', (m.visibleTo || []).join(', '));
     set('Scale', d.scale ?? 1); set('Rotation', d.rotation ?? 0);
     if (m.type === 'hero') {
       set('HeroRole', d.role || 'general'); set('HeroStars', H.stars(d.stars)); set('HeroTitle', d.title || ''); setNation(p, 'HeroNation', d.nation || '');
-      set('HeroPer', d.perception); set('HeroInt', d.intelligence); set('HeroMove', d.movement);
+      set('HeroPer', d.perception); set('HeroInt', d.intelligence); set('HeroMove', d.movement); syncTraitFields(p, d.traits || []);
     }
     const fl = document.getElementById(p + 'Flip'); if (fl) fl.checked = !!d.flip;
     const ao = document.getElementById(p + 'AdminOnly'); if (ao) ao.checked = !!m.adminOnly;
@@ -2498,14 +2870,15 @@
       <div class="row" style="margin-top:6px;flex-wrap:wrap;gap:4px" title="Resource nodes feed the faction that owns them each turn">
         <img id="qaResIcon" class="resicon" src="/icons/wheat.png" alt="" style="width:22px;height:22px;margin:0">
         <select id="qaResKind" style="width:auto;margin:0;padding:3px 6px">${(window.GameData ? GameData.RESOURCES : []).map(r => `<option value="${r.key}">${esc(r.name)}</option>`).join('')}</select>
-        <input id="qaResYield" type="number" min="0" max="50" step="any" value="3" style="width:56px;margin:0;padding:3px 6px" title="Yield per turn">
-        <button type="button" class="small secondary" id="qaResPlace" title="Then click the map to place nodes for the selected faction">Place…</button>
+        <button type="button" class="small secondary" id="qaResPlace" title="Click the map to place nodes owned by the province’s faction">Place…</button>
         <button type="button" class="small secondary" data-quick="factory">Factory</button>
       </div>
+      <p class="hint">Nodes and factories take the province’s owner automatically. Click repeatedly to place; edit levels from the marker popup.</p>
       <div class="row" style="margin-top:6px;flex-wrap:wrap;gap:4px" title="Heroes: generals buff nearby units, diplomats carry proposals, spies steal research, scout and hunt spies">
         <span class="hint">Hero</span>
         <select id="qaHeroRole" style="width:auto;margin:0;padding:3px 6px">${H.ROLE_KEYS.map(k => `<option value="${k}">${H.ROLES[k].glyph} ${H.ROLES[k].label}</option>`).join('')}</select>
         <select id="qaHeroStars" style="width:auto;margin:0;padding:3px 6px">${[1, 2, 3, 4, 5].map(n => `<option value="${n}" ${n === 3 ? 'selected' : ''}>${H.starText(n)}</option>`).join('')}</select>
+        <select id="qaHeroTrait" aria-label="Hero trait" style="width:220px;margin:0;padding:3px 6px">${traitOptions('general')}</select>
         <input id="qaHeroName" maxlength="60" placeholder="Name" autocomplete="off" style="width:130px;margin:0;padding:3px 6px">
         <button type="button" class="small secondary" id="qaHeroPlace" title="Then click the map to place the hero for the selected faction">Place…</button>
       </div>
@@ -2559,18 +2932,27 @@
       nationSel.onchange = () => { renderQuick(); updatePlaceHud(); setNation('add', 'Nation', nationSel.value); };
       renderQuick();
       $('#qaResKind').onchange = () => { const u = window.GameData?.iconUrl($('#qaResKind').value); $('#qaResIcon').src = u || ''; if (state.placing?.resource) { state.placing.resource = $('#qaResKind').value; updatePlaceHud(); } };
-      $('#qaResYield').onchange = () => { if (state.placing?.resource) { state.placing.yield = Number($('#qaResYield').value) || 0; updatePlaceHud(); } };
       $('#qaResPlace').onclick = () => {
         if (state.placing?.resource) { disarmPlacing(); return; }
         disarmPlacing();
-        state.placing = { resource: $('#qaResKind').value, yield: Number($('#qaResYield').value) || 0 };
+        state.placing = { resource: $('#qaResKind').value };
         $('#qaResPlace').classList.add('active');
         renderer.app.canvas.style.cursor = 'copy';
         updatePlaceHud();
       };
       $('#qaHeroPlace').onclick = armHero;
+      $('#qaHeroRole').onchange = () => { $('#qaHeroTrait').innerHTML = traitOptions($('#qaHeroRole').value); };
       $$('#addForm [data-quick]').forEach(b => b.onclick = () => {
+        const stopFactory = b.dataset.quick === 'factory' && state.placing?.gmFactory;
         disarmPlacing();
+        if (b.dataset.quick === 'factory') {
+          if (stopFactory) return;
+          state.placing = { gmFactory: true };
+          b.classList.add('active');
+          renderer.app.canvas.style.cursor = 'copy';
+          updatePlaceHud();
+          return;
+        }
         const det = $('#customMarker'); det.open = true;
         typeSel.value = b.dataset.quick; toggleTypeFields(form, typeSel.value, true);
         $('#addName').focus();
@@ -2594,8 +2976,8 @@
           // Keep faction, unit type and the stats just used so a line of identical units is a name and a click each.
           setNation('add', 'Nation', f.data.nation);
           setUnitType('add', f.data.unitType);
-          for (const k of ['Attack', 'Defend', 'Ap', 'Range', 'Movement']) {
-            const el = document.getElementById('add' + k); if (el) el.value = f.data[k.toLowerCase()] ?? '';
+          for (const k of ['Attack', 'Defend', 'Ap', 'Range', 'Movement', 'ArmourClass', 'Penetration']) {
+            const el = document.getElementById('add' + k); if (el) el.value = f.data[k[0].toLowerCase() + k.slice(1)] ?? '';
           }
         }
         if (f.type === 'town') setNation('add', 'TownNation', f.data.nation);
@@ -2737,6 +3119,17 @@
       if (d.dig) out += '<button class="small secondary" data-act="undig">✕ Stop digging</button>';
       else out += `<button class="small" data-act="dig" title="Dig ${S.trenchSectionKm ?? 10} ${u} of the nearest planned trench within ${S.trenchDigKm ?? 20} ${u} at End turn (${S.trenchDigTimber ?? 4} timber)">🛠 Dig trench</button><button class="small secondary" data-act="reinforce" title="Reinforce ${S.trenchSectionKm ?? 10} ${u} of the nearest dug trench of your side at End turn (${S.trenchReinforceTimber ?? 6} timber)">🛠 Reinforce</button>`;
     }
+    if (['engineers', 'pioneers', 'railway'].includes(t?.id)) {
+      out += `<button class="small" data-act="railrepair" title="Repair a broken rail link within ${S.railRepairKm ?? 30} ${u} on friendly or neutral ground, using one action point"${canRepairRail(m) ? '' : ' disabled'}>🛠 Repair railway…</button>`;
+      const near = [...state.shapes.values()].some(s => s.kind === 'rail' && s.data?.state === 'plan');
+      if (d.dig?.mode === 'rail') { if (t?.id === 'railway') out += '<button class="small secondary" data-act="undig">✕ Stop laying track</button>'; }
+      else if (near) out += `<button class="small" data-act="railbuild" title="Lay ${S.railBuildKm ?? 15} ${u} of the nearest planned railway of your side within ${S.trenchDigKm ?? 20} ${u} at End turn (${(S.railBuildIron ?? 5) * heroTraitsFor(m).build} iron, ${(S.railBuildTimber ?? 5) * heroTraitsFor(m).build} timber)">🛤 Lay track</button>`;
+    }
+    if (t?.id === 'supply' && goodsOn()) {
+      const depot = depotTown(m), wreck = wreckNear(m);
+      if (depot) out += `<button class="small secondary" data-act="load" title="Fill up from ${esc(depot.name)}'s military goods">📦 Load</button><button class="small secondary" data-act="unload" title="Leave what it carries in ${esc(depot.name)}'s stores (a depot for later)">📦 Unload</button>`;
+      if (wreck) out += `<button class="small" data-act="salvage" title="Take the ${fmtNum(poolOf(wreck))} supplies the wreck of ${esc(wreck.name)} still holds">📦 Salvage</button>`;
+    }
     if (t?.id === 'sappers') out += `<button class="small danger" data-act="wreck" title="Knock the works of the nearest improved resource node within ${S.trenchDigKm ?? 20} ${u} down a level: your own side's for certain (scorched earth), an enemy's on d20 + attack against d20 + ${S.trenchDemolishDefence ?? 2} + its best guard"${attacksClosed() ? ' disabled' : ''}>🔥 Wreck works</button>`;
     if (t?.id === 'sappers') out += `<button class="small danger" data-act="demolish" title="Blow up ${S.trenchSectionKm ?? 10} ${u} of the nearest enemy trench within ${S.trenchDigKm ?? 20} ${u}: d20 + attack against d20 + its works and its best guard"${attacksClosed() ? ' disabled' : ''}>💥 Blow up trench</button>`;
     return out;
@@ -2744,10 +3137,11 @@
   async function unitOrder(act, m) {
     if (act === 'demolish' && !confirm(`Send ${m.name} against the nearest enemy trench? It uses its action for the turn.`)) return;
     if (act === 'wreck' && !confirm(`Send ${m.name} to wreck the works of the nearest improved resource node? It uses its action for the turn, and your own side's works go down too.`)) return;
-    const path = { replenish: 'replenish', dig: 'dig', reinforce: 'dig', demolish: 'demolish', wreck: 'wreck', dive: 'dive', surface: 'dive' }[act];
-    const body = act === 'reinforce' ? { mode: 'reinforce' } : act === 'dig' ? { mode: 'dig' } : act === 'surface' ? { submerged: false } : act === 'dive' ? { submerged: true } : {};
+    const path = { replenish: 'replenish', dig: 'dig', reinforce: 'dig', demolish: 'demolish', wreck: 'wreck', dive: 'dive', surface: 'dive', railbuild: 'railbuild', load: 'goods', unload: 'goods', salvage: 'goods' }[act];
+    const body = act === 'reinforce' ? { mode: 'reinforce' } : act === 'dig' ? { mode: 'dig' } : act === 'surface' ? { submerged: false } : act === 'dive' ? { submerged: true } : ['load', 'unload', 'salvage'].includes(act) ? { action: act } : {};
     const d = act === 'undig' ? await api.del(`${base}/game/units/${m.id}/dig`) : await api.post(`${base}/game/units/${m.id}/${path}`, body);
     if (d.marker) upsertMarker(d.marker);
+    if (d.town) upsertMarker(d.town);
     if (d.message) toast(d.message, act === 'demolish' || act === 'wreck' ? 8000 : 6000);
     if (d.event && !state.events.some(x => x.id === d.event.id)) { state.events.push(d.event); renderLog(true); }
     renderPopup();
@@ -3043,33 +3437,18 @@
     $('#combatModal').classList.add('open');
   }
 
-  // ---- Log / chat / dice ------------------------------------------------------------------------------
+  // ---- Read-only activity Log -------------------------------------------------------------------------
   function renderLog(scroll) {
     const el = $('#logList');
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-    el.innerHTML = state.events.map(e => {
-      if (e.kind === 'chat') return `<div class="ev"><span class="who">${esc(e.displayName)}</span><span class="when">${fmtTime(e.createdAt)}</span><br>${esc(e.message)}</div>`;
+    el.innerHTML = state.events.filter(e => !['chat', 'announce'].includes(e.kind)).map(e => {
       if (e.kind === 'roll') return `<div class="ev roll"><span class="who">${esc(e.displayName)}</span> ${esc(e.message)}<span class="when">${fmtTime(e.createdAt)}</span></div>`;
       if (e.kind === 'combat') return `<div class="ev combat">${esc(e.message)}<span class="when">${fmtTime(e.createdAt)}</span></div>`;
       if (e.kind === 'turn') return `<div class="ev turn">📅 ${esc(e.message)}<span class="when">${fmtTime(e.createdAt)}</span></div>`;
-      if (e.kind === 'announce') return `<div class="ev announce">📣 <span class="who">${esc(e.displayName)}</span> ${esc(e.message)}<span class="when">${fmtTime(e.createdAt)}</span></div>`;
       return `<div class="ev system">${esc(e.message)}<span class="when">${fmtTime(e.createdAt)}</span></div>`;
     }).join('') || '<p class="muted">Nothing has happened yet.</p>';
     if (scroll === undefined || atBottom || scroll) el.scrollTop = el.scrollHeight;
   }
-  $('#chatForm').onsubmit = async e => {
-    e.preventDefault();
-    const input = $('#chatInput');
-    const message = input.value.trim();
-    if (!message) return;
-    input.value = '';
-    try { await api.post(`${base}/chat`, { message }); } catch (err) { toast(err.message); input.value = message; }
-  };
-  $('#btnRoll').onclick = async () => {
-    const expr = prompt('Roll dice (e.g. 2d6+3, d20, 3d8-1):', 'd20');
-    if (!expr) return;
-    try { await api.post(`${base}/chat`, { message: `/roll ${expr.trim().replace(/^\/?r(oll)?\s*/i, '')}` }); } catch (err) { toast(err.message); }
-  };
 
   // ---- History -----------------------------------------------------------------------------------------
   let historyFilter = null; // { entity, entityId } or null
@@ -3109,6 +3488,38 @@
   }
 
   // ---- Settings (GM) -----------------------------------------------------------------------
+  function showDiscordStatus(status) {
+    $('#discordWebhookStatus').textContent = !status.configured ? 'No webhook configured.'
+      : status.lastError ? `Webhook configured · last delivery failed: ${status.lastError}`
+        : status.lastSentAt ? `Webhook configured · last sent ${new Date(status.lastSentAt).toLocaleString()}` : 'Webhook configured · no messages sent yet.';
+    $('#btnDiscordTest').hidden = !status.configured;
+    $('#btnDiscordClear').hidden = !status.configured;
+  }
+  async function loadDiscordStatus() {
+    try { showDiscordStatus(await api.get(`${base}/discord-webhook`)); }
+    catch (err) { $('#discordWebhookStatus').textContent = err.message; }
+  }
+  $('#discordWebhookForm').onsubmit = async e => {
+    e.preventDefault();
+    const url = $('#discordWebhookUrl').value.trim();
+    if (!url) { toast('Paste a Discord webhook URL'); return; }
+    try {
+      const status = await api.put(`${base}/discord-webhook`, { url });
+      $('#discordWebhookUrl').value = '';
+      showDiscordStatus(status);
+      toast('Discord webhook saved');
+    } catch (err) { toast(err.message); }
+  };
+  $('#btnDiscordTest').onclick = async () => {
+    const button = $('#btnDiscordTest'); button.disabled = true;
+    try { showDiscordStatus(await api.post(`${base}/discord-webhook/test`, {})); toast('Test message sent to Discord'); }
+    catch (err) { toast(err.message); await loadDiscordStatus(); }
+    finally { button.disabled = false; }
+  };
+  $('#btnDiscordClear').onclick = async () => {
+    try { showDiscordStatus(await api.del(`${base}/discord-webhook`)); $('#discordWebhookUrl').value = ''; toast('Discord webhook removed'); }
+    catch (err) { toast(err.message); }
+  };
   /** Settings window pages (left nav): campaign pages, then one page per group of game rules. */
   function showSetPage(page) {
     if (!$(`#setNav [data-page="${page}"]`)) page = 'general';
@@ -3117,6 +3528,7 @@
     $$('.setpages section[data-page]').forEach(p => { p.hidden = p.dataset.page !== page; });
     $('#rulesSave').hidden = !page.startsWith('r-');
     $('#rulesOffHint').hidden = !page.startsWith('r-') || gameOn();
+    if (page === 'discord') loadDiscordStatus();
   }
   $$('#setNav [data-page]').forEach(b => b.onclick = () => showSetPage(b.dataset.page));
   function openSettings(page) {
@@ -3130,6 +3542,7 @@
     $('#setJoinCode').textContent = l.joinCode || '';
     const eb = l.settings?.earth?.borders;
     $('#mapInfo').textContent = l.mapKind === 'image' ? `Current map: uploaded image, ${l.mapWidth} × ${l.mapHeight} px`
+      : l.mapKind === 'azgaar' ? `Current map: ${l.settings.azgaar?.name || 'Azgaar'}, ${l.mapWidth} × ${l.mapHeight} px`
       : l.mapKind === 'earth' ? `Current map: Earth (${l.settings.earth.style}, ${l.mapWidth} × ${l.mapHeight} px${eb && eb !== 'none' ? `, borders of ${eb === 'modern' ? 'today' : eb}` : ''})` : 'No map yet.';
     fillEarthYears().then(() => {
       if (l.settings?.earth) {
@@ -3141,7 +3554,11 @@
         $('#earthGraticule').checked = !!e.showGraticule;
       }
     });
-    $('#btnDeleteLobby').hidden = !(l.ownerId === me.id || me.role === 'admin');
+    $('#btnDeleteLobby').hidden = !(l.ownerId === me.id || me.role === 'admin');   // the owner; a site admin as the site's moderator
+    $('#azgaarForm').hidden = l.mapKind === 'azgaar';
+    $('#azgaarImportHint').hidden = l.mapKind === 'azgaar';
+    $('#azgaarLockedHint').hidden = l.mapKind !== 'azgaar';
+    $('#otherMapForms').hidden = l.mapKind === 'azgaar';
     $('#importBordersBlock').hidden = l.mapKind !== 'earth';
     $('#settingsModal').classList.add('open');
   }
@@ -3181,6 +3598,26 @@
     } catch (err) { toast(err.message); }
     finally { btn.disabled = false; btn.textContent = 'Upload'; }
   };
+  $('#azgaarForm').onsubmit = async e => {
+    e.preventDefault();
+    const file = $('#azgaarFile').files[0];
+    if (!file) return;
+    const btn = e.target.querySelector('button'); btn.disabled = true; btn.textContent = 'Importing…';
+    try {
+      const fd = new FormData(); fd.append('file', file);
+      const d = await api.post(`${base}/map/azgaar`, fd);
+      state.lobby = d.lobby;
+      applyLobby();
+      await applyMap();
+      await loadFactions();
+      await loadProvinces();
+      await loadMarkers();
+      $('#azgaarFile').value = '';
+      openSettings('map');
+      toast(`Imported ${d.nations} nations and ${d.settlements} settlements`);
+    } catch (err) { toast(err.message); }
+    finally { btn.disabled = false; btn.textContent = 'Import JSON'; }
+  };
   let earthYearsLoaded = false;
   async function fillEarthYears() {
     if (earthYearsLoaded) return;
@@ -3211,7 +3648,7 @@
     try { const d = await api.post(`${base}/code`); state.lobby.joinCode = d.joinCode; applyLobby(); openSettings(); } catch (err) { toast(err.message); }
   };
   $('#btnDeleteLobby').onclick = async () => {
-    if (!confirm(`Delete "${state.lobby.name}" and every marker in it? This cannot be undone.`)) return;
+    if (!confirm(`Delete "${state.lobby.name}" for everyone, including its map, markers and campaign history? This cannot be undone.`)) return;
     try { await api.del(base); location.replace('/lobbies.html'); } catch (err) { toast(err.message); }
   };
   $('#btnLeave').onclick = async () => {
@@ -3249,21 +3686,31 @@
 
   // ---- Toolbar / tabs / keys -----------------------------------------------------------------
   // Main menu rail (docs/UI.md): each button opens its panel over the map; the same button (or ×, or Esc) closes it.
+  // [icon (its cell in assets/tabs.png, as on the rail), title]
   const PANELS = {
-    nation: ['🏛', 'Nation'], production: ['🏭', 'Production'], diplomacy: ['🤝', 'Diplomacy'], markers: ['🗺', 'Map'],
-    add: ['➕', 'Place tokens'], members: ['👥', 'People'], log: ['📜', 'Log'], history: ['🕘', 'History'], game: ['👑', 'Game master'],
+    nation: [0, 'Nation'], production: [1, 'Production'], diplomacy: [3, 'Diplomacy'], journal: [3, 'Campaign journal'], government: [6, 'Government'], news: [7, 'Campaign news'], markers: [4, 'Map'],
+    add: [5, 'Place tokens'], members: [6, 'People'], log: [7, 'Log'], history: [8, 'History'], game: [9, 'Game master'],
   };
   function showPanel(tab) {
     state.panel = tab && PANELS[tab] ? tab : null;
     $('#sidebar').hidden = !state.panel;
     $('#app').classList.toggle('panel-open', !!state.panel);
-    $$('#rail [data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === state.panel));
+    $$('#rail [data-tab]').forEach(b => {
+      const selected = b.dataset.tab === state.panel;
+      b.classList.toggle('on', selected);
+      b.setAttribute('aria-pressed', String(selected));
+    });
     if (!state.panel) return;
     $$('#sidebar .panel').forEach(p => p.classList.toggle('active', p.dataset.panel === state.panel));
-    $('#panelIcon').textContent = PANELS[state.panel][0];
+    $('#panelIcon').style.setProperty('--n', PANELS[state.panel][0]);
+    $('#panelIcon').className = ['journal', 'government', 'news'].includes(state.panel) ? `story-art story-art--${state.panel}` : 'ti';
+    $('#panelIcon').setAttribute('aria-hidden', 'true');
     $('#panelTitle').textContent = PANELS[state.panel][1];
     if (state.panel === 'log') { const el = $('#logList'); el.scrollTop = el.scrollHeight; }
     if (state.panel === 'markers' && listsStale) renderMarkerListsNow();
+    if (state.panel === 'journal') Journal.load();
+    if (state.panel === 'government') Government.load();
+    if (state.panel === 'news') News.open();
   }
   /** A panel whose rail button was just hidden (game mode off, role changed) closes. */
   function syncRail() {
@@ -3275,7 +3722,7 @@
   // The nation bar opens the Nation panel; the Diplomacy panel's trade button opens the trade dialog.
   document.addEventListener('click', e => {
     if (e.target.closest('#nbRes [data-nb]')) { if (state.panel !== 'nation') showPanel('nation'); return; }
-    if (e.target.closest('[data-opentrade]')) $('#notifTrade').click();
+    if (e.target.closest('[data-opentrade]')) Comms.openTrade();
   });
   // The map fills whatever space is left: keep the renderer the size of the stage.
   new ResizeObserver(() => renderer.app.resize()).observe($('#stage'));
@@ -3292,7 +3739,7 @@
   $('#btnDrawRail').onclick = () => (renderer.mode === 'draw' && renderer.draw.kind === 'rail') ? renderer.cancelMode() : renderer.startDraw('rail');
   $('#btnModeUndo').onclick = () => renderer.modeUndo();
   $('#btnModeClear').onclick = () => renderer.modeClear();
-  $('#btnModeDone').onclick = () => { if (!renderer.finishDraw()) toast('Add more points first'); };
+    $('#btnModeDone').onclick = () => { if (state.placing?.treatyPicker) { state.placing.treatyPicker.done = true; disarmPlacing(); return; } if (!renderer.finishDraw()) toast('Add more points first'); };
   $('#btnModeCancel').onclick = () => { if (renderer.mode) renderer.cancelMode(); else disarmPlacing(); };
   $('#searchInput').oninput = renderMarkerLists;
 
@@ -3343,7 +3790,11 @@
   try {
     await loadLobby();
     await loadFactions();
-    GameUI.init({ state, renderer, base, $, $$, flagImg, openPanel, loadMarkers, corpsHtml, loadTerritories, loadProvinces, removeBorderDrawings, armBrush, armFactory, notify, renderReady, onRail: syncRail, onLayout: () => renderer.app.resize(), isGm: () => state.role === 'gm' });
+    Journal.init({ state, me, base });
+    Government.init({ state, me, base });
+    News.init({ state, me, base });
+    TreatiesUI.init({ state, renderer, base, armTreatyPicker, isGm: () => state.role === 'gm' });
+    GameUI.init({ state, renderer, base, $, $$, flagImg, openPanel, loadMarkers, corpsHtml, loadTerritories, loadProvinces, removeBorderDrawings, armBrush, armFactory, armEmplacement, notify, renderReady, onRail: syncRail, onLayout: () => renderer.app.resize(), isGm: () => state.role === 'gm' });
     await GameUI.load().catch(err => console.warn('game state', err));
     syncRailButton();
     await loadTerritories();
@@ -3356,14 +3807,14 @@
     syncTrails();
     loadCorps();
     loadReachBonus();
-    if (isEarth() && window.Reach) Reach.loadMask(`${base}/landmask`).then(() => { reachChanged(); });
+    if ((isEarth() || state.lobby?.mapKind === 'azgaar') && window.Reach) Reach.loadMask(`${base}/landmask`).then(() => { reachChanged(); });
     await Comms.init({ state, me, base, renderer, notify, GameUI });
     loadPings();
     loadBattles();
     connectWs();
     if (state.viewAs) toast(`Viewing as ${state.viewAs.name}: you see what its player sees and have only their powers. 👁 to switch back.`, 6000);
   } catch (err) {
-    if (err.status === 403 || err.status === 404) { alert(err.message); location.replace('/lobbies.html'); }
+    if (err.status === 403 || err.status === 404 || err.status === 423) { alert(err.message); location.replace('/lobbies.html'); }
     else toast(err.message);
   }
 })();

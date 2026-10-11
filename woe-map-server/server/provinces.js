@@ -208,7 +208,8 @@ function settleStrays(lobbyId) {
 const cache = new Map();   // lobbyId -> { list, byId, grid, build, owners }
 let builds = 0;
 function serialize(row) {
-  return { id: row.id, name: row.name, state: row.state, subject: row.subject, year: row.year || 1914, cx: row.cx, cy: row.cy, factionId: row.faction_id, geometry: access.safeJson(row.geometry) || [] };
+  return { id: row.id, name: row.name, state: row.state, subject: row.subject, biomeColor: row.biome_color,
+    year: row.year || 1914, cx: row.cx, cy: row.cy, factionId: row.faction_id, geometry: access.safeJson(row.geometry) || [] };
 }
 const GRID = 32;   // map px per index cell (provinces are ~20 px across on the default Earth map)
 /**

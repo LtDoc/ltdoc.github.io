@@ -4,6 +4,8 @@
  *   - replenish: a worn unit takes on replacements (manpower and money) in friendly territory, away from the enemy;
  *   - dive / surface: submarines run submerged, seen only by destroyers close by, and surface to attack;
  *   - dig: engineers dig a planned trench (or reinforce a dug one) a section a turn, finished at End turn (processDigs);
+ *   - railbuild: engineers, pioneers and railway troops lay a section of a planned railway a turn, for iron and timber
+ *     (processDigs too);
  *   - demolish: sappers blow up a section of an enemy trench (a roll, in the battle phase);
  *   - wreck: sappers knock a resource node's works down a level: their own side's (scorched earth, certain) or an
  *     enemy's (a raid, a roll), in the battle phase;
@@ -27,6 +29,7 @@ const GameData = require('../../public/js/game-data');
 const UnitTypes = require('../../public/js/units');
 
 const DIGGERS = new Set(['engineers', 'pioneers']);
+const RAIL_BUILDERS = new Set(['engineers', 'pioneers', 'railway']);
 const norm = s => String(s || '').trim().toLowerCase();
 const typeOf = m => UnitTypes.resolve(m?.data?.unitType);
 
@@ -103,13 +106,15 @@ module.exports = function orderRoutes(h) {
     if (!gm) {
       if (t?.cat === 'Naval') {
         const km = num(s.supplyTownKm, 30);
-        if (!markers.some(m => m.type === 'town' && friends.has(norm(m.data?.nation)) && geo.distance(req.lobby, unit.x, unit.y, m.x, m.y) <= km)) return res.status(409).json({ error: `${unit.name} must be in a friendly port (within ${km} ${u} of a friendly town)` });
+        const ports = supply.friendsResolver(req.lobby, 'ports')(d.nation);
+        if (!markers.some(m => m.type === 'town' && ports.has(norm(m.data?.nation)) && geo.distance(req.lobby, unit.x, unit.y, m.x, m.y) <= km)) return res.status(409).json({ error: `${unit.name} must be in a friendly port (within ${km} ${u} of a friendly town)` });
       } else {
         const lookup = territory.ownerLookup(req.lobby);
         if (lookup) {
           const owner = lookup(unit.x, unit.y);
           const f = owner ? game.q.faction.get(owner, req.lobby.id) : null;
-          if (!f || !friends.has(norm(f.name))) return res.status(409).json({ error: `${unit.name} must stand in its own or allied territory` });
+          const permitted = f && require('../treaties').permission(req.lobby.id, factionNamed(req, d.nation)?.id, f.id, t?.cat === 'Air' ? 'airfields' : 'supply');
+          if (!f || !friends.has(norm(f.name)) && !permitted) return res.status(409).json({ error: `${unit.name} needs friendly territory or the appropriate access agreement to refit here` });
         }
       }
       // Engagement distance: an enemy (at war) unit its side can see. Units hidden from it do not count.
@@ -181,10 +186,52 @@ module.exports = function orderRoutes(h) {
     const friends = supply.friendsResolver(req.lobby)(unit.data?.nation), km = num(s.trenchDigKm, 20);
     const t = nearestTrench(req, unit, mode === 'dig' ? 'plan' : 'dug', km, sh => workable(friends, sh) && access.canSee(sh, viewerOf(req)));
     if (!t) return res.status(409).json({ error: mode === 'dig' ? `No planned trench within ${km} ${u} of ${unit.name}: draw one with the trench tool (⌇) first` : `No dug trench of your side within ${km} ${u} of ${unit.name}` });
+    const build = heroRules.effects(req.lobby, s, markersOf(req), unit).build;
     const after = writeMarker(req, unit, { data: { dig: { mode, turn: g.turn } } });
-    const timber = num(mode === 'dig' ? s.trenchDigTimber : s.trenchReinforceTimber, 4);
-    res.json({ marker: after, message: `${unit.name} will ${mode === 'dig' ? 'dig' : 'reinforce'} ${num(s.trenchSectionKm, 10)} ${u} of ${t.shape.label || 'the trench'} at End turn (${timber} timber), if it is still within ${km} ${u} of it` });
+    const timber = num(mode === 'dig' ? s.trenchDigTimber : s.trenchReinforceTimber, 4) * build;
+    res.json({ marker: after, message: `${unit.name} will ${mode === 'dig' ? 'dig' : 'reinforce'} ${num(s.trenchSectionKm, 10) * build} ${u} of ${t.shape.label || 'the trench'} at End turn (${timber} timber), if it is still within ${km} ${u} of it` });
   });
+  // ---- Railways: engineers and railway troops build planned lines ----------------------------------------------------
+  /** The planned railway of the unit's side nearest it within km: { shape, dist } or null. */
+  function nearestRailPlan(req, unit, km, friends) {
+    let best = null;
+    for (const row of db.prepare("SELECT * FROM shapes WHERE lobby_id = ? AND kind = 'rail'").all(req.lobby.id)) {
+      const s = access.serializeShape(row);
+      if (s.data?.state !== 'plan' || (s.data?.nation && !friends.has(norm(s.data.nation)))) continue;
+      const d = trenches.distanceTo(req.lobby, s.points, unit.x, unit.y);
+      if (d <= km && (!best || d < best.dist)) best = { shape: s, dist: d };
+    }
+    return best;
+  }
+  /** Order an engineer, pioneer or railway troops unit to lay the next section of the planned railway nearest it. */
+  router.post('/units/:mid/railbuild', (req, res) => {
+    const unit = loadUnit(req, res);
+    if (!unit) return;
+    const g = game.get(req.lobby.id), s = g.settings, u = units(req);
+    if (!g.enabled) return res.status(400).json({ error: 'Building railways needs game mode: outside it, draw the line' });
+    if (!RAIL_BUILDERS.has(typeOf(unit)?.id)) return res.status(400).json({ error: 'Only engineers, pioneers and railway troops lay track' });
+    if (num(unit.data?.strength, 100) <= 0 || unit.data?.aboard) return res.status(409).json({ error: `${unit.name} cannot build now` });
+    const km = num(s.trenchDigKm, 20), friends = supply.friendsResolver(req.lobby)(unit.data?.nation);
+    const t = nearestRailPlan(req, unit, km, friends);
+    if (!t) return res.status(409).json({ error: `No planned railway of your side within ${km} ${u} of ${unit.name}: plan one with the railway tool first` });
+    const build = heroRules.effects(req.lobby, s, markersOf(req), unit).build;
+    const after = writeMarker(req, unit, { data: { dig: { mode: 'rail', turn: g.turn } } });
+    res.json({ marker: after, message: `${unit.name} will lay ${num(s.railBuildKm, 15) * build} ${u} of ${t.shape.label || 'the planned railway'} at End turn (${num(s.railBuildIron, 5) * build} iron, ${num(s.railBuildTimber, 5) * build} timber), if it is still within ${km} ${u} of it` });
+  });
+  /**
+   * Lay the section of a planned railway nearest (x, y): it becomes track (a rail drawing of its own, whose ends meet the
+   * track already laid, so the network joins it up), and what is left stays planned. Returns { built, length }.
+   */
+  function buildRailSection(req, shape, x, y, km) {
+    const sec = trenches.section(req.lobby, shape.points, x, y, km);
+    const { before, section, after } = sec.pieces;
+    const plan = { ...(shape.data || {}), cuts: [], state: 'plan' };
+    if (before) { reshapeShape(req, shape, before, plan); if (after) createShape(req, { kind: 'rail', label: shape.label, color: shape.color, width: shape.width, adminOnly: shape.adminOnly, visibleTo: shape.visibleTo, createdBy: shape.createdBy, points: after, data: plan }); }
+    else if (after) reshapeShape(req, shape, after, plan);
+    else removeShape(req, shape);
+    const built = createShape(req, { kind: 'rail', label: shape.label, color: shape.color, width: shape.width, adminOnly: shape.adminOnly, visibleTo: shape.visibleTo, createdBy: shape.createdBy, points: section, data: { cuts: [] } });
+    return { built, length: sec.s1 - sec.s0 };
+  }
   router.delete('/units/:mid/dig', (req, res) => {
     const unit = loadUnit(req, res);
     if (!unit) return;
@@ -229,21 +276,43 @@ module.exports = function orderRoutes(h) {
     if (!g.enabled) return [];
     const out = [], friendsOf = supply.friendsResolver(req.lobby), km = num(s.trenchDigKm, 20), sectionKm = num(s.trenchSectionKm, 10);
     const markers = markersOf(req);
-    for (const unit of markers.filter(m => m.type === 'unit' && m.data?.dig && DIGGERS.has(typeOf(m)?.id))) {
+    for (const unit of markers.filter(m => m.type === 'unit' && m.data?.dig && (DIGGERS.has(typeOf(m)?.id) || (m.data.dig.mode === 'rail' && RAIL_BUILDERS.has(typeOf(m)?.id))))) {
       const mode = unit.data.dig.mode, nation = unit.data?.nation || '';
+      const build = heroRules.effects(req.lobby, s, markers, unit).build;
+      if (mode === 'rail') {
+        const fail = why => { out.push(sideLog(req, [nation], `🛤 ${unit.name} could not lay track: ${why}`)); };
+        if (num(unit.data?.strength, 100) <= 0 || unit.data?.aboard) { fail('it is out of action'); continue; }
+        if (require('../supply').exhausted(unit) && s.supplyEnabled !== false) { fail('it is out of supply'); continue; }
+        const t = nearestRailPlan(req, unit, km, friendsOf(nation));
+        if (!t) { fail(`no planned railway of its side within ${km} ${u}`); continue; }
+        const f = factionNamed(req, nation), iron = num(s.railBuildIron, 5) * build, timber = num(s.railBuildTimber, 5) * build;
+        let state = null;
+        if (f && (iron > 0 || timber > 0)) {
+          state = game.serializeState(game.q.state.get(f.id) || game.ensureState(req.lobby.id, f.id, s));
+          if (num(state.resources.iron) < iron || num(state.resources.timber) < timber) { fail(`${f.name} is short of iron or timber (needs ${iron} iron, ${timber} timber)`); continue; }
+        }
+        const r = buildRailSection(req, t.shape, unit.x, unit.y, num(s.railBuildKm, 15) * build);
+        if (state) {
+          state.resources.iron = Math.round((num(state.resources.iron) - iron) * 10) / 10;
+          state.resources.timber = Math.round((num(state.resources.timber) - timber) * 10) / 10;
+          game.writeState(state); pushFaction(req, g, f);
+        }
+        out.push(sideLog(req, [nation], `🛤 ${unit.name} laid ${Math.round(r.length)} ${u} of ${t.shape.label || 'railway'} ${placeName(markers, req.lobby, unit.x, unit.y)} (${iron} iron, ${timber} timber)`));
+        continue;
+      }
       const fail = why => { out.push(sideLog(req, [nation], `🛠 ${unit.name} could not ${mode === 'dig' ? 'dig' : 'reinforce'} its trench: ${why}`)); };
       if (num(unit.data?.strength, 100) <= 0 || unit.data?.aboard) { fail('it is out of action'); continue; }
       if (require('../supply').exhausted(unit) && s.supplyEnabled !== false) { fail('it is out of supply'); continue; }
       const t = nearestTrench(req, unit, mode === 'dig' ? 'plan' : 'dug', km, sh => workable(friendsOf(nation), sh));
       if (!t) { fail(`no ${mode === 'dig' ? 'planned' : 'dug'} trench of its side within ${km} ${u}`); continue; }
       const f = factionNamed(req, nation);
-      const timber = num(mode === 'dig' ? s.trenchDigTimber : s.trenchReinforceTimber, 4);
+      const timber = num(mode === 'dig' ? s.trenchDigTimber : s.trenchReinforceTimber, 4) * build;
       let state = null;
       if (f && timber > 0) {
         state = game.serializeState(game.q.state.get(f.id) || game.ensureState(req.lobby.id, f.id, s));
         if (num(state.resources.timber) < timber) { fail(`${f.name} is short of timber (needs ${timber})`); continue; }
       }
-      const r = cutSection(req, t.shape, unit.x, unit.y, sectionKm, mode === 'dig' ? 'dug' : 'reinforced');
+      const r = cutSection(req, t.shape, unit.x, unit.y, sectionKm * build, mode === 'dig' ? 'dug' : 'reinforced');
       if (state) { state.resources.timber = Math.round((num(state.resources.timber) - timber) * 10) / 10; game.writeState(state); pushFaction(req, g, f); }
       out.push(sideLog(req, [nation], `🛠 ${unit.name} ${mode === 'dig' ? 'dug' : 'reinforced'} ${Math.round(r.length)} ${u} of ${t.shape.label || 'trench'} ${placeName(markers, req.lobby, unit.x, unit.y)}${timber ? ` (${timber} timber)` : ''}`));
     }
@@ -269,8 +338,9 @@ module.exports = function orderRoutes(h) {
     const sh = target.shape, holder = sh.data.nation;
     const markers = markersOf(req);
     const fx = game.factionEffects(req.lobby.id, nation);
-    const bonus = research.statBonus(fx, typeOf(unit)).attack, gen = heroRules.generalFor(req.lobby, s, markers, unit), worn = g.enabled ? game.wornPenalty(s, unit) : 0;
-    const atk = num(unit.data?.attack) + bonus + (gen ? gen.bonus : 0) - worn;
+    const traits = heroRules.effects(req.lobby, s, markers, unit, { enemyEntrenched: !!target.shape });
+    const bonus = research.statBonus(fx, typeOf(unit)).attack, gen = heroRules.generalFor(req.lobby, s, markers, unit), worn = g.enabled ? Math.max(0, game.wornPenalty(s, unit) - traits.worn) : 0;
+    const atk = num(unit.data?.attack) + bonus + (gen ? gen.bonus : 0) + traits.attack - worn;
     const at = trenches.section(req.lobby, sh.points, unit.x, unit.y, num(s.trenchSectionKm, 10));
     const mid = at.pieces.section[Math.floor(at.pieces.section.length / 2)];
     const guardSide = supply.friendsResolver(req.lobby)(holder);
@@ -283,7 +353,7 @@ module.exports = function orderRoutes(h) {
     if (g.enabled) writeMarker(req, unit, { data: { apUsed: num(unit.data?.apUsed) + 1, attacked: true, ...(unit.data?.submerged ? { submerged: false } : {}) } });
     let length = 0;
     if (success) length = cutSection(req, sh, unit.x, unit.y, num(s.trenchSectionKm, 10), null).length;
-    const notes = [bonus ? `+${bonus} tech` : '', gen ? `+${gen.bonus} ${gen.hero.name}` : '', worn ? `−${worn} worn` : '', `+${cover} ${trenchState(sh)} works`, guard ? `guarded by ${guard.name}` : ''].filter(Boolean);
+    const notes = [bonus ? `+${bonus} tech` : '', gen ? `+${gen.bonus} ${gen.hero.name}` : '', traits.attack ? `+${traits.attack} traits (${traits.notes.filter(n => n.fields.attack).map(n => n.name).join(', ')})` : '', worn ? `−${worn} worn` : '', `+${cover} ${trenchState(sh)} works`, guard ? `guarded by ${guard.name}` : ''].filter(Boolean);
     const msg = `💥 ${unit.name} attacked ${sh.label || `${holder}'s trench`} ${placeName(markers, req.lobby, mid[0], mid[1])}: ${aRoll}+${atk}=${aRoll + atk} vs ${dRoll}+${def}=${dRoll + def} (${notes.join(', ')}) → ` +
       (success ? `${Math.round(length)} ${u} of trench blown in` : 'the works hold');
     const fog = vision.on(req.lobby.id);
@@ -319,15 +389,16 @@ module.exports = function orderRoutes(h) {
     let success = true, roll = '';
     if (!own) {
       const fx = game.factionEffects(req.lobby.id, nation);
-      const bonus = research.statBonus(fx, typeOf(unit)).attack, gen = heroRules.generalFor(req.lobby, s, markers, unit), worn = g.enabled ? game.wornPenalty(s, unit) : 0;
-      const atk = num(unit.data?.attack) + bonus + (gen ? gen.bonus : 0) - worn;
+      const traits = heroRules.effects(req.lobby, s, markers, unit);
+      const bonus = research.statBonus(fx, typeOf(unit)).attack, gen = heroRules.generalFor(req.lobby, s, markers, unit), worn = g.enabled ? Math.max(0, game.wornPenalty(s, unit) - traits.worn) : 0;
+      const atk = num(unit.data?.attack) + bonus + (gen ? gen.bonus : 0) + traits.attack - worn;
       const guardSide = supply.friendsResolver(req.lobby)(holder);
       const guard = markers.filter(m => territory.isLandUnit(m) && num(m.data?.strength, 100) > 0 && guardSide.has(norm(m.data?.nation)) &&
         geo.distance(req.lobby, m.x, m.y, target.x, target.y) <= km).sort((a, b) => num(b.data?.defend) - num(a.data?.defend))[0] || null;
       const def = num(s.trenchDemolishDefence, 2) + (guard ? num(guard.data?.defend) - (g.enabled ? game.wornPenalty(s, guard) : 0) : 0);
       const aRoll = crypto.randomInt(1, 21), dRoll = crypto.randomInt(1, 21);
       success = aRoll + atk > dRoll + def;
-      const notes = [bonus ? `+${bonus} tech` : '', gen ? `+${gen.bonus} ${gen.hero.name}` : '', worn ? `−${worn} worn` : '', guard ? `guarded by ${guard.name}` : 'unguarded'].filter(Boolean);
+      const notes = [bonus ? `+${bonus} tech` : '', gen ? `+${gen.bonus} ${gen.hero.name}` : '', traits.attack ? `+${traits.attack} traits (${traits.notes.filter(n => n.fields.attack).map(n => n.name).join(', ')})` : '', worn ? `−${worn} worn` : '', guard ? `guarded by ${guard.name}` : 'unguarded'].filter(Boolean);
       roll = `: ${aRoll}+${atk}=${aRoll + atk} vs ${dRoll}+${def}=${dRoll + def} (${notes.join(', ')})`;
     }
     if (g.enabled) writeMarker(req, unit, { data: { apUsed: num(unit.data?.apUsed) + 1, attacked: true, ...(unit.data?.submerged ? { submerged: false } : {}) } });

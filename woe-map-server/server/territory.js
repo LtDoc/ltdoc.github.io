@@ -17,6 +17,14 @@ const access = require('./lobbyAccess');
 const geo = require('./geo');
 const UnitTypes = require('../public/js/units');
 const Powers = require('../public/js/powers');
+const azgaarMemo = new WeakMap();
+function isAzgaar(lobby) {
+  const hit = azgaarMemo.get(lobby);
+  if (hit && hit.settings === lobby.settings) return hit.value;
+  const value = !!access.safeJson(lobby.settings).azgaar;
+  azgaarMemo.set(lobby, { settings: lobby.settings, value });
+  return value;
+}
 
 const q = {
   all: db.prepare('SELECT * FROM territories WHERE lobby_id = ?'),
@@ -194,6 +202,7 @@ function circle(lobby, x, y, km, n = 28) {
 
 /** Is a map point on land (Earth map)? Image maps are all land. */
 function isLand(lobby, x, y) {
+  if (isAzgaar(lobby)) return !!require('./provinces').at(lobby.id, x, y);
   if (!geo.isEarth(lobby)) return true;
   for (const l of landFor(lobby)) {
     const b = l.bbox;
@@ -205,6 +214,7 @@ function isLand(lobby, x, y) {
 const coastMemo = new Map();   // "W×H|x|y|km" -> bool: the land never changes, and places are asked about again and again
 /** Coastal test: any point on a circle of `km` around (x, y) is sea. */
 function isCoastal(lobby, x, y, km = 30) {
+  if (isAzgaar(lobby)) return circle(lobby, x, y, km, 24)[0][0].some(p => !isLand(lobby, p[0], p[1]));
   if (!geo.isEarth(lobby)) return true;
   const key = `${lobby.map_width}x${lobby.map_height}|${x}|${y}|${km}`;
   if (coastMemo.has(key)) return coastMemo.get(key);
@@ -222,14 +232,16 @@ const MASK_CELL = 2;   // map px per cell (about 10 km on the Earth map)
  * Returns { W, H, cell, data } with data[i] = 1 on land, or null for image maps (which have no sea).
  */
 function landMask(lobby) {
-  if (!geo.isEarth(lobby)) return null;
-  const key = `mask:${lobby.map_width}x${lobby.map_height}`;
+  const azgaar = isAzgaar(lobby);
+  if (!azgaar && !geo.isEarth(lobby)) return null;
+  const key = `mask:${azgaar ? lobby.id + ':' : ''}${lobby.map_width}x${lobby.map_height}`;
   if (cache.has(key)) return cache.get(key);
   const W = Math.ceil(lobby.map_width / MASK_CELL), H = Math.ceil(lobby.map_height / MASK_CELL);
   const data = new Uint8Array(W * H);
   // Bucket every edge by the rows it crosses, then fill between crossings row by row.
   const rows = Array.from({ length: H }, () => []);
-  for (const l of landFor(lobby)) for (const ring of l.poly) {
+  const polygons = azgaar ? require('./provinces').list(lobby.id).flatMap(p => p.geometry) : landFor(lobby).map(l => l.poly);
+  for (const poly of polygons) for (const ring of poly) {
     for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
       const [x1, y1] = ring[j], [x2, y2] = ring[i];
       if (y1 === y2) continue;
@@ -261,7 +273,7 @@ function landMask(lobby) {
 function landMaskRuns(lobby) {
   const m = landMask(lobby);
   if (!m) return null;
-  const key = `maskruns:${lobby.map_width}x${lobby.map_height}`;
+  const key = `maskruns:${isAzgaar(lobby) ? lobby.id + ':' : ''}${lobby.map_width}x${lobby.map_height}`;
   if (cache.has(key)) return cache.get(key);
   const rows = [];
   let total = 12;
@@ -531,7 +543,7 @@ function brush(lobby, factionId, x, y, km) {
 }
 
 /**
- * Markers that follow territory ownership: resource nodes, factories and towns take the faction that owns
+ * Markers that follow territory ownership: resource nodes, factories, towns and capturable emplacements take the faction that owns
  * the ground under them. Returns [{ marker, nation }] for the ones whose nation should change.
  */
 function ownershipChanges(lookup, factions, markers, lobby) {
@@ -539,10 +551,10 @@ function ownershipChanges(lookup, factions, markers, lobby) {
   const out = [];
   if (!lookup) return out;
   for (const m of markers) {
-    if (!['resource', 'factory', 'town'].includes(m.type)) continue;
+    if (!['resource', 'factory', 'town'].includes(m.type) && !isCapturableEmplacement(m)) continue;
     let owner = lookup(m.x, m.y);
     // A port a little offshore on the coastline data takes the owner of the nearest province.
-    if (owner === null && lobby && provinces().has(lobby.id)) owner = provinces().nearestOwner(lobby, m.x, m.y);
+    if (owner === null && m.type !== 'unit' && lobby && provinces().has(lobby.id)) owner = provinces().nearestOwner(lobby, m.x, m.y);
     if (owner === null) continue;                       // sea or unclaimed: leave as is
     const nation = owner === NEUTRAL ? '' : (byId.get(owner)?.name || '');
     if (String(m.data?.nation || '').toLowerCase() !== nation.toLowerCase()) out.push({ marker: m, nation });
@@ -608,6 +620,10 @@ function trenchCover(lobby, settings, unit, shapes) {
 }
 
 const LAND_CATEGORIES = new Set(['Infantry', 'Mounted & mobile', 'Artillery', 'Emplacements', 'Support']);
+const CAPTURABLE_EMPLACEMENTS = new Set(['coastal', 'mgbunker', 'aaemplacement']);
+function isCapturableEmplacement(m) {
+  return m.type === 'unit' && CAPTURABLE_EMPLACEMENTS.has(UnitTypes.resolve(m.data?.unitType)?.id);
+}
 function isLandUnit(m) {
   if (m.type !== 'unit' || m.data?.aboard) return false;   // aboard a convoy: at sea, not holding or taking ground
   const t = UnitTypes.resolve(m.data?.unitType);
@@ -622,7 +638,7 @@ function isLandUnit(m) {
  * defender in it stays with its owner until the defenders are beaten. Landing in one, the front holds.
  */
 function capture(lobby, g, unit, factions, markers, relation) {
-  if (!g.enabled || !isLandUnit(unit) || Number(unit.data?.strength ?? 100) <= 0) return null;
+  if (!g.enabled || isCapturableEmplacement(unit) || !isLandUnit(unit) || Number(unit.data?.strength ?? 100) <= 0) return null;
   const mine = factions.find(f => f.name.toLowerCase() === String(unit.data?.nation || '').toLowerCase());
   if (!mine) return null;
   const lookup = ownerLookup(lobby);
@@ -637,7 +653,7 @@ function capture(lobby, g, unit, factions, markers, relation) {
   const ownerName = owner === NEUTRAL ? '' : (factions.find(f => f.id === owner)?.name || '').toLowerCase();
   // Defenders: living land units of the ground's owner, or of anyone at war with the mover (the owner's allies in the war).
   const isDefender = m => {
-    if (m.id === unit.id || !isLandUnit(m) || Number(m.data?.strength ?? 100) <= 0 || m.data?.surrendered) return false;
+    if (m.id === unit.id || isCapturableEmplacement(m) || !isLandUnit(m) || Number(m.data?.strength ?? 100) <= 0 || m.data?.surrendered) return false;
     const n = String(m.data?.nation || '').toLowerCase();
     if (!n || n === mine.name.toLowerCase()) return false;
     if (ownerName && n === ownerName) return true;
@@ -683,4 +699,4 @@ function capture(lobby, g, unit, factions, markers, relation) {
 }
 
 module.exports = { assignHistory, historyNames, landMask, landMaskRuns, landAt, nearWater, shipCourseError, landCourseError, nearestWater, nearestLand, NEUTRAL, all, write, clear, carve, circle, landClip, ownerAt, seedFromYear, assignArea, brush, ownershipChanges, capture, isLandUnit, earthYears, clean,
-  trenchOwner, trenchOwnershipChanges, trenchCover, distanceToPath, isLand, isCoastal, landFor, lakesFor, loadGz, world, bboxOf, pointInMulti, overlaps, ownerLookup, ownershipKey };
+  isCapturableEmplacement, trenchOwner, trenchOwnershipChanges, trenchCover, distanceToPath, isLand, isCoastal, landFor, lakesFor, loadGz, world, bboxOf, pointInMulti, overlaps, ownerLookup, ownershipKey };

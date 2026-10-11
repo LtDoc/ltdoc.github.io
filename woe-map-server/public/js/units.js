@@ -2,7 +2,7 @@
 /* global PIXI */
 
 /**
- * Default unit catalogue (WW1 era) and the procedural NATO-style symbols drawn on unit counters.
+ * Unit pack catalogues and the procedural symbols drawn on unit counters.
  * Each symbol is drawn in white inside the counter's inner box; the counter background is the nation colour.
  * `mod` is a small tag drawn in the corner to tell similar units apart (e.g. heavy vs field artillery).
  */
@@ -129,8 +129,9 @@ const UnitTypes = (() => {
   };
 
   // ---- Catalogue -----------------------------------------------------------------------------
-  // `stats` are the default [attack, defend, action points, range, movement] filled into the form when a
-  // type is picked. Attack and defend are d20 modifiers (combat rolls d20 + attack vs d20 + defend):
+  // `stats` begin with [attack, defend, action points, range, movement]; armour class and penetration
+  // are appended below. These defaults fill the form when a type is picked. Penetration must meet or
+  // exceed the target's armour class to cause losses. Attack and defend are d20 modifiers:
   //   0-1 very weak · 2-3 weak · 4-5 mid · 6-7 strong · 8-9 very strong · 10 extreme.
   // Range and movement are in map tiles/hexes per turn on a loose relative scale (infantry moves 2).
   const LIST = [
@@ -201,6 +202,20 @@ const UnitTypes = (() => {
     { id: 'transport', name: 'Transports / convoy', cat: 'Naval', symbol: 'transport', stats: [0, 1, 1, 0, 5] },
     { id: 'seaplanecarrier', name: 'Seaplane carrier', cat: 'Naval', symbol: 'transport', mod: 'AV', stats: [2, 2, 1, 4, 5] },
   ];
+  // Unarmoured troops have AC 0 and small-arms penetration 1. Keep the first five catalogue slots
+  // stable so older campaign overrides continue to apply when the two new slots are absent.
+  const ARMOUR = {
+    armouredcar: [2, 3], tank: [5, 5], armouredtrain: [4, 5],
+    fieldartillery: [0, 4], horseartillery: [0, 3], heavyartillery: [0, 7],
+    siegeartillery: [0, 8], railwaygun: [0, 9], mortar: [0, 3], antiaircraft: [0, 2],
+    coastal: [7, 10], fortress: [6, 8], mgbunker: [5, 2], aaemplacement: [4, 3],
+    fighter: [1, 2], bomber: [1, 5], reconair: [1, 1], seaplane: [1, 2], airship: [1, 5],
+    dreadnought: [10, 10], predreadnought: [8, 8], battlecruiser: [7, 9],
+    armouredcruiser: [7, 7], lightcruiser: [5, 6], destroyer: [3, 5],
+    torpedoboat: [2, 8], submarine: [3, 9], minelayer: [2, 2], gunboat: [3, 4],
+    transport: [2, 0], seaplanecarrier: [3, 2],
+  };
+  for (const t of LIST) t.stats.push(...(ARMOUR[t.id] || [0, 1]));
   // Formation name each type gives to quick-added units: "1st Infantry Regiment", "2nd Assault Regiment"…
   const FORMATIONS = {
     infantry: 'Infantry Regiment', stormtroopers: 'Assault Regiment', mountain: 'Mountain Regiment', marines: 'Marine Regiment',
@@ -221,12 +236,10 @@ const UnitTypes = (() => {
     minelayer: 'Minelayer', gunboat: 'Gunboat', transport: 'Transport Convoy', seaplanecarrier: 'Seaplane Carrier',
   };
   for (const t of LIST) t.unit = FORMATIONS[t.id] || t.name;
-  const byId = new Map(LIST.map(t => [t.id, t]));
-  const byName = new Map(LIST.map(t => [t.name.toLowerCase(), t]));
-  const STAT_KEYS = ['attack', 'defend', 'ap', 'range', 'movement'];
+  const STAT_KEYS = ['attack', 'defend', 'ap', 'range', 'movement', 'armourClass', 'penetration'];
 
   /**
-   * Stats array for a type after applying a campaign's overrides ({ typeId: [a, d, ap, r, m] }).
+   * Stats array for a type after applying a campaign's overrides ({ typeId: [a, d, ap, r, m, ac, pen] }).
    * Missing or malformed override entries fall back to the catalogue value for that slot.
    */
   function statsFor(t, overrides) {
@@ -234,18 +247,18 @@ const UnitTypes = (() => {
     const o = overrides && overrides[t.id];
     return t.stats.map((v, i) => (Array.isArray(o) && Number.isFinite(Number(o[i])) ? Number(o[i]) : v));
   }
-  /** Default stats for a type (by object, id, name or free text) as {attack, defend, ap, range, movement}; null when nothing matches. */
+  /** Default stats for a type (by object, id, name or free text); null when nothing matches. */
   function defaults(typeOrName, overrides) {
     const t = typeOrName && typeof typeOrName === 'object' ? typeOrName : resolve(typeOrName);
     const s = statsFor(t, overrides);
     return s ? Object.fromEntries(STAT_KEYS.map((k, i) => [k, s[i]])) : null;
   }
-  /** Short "A4 D4 R1 M2" summary for lists and the key. */
+  /** Short summary for lists and the key. */
   function statLabel(t, overrides) {
     const s = statsFor(t, overrides);
-    return s ? `A${s[0]} D${s[1]} R${s[3]} M${s[4]}` : '';
+    return s ? `A${s[0]} D${s[1]} R${s[3]} M${s[4]} AC${s[5]} P${s[6]}` : '';
   }
-  const STAT_LABELS = [['attack', 'Atk'], ['defend', 'Def'], ['ap', 'AP'], ['range', 'Rng'], ['movement', 'Mov']];
+  const STAT_LABELS = [['attack', 'Atk'], ['defend', 'Def'], ['ap', 'AP'], ['range', 'Rng'], ['movement', 'Mov'], ['armourClass', 'AC'], ['penetration', 'Pen']];
 
   // Keyword fallback for free-text unit types (old data, imports, custom names).
   const KEYWORDS = [
@@ -272,13 +285,47 @@ const UnitTypes = (() => {
     [/inf|foot|rifle|grenadier|fusilier|jäger|jaeger|guards?|regiment|division|brigade|corps|army|battalion/, 'infantry'],
   ];
 
+  const DEFAULT_PACK = 'great-war';
+  const packs = new Map();
+  let activePack = DEFAULT_PACK;
+  // Server requests may serve different campaigns at once. Keep their catalogue in async context.
+  const requestPack = typeof window === 'undefined' && typeof require === 'function'
+    ? new (require('node:async_hooks').AsyncLocalStorage)() : null;
+  const currentPack = () => requestPack?.getStore() || activePack;
+  function registerPack(id, name, list, keywords = []) {
+    if (!/^[a-z0-9-]+$/.test(id) || !name || !Array.isArray(list) || !list.length || packs.has(id)) throw new Error('Invalid or duplicate unit pack');
+    const byId = new Map(list.map(t => [t.id.toLowerCase(), t]));
+    const byName = new Map(list.map(t => [t.name.toLowerCase(), t]));
+    if (byId.size !== list.length) throw new Error('Duplicate unit type in pack');
+    const exact = value => {
+      const key = String(value || '').trim().toLowerCase();
+      return byId.get(key) || byName.get(key) || null;
+    };
+    const resolve = value => {
+      const found = exact(value);
+      if (found) return found;
+      const key = String(value || '').trim().toLowerCase();
+      for (const [re, typeId] of keywords) if (re.test(key)) return byId.get(typeId) || null;
+      return null;
+    };
+    const catalogue = Object.freeze({ id, name, LIST: Object.freeze(list), categories: Object.freeze([...new Set(list.map(t => t.cat))]), exact, resolve,
+      defaults: (type, overrides) => defaults(typeof type === 'object' ? type : exact(type), overrides) });
+    packs.set(id, catalogue);
+    return catalogue;
+  }
+  function forPack(id) { return packs.get(id || DEFAULT_PACK) || null; }
+  function selectPack(id) {
+    if (!forPack(id)) throw new Error(`Unknown unit pack: ${id}`);
+    activePack = id || DEFAULT_PACK;
+  }
+  function runWithPack(id, callback) {
+    if (!forPack(id)) throw new Error(`Unknown unit pack: ${id}`);
+    return requestPack ? requestPack.run(id || DEFAULT_PACK, callback) : callback();
+  }
   function resolve(unitType) {
     const s = String(unitType || '').trim().toLowerCase();
     if (!s) return null;
-    if (byId.has(s)) return byId.get(s);
-    if (byName.has(s)) return byName.get(s);
-    for (const [re, id] of KEYWORDS) if (re.test(s)) return byId.get(id);
-    return null;
+    return forPack(currentPack()).resolve(s);
   }
 
   /** Draw a type's symbol (and mod tag) into a counter. `box` is the inner rectangle; `c` receives text. */
@@ -293,10 +340,12 @@ const UnitTypes = (() => {
     }
   }
 
-  const categories = [...new Set(LIST.map(t => t.cat))];
+  registerPack(DEFAULT_PACK, 'Great War Pack', LIST, KEYWORDS);
   /** Whether a type fires from range like artillery (it shells its target and is spared the reply when repelled). */
   const firesFromRange = t => !!t && (t.cat === 'Artillery' || !!t.guns);
-  return { LIST, categories, resolve, draw, symbols: sym, defaults, statsFor, statLabel, STAT_KEYS, STAT_LABELS, firesFromRange };
+  return { get LIST() { return forPack(currentPack()).LIST; }, get categories() { return forPack(currentPack()).categories; },
+    DEFAULT_PACK, get PACKS() { return [...packs.values()].map(({ id, name }) => ({ id, name })); },
+    registerPack, forPack, selectPack, runWithPack, resolve, draw, symbols: sym, defaults, statsFor, statLabel, STAT_KEYS, STAT_LABELS, firesFromRange };
 })();
 
 if (typeof window !== 'undefined') window.UnitTypes = UnitTypes;

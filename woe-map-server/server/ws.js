@@ -8,12 +8,13 @@ const rooms = new Map(); // lobbyId -> Set<ws>
 let wss = null;
 
 const selectMarker = db.prepare('SELECT * FROM markers WHERE id = ? AND lobby_id = ?');
+const selectChat = db.prepare('SELECT members FROM chat_channels WHERE id = ? AND lobby_id = ?');
 
 function send(ws, msg) {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
 }
 
-function viewer(ws) { return { role: ws.lobbyRole, userId: ws.user.id, nation: ws.nation || '', viewAs: ws.viewAs || null, lobbyId: ws.lobbyId }; }
+function viewer(ws) { return { role: ws.lobbyRole, realRole: ws.realRole, userId: ws.user.id, nation: ws.nation || '', viewAs: ws.viewAs || null, lobbyId: ws.lobbyId }; }
 /** Take on a viewer: a GM viewing as a nation is a player of it on this socket (presence still shows the GM). */
 function applyViewer(ws, v) {
   ws.lobbyRole = v.role; ws.nation = v.nation; ws.viewAs = v.viewAs || null; ws.realRole = v.realRole || v.role;
@@ -56,9 +57,16 @@ function broadcastEntity(lobbyId, entity, before, after, actorId) {
   const set = rooms.get(Number(lobbyId));
   if (!set) return;
   const id = (after || before).id;
+  const vision = require('./vision');
   for (const ws of set) {
     if (ws.readyState !== ws.OPEN) continue;
     const v = viewer(ws);
+    // Another side's trench under fog: the viewer gets the pieces of it in their sight (none, when out of sight).
+    if (entity === 'shape') {
+      const nowForeign = after && vision.foreignTrench(v, after), wasForeign = before && vision.foreignTrench(v, before);
+      if (nowForeign) { syncTrench(ws, v, id, access.canSee(after, v) ? vision.shapeViews(v, after) : [], actorId); continue; }
+      if (wasForeign) syncTrench(ws, v, id, [], actorId);   // now the viewer's own side's (or gone): the pieces go, the whole follows below
+    }
     const sees = after && access.canSee(after, v);
     const saw = before && access.canSee(before, v);
     if (sees) ws.send(JSON.stringify({ type: entity, action: 'upsert', [entity]: entity === 'marker' ? require('./vision').redact(after, v) : after, actorId }));
@@ -75,8 +83,25 @@ function broadcastVisible(lobbyId, msg, obj) {
 }
 
 /**
+ * One foreign trench's pieces for a socket, against what it had (ws.fogTrench: trench id -> Map(piece id -> JSON)):
+ * new or changed pieces go as upserts, pieces gone from sight as deletes.
+ */
+function syncTrench(ws, v, trenchId, pieces, actorId = null) {
+  if (!ws.fogTrench) ws.fogTrench = new Map();
+  const had = ws.fogTrench.get(trenchId) || new Map(), now = new Map();
+  for (const p of pieces) {
+    const json = JSON.stringify(p);
+    now.set(p.id, json);
+    if (had.get(p.id) !== json) send(ws, { type: 'shape', action: 'upsert', shape: p, actorId, fog: true });
+  }
+  for (const id of had.keys()) if (!now.has(id)) send(ws, { type: 'shape', action: 'delete', id, actorId, fog: true });
+  if (now.size) ws.fogTrench.set(trenchId, now); else ws.fogTrench.delete(trenchId);
+}
+/**
  * Fog of war (server/vision.js): after vision changes, send each player the other sides' units that came into
  * sight (upserts) or went out of it (deletes), and their fog overlay and last known positions when those changed.
+ * The battlefield too: the pieces of other sides' trenches now in sight, and a fresh fetch of the fighting when
+ * what they may see of it changed.
  */
 function syncFog(lobbyId, only = null) {
   const set = rooms.get(Number(lobbyId));
@@ -99,6 +124,20 @@ function syncFog(lobbyId, only = null) {
       byViewer.set(vk, view);
     }
     if (view.key !== ws.fogKey) { ws.fogKey = view.key; send(ws, { type: 'vision', vision: view.ov }); }
+    if (st.on && v.role !== 'gm') {
+      if (!view.pieces) { view.pieces = vision.trenchPieces(v); view.fights = vision.fightKey(v); }
+      const first = !ws.fogTrench;
+      const byTrench = new Map();
+      for (const p of view.pieces.values()) { if (!byTrench.has(p.data.of)) byTrench.set(p.data.of, []); byTrench.get(p.data.of).push(p); }
+      if (first) { ws.fogTrench = new Map(); for (const [id, list] of byTrench) ws.fogTrench.set(id, new Map(list.map(p => [p.id, JSON.stringify(p)]))); }
+      else {
+        for (const [id, list] of byTrench) syncTrench(ws, v, id, list);
+        for (const id of [...ws.fogTrench.keys()]) if (!byTrench.has(id)) syncTrench(ws, v, id, []);
+      }
+      // The first load fetched the fighting over HTTP; afterwards a change in what is seen of it means a fresh fetch.
+      if (ws.fogFights !== undefined && ws.fogFights !== view.fights) send(ws, { type: 'reload', what: 'battles' });
+      ws.fogFights = view.fights;
+    } else { ws.fogTrench = null; ws.fogFights = undefined; }
     if (!view.seen) { ws.fogSeen = null; continue; }
     const seen = view.seen;
     const prev = ws.fogSeen;
@@ -115,7 +154,7 @@ function leaveRoom(ws) {
   const set = rooms.get(ws.lobbyId);
   if (set) { set.delete(ws); if (set.size === 0) rooms.delete(ws.lobbyId); }
   const old = ws.lobbyId;
-  ws.lobbyId = null; ws.lobbyRole = null; ws.nation = ''; ws.viewAs = null; ws.realRole = null; ws.fogSeen = null; ws.fogKey = null;
+  ws.lobbyId = null; ws.lobbyRole = null; ws.nation = ''; ws.viewAs = null; ws.realRole = null; ws.fogSeen = null; ws.fogKey = null; ws.fogTrench = null; ws.fogFights = undefined;
   broadcastPresence(old);
 }
 
@@ -123,11 +162,12 @@ function joinRoom(ws, lobbyId, viewAs) {
   const lobby = access.getLobby(lobbyId);
   const v = lobby && access.viewerFor(lobby, ws.user, viewAs);
   if (!lobby || !v) { send(ws, { type: 'error', error: 'Not a member of that campaign' }); return; }
+  if (access.ownerSuspended(lobby)) { send(ws, { type: 'kicked', lobbyId: lobby.id, reason: access.SUSPENDED_LOBBY }); return; }
   leaveRoom(ws);
   ws.lobbyId = lobby.id; applyViewer(ws, v);
   if (!rooms.has(lobby.id)) rooms.set(lobby.id, new Set());
   rooms.get(lobby.id).add(ws);
-  send(ws, { type: 'joined', lobbyId: lobby.id, role: v.role, viewAs: v.viewAs || null, users: presence(lobby.id) });
+  send(ws, { type: 'joined', lobbyId: lobby.id, role: v.realRole === 'observer' ? 'observer' : v.role, viewAs: v.viewAs || null, users: presence(lobby.id) });
   broadcastPresence(lobby.id);
   try { syncFog(lobby.id, ws); } catch (e) { console.warn('fog of war on join failed', e); }   // what it sees now, and its overlay
 }
@@ -140,6 +180,24 @@ function handleMessage(ws, raw) {
     case 'join': return joinRoom(ws, Number(msg.lobbyId), msg.viewAs);
     case 'leave': return leaveRoom(ws);
     case 'ping': return send(ws, { type: 'pong', t: msg.t });
+    case 'typing': {
+      if (ws.realRole === 'observer') return;
+      // "X is typing…" to the chat's other members (docs/COMMS.md); nothing is stored.
+      if (ws.lobbyId == null) return;
+      const key = String(msg.channel || '');
+      if (key === 'gm' && ws.lobbyRole !== 'gm') return;
+      if (Date.now() - (ws.lastTyping || 0) < 1000) return;
+      ws.lastTyping = Date.now();
+      let inChat = other => other !== ws;
+      if (!/^(ooc|gm)$/.test(key)) {
+        const m = /^c(\d+)$/.exec(key), row = m && selectChat.get(Number(m[1]), ws.lobbyId);
+        const members = row ? access.safeJson(row.members) || [] : [];
+        if (!members.includes(ws.user.id)) return;
+        inChat = other => other !== ws && members.includes(other.user.id);
+      }
+      broadcast(ws.lobbyId, { type: 'typing', channel: key, userId: ws.user.id, displayName: ws.user.displayName }, inChat);
+      return;
+    }
     case 'drag': {
       // Ephemeral live-drag preview; the final position is persisted through the REST API.
       if (ws.lobbyId == null) return;
@@ -166,8 +224,8 @@ function attach(server) {
     try { pathname = new URL(req.url, 'http://localhost').pathname; } catch { /* ignore */ }
     if (pathname !== '/ws') { socket.destroy(); return; }
     const user = getUserFromRequest(req);
-    if (!user) {
-      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+    if (!user || user.suspended) {
+      socket.write(`HTTP/1.1 ${user ? '403 Forbidden' : '401 Unauthorized'}\r\nConnection: close\r\n\r\n`);
       socket.destroy();
       return;
     }
@@ -216,6 +274,11 @@ function sweepIdle(now = Date.now()) {
   }
 }
 
+/** A suspended account: every socket of theirs closes. */
+function dropUser(userId) {
+  if (!wss) return;
+  for (const ws of wss.clients) if (ws.user?.id === Number(userId)) { send(ws, { type: 'kicked', reason: 'Your account has been suspended' }); ws.close(); }
+}
 /** Re-evaluate roles and nations for every socket in a lobby after membership changes. */
 function refreshRoles(lobbyId) {
   const set = rooms.get(Number(lobbyId));
@@ -224,12 +287,12 @@ function refreshRoles(lobbyId) {
   for (const ws of [...set]) {
     const v = access.viewerFor(lobby, ws.user, ws.viewAs);
     if (!v) { leaveRoom(ws); send(ws, { type: 'kicked', lobbyId: Number(lobbyId) }); continue; }
-    const changed = v.role !== ws.lobbyRole || v.nation !== ws.nation || (v.viewAs || null) !== ws.viewAs;
+    const changed = v.role !== ws.lobbyRole || v.realRole !== ws.realRole || v.nation !== ws.nation || (v.viewAs || null) !== ws.viewAs;
     applyViewer(ws, v);
-    if (changed) { ws.fogSeen = null; send(ws, { type: 'role', role: v.role, nation: v.nation, viewAs: v.viewAs || null }); }
+    if (changed) { ws.fogSeen = null; ws.fogTrench = null; ws.fogFights = undefined; send(ws, { type: 'role', role: v.realRole === 'observer' ? 'observer' : v.role, nation: v.nation, viewAs: v.viewAs || null }); }
   }
   broadcastPresence(Number(lobbyId));
   require('./vision').schedulePush(lobbyId);
 }
 
-module.exports = { attach, sweepIdle, broadcast, broadcastEntity, broadcastVisible, broadcastPresence, presence, refreshRoles, syncFog };
+module.exports = { attach, sweepIdle, broadcast, broadcastEntity, broadcastVisible, broadcastPresence, presence, refreshRoles, syncFog, viewerOf: viewer, dropUser };

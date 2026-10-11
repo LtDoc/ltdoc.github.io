@@ -259,6 +259,11 @@ and a base allowance). Every pool is a whole number the GM can edit with +/- ste
 - A faction queues builds at a **city it owns**; a city runs `industry` builds in parallel. Cost is paid when
   queued (refunded if cancelled). Naval units need a coastal city (a city within ~30 km of the coast, computed
   from the land polygon); aircraft need industry ≥ 2.
+- **Emplacements** (forts, coastal batteries, bunkers, AA) are built in a city like any unit, but once finished they
+  wait under **Ready to place** in the Production panel. **📍 Place…** puts one on the map where the player clicks: on
+  their own ground, on land, a coastal battery within the coastal distance of the sea
+  (`POST /game/production/:qid/place`). **×** scraps it for a refund. They no longer take a build slot, and they are not
+  lost if the city falls.
 - Completed units spawn beside the city with quick-add naming and stats from the campaign table, owned by
   the faction's player if one is assigned.
 - Tech gating: a type appears in the production list only when the faction has unlocked it (section 7.2).

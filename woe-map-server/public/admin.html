@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Site admin · Rob's Strategic Warfare Roleplayer 1</title>
+  <link rel="icon" type="image/x-icon" href="/assets/favicon/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon/favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/favicon/apple-touch-icon.png">
+  <link rel="manifest" href="/assets/favicon/site.webmanifest">
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body>
+  <!-- Site administration (README, "Accounts and roles"): users, every campaign, and reports from the chats. Only a
+       site admin can read any of it (the API refuses everyone else); the campaigns page is the same for admins as
+       for anyone else. -->
+  <div class="page">
+    <header>
+      <h1>Site admin</h1>
+      <span id="whoami" class="muted"></span>
+      <a href="/lobbies.html" class="small secondary" style="padding:6px 10px;border-radius:6px;background:var(--panel2);color:#fff;text-decoration:none">← Campaigns</a>
+    </header>
+
+    <div class="card">
+      <h2 style="font-size:16px">Reports <span id="reportsOpen" class="badge" hidden></span></h2>
+      <p class="hint">Members reported from a campaign's chat (docs/COMMS.md, "Reporting"). The reported message's text is kept with the report.</p>
+      <ul id="reportList" class="list"></ul>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h2 style="font-size:16px">Takeover requests <span id="takeoversOpen" class="badge" hidden></span></h2>
+      <p class="hint">A co-GM of a campaign whose owner was suspended, asking to be made its owner. Approve hands the campaign over.</p>
+      <ul id="takeoverList" class="list"></ul>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h2 style="font-size:16px">Users</h2>
+      <p class="hint">Suspending an account signs it out everywhere, keeps it out (with the reason shown at sign-in), and shuts every campaign it owns until it is unsuspended or the campaign is transferred.</p>
+      <p class="hint">Use <strong>Grant Site VIP</strong> to give a player the gold name and avatar effect throughout every campaign.</p>
+      <ul id="userList" class="list"></ul>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h2 style="font-size:16px">Every campaign</h2>
+      <p class="hint">A site admin is not a game master. To look inside a campaign you are not in, <b>Join</b> it as a player (and leave from its People panel afterwards); <b>Delete</b> removes a campaign and everything in it.</p>
+      <ul id="campaignList" class="list"></ul>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    (async () => {
+      const me = await requireUser();
+      if (me.role !== 'admin') { location.replace('/lobbies.html'); return; }
+      const $ = s => document.querySelector(s);
+      $('#whoami').textContent = me.displayName;
+      const when = t => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+      async function loadReports() {
+        const { reports } = await api.get('/api/auth/reports');
+        const open = reports.filter(r => r.status === 'open').length;
+        $('#reportsOpen').hidden = !open; $('#reportsOpen').textContent = open + ' open';
+        $('#reportList').innerHTML = reports.map(r => `
+          <li data-id="${r.id}" style="flex-wrap:wrap;opacity:${r.status === 'open' ? 1 : .55}">
+            <span class="grow" style="min-width:240px;white-space:normal"><strong>${esc(r.reporterName)}</strong> reported ${r.kind === 'campaign' ? 'the campaign' : `<strong>${esc(r.userName)}</strong>`}
+              <span class="muted">· ${esc(r.lobbyName || 'a deleted campaign')} · ${when(r.createdAt)}${r.status === 'closed' ? ` · closed by ${esc(r.closedByName)}${r.closeReason ? `: ${esc(r.closeReason)}` : ''}` : ''}</span><br>
+              <span>${esc(r.reason)}</span>${r.messageText ? `<br><em class="muted">“${esc(r.messageText.slice(0, 300))}”</em>` : ''}</span>
+            ${r.status === 'open' && r.messageId && r.lobbyId ? `<button class="small danger" data-act="delmsg" title="Delete the reported message for everyone">Delete message</button>` : ''}
+            ${r.lobbyId ? `<a class="small secondary" href="/map/${r.lobbyId}" style="padding:4px 8px;border-radius:6px;background:var(--panel2);color:#fff;text-decoration:none">Open campaign</a>` : ''}
+            ${r.status === 'open' ? `<button class="small secondary" data-act="close">Close</button>` : ''}
+          </li>`).join('') || '<li class="muted">No reports.</li>';
+        $('#reportList').querySelectorAll('button').forEach(b => b.onclick = async () => {
+          const li = b.closest('li'), r = reports.find(x => String(x.id) === li.dataset.id);
+          try {
+            if (b.dataset.act === 'close') { const reason = prompt('Why is this report closed? The reporter will read this.', ''); if (reason === null) return; await api.post(`/api/auth/reports/${r.id}/close`, { reason }); }
+            if (b.dataset.act === 'delmsg') { if (!confirm('Delete the reported message for everyone in that chat?')) return; await api.del(`/api/auth/reports/${r.id}/message`); toast('Message deleted'); }
+            loadReports();
+          } catch (err) { toast(err.message); }
+        });
+      }
+
+      async function loadUsers() {
+        const [{ users }, { packs }] = await Promise.all([api.get('/api/auth/users'), api.get('/api/auth/packs')]);
+        $('#userList').innerHTML = users.map(u => `
+          <li data-id="${u.id}" class="admin-user">
+            <div class="admin-user-head"><span class="grow" style="white-space:normal"><strong>${esc(u.displayName)}</strong> <span class="hint">@${esc(u.username)} · joined ${when(u.createdAt)}</span>${u.suspendedAt ? `<br><span style="color:#f5b7b1">Suspended ${when(u.suspendedAt)}${u.suspendedReason ? `: ${esc(u.suspendedReason)}` : ''}</span>` : ''}</span><span class="badge ${u.role === 'admin' ? 'admin' : ''}">${u.role}</span>${u.siteVip ? '<span class="badge site-vip-badge">Site VIP</span>' : ''}</div>
+            <div class="admin-user-actions"><button class="small ${u.siteVip ? 'secondary' : 'vip-grant'}" data-act="vip" aria-pressed="${u.siteVip}">${u.siteVip ? 'Remove Site VIP' : 'Grant Site VIP'}</button>
+            <select data-pack="${u.id}" aria-label="Manage packs for ${esc(u.username)}"><option value="">Manage packs…</option></select>
+            ${u.id === me.id ? '' : `<button class="small secondary" data-act="role">${u.role === 'admin' ? 'Make player' : 'Make admin'}</button>
+            <button class="small secondary" data-act="pw">Reset password</button>
+            <button class="small ${u.suspendedAt ? '' : 'danger'}" data-act="suspend">${u.suspendedAt ? 'Unsuspend' : 'Suspend…'}</button>
+            <button class="small danger" data-act="del">Delete</button>`}</div>
+          </li>`).join('');
+        $('#userList').querySelectorAll('[data-pack]').forEach(s => {
+          const owned = users.find(u => String(u.id) === s.dataset.pack).packs;
+          s.innerHTML += packs.filter(p => !p.included).map(p => `<option value="${owned.includes(p.id) ? 'revoke:' : 'grant:'}${esc(p.id)}">${owned.includes(p.id) ? 'Remove' : 'Grant'} ${esc(p.name)}</option>`).join('');
+          s.onchange = async () => { if (!s.value) return; const [action, packId] = s.value.split(':'); try { if (action === 'grant') await api.put(`/api/auth/users/${s.dataset.pack}/packs/${encodeURIComponent(packId)}`, {}); else await api.del(`/api/auth/users/${s.dataset.pack}/packs/${encodeURIComponent(packId)}`); toast(action === 'grant' ? 'Pack granted' : 'Pack removed'); loadUsers(); } catch (err) { toast(err.message); } };
+        });
+        $('#userList').querySelectorAll('button').forEach(b => b.onclick = async () => {
+          const li = b.closest('li'); const id = li.dataset.id; const u = users.find(x => String(x.id) === id);
+          try {
+            if (b.dataset.act === 'role') await api.patch(`/api/auth/users/${id}`, { role: u.role === 'admin' ? 'player' : 'admin' });
+            if (b.dataset.act === 'vip') { await api.patch(`/api/auth/users/${id}`, { siteVip: !u.siteVip }); toast(u.siteVip ? 'Site VIP removed' : 'Site VIP granted'); }
+            if (b.dataset.act === 'pw') { const pw = prompt(`New password for ${u.username} (8+ chars):`); if (!pw) return; await api.patch(`/api/auth/users/${id}`, { password: pw }); toast('Password reset'); }
+            if (b.dataset.act === 'suspend') {
+              if (u.suspendedAt) await api.patch(`/api/auth/users/${id}`, { suspended: false });
+              else { const reason = prompt(`Suspend ${u.username}? They are signed out everywhere and every campaign they own is shut. Reason (shown to them):`, ''); if (reason === null) return; await api.patch(`/api/auth/users/${id}`, { suspended: true, reason }); }
+              loadCampaigns();
+            }
+            if (b.dataset.act === 'del') { if (!confirm(`Delete user ${u.username}? This cannot be undone.`)) return; await api.del(`/api/auth/users/${id}`); }
+            loadUsers();
+          } catch (err) { toast(err.message); }
+        });
+      }
+
+      async function loadCampaigns() {
+        const { lobbies } = await api.get('/api/auth/lobbies');
+        $('#campaignList').innerHTML = lobbies.map(l => `
+          <li data-id="${l.id}">
+            <span class="grow" style="white-space:normal"><strong>${esc(l.name)}</strong>${l.suspended ? ' <span class="badge" style="background:var(--danger)">shut: owner suspended</span>' : ''}<br><span class="hint">owner ${esc(l.ownerName)} · ${l.memberCount} member${l.memberCount === 1 ? '' : 's'} · created ${when(l.createdAt)}${l.member ? '' : ' · you are not a member'}</span></span>
+            <select data-act="transfer" title="Transfer the campaign to another member: they become its owner and GM"><option value="">Transfer to…</option>${l.members.filter(m => m.userId !== l.ownerId).map(m => `<option value="${m.userId}">${esc(m.displayName)} (${m.role})</option>`).join('')}</select>
+            ${l.suspended ? '' : l.member ? `<a class="small" href="/map/${l.id}" style="padding:4px 8px;border-radius:6px;background:var(--accent);color:#fff;text-decoration:none">Open</a>` : `<button class="small secondary" data-act="join" title="Join as a player, to look inside">Join</button>`}
+            <button class="small danger" data-act="del" title="Delete the campaign and everything in it">Delete</button>
+          </li>`).join('') || '<li class="muted">No campaigns yet.</li>';
+        $('#campaignList').querySelectorAll('select[data-act="transfer"]').forEach(s => { s.style.margin = '0'; s.style.width = 'auto'; s.onchange = async () => {
+          const l = lobbies.find(x => String(x.id) === s.closest('li').dataset.id), m = l.members.find(x => String(x.userId) === s.value);
+          if (!m) return;
+          if (!confirm(`Make ${m.displayName} the owner and GM of "${l.name}"? ${l.ownerName} stays in it as a player.`)) { s.value = ''; return; }
+          try { await api.post(`/api/auth/lobbies/${l.id}/transfer`, { userId: m.userId }); toast(`${m.displayName} now owns ${l.name}`); loadCampaigns(); } catch (err) { toast(err.message); s.value = ''; }
+        }; });
+        $('#campaignList').querySelectorAll('button').forEach(b => b.onclick = async () => {
+          const l = lobbies.find(x => String(x.id) === b.closest('li').dataset.id);
+          try {
+            if (b.dataset.act === 'join') { await api.post(`/api/auth/lobbies/${l.id}/join`, {}); location.href = `/map/${l.id}`; return; }
+            if (!confirm(`Delete the campaign "${l.name}" and everything in it? This cannot be undone.`)) return;
+            await api.del(`/api/auth/lobbies/${l.id}`); loadCampaigns();
+          } catch (err) { toast(err.message); }
+        });
+      }
+
+      async function loadTakeovers() {
+        const { takeovers } = await api.get('/api/auth/takeovers');
+        const open = takeovers.filter(t => t.status === 'open').length;
+        $('#takeoversOpen').hidden = !open; $('#takeoversOpen').textContent = open + ' open';
+        $('#takeoverList').innerHTML = takeovers.map(t => `
+          <li data-id="${t.id}" style="flex-wrap:wrap;opacity:${t.status === 'open' ? 1 : .55}">
+            <span class="grow" style="white-space:normal"><strong>${esc(t.userName)}</strong> asks to take over <strong>${esc(t.lobbyName)}</strong> <span class="muted">· ${when(t.createdAt)}${t.status !== 'open' ? ` · ${t.status} by ${esc(t.resolvedByName)}${t.reason ? `: ${esc(t.reason)}` : ''}` : ''}</span>${t.note ? `<br><em class="muted">${esc(t.note)}</em>` : ''}</span>
+            ${t.status === 'open' ? `<button class="small" data-act="approve">Approve</button><button class="small secondary" data-act="decline">Decline…</button>` : ''}
+          </li>`).join('') || '<li class="muted">No requests.</li>';
+        $('#takeoverList').querySelectorAll('button').forEach(b => b.onclick = async () => {
+          const t = takeovers.find(x => String(x.id) === b.closest('li').dataset.id);
+          try {
+            const reason = prompt(b.dataset.act === 'approve' ? `Make ${t.userName} the owner of "${t.lobbyName}"? A word for them (optional):` : `Why is ${t.userName}'s request declined? They will read this.`, '');
+            if (reason === null) return;
+            await api.post(`/api/auth/takeovers/${t.id}/${b.dataset.act}`, { reason });
+            loadTakeovers(); loadCampaigns();
+          } catch (err) { toast(err.message); }
+        });
+      }
+
+      await loadReports();
+      await loadTakeovers();
+      await loadUsers();
+      await loadCampaigns();
+    })();
+  </script>
+</body>
+</html>

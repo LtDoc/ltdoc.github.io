@@ -173,7 +173,7 @@ function applyIncome(fx, inc) {
 // ---- A faction's research ----------------------------------------------------------------------
 function researchState(state) {
   const r = state.research && typeof state.research === 'object' ? state.research : {};
-  return { active: r.active || null, progress: r.progress && typeof r.progress === 'object' ? r.progress : {}, queue: Array.isArray(r.queue) ? r.queue : [] };
+  return { active: r.active || null, progress: r.progress && typeof r.progress === 'object' ? r.progress : {}, queue: Array.isArray(r.queue) ? r.queue : [], costs: r.costs && typeof r.costs === 'object' ? r.costs : {} };
 }
 /** Why a faction cannot research a tech right now; null when it can. */
 function blocker(tech, state, techs, g) {
@@ -196,6 +196,7 @@ function start(state, tech, techs, g) {
     if (state.money < tech.money) throw new Error(`Needs ${tech.money} money to start (you have ${state.money})`);
     state.money = Math.round((state.money - tech.money) * 10) / 10;
     r.active = tech.key;
+    if (r.costs[tech.key] === undefined) r.costs[tech.key] = require('./treaties').researchCost(g.lobbyId, state.factionId, tech, state, g.turn);
   } else {
     if (r.queue.length >= 5) throw new Error('The research queue is full (5)');
     r.queue.push(tech.key);
@@ -206,6 +207,11 @@ function start(state, tech, techs, g) {
 /** Drop a project from the plan. Progress already made is kept for later; an active project's money is not refunded. */
 function drop(state, key) {
   const r = researchState(state);
+  if (r.active === key && r.costs[key] === undefined) {
+    const lobbyId = db.prepare('SELECT lobby_id FROM faction_state WHERE faction_id = ?').get(state.factionId)?.lobby_id;
+    const tech = lobbyId && get(lobbyId, key);
+    if (tech) r.costs[key] = tech.rp;
+  }
   if (r.active === key) r.active = null;
   r.queue = r.queue.filter(k => k !== key);
   state.research = r;
@@ -220,6 +226,7 @@ function promote(state, techs, g) {
     if (!tech || blocker(tech, state, techs, g) || state.money < tech.money) continue;
     state.money = Math.round((state.money - tech.money) * 10) / 10;
     r.active = key;
+    if (r.costs[key] === undefined) r.costs[key] = require('./treaties').researchCost(g.lobbyId, state.factionId, tech, state, g.turn);
   }
   state.research = r;
 }
@@ -237,16 +244,18 @@ function advance(state, techs, g) {
   if (r.active && !tech) r.active = null;
   if (tech) {
     const have = num(r.progress[tech.key]);
-    const spend = Math.min(Math.max(0, tech.rp - have), Math.max(0, state.rp));
+    const required = r.costs[tech.key] ?? tech.rp;
+    const spend = Math.min(Math.max(0, required - have), Math.max(0, state.rp));
     r.progress[tech.key] = have + spend;
     state.rp = Math.round((state.rp - spend) * 10) / 10;
-    if (r.progress[tech.key] + 1e-9 >= tech.rp) {
+    if (r.progress[tech.key] + 1e-9 >= required) {
       delete r.progress[tech.key];
+      delete r.costs[tech.key];
       r.active = null;
       state.techs = [...new Set([...(state.techs || []), tech.key])];
       done.push(tech);
       state.research = r;
-      promote(state, techs, g);
+      promote(state, techs, { ...g, turn: g.turn + 1 });
       return done;
     }
   }
@@ -258,7 +267,7 @@ function setUnlocked(state, key, on) {
   if (on) set.add(key); else set.delete(key);
   state.techs = [...set];
   const r = researchState(state);
-  if (on) { if (r.active === key) r.active = null; r.queue = r.queue.filter(k => k !== key); delete r.progress[key]; state.research = r; }
+  if (on) { if (r.active === key) r.active = null; r.queue = r.queue.filter(k => k !== key); delete r.progress[key]; delete r.costs[key]; state.research = r; }
 }
 
 module.exports = { list, get, count, upsert, remove, seedDefault, ensureTree, startingKeys, yearOf, effectsFor, emptyEffects, canBuild, statBonus, applyCost, applyIncome,

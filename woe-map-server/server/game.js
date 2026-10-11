@@ -24,7 +24,7 @@ const q = {
   insertState: db.prepare(`INSERT OR IGNORE INTO faction_state (faction_id, lobby_id, resources, money, manpower, rp, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)`),
   updateState: db.prepare(`UPDATE faction_state SET resources = ?, money = ?, manpower = ?, rp = ?, techs = ?, research = ?,
-    production = ?, mods = ?, updated_at = ? WHERE faction_id = ?`),
+    production = ?, mods = ?, policy = ?, updated_at = ? WHERE faction_id = ?`),
   markers: db.prepare('SELECT * FROM markers WHERE lobby_id = ?'),
   clearBattles: db.prepare('DELETE FROM battles WHERE lobby_id = ? AND turn <= ?'),
   clearCraters: db.prepare('DELETE FROM craters WHERE lobby_id = ? AND expires_turn <= ?'),
@@ -167,12 +167,12 @@ function serializeState(row) {
   return {
     factionId: row.faction_id, resources: res, money: row.money, manpower: row.manpower, rp: row.rp,
     techs: access.safeJson(row.techs || '[]'), research: access.safeJson(row.research || '{}'),
-    production: access.safeJson(row.production || '[]'), mods: access.safeJson(row.mods || '{}'), updatedAt: row.updated_at,
+    production: access.safeJson(row.production || '[]'), mods: access.safeJson(row.mods || '{}'), policy: access.safeJson(row.policy || '{}'), updatedAt: row.updated_at,
   };
 }
 function writeState(s) {
   q.updateState.run(JSON.stringify(s.resources), round(s.money), round(s.manpower), round(s.rp), JSON.stringify(s.techs || []),
-    JSON.stringify(s.research || {}), JSON.stringify(s.production || []), JSON.stringify(s.mods || {}), now(), s.factionId);
+    JSON.stringify(s.research || {}), JSON.stringify(s.production || []), JSON.stringify(s.mods || {}), JSON.stringify(s.policy || {}), now(), s.factionId);
 }
 /** Every faction of the lobby with its state (created on demand). */
 function factionStates(lobbyId, settings) {
@@ -206,9 +206,10 @@ function incomeFor(lobby, g, faction, state, markers) {
     }
     if (m.type === 'resource' && GameData.byKey[m.data.kind]) {
       // Improvements (long-term projects) add a share of the base yield per level.
-      const y = GameData.resourceYield(m, s), extra = Math.round((y - num(m.data.yield)) * 10) / 10;
+      const traitYield = require('./heroes').effects(lobby, s, markers, m).yield;
+      const y = GameData.resourceYield(m, s) * traitYield, extra = Math.round((y - num(m.data.yield)) * 10) / 10;
       inc.resources[m.data.kind] += y;
-      if (y) inc.notes.push(`${m.name}: +${y} ${GameData.byKey[m.data.kind].name.toLowerCase()}${extra > 0 ? ` (${extra} from its works)` : ''}`);
+      if (y) inc.notes.push(`${m.name}: +${round(y)} ${GameData.byKey[m.data.kind].name.toLowerCase()}${extra > 0 ? ` (${extra} from works${traitYield > 1 ? ' and Resource Baron' : ''})` : ''}`);
     } else if (m.type === 'town') {
       const c = s.cityIncome[m.data.size] || s.cityIncome.village;
       inc.money += num(c.money); inc.rp += num(c.rp); inc.manpower += num(c.manpower);
@@ -262,8 +263,10 @@ function serializeDiplomacy(d) {
 function diplomacy(lobbyId) { return q.diplomacy.all(lobbyId).map(serializeDiplomacy); }
 
 // ---- Trades (docs/COMMS.md) ---------------------------------------------------------------------
-/** Goods a trade can carry: every resource plus money, manpower and research points. */
-const TRADE_KEYS = [...GameData.RESOURCE_KEYS, 'money', 'manpower', 'rp'];
+/** Goods a trade can carry: every resource, consumer and military goods, money, manpower and research points. */
+const TRADE_KEYS = [...GameData.RESOURCE_KEYS, ...GameData.GOODS_KEYS, 'money', 'manpower', 'rp'];
+const isGood = k => GameData.GOODS_KEYS.includes(k);
+const nameOfGood = k => k === 'rp' ? 'RP' : (GameData.byKey[k]?.name || GameData.GOODS.find(x => x.key === k)?.name || k);
 function serializeTrade(t) {
   return {
     id: t.id, from: t.from_faction, to: t.to_faction, give: access.safeJson(t.give) || {}, take: access.safeJson(t.take) || {},
@@ -273,9 +276,12 @@ function serializeTrade(t) {
 }
 /** Open trades plus those settled in the last week. */
 function trades(lobbyId) { return q.trades.all(lobbyId, Date.now() - 7 * 86400000).map(serializeTrade); }
-const stockOf = (state, k) => GameData.RESOURCE_KEYS.includes(k) ? num(state.resources[k]) : num(state[k]);
+// Consumer and military goods live in the towns (server/goods.js): exchange() is handed the two nations' totals as state.goods
+// and moves them through the towns once the deal stands.
+const stockOf = (state, k) => GameData.RESOURCE_KEYS.includes(k) ? num(state.resources[k]) : isGood(k) ? num(state.goods?.[k]) : num(state[k]);
 function addStock(state, k, v) {
   if (GameData.RESOURCE_KEYS.includes(k)) state.resources[k] = round(num(state.resources[k]) + v);
+  else if (isGood(k)) { state.goods = { ...(state.goods || {}), [k]: round(num(state.goods?.[k]) + v) }; (state.goodsMoves = state.goodsMoves || []).push([k, v]); }
   else state[k] = round(num(state[k]) + v);
 }
 /** The first good a state cannot cover, or null. */
@@ -285,19 +291,32 @@ function shortOf(state, bundle) {
 }
 function goodsText(bundle) {
   const parts = Object.entries(bundle || {}).filter(([, v]) => num(v) > 0)
-    .map(([k, v]) => `${round(v)} ${k === 'rp' ? 'RP' : (GameData.byKey[k]?.name || k).toLowerCase()}`);
+    .map(([k, v]) => `${round(v)} ${k === 'rp' ? 'RP' : nameOfGood(k).toLowerCase()}`);
   return parts.length ? parts.join(', ') : 'nothing';
 }
-const goodName = k => k === 'rp' ? 'research points' : (GameData.byKey[k]?.name || k).toLowerCase();
+const goodName = k => k === 'rp' ? 'research points' : nameOfGood(k).toLowerCase();
 /**
  * Exchange one delivery between two faction states (in memory): both sides must cover their half or
- * nothing moves. Returns { ok, short: { side, good } | null }.
+ * nothing moves. Returns { ok, short: { side, good } | null }. `ctx` = { lobby, settings, from, to } (the two nations'
+ * names) lets consumer and military goods change hands: out of the giver's towns, into the taker's capital.
  */
-function exchange(fromState, toState, t) {
+function exchange(fromState, toState, t, ctx) {
+  const goods = require('./goods');
+  const hasGoods = [...Object.keys(t.give || {}), ...Object.keys(t.take || {})].some(isGood);
+  if (hasGoods && ctx) {
+    fromState.goods = goods.totals(ctx.lobby, ctx.settings, ctx.from);
+    toState.goods = goods.totals(ctx.lobby, ctx.settings, ctx.to);
+  }
+  fromState.goodsMoves = []; toState.goodsMoves = [];
   const sf = shortOf(fromState, t.give), st = shortOf(toState, t.take);
   if (sf || st) return { ok: false, short: sf ? { side: 'from', good: sf } : { side: 'to', good: st } };
   for (const [k, v] of Object.entries(t.give)) { addStock(fromState, k, -num(v)); addStock(toState, k, num(v)); }
   for (const [k, v] of Object.entries(t.take)) { addStock(toState, k, -num(v)); addStock(fromState, k, num(v)); }
+  if (ctx) for (const [st, nation] of [[fromState, ctx.from], [toState, ctx.to]]) {
+    for (const [k, v] of st.goodsMoves) {
+      if (v < 0) goods.take(ctx.lobby, ctx.settings, nation, k, -v); else goods.give(ctx.lobby, ctx.settings, nation, k, v);
+    }
+  }
   return { ok: true, short: null };
 }
 /** War ends every open trade between the two sides. Returns the trades cancelled. */
@@ -332,12 +351,20 @@ function endTurn(lobby, hooks = {}) {
   const g = get(lobby.id);
   const production = require('./production');
   if (!g.enabled) throw new Error('Game mode is off');
-  const markers = q.markers.all(lobby.id).map(access.serializeMarker);
+  let markers = q.markers.all(lobby.id).map(access.serializeMarker);
   const fs = factionStates(lobby.id, g.settings);
   const summaries = [], strengthHits = [];
+  let goodsTurn = { rebels: [], byNation: new Map() };
   const territory = require('./territory');
+  require('./provinces').get(lobby.id); // lazy province migrations cannot start inside End turn's transaction
+  const ownershipMarkers = markers.filter(m => ['town', 'factory', 'resource'].includes(m.type) || territory.isCapturableEmplacement(m))
+    .map(m => ({ id: m.id, nation: m.data?.nation || '', color: m.color, ownerId: m.ownerId, goal: m.data?.goal || null }));
+  const ownershipShapes = db.prepare("SELECT id, data FROM shapes WHERE lobby_id = ? AND kind = 'trench'").all(lobby.id)
+    .map(s => ({ id: s.id, nation: JSON.parse(s.data || '{}').nation || '' }));
   transaction(() => {
-    q.insertSnapshot.run(lobby.id, g.turn, JSON.stringify({ states: fs.map(x => x.state), game: { turn: g.turn, date: g.date }, territories: territory.all(lobby.id), relations: relations(lobby.id), provinces: require('./provinces').ownership(lobby.id), trades: q.tradesActive.all(lobby.id).map(t => ({ id: t.id, status: t.status, turnsLeft: t.turns_left, log: t.log })) }), now());
+    q.insertSnapshot.run(lobby.id, g.turn, JSON.stringify({ ownershipMarkers, ownershipShapes, treatyLedger: require('./treaties').load(lobby.id), newsMaxId: Number(db.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM news_posts WHERE lobby_id = ?').get(lobby.id).id), states: fs.map(x => x.state), game: { turn: g.turn, date: g.date }, territories: territory.all(lobby.id), relations: relations(lobby.id), provinces: require('./provinces').ownership(lobby.id), trades: q.tradesActive.all(lobby.id).map(t => ({ id: t.id, status: t.status, turnsLeft: t.turns_left, log: t.log })) }), now());
+    require('./treaties').tick(lobby, fs, g.turn + 1);
+    markers = q.markers.all(lobby.id).map(access.serializeMarker);
     q.pruneSnapshots.run(lobby.id, lobby.id);
     // Recurring trades deliver first: both halves or nothing, then one fewer delivery to go.
     const tradeNotes = new Map();
@@ -346,7 +373,7 @@ function endTurn(lobby, hooks = {}) {
       const t = serializeTrade(row);
       const A = fs.find(x => x.faction.id === t.from), B = fs.find(x => x.faction.id === t.to);
       if (!A || !B) continue;
-      const r = exchange(A.state, B.state, t);
+      const r = exchange(A.state, B.state, t, { lobby, settings: g.settings, from: A.faction.name, to: B.faction.name });
       const left = Math.max(0, t.turnsLeft - 1);
       const text = r.ok ? `${A.faction.name} → ${B.faction.name}: ${goodsText(t.give)} for ${goodsText(t.take)}`
         : `missed: ${(r.short.side === 'from' ? A : B).faction.name} was short of ${goodName(r.short.good)}`;
@@ -395,7 +422,7 @@ function endTurn(lobby, hooks = {}) {
       // A build at a site the faction no longer holds is lost with the site (no refund: the enemy has the works).
       const lostBuilds = [];
       state.production = (state.production || []).filter(item => {
-        if (item.typeId === 'factory' || !item.siteId) return true;
+        if (item.typeId === 'factory' || !item.siteId || item.ready) return true;   // a finished emplacement has left the works
         const site = markers.find(m => m.id === item.siteId);
         if (!site || String(site.data?.nation || '').toLowerCase() === faction.name.toLowerCase()) return true;
         lostBuilds.push({ type: buildLabel(item), site: site.name });
@@ -411,15 +438,16 @@ function endTurn(lobby, hooks = {}) {
         catch (e) { parts.push(`build failed: ${e.message}`); }
       }
       if (built.length) parts.push(`completed ${built.join(', ')}`);
-      const queued = (state.production || []).length;
+      const queued = (state.production || []).filter(x => !x.ready).length, toPlace = (state.production || []).filter(x => x.ready).length;
       if (queued) parts.push(`${queued} build${queued === 1 ? '' : 's'} in progress`);
+      if (toPlace) parts.push(`${toPlace} emplacement${toPlace === 1 ? '' : 's'} ready to place`);
       writeState(state);
       const rs = research.researchState(state);
       const active = rs.active ? techs.find(t => t.key === rs.active) : null;
       summaries.push({ faction, text: parts.length ? parts.join(', ') : 'no income', data: {
         income: inc, built, researched, gained, lost, lostBuilds, shortages: [],
         stock: { resources: { ...state.resources }, money: state.money, manpower: state.manpower, rp: state.rp },
-        research: active ? { name: active.name, progress: num(rs.progress[active.key]), rp: active.rp, queue: rs.queue.map(k => techs.find(t => t.key === k)?.name || k) } : null,
+        research: active ? { name: active.name, progress: num(rs.progress[active.key]), rp: rs.costs[active.key] ?? active.rp, queue: rs.queue.map(k => techs.find(t => t.key === k)?.name || k) } : null,
         queued: (state.production || []).map(item => ({ type: buildLabel(item), site: item.siteName || '', turnsLeft: item.turnsLeft })),
       } });
     }
@@ -438,13 +466,26 @@ function endTurn(lobby, hooks = {}) {
       const s = summaries.find(x => x.faction.id === hit.faction.id);
       if (s) s.data.shortages.push({ resource: hit.resource, units: hit.units });
     }
-    // Supply is kept live; make sure it is current, then cut-off units suffer attrition (docs/UNITS.md).
+    // Goods: towns make and store consumer and military goods; consumer goods keep their unrest down (docs/ECONOMY.md).
+    const goods = require('./goods');
+    goodsTurn = goods.endTurn(lobby, g, new Map(fs.map(x => [x.faction.name.toLowerCase(), x.state])));
+    // Supply is kept live; make sure it is current. Supplied units draw on their towns, columns and convoys; those whose
+    // source has run dry, and units cut off, live on what they carry, and suffer attrition once that is gone
+    // (docs/UNITS.md). Columns and convoys then refill from their towns.
+    let refillNotes = new Map();
     if (g.settings.supplyEnabled !== false) {
-      applySupply(lobby, g.settings);
-      for (const a of applyAttrition(lobby, g.settings, summaries)) {
+      const sup = applySupply(lobby, g.settings);
+      const unfed = goods.draw(lobby, g.settings, sup.result);
+      for (const a of applyAttrition(lobby, g.settings, summaries, unfed)) {
         const u = markers.find(m => m.id === a.id);
         if (u) { u.data.strength = a.to; u.data.supplied = false; u.data.supplies = a.supplies; }
       }
+      refillNotes = goods.refill(lobby, g.settings, sup.result);
+    }
+    for (const s of summaries) {
+      const k = s.faction.name.toLowerCase();
+      s.data.goods = goodsTurn.byNation.get(k) || null;
+      if (refillNotes.get(k)) s.data.refill = refillNotes.get(k);
     }
     // Field hospitals heal damaged friendly units around them (docs/UNITS.md).
     const supply = require('./supply');
@@ -470,6 +511,14 @@ function endTurn(lobby, hooks = {}) {
     save(g);
     // One report per faction, kept for the last 60 turns, for the turn report modal.
     for (const s of summaries) {
+      const gd = s.data.goods;
+      if (gd) {
+        s.text += `, goods: +${Math.round(gd.made.military)} military, +${Math.round(gd.made.consumer)} consumer (towns need ${Math.round(gd.need)})`;
+        if (gd.short.length) s.text += `, ⚠ consumer goods short in ${gd.short.length === 1 ? 'one network' : `${gd.short.length} networks`} (${gd.short.map(x => `${Math.round(x.covered * 100)}% met`).join(', ')}): unrest rising`;
+        if (gd.critical.length) s.text += `, 🔥 unrest critical in ${gd.critical.map(c => `${c.name} (${c.turns} turn${c.turns === 1 ? '' : 's'} left)`).join(', ')}`;
+        if (gd.revolt.length) s.text += `, 🔥 ${gd.revolt.join(', ')} rose in revolt`;
+      }
+      if (s.data.refill?.length) s.text += `, supply: ${s.data.refill.slice(0, 4).join('; ')}${s.data.refill.length > 4 ? '; …' : ''}`;
       if (s.data.healed?.length) s.text += `, field hospitals restored ${s.data.healed.length} unit${s.data.healed.length === 1 ? '' : 's'}`;
       if (s.data.attrition?.length) {
         const gone = s.data.attrition.filter(a => a.surrendered), worn = s.data.attrition.filter(a => !a.surrendered);
@@ -481,7 +530,7 @@ function endTurn(lobby, hooks = {}) {
     }
     q.pruneReports.run(lobby.id, ended.turn - 60);
   });
-  return { game: get(lobby.id), summaries, shortages: strengthHits };
+  return { game: get(lobby.id), summaries, shortages: strengthHits, rebels: goodsTurn.rebels };
 }
 
 /**
@@ -529,16 +578,17 @@ function applySupply(lobby, settings, summaries) {
  * Attrition at End turn: a land unit still cut off counts its turns without supply and uses one of the supplies it
  * carries (data.supplies, up to supplyStock). With none left it loses attritionRate % of its remaining strength each
  * turn, and below attritionDisbandBelow % it surrenders (strength 0, white flag). Supplied units start counting again
- * (and were topped up by applySupply).
+ * (and were topped up by applySupply). `unfed`: units supplied but whose source ran dry this turn (server/goods.js draw):
+ * they live on what they carry like units cut off.
  */
-function applyAttrition(lobby, settings, summaries) {
+function applyAttrition(lobby, settings, summaries, unfed) {
   const rate = Number(settings.attritionRate ?? 25) / 100, floor = Number(settings.attritionDisbandBelow ?? 10);
   const max = require('./supply').stockMax(settings);
   const out = [];
   for (const m of q.markers.all(lobby.id).map(access.serializeMarker)) {
     if (m.type !== 'unit' || m.data?.supplied === undefined || num(m.data?.strength, 100) <= 0) continue;
     if (!require('./supply').needsSupply(m)) continue;
-    if (m.data.supplied !== false) {
+    if (m.data.supplied !== false && !(unfed && unfed.has(m.id))) {
       if (num(m.data.unsuppliedTurns)) q.setAttrition.run(num(m.data.strength, 100), 0, 'false', num(m.data.supplies, max), now(), m.id);
       continue;
     }
@@ -580,7 +630,15 @@ function undoTurn(lobby) {
       for (const t of data.territories) territory.write(lobby.id, t.factionId, t.geometry, require('./provinces').CLEAN);
     }
     if (Array.isArray(data.provinces)) require('./provinces').restoreOwnership(lobby.id, data.provinces);
-    if (Array.isArray(data.relations)) for (const r of data.relations) setRelation(lobby.id, r.a, r.b, r.status, r.sinceTurn);
+    if (Array.isArray(data.relations)) {
+      db.prepare('DELETE FROM relations WHERE lobby_id = ?').run(lobby.id);
+      for (const r of data.relations) setRelation(lobby.id, r.a, r.b, r.status, r.sinceTurn);
+    }
+    if (data.treatyLedger) require('./treaties').store(lobby.id, data.treatyLedger);
+    for (const m of data.ownershipMarkers || []) db.prepare("UPDATE markers SET data = json_set(data, '$.nation', ?, '$.goal', json(?)), color = ?, owner_id = ?, updated_at = ? WHERE id = ? AND lobby_id = ?")
+      .run(m.nation, JSON.stringify(m.goal), m.color, m.ownerId ?? null, now(), m.id, lobby.id);
+    for (const s of data.ownershipShapes || []) db.prepare("UPDATE shapes SET data = json_set(data, '$.nation', ?), updated_at = ? WHERE id = ? AND lobby_id = ?").run(s.nation, now(), s.id, lobby.id);
+    if (data.newsMaxId !== undefined) db.prepare("DELETE FROM news_posts WHERE lobby_id = ? AND id > ? AND source_name = 'Diplomatic dispatch'").run(lobby.id, data.newsMaxId);
     // Recurring trades go back to where they stood (deliveries are inside the restored treasuries).
     if (Array.isArray(data.trades)) for (const t of data.trades) q.updateTrade.run(t.status, t.turnsLeft, t.log, null, t.id);
     g.turn = data.game.turn; g.date = data.game.date;
@@ -709,6 +767,35 @@ function haltAtTrench(lobby, g, marker, path) {
 const REMAINS_TURNS = 3;
 
 function checkMove(lobby, g, isGm, marker, x, y) {
+  const result = moveResult(lobby, g, isGm, marker, x, y);
+  if (result.error || isGm || !g.enabled || marker.type !== 'unit') return result;
+  const lookup = require('./territory').ownerLookup(lobby);
+  const me = q.factions.all(lobby.id).find(f => f.name.toLowerCase() === String(marker.data?.nation || '').toLowerCase());
+  if (!lookup || !me) return result;
+  const cat = UnitTypes.resolve(marker.data?.unitType)?.cat;
+  const right = cat === 'Naval' ? 'ports' : cat === 'Air' ? 'airfields' : 'land';
+  const passage = require('./treaties').accessResolver(lobby.id, me.id, right);
+  const allowed = (px, py) => {
+    const host = lookup(px, py);
+    return !host || host === me.id || relationStatus(lobby.id, me.id, host) === 'war' || passage(host);
+  };
+  if (right !== 'land') {
+    if (!allowed(result.x, result.y)) return { error: `${marker.name} needs ${right === 'ports' ? 'port' : 'airfield'} access to stop in that nation`, fatal: true };
+  } else {
+    const path = result.path || result.route?.path || [[marker.x, marker.y], [result.x, result.y]];
+    for (let i = 1; i < path.length; i++) {
+      const a = path[i - 1], b = path[i];
+      const steps = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.5));
+      for (let j = 1; j <= steps; j++) if (!allowed(a[0] + (b[0] - a[0]) * j / steps, a[1] + (b[1] - a[1]) * j / steps)) return { error: `${marker.name} needs land passage through that neutral nation`, fatal: true };
+    }
+  }
+  return result;
+}
+function moveResult(lobby, g, isGm, marker, x, y) {
+  // The GM may reposition a wreck; it never needs terrain, supply or range calculations.
+  if (marker.type === 'unit' && num(marker.data?.strength, 100) <= 0) {
+    return isGm ? { x, y, clamped: false } : { error: `${marker.name} is destroyed and cannot move`, fatal: true };
+  }
   // Ships stay at sea (or in harbour) for players in any mode; the GM can still place them anywhere.
   if (!isGm && marker.type === 'unit' && UnitTypes.resolve(marker.data?.unitType)?.cat === 'Naval') {
     const err = require('./territory').shipCourseError(lobby, marker.x, marker.y, x, y);
@@ -750,13 +837,14 @@ function checkMove(lobby, g, isGm, marker, x, y) {
   }
   // Walking: No Man's Land costs several times its distance.
   const walk = route ? null : walkCost(lobby, g.settings, marker.x, marker.y, x, y);
-  const cost = route ? route.cost : walk.cost, slowed = !!walk?.slowed;
+  const walkSpeed = require('./heroes').effects(lobby, g.settings, q.markers.all(lobby.id).map(access.serializeMarker), marker).walk;
+  const cost = route ? route.cost : walk.cost / walkSpeed, slowed = !!walk?.slowed;
   if (cost <= remaining + 1e-6) return { x, y, clamped: false, movedKm: round(used + cost), cost, route, slowed, blocked, path: route ? route.path.map(p => [p[0], p[1]]) : null };
   if (route) {
     const w = require('./rails').walk(lobby, route.path, remaining);
     return { x: round(w.x), y: round(w.y), clamped: true, movedKm: round(allowance), remaining, dist: round(cost), cost, route, path: w.points, to: halt ? [x, y] : null };   // ran out before the trench
   }
-  const t = walk.frac(remaining), cx = round(marker.x + (x - marker.x) * t), cy = round(marker.y + (y - marker.y) * t);
+  const t = walk.frac(remaining * walkSpeed), cx = round(marker.x + (x - marker.x) * t), cy = round(marker.y + (y - marker.y) * t);
   // Run out of movement part-way: not in the middle of a strait.
   if (landUnit && territory.landCourseError(lobby, cx, cy, cx, cy, false)) return { error: `${marker.name} would stop in the water short of the far shore: move it to the near side first` };
   return { x: cx, y: cy, clamped: true, movedKm: round(allowance), remaining, dist: round(cost), cost, slowed, to: halt ? [x, y] : null };
@@ -789,7 +877,7 @@ function checkAttack(g, isGm, marker) {
 }
 
 /** Fields a player may not change on their own unit while the game is running. */
-const PROTECTED_UNIT_FIELDS = ['attack', 'defend', 'ap', 'range', 'movement', 'strength', 'unitType', 'nation', 'movedKm', 'apUsed', 'trail', 'supplied', 'supplyFrom', 'supplies', 'unsuppliedTurns', 'surrendered', 'aboard', 'ride', 'heldTurns', 'attacked',
+const PROTECTED_UNIT_FIELDS = ['attack', 'defend', 'ap', 'range', 'movement', 'armourClass', 'penetration', 'strength', 'unitType', 'nation', 'movedKm', 'apUsed', 'trail', 'supplied', 'supplyFrom', 'supplies', 'pool', 'unsuppliedTurns', 'surrendered', 'aboard', 'ride', 'heldTurns', 'attacked',
   'dig', 'submerged', 'replenishedTurn', 'corps', 'facing'];   // set by orders (routes/orders.js), not by editing
 
 module.exports = {

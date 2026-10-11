@@ -1,0 +1,47 @@
+<!doctype html><meta charset="utf-8"><title>Procedural rendering regression</title>
+<style>body{margin:20px;background:#20242a;color:white;font:16px sans-serif}canvas{display:block;margin-top:12px}button{padding:10px}</style>
+<h1>Procedural rendering regression</h1><button id="run">Run zoom and pan stress test</button><p id="status">Loading…</p>
+<script src="/vendor/pixi.min.js"></script><script src="/js/towns.js"></script><script src="/js/resource-art.js"></script><script src="/js/map-renderer.js"></script>
+<script>
+(async () => {
+  const app = new PIXI.Application();
+  await app.init({width:900,height:600,preference:'webgl',background:0x20242a,antialias:true,autoStart:false});
+  document.body.append(app.canvas);
+  const world = new PIXI.Container(); app.stage.addChild(world);
+  const r = Object.create(MapRenderer.prototype); r.app = app;
+  const plans = [TownArt.plan({name:'Regression capital',x:0,y:0,data:{size:'capital'}},()=>true,()=>true),
+    ResourceArt.plan({name:'Regression coal',x:0,y:0,data:{kind:'coal',yield:6,improved:3}},()=>true,()=>true)];
+  let sprites = [];
+  function rebuild(detail) {
+    for (const s of sprites) s.destroy();
+    sprites = plans.map((p,i) => r._proceduralSprite(i ? ResourceArt.draw(p,detail) : TownArt.draw(p,()=>0,detail),p,detail));
+    sprites.forEach((s,i) => { s.position.set(i*65,0); world.addChild(s); });
+  }
+  rebuild(true); world.scale.set(7); world.position.set(220,300); app.render();
+  document.querySelector('#status').textContent = 'Ready: capital and coal works rendered as bounded images.';
+  document.querySelector('#run').onclick = async () => {
+    const button=document.querySelector('#run'); button.disabled=true;
+    let checks=0;
+    try {
+      for(let i=0;i<60;i++) {
+        rebuild(i%2===0);
+        const scale=[2,4.9,5.1,8,16,32][i%6]; world.scale.set(scale);
+        world.position.set(120+(i%5)*65,220+(i%3)*30);
+        sprites[1].visible=i%3!==0; app.render();
+        const bounds=sprites.filter(s=>s.visible).map(s=>s.getBounds());
+        const {pixels,width,height}=app.renderer.extract.pixels({target:app.stage,frame:new PIXI.Rectangle(0,0,900,600),resolution:1});
+        for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+          if(bounds.some(b=>x>=b.x-2&&x<=b.x+b.width+2&&y>=b.y-2&&y<=b.y+b.height+2))continue;
+          const k=(y*width+x)*4;
+          if(pixels[k+3]>0)throw Error(`Pixel outside artwork bounds at ${x},${y}, frame ${i}`);
+        }
+        checks++; document.querySelector('#status').textContent=`Checking frame ${checks}/60…`;
+        await new Promise(resolve=>requestAnimationFrame(resolve));
+      }
+      rebuild(true); world.scale.set(7); world.position.set(220,300); app.render();
+      document.querySelector('#status').textContent=`PASS: ${checks} zoom/pan/rebuild frames; no pixels outside artwork bounds.`;
+    } catch(e) { document.querySelector('#status').textContent='FAIL: '+e.message; }
+    finally {button.disabled=false;}
+  };
+})();
+</script>

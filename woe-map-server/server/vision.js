@@ -17,7 +17,9 @@
  * The server decides: canSee (lobbyAccess.js) asks `sees()`, so a unit outside vision never reaches a browser
  * (first load, live updates, history, drags, battles). When vision changes, `schedulePush` sends each player the
  * units that came into or went out of sight, their fog overlay, and the last known positions ("ghosts") of
- * enemy units that slipped out of view.
+ * enemy units that slipped out of view. The battlefield follows the same rule (shapeViews, fightSeen, craterSeen):
+ * another side's trenches reach a player only where they run through their vision, fights they are not in only
+ * with both ends in sight, craters only on ground they can see.
  */
 const { db, now } = require('./db');
 const access = require('./lobbyAccess');
@@ -25,6 +27,7 @@ const geo = require('./geo');
 const UnitTypes = require('../public/js/units');
 
 const norm = s => String(s || '').trim().toLowerCase();
+const wreck = m => m?.type === 'unit' && Number(m.data?.strength ?? 100) <= 0;
 const DEFAULT_RANGE = 50;
 const BUCKET = 64;   // map px per cell of the source index
 
@@ -37,7 +40,7 @@ const q = {
     (SELECT IFNULL(GROUP_CONCAT(a || '-' || b || status), '') FROM relations WHERE lobby_id = ?) || '|' ||
     (SELECT IFNULL(GROUP_CONCAT(id || name), '') FROM factions WHERE lobby_id = ?) AS fp`),
   othersFp: db.prepare('SELECT COUNT(*) AS n, IFNULL(MAX(updated_at), 0) AS t FROM markers WHERE lobby_id = ? AND id != ?'),
-  anySubmerged: db.prepare("SELECT COUNT(*) AS n FROM markers WHERE lobby_id = ? AND type = 'unit' AND json_extract(data, '$.submerged') = 1"),
+  anySubmerged: db.prepare("SELECT COUNT(*) AS n FROM markers WHERE lobby_id = ? AND type = 'unit' AND COALESCE(json_extract(data, '$.strength'), 100) > 0 AND json_extract(data, '$.submerged') = 1"),
   ghosts: db.prepare('SELECT * FROM fog_ghosts WHERE lobby_id = ? AND nation = ?'),
   allGhosts: db.prepare('SELECT * FROM fog_ghosts WHERE lobby_id = ?'),
   putGhost: db.prepare(`INSERT INTO fog_ghosts (lobby_id, nation, marker_id, x, y, name, type, unit_type, color, flag_nation, turn, seen_at)
@@ -68,6 +71,7 @@ function patchMarker(lobbyId, before, after) {
   const st = cache.get(lobbyId);
   if (!st || !st.track) return false;
   if (!!before?.data?.submerged !== !!after?.data?.submerged) return false;   // a submarine dived or surfaced: what is tracked changes
+  if (wreck(before) !== wreck(after) && (before?.data?.submerged || after?.data?.submerged)) return false;
   const id = (after || before).id;
   // Only when this write is the sole change since the state was built: the fingerprint as it was before it
   // (every other marker, plus this one as it stood) must match. Anything else changed too: rebuild instead.
@@ -78,8 +82,8 @@ function patchMarker(lobbyId, before, after) {
   const i = st.markers.findIndex(m => m.id === id);
   if (after) { if (i >= 0) st.markers[i] = after; else st.markers.push(after); }
   else if (i >= 0) st.markers.splice(i, 1);
-  for (const m of [before, after]) if (m) st.nations.delete(norm(m.data?.nation));
-  st.hunters = null;   // destroyers may have moved (sonar)
+  for (const m of [before, after]) if (m && !wreck(m)) st.nations.delete(norm(m.data?.nation));
+  if ([before, after].some(m => m && !wreck(m))) st.hunters = null;   // living destroyers may have moved (sonar)
   st.fp = fp;
   return true;
 }
@@ -158,7 +162,7 @@ function nationVision(st, nation) {
   if (!f) return nv;
   const fx = require('./game').factionEffects(st.lobbyId, f.id);
   for (const m of st.markers) {
-    if (!['unit', 'hero', 'town'].includes(m.type) || norm(m.data?.nation) !== n) continue;
+    if (wreck(m) || !['unit', 'hero', 'town'].includes(m.type) || norm(m.data?.nation) !== n) continue;
     const km = rangeOf(m, st.settings, fx);
     if (km <= 0) continue;
     const { rx, ry } = extent(st, m.x, m.y, km);
@@ -240,6 +244,9 @@ function sonar(st, side, x, y) {
 }
 /** Vision step of canSee: true unless fog (or the sea) hides this unit from the viewer. */
 function sees(viewer, m) {
+  // Wrecks remain on the battlefield, without per-viewer radius/province/sonar checks.
+  // Explicit marker access restrictions are still enforced by canSee before this call.
+  if (wreck(m)) return true;
   if (!foreign(viewer, m)) return true;
   if (m.data?.aboard) return false;   // another side's troops aboard a convoy: what it carries is not seen
   const st = state(viewer.lobbyId), side = sideOf(st, viewer.nation);
@@ -259,12 +266,14 @@ function ownSide(viewer, m) {
  */
 function redact(m, viewer) {
   if (m.data?.goal && !ownSide(viewer, m)) { const { goal, ...rest } = m.data; m = { ...m, data: rest }; }
+  // Under fog of war a town's stores (server/goods.js) are its own side's to know; its unrest is public, like a revolt.
+  if (m.type === 'town' && m.data?.goods && viewer && viewer.role !== 'gm' && on(viewer.lobbyId) && !ownSide(viewer, m)) { const { goods, ...rest } = m.data; m = { ...m, data: rest }; }
   if (!foreign(viewer, m) || !m.data) return m;
   const { trail, supplyFrom, travel, postedTo, ride, dig, corps, ...data } = m.data;
   return { ...m, data };
 }
 /** Under fog, does a viewer see this unit's history and drag previews? Only its own side (and the GM) do. */
-function sameSide(viewer, m) { return !foreign(viewer, m); }
+function sameSide(viewer, m) { return !foreign(viewer, m) && !foreignTrench(viewer, m); }
 /** The nations (names as stored) on a nation's side, for log audiences. */
 function sideNames(lobbyId, nation) {
   const st = state(lobbyId);
@@ -273,6 +282,7 @@ function sideNames(lobbyId, nation) {
 }
 /** Vision range shown in a unit's panel (km). */
 function rangeFor(lobbyId, m) {
+  if (wreck(m)) return 0;
   const st = state(lobbyId);
   const f = st.on ? st.byName.get(norm(m.data?.nation)) : null;
   return rangeOf(m, st.settings || {}, f ? require('./game').factionEffects(lobbyId, f.id) : null);
@@ -311,7 +321,7 @@ function visibleForeign(st, nation) {
   const side = sideOf(st, nation), out = new Map();
   const viewer = { role: 'player', userId: -1, nation, lobbyId: st.lobbyId };
   for (const m of st.markers) {
-    if (!fogged(m) || side.has(norm(m.data?.nation))) continue;
+    if (wreck(m) || !fogged(m) || side.has(norm(m.data?.nation))) continue;
     if (access.canSee(m, viewer)) out.set(m.id, m);
   }
   return out;
@@ -324,7 +334,8 @@ function visibleForeign(st, nation) {
 function updateGhosts(st) {
   if (!lastSeen.has(st.lobbyId)) lastSeen.set(st.lobbyId, new Map());
   const memo = lastSeen.get(st.lobbyId), changed = new Set(), t = now();
-  const onMap = new Set(st.markers.map(m => m.id));
+  const wrecks = new Set(st.markers.filter(wreck).map(m => m.id));
+  const onMap = new Set(st.markers.filter(m => !wreck(m)).map(m => m.id));
   for (const f of st.factions) {
     const n = norm(f.name), seen = visibleForeign(st, n), prev = memo.get(n), side = sideOf(st, n);
     if (prev) {
@@ -337,7 +348,7 @@ function updateGhosts(st) {
       }
     }
     for (const gh of q.ghosts.all(st.lobbyId, n)) {
-      if (seen.has(gh.marker_id) || inVision(st, side, gh.x, gh.y)) { q.dropGhost.run(st.lobbyId, n, gh.marker_id); changed.add(n); }
+      if (wrecks.has(gh.marker_id) || seen.has(gh.marker_id) || inVision(st, side, gh.x, gh.y)) { q.dropGhost.run(st.lobbyId, n, gh.marker_id); changed.add(n); }
     }
     memo.set(n, seen);
   }
@@ -355,6 +366,7 @@ const PUSH_MS = 100;   // moves landing within this of each other (several playe
 function schedulePush(lobbyId, before = null, after = null) {
   lobbyId = Number(lobbyId);
   if (!(before || after) || !patchMarker(lobbyId, before, after)) invalidate(lobbyId);
+  if ((before || after) && [before, after].every(m => !m || wreck(m))) return;
   if (pending.has(lobbyId)) return;
   pending.add(lobbyId);
   setTimeout(() => {
@@ -370,4 +382,92 @@ function pushNow(lobbyId) {
 /** Fog switched on or off: forget what each side last saw, so no ghosts appear from before. */
 function reset(lobbyId) { lastSeen.delete(Number(lobbyId)); q.clearGhosts.run(Number(lobbyId)); invalidate(lobbyId); }
 
-module.exports = { on, sees, foreign, redact, sameSide, sideNames, rangeFor, overlay, invalidate, cached, schedulePush, reset, state };
+// ---- The battlefield under fog: trenches, fights and craters --------------------------------------------------
+// Nobody knows the shape of a battlefield without having looked at it. Another side's trench reaches a player only
+// where it runs through their vision (clipped on the server into pieces, so the browser never holds the rest), a
+// fight they are not in only when both ends are in sight, and craters only where they can see the ground.
+const qf = {
+  trenches: db.prepare("SELECT * FROM shapes WHERE lobby_id = ? AND kind = 'trench'"),
+  battles: db.prepare('SELECT id, hidden, user_id, ax, ay, dx, dy, losses FROM battles WHERE lobby_id = ? AND turn >= ? AND (until_ms IS NULL OR until_ms > ?)'),
+  craters: db.prepare('SELECT id, hidden, user_id, x, y FROM craters WHERE lobby_id = ? AND expires_turn > ? AND (until_ms IS NULL OR until_ms > ?)'),
+};
+const SAMPLE_PX = 6;    // a trench is tested for sight at least this often along its line (about 30 km on the Earth map)
+const MAX_PIECES = 99;
+/** Is this trench another side's (or nobody's) under fog, so that only what is in sight of the viewer reaches them? */
+function foreignTrench(viewer, s) {
+  if (!viewer || viewer.role === 'gm' || !viewer.lobbyId || !s || s.kind !== 'trench') return false;
+  const st = state(viewer.lobbyId);
+  if (!st.on) return false;
+  const n = norm(s.data?.nation);
+  return !n || !sideOf(st, viewer.nation).has(n);
+}
+/**
+ * A shape as a viewer receives it: itself, or, for another side's trench under fog, the pieces of it inside the
+ * viewer's vision (none when nothing of it is in sight). A piece keeps the trench's look and state, with
+ * data.of (the trench) and data.part, and an id of its own below zero.
+ */
+function shapeViews(viewer, s) {
+  if (!foreignTrench(viewer, s)) return [s];
+  const pts = Array.isArray(s.points) ? s.points : [];
+  if (pts.length < 2) return [];
+  const st = state(viewer.lobbyId), side = sideOf(st, viewer.nation);
+  // Walk the line, a sample at least every SAMPLE_PX, and keep the runs in sight.
+  const runs = [];
+  let run = null;
+  const take = (x, y) => {
+    if (inVision(st, side, x, y)) { if (!run) { run = []; runs.push(run); } run.push([x, y]); }
+    else run = null;
+  };
+  take(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) {
+    const [ax, ay] = pts[i - 1], [bx, by] = pts[i], n = Math.ceil(Math.hypot(bx - ax, by - ay) / SAMPLE_PX);
+    for (let k = 1; k < n; k++) take(Math.round((ax + (bx - ax) * k / n) * 10) / 10, Math.round((ay + (by - ay) * k / n) * 10) / 10);
+    take(bx, by);
+  }
+  return runs.filter(r => r.length >= 2).slice(0, MAX_PIECES)
+    .map((points, k) => ({ ...s, id: -(s.id * 100 + k), points, locked: true, data: { ...(s.data || {}), of: s.id, part: k } }));
+}
+/** Every trench piece a viewer sees now: Map(piece id -> its JSON), for the push that follows vision changes. */
+function trenchPieces(viewer) {
+  const out = new Map();
+  for (const row of qf.trenches.all(viewer.lobbyId)) {
+    const s = access.serializeShape(row);
+    if (!foreignTrench(viewer, s) || !access.canSee(s, viewer)) continue;
+    for (const p of shapeViews(viewer, s)) out.set(p.id, p);
+  }
+  return out;
+}
+/** Does a viewer see a fight (its tracers, shells, and later its dead)? b: a battles row or serialized battle. */
+function fightSeen(viewer, b) {
+  if (!viewer || viewer.role === 'gm') return true;
+  const hidden = b.hidden, user = b.user_id ?? b.userId;
+  if (hidden && user !== viewer.userId) return false;
+  if (!viewer.lobbyId) return true;
+  const st = state(viewer.lobbyId);
+  if (!st.on) return true;
+  const side = sideOf(st, viewer.nation);
+  // By nation, not by account: a GM viewing as a nation sees what that nation would, not the fights the GM ran.
+  const losses = typeof b.losses === 'string' ? access.safeJson(b.losses) : b.losses;
+  if (side.has(norm(losses?.a?.nation)) || side.has(norm(losses?.d?.nation))) return true;
+  return inVision(st, side, b.ax, b.ay) && inVision(st, side, b.dx, b.dy);
+}
+/** Does a viewer see a crater? Its own fights' and the GM's always; otherwise where they can see the ground. */
+function craterSeen(viewer, c) {
+  if (!viewer || viewer.role === 'gm') return true;
+  const user = c.user_id ?? c.userId;
+  if (c.hidden && user !== viewer.userId) return false;
+  if (!viewer.lobbyId) return true;
+  const st = state(viewer.lobbyId);
+  if (!st.on) return true;
+  return inVision(st, sideOf(st, viewer.nation), c.x, c.y);
+}
+/** What a viewer sees of the fighting, as one string: when it changes, their map fetches the battles again. */
+function fightKey(viewer) {
+  const st = state(viewer.lobbyId), t = Date.now(), turn = st.g?.turn || 1;
+  const b = qf.battles.all(viewer.lobbyId, turn - 2, t - 30 * 60000).filter(x => fightSeen(viewer, x)).map(x => x.id);
+  const c = qf.craters.all(viewer.lobbyId, turn, t).filter(x => craterSeen(viewer, x)).map(x => x.id);
+  return `${b.join(',')}|${c.join(',')}`;
+}
+
+module.exports = { on, sees, foreign, redact, sameSide, sideNames, rangeFor, overlay, invalidate, cached, schedulePush, reset, state,
+  foreignTrench, shapeViews, trenchPieces, fightSeen, craterSeen, fightKey };

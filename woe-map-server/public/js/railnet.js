@@ -235,7 +235,7 @@
    */
   function route(net, a, b, opt = {}) {
     if (!net.edges.length) return null;
-    const speed = opt.speed || net.opt.speed, cache = {};
+    const speed = opt.speed || net.opt.speed, wf = 1 / (opt.walkSpeed || 1), cache = {};
     const on = board(net, a.x, a.y, opt.usable, cache), off = board(net, b.x, b.y, opt.usable, cache);
     if (!on || !off) return null;
     const dist = net.opt.dist;
@@ -247,7 +247,7 @@
     const eOn = net.edges[on.edge], eOff = net.edges[off.edge];
     const same = on.edge === off.edge;
     const sameKm = same ? eOn.km * Math.abs(on.t - off.t) : Infinity;
-    const { dist: d, via } = spread(net, on, opt.usable, cache, (direct - walkKm) * speed);
+    const { dist: d, via } = spread(net, on, opt.usable, cache, (direct - walkKm) * wf * speed);
     const viaA = d[eOff.a] + eOff.km * off.t, viaB = d[eOff.b] + eOff.km * (1 - off.t);
     railKm = Math.min(sameKm, viaA, viaB);
     if (!Number.isFinite(railKm)) return null;
@@ -263,9 +263,9 @@
       }
       mids.reverse();
     }
-    const cost = walkKm + railKm / speed;
-    if (cost >= direct) return null;
-    const path = [[a.x, a.y, 1], [on.x, on.y, 1], ...mids, [off.x, off.y, rf], [b.x, b.y, 1]];
+    const cost = walkKm * wf + railKm / speed;
+    if (cost >= direct * wf) return null;
+    const path = [[a.x, a.y, wf], [on.x, on.y, wf], ...mids, [off.x, off.y, rf], [b.x, b.y, wf]];
     return { cost, railKm, walkKm, path };
   }
 
@@ -292,10 +292,10 @@
    */
   function reach(net, a, budget, opt = {}) {
     if (!net.edges.length || budget <= 0) return [];
-    const speed = opt.speed || net.opt.speed, cache = {};
+    const speed = opt.speed || net.opt.speed, wf = 1 / (opt.walkSpeed || 1), cache = {};
     const on = board(net, a.x, a.y, opt.usable, cache);
-    if (!on || on.d >= budget) return [];
-    const trackKm = (budget - on.d) * speed;
+    if (!on || on.d * wf >= budget) return [];
+    const trackKm = (budget - on.d * wf) * speed;
     const { dist: d } = spread(net, on, opt.usable, cache, trackKm);
     const out = [];
     net.edges.forEach((e, i) => {

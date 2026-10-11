@@ -6,7 +6,7 @@
  *
  * World space = map image pixels (origin top-left, y down).
  * Markers keep a constant on-screen size regardless of zoom, like the old Leaflet map,
- * and animate: spawn pop, smooth movement tween, idle bob for units, hover scale,
+ * and animate: spawn pop, paced marches (units along their route), idle bob for units, hover scale,
  * selection pulse ring, movement trails, hit shake and fade-out on removal.
  * Shapes (lines and areas) live in their own layer under the markers with constant screen-pixel
  * stroke widths.
@@ -20,6 +20,13 @@
 // so they sit better among the towns and counters.
 // A unit out of a fight (from 800 % zoom): its men's line, screen px ahead of its token, and how wide it is.
 const IDLE_AHEAD = 62, IDLE_FRONT = 110;
+// A unit on the march (from 800 % zoom): its men's formation, screen px ahead of its token.
+const STRATEGIC_SCALE = 0.505;   // at this zoom (50 %) and further out, the strategic view: land, borders and names only
+const MARCH_AHEAD = 40;
+// How fast a unit's token marches to where it was sent (screen px a second, so it reads the same at any zoom), and the
+// longest a march takes on screen (ms). Tanks grind along; horsemen and aircraft are quicker.
+const MARCH_PX_S = { tanks: 34, horse: 110, air: 220, ships: 75, other: 60 };
+const MARCH_MAX_MS = { tanks: 9000, air: 3500, other: 6500 }, MARCH_MIN_MS = 700;
 const CRATER_SCALE = 0.65;
 function hash01(a, b) { const v = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453; return v - Math.floor(v); }
 /** Smooth wandering value in about [0, 1] (sum of incommensurate sines), for bursts and lulls. */
@@ -240,6 +247,7 @@ class MapRenderer extends EventTarget {
     this.lakes = null; this.lakeG.clear(); this.lakeShoreG.clear();
     if (this.earth) { this.mapLayer.removeChild(this.earth.container); this.earth.destroy(); this.earth = null; }
     for (const c of this.mapLayer.removeChildren()) c.destroy();
+    this.azgaarTerrain = null;
   }
 
   /** Show the bundled vector Earth (see earth.js). opts = lobby.settings.earth */
@@ -248,6 +256,7 @@ class MapRenderer extends EventTarget {
     const earth = await window.EarthMap.build(opts);
     if (gen !== this._mapGen) { earth.destroy(); return false; }
     this._clearMap();
+    this.azgaar = false;
     this.mapSize = { w: opts.width, h: opts.height };
     this.earth = earth;
     this.mapLayer.addChild(earth.container);
@@ -318,6 +327,7 @@ class MapRenderer extends EventTarget {
   async setMap(url, w, h) {
     this._mapGen = (this._mapGen || 0) + 1;
     this._clearMap();
+    this.azgaar = false;
     this.mapSize = { w: w || 2000, h: h || 1200 };
     let ok = false;
     if (url) {
@@ -339,6 +349,20 @@ class MapRenderer extends EventTarget {
     this._drawGrid();
     this.fit();
     return ok;
+  }
+
+  /** Azgaar land and nation borders are drawn by ProvinceLayer above this sea background. */
+  setAzgaar(w, h) {
+    this._mapGen = (this._mapGen || 0) + 1;
+    this._clearMap();
+    this.azgaar = true;
+    this.mapSize = { w, h };
+    const sea = new PIXI.Graphics().rect(0, 0, w, h).fill(0x466eab);
+    sea.eventMode = 'none';
+    this.mapLayer.addChild(sea);
+    this._drawGrid();
+    this.fit();
+    this.invalidate();
   }
 
   // ---- Camera --------------------------------------------------------------------
@@ -503,6 +527,7 @@ class MapRenderer extends EventTarget {
     if (this._corps) this._drawCorpsLine();
     if (this.persistTrails) this.queueTrails();
     this._syncCraterZoom();
+    this._syncStrategic();
     if (this._range) { const r = this._range; this.showRange(r.x, r.y, r.radius, r.exhausted, r.ry, r.reach); }
     if (this._fire) this._drawFireRange();
     if (this.earth) {
@@ -665,6 +690,24 @@ class MapRenderer extends EventTarget {
   _townsHit(craters) {
     for (const t of this.towns.values()) if (t.plan && craters.some(c => Math.hypot(c.x - t.plan.x, c.y - t.plan.y) < t.plan.R * 1.4 + 3)) t.dirty = true;
   }
+  /** Rasterize static procedural geometry into a bounded local image. Camera changes then draw a quad,
+   * not large changing graphics batches. The explicit frame also contains any stray tessellation triangles.
+   * Images own their textures; culling and rebuilding release GPU storage, while deterministic plans survive. */
+  _proceduralSprite(graphics, plan, detail) {
+    const reach = Math.ceil(plan.reach + 1);
+    const resolution = Math.min(detail ? 32 : 8, 2048 / (reach * 2));
+    let texture;
+    try {
+      texture = this.app.renderer.generateTexture({ target: graphics,
+        frame: new PIXI.Rectangle(-reach, -reach, reach * 2, reach * 2),
+        resolution, antialias: true });
+    } finally { graphics.destroy(); }
+    const sprite = new PIXI.Sprite(texture);
+    sprite.anchor.set(0.5);
+    sprite.once('destroyed', () => texture.destroy(true));
+    return sprite;
+  }
+
   /** Draw a town with what the shells have done to it; houses hit this turn are burning. */
   _drawTown(t, detail) {
     const p = t.plan, near = [...this.craters.values()].filter(c => Math.hypot(c.x - p.x, c.y - p.y) < p.R * 1.4 + 3)
@@ -680,7 +723,7 @@ class MapRenderer extends EventTarget {
       return d;
     };
     t.g?.destroy();
-    t.g = window.TownArt.draw(p, damageOf, detail);
+    t.g = this._proceduralSprite(window.TownArt.draw(p, damageOf, detail), p, detail);
     t.detail = detail;
     t.g.position.set(p.x, p.y);
     this.townLayer.addChild(t.g);
@@ -756,13 +799,13 @@ class MapRenderer extends EventTarget {
     for (const f of this.fieldSites.values()) {
       const m = f.m, reach = f.plan ? f.plan.reach : f.R * 1.4 + 0.5;
       const inView = m.x + reach > vx0 && m.x - reach < vx1 && m.y + reach > vy0 && m.y - reach < vy1;
-      if (!inView) { if (f.g) f.g.visible = false; continue; }
-      if (!f.plan || f.dirty || f.detail !== detail) {
+      if (!inView) { f.g?.destroy(); f.g = null; continue; }
+      if (!f.g || !f.plan || f.dirty || f.detail !== detail) {
         if (built && performance.now() - t0 > 8) { pending = true; continue; }
         built++;
         if (!f.plan) f.plan = window.ResourceArt.plan(m, isLand, isFree);
         f.g?.destroy();
-        f.g = window.ResourceArt.draw(f.plan, detail, this._fieldTex);
+        f.g = this._proceduralSprite(window.ResourceArt.draw(f.plan, detail, this._fieldTex), f.plan, detail);
         f.g.position.set(f.plan.x, f.plan.y);
         this.fieldLayer.addChild(f.g);
         f.detail = detail; f.dirty = false;
@@ -787,8 +830,8 @@ class MapRenderer extends EventTarget {
     for (const t of this.towns.values()) {
       const m = t.m, reach = t.plan ? t.plan.reach : 22;
       const inView = m.x + reach > vx0 && m.x - reach < vx1 && m.y + reach > vy0 && m.y - reach < vy1;
-      if (!inView) { if (t.g) t.g.visible = false; continue; }
-      if (!t.plan || t.dirty || t.detail !== detail) {
+      if (!inView) { t.g?.destroy(); t.g = null; continue; }
+      if (!t.g || !t.plan || t.dirty || t.detail !== detail) {
         if (built && performance.now() - t0 > 10) { pending = true; continue; }
         built++;
         if (!t.plan) t.plan = window.TownArt.plan(m, isLand, (x, y) => !this._inWorks(x, y));
@@ -804,7 +847,7 @@ class MapRenderer extends EventTarget {
   ghostMove(id, x, y) {
     this.invalidate();
     const v = this.views.get(id);
-    if (v && !v.dragging) { v.tx = x; v.ty = y; }
+    if (v && !v.dragging) { v.tx = x; v.ty = y; v.march = null; }
   }
 
   select(id) {
@@ -970,7 +1013,7 @@ class MapRenderer extends EventTarget {
       this.shapeViews.set(shape.id, v);
     }
     if (shape.kind === 'trench' && !v.trench && window.Trench) v.trench = new Trench.View(this.trenchLayer);
-    if (shape.kind === 'rail' && !v.rail && window.Rail) {
+    if (shape.kind === 'rail' && !v.rail && window.Rail && shape.data?.state !== 'plan') {
       v.rail = new Rail.View(this.railLayer, this);
       // The track tile and cars come from the train sheet; draw again once it has loaded.
       Rail.load().then(() => { if (this.shapeViews.get(shape.id) === v && v.rail) { v.rail.key = null; this._drawShapeView(v); } });
@@ -1034,6 +1077,37 @@ class MapRenderer extends EventTarget {
       v.label.visible = !!s.label;
       const a = shapeAnchor(s);
       v.label.position.set(a[0], a[1]);
+      v.label.scale.set(1 / sc);
+      return;
+    }
+    if (s.kind === 'rail' && s.data?.state === 'plan') {
+      // A planned railway: a dashed survey line with its sleepers pegged out, until engineers lay the track.
+      const dash = 9 / sc, gap = 6 / sc, tie = 4 / sc;
+      let start = 0;
+      for (let i = 1; i < pts.length; i++) {
+        const [ax, ay] = pts[i - 1], [bx, by] = pts[i], L = Math.hypot(bx - ax, by - ay);
+        if (L < 1e-9) continue;
+        const ux = (bx - ax) / L, uy = (by - ay) / L;
+        let d = start;
+        for (; d < L; d += dash + gap) {
+          const s0 = Math.max(0, d), e = Math.min(L, d + dash);
+          if (e <= s0) continue;
+          const mid = (s0 + e) / 2;
+          g.moveTo(ax + ux * s0, ay + uy * s0).lineTo(ax + ux * e, ay + uy * e)
+            .moveTo(ax + ux * mid - uy * tie, ay + uy * mid + ux * tie).lineTo(ax + ux * mid + uy * tie, ay + uy * mid - ux * tie);
+        }
+        start = d - L - (dash + gap);   // negative: a dash cut by the corner finishes on the next segment
+        if (start < -(dash + gap)) start += dash + gap;
+      }
+      // Dark casing under the pegged-out line so it reads over fields and towns.
+      g.stroke({ width: 3.2 / sc, color: 0xf2ead8, alpha: 1 });
+      path(); g.stroke({ width: 1.2 / sc, color: 0x2b2620, alpha: 0.55 });
+      if (selected) { path(); g.stroke({ width: 10 / sc, color: 0xffffff, alpha: 0.35 }); }
+      path(); g.stroke({ width: 14 / sc, color: 0xffffff, alpha: 0.001 });
+      v.label.text = `${s.label || 'Railway'} (planned)`;
+      v.label.visible = true;
+      const mid = window.Rail ? (() => { const cum = Rail.cumulative(pts); return Rail.at(pts, cum, cum[cum.length - 1] / 2); })() : { x: pts[0][0], y: pts[0][1] };
+      v.label.position.set(mid.x, mid.y - 10 / sc);
       v.label.scale.set(1 / sc);
       return;
     }
@@ -1322,6 +1396,9 @@ class MapRenderer extends EventTarget {
   }
   /** Replace (replace=true) or merge the territory set. Each item: { factionId, geometry }. */
   setTerritories(list, replace) {
+    // Province owners are authoritative. Older servers/campaigns can still send their historical polygons.
+    // Do not layer those old colours over occupied or ceded provinces, including on an already open map.
+    if (this.provinceLayer?.size) { list = []; replace = true; }
     if (replace) { for (const v of this.territoryViews.values()) this._dropTerritory(v); this.territoryViews.clear(); }
     for (const t of list || []) {
       let v = this.territoryViews.get(t.factionId);
@@ -1359,6 +1436,7 @@ class MapRenderer extends EventTarget {
     const track = pts.slice(on, off + 1);
     if (track.length < 2) return;
     const final = { x: v.tx, y: v.ty };
+    v.march = null;
     v.riding = 'walk'; v.x = v.tx = pts[0][0]; v.y = v.ty = pts[0][1];   // back to where it set out from
     Rail.load().then(() => {
       const f = Rail.frames();
@@ -1379,6 +1457,40 @@ class MapRenderer extends EventTarget {
       this.rides.set(id, { v, pts, on, off, track, cum, L, c, cars, label, t0: performance.now(), D, final });
       this.invalidate();
     });
+  }
+  /**
+   * Send a unit's token marching from where it is drawn to (x, y): along the way it went (`path`, map points after the
+   * start, ending at x, y; else straight), at its kind's pace on screen (MARCH_PX_S), easing in and out. Its men march
+   * with it from 800 % zoom (_tickBattles, skirmish.js).
+   */
+  march(v, path) {
+    const pts = [[v.x, v.y], ...path];
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+    const L = cum[cum.length - 1];
+    if (L < 1e-6) { v.march = null; return; }
+    const kind = window.Skirmish?.kindOf(v.marker), pace = MARCH_PX_S[kind] || MARCH_PX_S.other;
+    const dur = Math.max(MARCH_MIN_MS, Math.min(MARCH_MAX_MS[kind] || MARCH_MAX_MS.other, L * this.scale / pace * 1000));
+    const [dx, dy] = [pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]], n = Math.hypot(dx, dy) || 1;
+    v.march = { pts, cum, L, t0: performance.now(), dur, ux: dx / n, uy: dy / n };
+    this.invalidate();
+  }
+  _tickMarch(v, nowMs) {
+    const r = v.march, k = Math.max(0, Math.min(1, (nowMs - r.t0) / r.dur));
+    // Even pace, gathering speed over the first tenth and slowing over the last.
+    const a = 0.1, top = 1 / (1 - a), u = k < a ? top * k * k / (2 * a) : k > 1 - a ? 1 - top * (1 - k) ** 2 / (2 * a) : top * (k - a / 2);
+    const at = u * r.L;
+    let i = 1;
+    while (i < r.cum.length - 1 && r.cum[i] < at) i++;
+    const p0 = r.pts[i - 1], p1 = r.pts[i], seg = r.cum[i] - r.cum[i - 1] || 1, f = (at - r.cum[i - 1]) / seg;
+    v.x = p0[0] + (p1[0] - p0[0]) * f; v.y = p0[1] + (p1[1] - p0[1]) * f;
+    // Heading: along the stretch it is on, turning smoothly onto the next.
+    const n = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
+    if (n > 1e-6) {
+      const want = Math.atan2(p1[1] - p0[1], p1[0] - p0[0]), cur = Math.atan2(r.uy, r.ux), hd = cur + Math.atan2(Math.sin(want - cur), Math.cos(want - cur)) * 0.15;
+      r.ux = Math.cos(hd); r.uy = Math.sin(hd);
+    }
+    if (k >= 1) { v.march = null; v.x = v.tx; v.y = v.ty; }
   }
   _tickRides(nowMs) {
     if (!this.rides.size) return false;
@@ -1471,7 +1583,19 @@ class MapRenderer extends EventTarget {
   /** The province set: [{ id, n, s, x, y, g }], drawn and recoloured by the province layer (public/js/province-layer.js). */
   setProvinces(list) {
     if (!this.provinceLayer) return;
+    if (this.azgaar) {
+      if (this.azgaarTerrain) { this.mapLayer.removeChild(this.azgaarTerrain); this.azgaarTerrain.destroy(); }
+      const terrain = new PIXI.Graphics();
+      terrain.eventMode = 'none';
+      for (const p of list || []) {
+        const color = /^#[0-9a-f]{6}$/i.test(p.b || '') ? parseInt(p.b.slice(1), 16) : 0xa6be8d;
+        for (const poly of p.g || []) for (const ring of poly.slice(0, 1)) terrain.poly(ring.flat()).fill(color);
+      }
+      this.azgaarTerrain = terrain;
+      this.mapLayer.addChild(terrain);
+    }
     this.provinceLayer.setProvinces(list);
+    if (this.provinceLayer.size) this.setTerritories([], true);
     this.provinceLayer.setFactionInfo([...this.factionInfo.entries()].map(([id, f]) => ({ id, name: f.name, color: '#' + f.color.toString(16).padStart(6, '0') })));
     this.provinceLayer.flushPending();
     this._syncEarthPolitical();
@@ -1874,6 +1998,20 @@ class MapRenderer extends EventTarget {
   /** Craters are a few map px across: hide them while they would be specks (their dark ground shows a little sooner). */
   _syncCraterZoom() { this.craterLayer.visible = this.scale >= 4; this.scarLayer.visible = this.scale >= 2.5; this.craterSmokeG.visible = this.scale >= 1.5; }
   /**
+   * The strategic view (docs/UI.md): at 50 % zoom and further out only the land, the borders and the nations' names
+   * show. Tokens, drawings and their names, trenches, railways, trails, ghosts, trains and the fighting are hidden
+   * until the map is zoomed back in. The map tools' own overlays (selection, measure, ranges) and pings stay.
+   */
+  _syncStrategic() {
+    const far = this.scale <= STRATEGIC_SCALE;
+    if (far === this._strategic) return;
+    this._strategic = far;
+    const layers = [this.markerLayer, this.shapesLayer, this.trenchLayer, this.railLayer, this.sceneryLayer, this.trailG, this.ghostLayer, this.rideLayer,
+      this.fxLayer, this.boomLayer, this.unitDots, this.gunG, this.nml?.layer, this.skirmish?.layer, this.skirmish?.airLayer];
+    for (const l of layers) if (l) l.visible = !far;
+    this.invalidate();
+  }
+  /**
    * Ground scars, generated once: four variants of a ragged blotch of churned mud (value noise for its edge and
    * texture: wet dark earth, drier lighter clods, a few standing puddles), scorched dark close round the hole, and
    * clods and pale subsoil thrown out across it.
@@ -2084,7 +2222,9 @@ class MapRenderer extends EventTarget {
         // Holding fire: the target of a bombardment does not shoot back at the distant guns, and artillery attacked
         // does not return fire.
         // (A unit that is itself attacking this turn, like a ship a coastal battery fires back at, keeps firing.)
-        const holdFire = id === b.defenderId && !attacking.has(id) && (b.kind === 'shells' || window.UnitTypes?.resolve(view?.marker?.data?.unitType)?.cat === 'Artillery');
+        // A fort's volley (b.losses.volley: its garrison fired as well as its guns) is close fighting: the defender answers.
+        const volley = !!b.losses?.volley;
+        const holdFire = id === b.defenderId && !attacking.has(id) && ((b.kind === 'shells' && !volley) || window.UnitTypes?.resolve(view?.marker?.data?.unitType)?.cat === 'Artillery');
         const l = Math.hypot(x1 - x0, y1 - y0), r0 = Math.min(l * 0.3, px / s), r1 = Math.min(l * 0.3, otherPx / s);
         const fux = (x1 - x0) / l, fuy = (y1 - y0) / l;
         if (kind === 'balloon') {
@@ -2101,12 +2241,13 @@ class MapRenderer extends EventTarget {
           return;
         }
         const enemyId = id === b.attackerId ? b.defenderId : b.attackerId, enemyKind = id === b.attackerId ? kD : kA;
-        fronts.set(id, { battleId: b.id, turn: b.turn, from: startOf.get(id), holdFire, view, kind, enemyId, enemyKind, cover: id === b.defenderId && !!b.cover, shells: b.kind === 'shells' && id === b.attackerId, cx: x0 + fux * r0, cy: y0 + fuy * r0, ux: fux, uy: fuy,
+        fronts.set(id, { battleId: b.id, turn: b.turn, from: startOf.get(id), holdFire, view, kind, enemyId, enemyKind, attacker: id === b.attackerId, cover: id === b.defenderId && !!b.cover, shells: b.kind === 'shells' && id === b.attackerId, volley: volley && id === b.attackerId, cx: x0 + fux * r0, cy: y0 + fuy * r0, ux: fux, uy: fuy,
           front: Math.max(80, Math.min(190, (l - r0 - r1) * s * 0.9)) / s, backPx: r0 * s, tx: x1 - fux * r1, ty: y1 - fuy * r1, createdAt: b.createdAt });
       };
       if (squadsOn) {
-        // Heavy guns shelling get a spotter balloon up behind the battery, its observers directing the fire.
-        if (b.kind === 'shells' && kA === 'guns' && /heavyartillery|siegeartillery|railwaygun|coastal|fortress/.test(window.UnitTypes?.resolve(Av?.marker?.data?.unitType)?.id || '')) {
+        // Heavy guns shelling get a spotter balloon up behind the battery, its observers directing the fire (not coastal
+        // batteries or forts: drawn as the work itself, nothing else with it).
+        if (b.kind === 'shells' && kA === 'guns' && /heavyartillery|siegeartillery|railwaygun/.test(window.UnitTypes?.resolve(Av?.marker?.data?.unitType)?.id || '')) {
           const key = 'spot' + b.attackerId;
           fronts.set(key, { view: Av, kind: 'balloon', spotter: true, mode: 'hold', hx: ax - ux * 34 / s + nx * 22 / s, hy: ay - uy * 34 / s + ny * 22 / s });
           keep.add(key);
@@ -2140,7 +2281,10 @@ class MapRenderer extends EventTarget {
         if (s < 1.5 || !(onScreen(dx, dy, margin) || onScreen(ax, ay, margin))) continue;
         anim = true;
         if (gunZoom) this._drawHaze(g, b, ax, ay, dx, dy, t, s, true);
-        if (nowMs >= e.nextShell && this.shellFrames) {
+        // Anti-aircraft guns on screen firing at planes or balloons: their flak bursts in the sky (skirmish.js), no
+        // shells lobbed at the ground.
+        const flak = (kD === 'air' || kD === 'balloon') && !!sk?.firesFlak(b.attackerId);
+        if (nowMs >= e.nextShell && this.shellFrames && !flak) {
           const a = Math.random() * Math.PI * 2, r = (14 + Math.random() * 40) / s;
           const bx = dx + Math.cos(a) * r, by = dy + Math.sin(a) * r * 0.75;
           // From one of the battery's guns when they are drawn (it recoils and flashes), else the token's edge.
@@ -2164,6 +2308,14 @@ class MapRenderer extends EventTarget {
       for (const [id, v] of this.views) {
         if (fronts.has(id) || keep.has(id) || v.dying || v.riding || v.marker.type !== 'unit' || v.marker.data?.aboard || !onScreen(v.x, v.y, m)) continue;
         if (v._skType !== v.marker.data?.unitType || v._skKind === undefined) { v._skType = v.marker.data?.unitType; v._skKind = window.Skirmish.kindOf(v.marker); }
+        // On the march: infantry in a wedge, tanks side by side, guns in column with their crews, horsemen in twos, a
+        // supply wagon with its men alongside, all a little ahead of the token, heading the way it goes.
+        if (v.march && ['rifles', 'guns', 'tanks', 'horse', 'wagon'].includes(v._skKind) && Number(v.marker.data?.strength ?? 100) > 0) {
+          const { ux, uy } = v.march;
+          fronts.set(id, { view: v, kind: v._skKind, idle: true, march: true, cx: v.x + ux * MARCH_AHEAD / s, cy: v.y + uy * MARCH_AHEAD / s, ux, uy, front: IDLE_FRONT / s, backPx: MARCH_AHEAD });
+          keep.add(id);
+          continue;
+        }
         if (v._skKind === 'ships' && sk.ships) {
           // Bows the way it last moved (else either way, steady for the unit).
           const tr = v.marker.data?.trail, a = Array.isArray(tr) && tr.length > 1 ? tr[tr.length - 1][0] - tr[tr.length - 2][0] : 0;
@@ -2176,8 +2328,8 @@ class MapRenderer extends EventTarget {
           keep.add(id);
           continue;
         }
-        if (['rifles', 'guns', 'tanks', 'horse'].includes(v._skKind)) {
-          if (Number(v.marker.data?.strength ?? 100) <= 0) continue;
+        if (['rifles', 'guns', 'tanks', 'horse', 'wagon'].includes(v._skKind)) {
+          if (Number(v.marker.data?.strength ?? 100) <= 0 && v._skKind !== 'wagon') continue;   // (a wrecked wagon stays, for salvage)
           const [ux, uy] = this._facing(v, nowMs);
           fronts.set(id, { view: v, kind: v._skKind, idle: true, cx: v.x + ux * IDLE_AHEAD / s, cy: v.y + uy * IDLE_AHEAD / s, ux, uy, front: IDLE_FRONT / s, backPx: IDLE_AHEAD });
           keep.add(id);
@@ -2604,7 +2756,7 @@ class MapRenderer extends EventTarget {
           if (this.onMapClick && this.onMapClick(p.x, p.y)) return;
           this.select(null);
           this.dispatchEvent(new CustomEvent('mapclick', { detail: { x: p.x, y: p.y } }));
-        } else if (!pan.moved && pan.button === 2 && !this.mode) {
+        } else if (!pan.moved && pan.button === 2 && (!this.mode || this.mode === 'select')) {
           const p = this.screenToWorld(e.global.x, e.global.y);
           this.dispatchEvent(new CustomEvent('mapcontext', { detail: { x: p.x, y: p.y } }));
         }
@@ -2615,12 +2767,18 @@ class MapRenderer extends EventTarget {
         d.view.dragging = false;
         if (d.group) for (const g of d.group) g.view.dragging = false;
         if (d.moved) {
+          // In game mode a unit dropped somewhere goes back to where it stood and marches there (MarkerView.update)
+          // once the server has taken the move; a move it refuses leaves it standing.
+          const back = (view, x, y) => { if (this.gameRules && view.marker.type === 'unit') view.setImmediate(x, y); };
           if (d.group) {
             const moves = d.group.map(g => { this.trail(g.x, g.y, g.view.x, g.view.y, g.view.colorNum); return { id: g.view.id, x: g.view.x, y: g.view.y }; });
-            this.dispatchEvent(new CustomEvent('dragend', { detail: { id: d.view.id, x: d.view.x, y: d.view.y, moves } }));
+            for (const g of d.group) back(g.view, g.x, g.y);
+            this.dispatchEvent(new CustomEvent('dragend', { detail: { id: d.view.id, x: moves.find(m => m.id === d.view.id)?.x ?? d.view.x, y: moves.find(m => m.id === d.view.id)?.y ?? d.view.y, moves } }));
           } else {
-            this.trail(d.startX, d.startY, d.view.x, d.view.y, d.view.colorNum);
-            this.dispatchEvent(new CustomEvent('dragend', { detail: { id: d.view.id, x: d.view.x, y: d.view.y } }));
+            const x = d.view.x, y = d.view.y;
+            this.trail(d.startX, d.startY, x, y, d.view.colorNum);
+            back(d.view, d.startX, d.startY);
+            this.dispatchEvent(new CustomEvent('dragend', { detail: { id: d.view.id, x, y } }));
           }
         } else if (!d.group) {
           this.select(d.view.id);
@@ -2709,11 +2867,17 @@ class MapRenderer extends EventTarget {
     if ((this.craters.size || this.towns.size) && this.scale >= 1.5) {
       const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
       if (this._tickTowns(tl.x, tl.y, br.x, br.y)) anim = true;
-    } else this.townLayer.visible = false;
+    } else {
+      if (this.townLayer.visible) for (const t of this.towns.values()) { t.g?.destroy(); t.g = null; }
+      this.townLayer.visible = false;
+    }
     if (this.fieldSites.size && this.scale >= 1.5) {
       const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
       if (this._tickFields(tl.x, tl.y, br.x, br.y)) anim = true;
-    } else this.fieldLayer.visible = false;
+    } else {
+      if (this.fieldLayer.visible) for (const f of this.fieldSites.values()) { f.g?.destroy(); f.g = null; }
+      this.fieldLayer.visible = false;
+    }
     if (this.craters.size && this.scale >= 1.5) {
       const tl = this.screenToWorld(0, 0), br = this.screenToWorld(this.app.screen.width, this.app.screen.height);
       if (this._tickCraterSmoke(nowMs, tl.x, tl.y, br.x, br.y)) anim = true;
@@ -2744,7 +2908,10 @@ class MapRenderer extends EventTarget {
         }
         continue;
       }
-      if (!v.dragging && (v.x !== v.tx || v.y !== v.ty)) {
+      if (v.march && !v.dragging) {
+        this._tickMarch(v, nowMs);
+        anim = true;
+      } else if (!v.dragging && (v.x !== v.tx || v.y !== v.ty)) {
         v.x += (v.tx - v.x) * k; v.y += (v.ty - v.y) * k;
         if (Math.abs(v.tx - v.x) < 0.02) v.x = v.tx;
         if (Math.abs(v.ty - v.y) < 0.02) v.y = v.ty;
@@ -3040,7 +3207,7 @@ class MarkerView {
     this.update(marker);
   }
 
-  setImmediate(x, y) { this.x = x; this.y = y; this.tx = x; this.ty = y; this.r.invalidate(); }
+  setImmediate(x, y) { this.x = x; this.y = y; this.tx = x; this.ty = y; this.march = null; this.r.invalidate(); }
 
   update(marker) {
     const prev = this.marker;
@@ -3063,6 +3230,19 @@ class MarkerView {
     if (prev && (prev.x !== marker.x || prev.y !== marker.y) && !this.dragging) {
       const d = Math.hypot(marker.x - this.x, marker.y - this.y);
       if (d > 6) this.r.trail(this.x, this.y, marker.x, marker.y, this.colorNum);
+      // A unit marches there (a rail trip plays its own way): along the stretch of its trail walked since it stood at
+      // its old place, else straight.
+      const newRide = marker.data?.ride && marker.data.ride.at !== prev.data?.ride?.at;
+      if (marker.type === 'unit' && !newRide && !this.riding) {
+        const tr = marker.data?.trail, end = Array.isArray(tr) && tr.length > 1 ? tr[tr.length - 1] : null;
+        let path = null;
+        if (end && Math.hypot(end[0] - marker.x, end[1] - marker.y) < 0.5) {
+          let i = tr.length - 2;
+          while (i >= 0 && Math.hypot(tr[i][0] - prev.x, tr[i][1] - prev.y) >= 0.5) i--;
+          if (i >= 0) path = tr.slice(i + 1).map(p => [p[0], p[1]]);
+        }
+        this.r.march(this, path || [[marker.x, marker.y]]);
+      }
     }
     if (this.r.persistTrails && (marker.data?.trail || prev?.data?.trail)) this.r.queueTrails();
   }
@@ -3206,11 +3386,11 @@ class MarkerView {
     return c;
   }
 
-  /** Small faction flag above the token (any type except scenery). */
+  /** Small faction flag above the token (any type except scenery and towns: the border says whose a town is). */
   async _buildFlag(gen) {
     if (this.flag) { this.root.removeChild(this.flag); this.flag.destroy({ children: true }); this.flag = null; }
     const url = this.marker.flagUrl;
-    if (!url || this.marker.type === 'scenery') return;
+    if (!url || this.marker.type === 'scenery' || this.marker.type === 'town') return;
     let tex;
     try { tex = await PIXI.Assets.load({ src: url, loadParser: 'loadTextures' }); } catch { return; }
     if (gen !== this._gen || this.root.destroyed) return;
@@ -3248,9 +3428,24 @@ class MarkerView {
    */
   _refreshSupply(rules) {
     const m = this.marker;
+    if (m.type === 'unit' && Number(m.data?.strength ?? 100) <= 0) {
+      if (this.supplyBadge) this.supplyBadge.visible = false;
+      if (this.body) this.body.alpha = 1;
+      return;
+    }
     const cut = !!(rules && rules.enabled && rules.supply && m.type === 'unit' && m.data?.supplied === false);
     const left = cut && Number.isFinite(Number(m.data?.supplies)) ? Math.max(0, Math.round(Number(m.data.supplies))) : 0, out = cut && left <= 0;
     if (this.body) this.body.alpha = out ? 0.72 : (m.type === 'unit' && m.data?.submerged ? 0.42 : 1);
+    const restless = !!(rules && rules.enabled && rules.unrestCritical && m.type === 'town' && Number(m.data?.unrest) >= rules.unrestCritical);
+    if (restless || this.unrestBadge) {
+      if (!this.unrestBadge) { this.unrestBadge = new PIXI.Graphics(NO_SHAPE()); this.unrestBadge.eventMode = 'none'; this.root.addChild(this.unrestBadge); }
+      const ux = round1(-this.w / 2 + 2), uy = round1(-this.h / 2 + 3);
+      this.unrestBadge.context = sharedShape(`unrest|${ux}|${uy}`, g => g.circle(ux, uy, 6).fill(0x8e1b10).stroke({ width: 1.3, color: 0x0b0f14 })
+        .moveTo(ux, uy - 4.2).quadraticCurveTo(ux + 3.6, uy - 0.2, ux + 2.2, uy + 2.6).quadraticCurveTo(ux, uy + 4.4, ux - 2.2, uy + 2.6).quadraticCurveTo(ux - 3.4, uy, ux, uy - 4.2).fill(0xf39c12)
+        .moveTo(ux, uy - 1).quadraticCurveTo(ux + 1.6, uy + 1, ux + 0.9, uy + 2.4).quadraticCurveTo(ux, uy + 3.2, ux - 0.9, uy + 2.4).quadraticCurveTo(ux - 1.4, uy + 1, ux, uy - 1).fill(0xfff1a8));
+      this.unrestBadge.visible = restless;
+      this.r.invalidate();
+    }
     const blockaded = !!(rules && rules.enabled && m.type === 'town' && m.data?.blockaded);
     if (blockaded || this.blockBadge) {
       if (!this.blockBadge) { this.blockBadge = new PIXI.Graphics(NO_SHAPE()); this.blockBadge.eventMode = 'none'; this.root.addChild(this.blockBadge); }

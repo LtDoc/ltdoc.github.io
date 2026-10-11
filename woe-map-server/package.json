@@ -6,8 +6,16 @@
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
+    "test:chat": "node --test tests/chat.test.cjs",
+    "test:azgaar": "node --test tests/azgaar.test.cjs tests/azgaar-import.test.cjs",
+    "test:membership": "node --test tests/campaign-membership.test.cjs",
+    "test:dead-units": "node --test tests/dead-units.test.cjs",
+    "test:emplacements": "node --test tests/emplacements.test.cjs",
+    "test:rail-repair": "node --test tests/rail-repair.test.cjs",
+    "test:treaties": "node --test tests/treaties.test.cjs tests/treaties-ui.test.cjs tests/province-peace-render.test.cjs",
     "create-admin": "node scripts/create-admin.js",
-    "import-firebase": "node scripts/import-firebase.js"
+    "import-firebase": "node scripts/import-firebase.js",
+    "test:heroes": "node --test tests/hero-traits.test.cjs tests/hero-traits-api.test.cjs"
   },
   "engines": {
     "node": ">=22.13"

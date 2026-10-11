@@ -2,8 +2,14 @@
 
 const api = {
   headers: {},   // sent with every request (the map page's X-View-As)
-  async request(method, url, body) {
-    const init = { method, headers: { ...api.headers }, credentials: 'same-origin' };
+  async request(method, url, body, { keepalive = false } = {}) {
+    const ro = api.readOnlyCampaign;
+    if (ro && (url === ro.base || url.startsWith(ro.base + '/')) && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+      const receipt = method === 'POST' && /\/chats\/[^/]+\/read$/.test(url);
+      const leave = method === 'DELETE' && url === `${ro.base}/members/${ro.userId}`;
+      if (!receipt && !leave) throw new Error('Observers have read-only access');
+    }
+    const init = { method, headers: { ...api.headers }, credentials: 'same-origin', keepalive };
     if (body instanceof FormData) init.body = body;
     else if (body !== undefined) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(body); }
     const res = await fetch(url, init);
@@ -19,6 +25,7 @@ const api = {
   get: (u) => api.request('GET', u),
   post: (u, b) => api.request('POST', u, b),
   patch: (u, b) => api.request('PATCH', u, b),
+  put: (u, b) => api.request('PUT', u, b),
   del: (u) => api.request('DELETE', u),
 };
 
@@ -26,8 +33,9 @@ const api = {
 async function requireUser() {
   try {
     return (await api.get('/api/auth/me')).user;
-  } catch {
-    location.replace('/?next=' + encodeURIComponent(location.pathname + location.search));
+  } catch (err) {
+    // A suspended account is told so on the login page (msg); anyone else just signs in.
+    location.replace('/login.html?next=' + encodeURIComponent(location.pathname + location.search) + (err?.status === 403 ? '&msg=' + encodeURIComponent(err.message) : ''));
     await new Promise(() => {}); // never resolves; page is navigating away
   }
 }

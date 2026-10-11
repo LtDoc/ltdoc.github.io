@@ -29,6 +29,14 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 
+CREATE TABLE IF NOT EXISTS user_packs (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  pack_id TEXT NOT NULL,
+  granted_at INTEGER NOT NULL,
+  granted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  PRIMARY KEY (user_id, pack_id)
+);
+
 CREATE TABLE IF NOT EXISTS lobbies (
   id           INTEGER PRIMARY KEY,
   name         TEXT NOT NULL,
@@ -40,13 +48,14 @@ CREATE TABLE IF NOT EXISTS lobbies (
   scale_label  TEXT NOT NULL DEFAULT 'km',
   units_per_px REAL NOT NULL DEFAULT 1,
   settings     TEXT NOT NULL DEFAULT '{}',
+  unit_pack    TEXT NOT NULL DEFAULT 'great-war',
   created_at   INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS lobby_members (
   lobby_id  INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
   user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  role      TEXT NOT NULL DEFAULT 'player',        -- 'gm' | 'player'
+  role      TEXT NOT NULL DEFAULT 'player',        -- 'gm' | 'player' | 'observer'
   nation    TEXT NOT NULL DEFAULT '',
   color     TEXT NOT NULL DEFAULT '#3498db',
   joined_at INTEGER NOT NULL,
@@ -200,6 +209,7 @@ CREATE TABLE IF NOT EXISTS provinces (
   name       TEXT NOT NULL,
   state      TEXT NOT NULL DEFAULT '',              -- state of the seed year the province was cut from
   subject    TEXT NOT NULL DEFAULT '',              -- that state's overlord (colonies), if any
+  biome_color TEXT NOT NULL DEFAULT '',              -- Azgaar's terrain colour for this cell
   cx         REAL NOT NULL,                         -- centre in map pixels (capture and brush radii test this)
   cy         REAL NOT NULL,
   faction_id INTEGER NOT NULL DEFAULT 0,            -- owner, 0 = neutral
@@ -327,6 +337,50 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_chat_messages_channel ON chat_messages(channel_id, id);
+-- Read receipts: how far each member has read in each chat. channel is 'ooc' or 'gm' (last_id an events id) or
+-- 'c<id>' (a chat_messages id). Unread counts come from here, so they are the same on every device.
+CREATE TABLE IF NOT EXISTS chat_reads (
+  lobby_id   INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  channel    TEXT NOT NULL,
+  last_id    INTEGER NOT NULL DEFAULT 0,
+  read_at    INTEGER NOT NULL,
+  PRIMARY KEY (lobby_id, user_id, channel)
+);
+
+-- A member reported to the site admins (docs/COMMS.md, "Reporting"): who, by whom, in which campaign, with the
+-- message it was about (its text kept here, since the message may be deleted afterwards) and the reason.
+CREATE TABLE IF NOT EXISTS reports (
+  id           INTEGER PRIMARY KEY,
+  lobby_id     INTEGER REFERENCES lobbies(id) ON DELETE SET NULL,
+  lobby_name   TEXT NOT NULL DEFAULT '',
+  reporter_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  user_name    TEXT NOT NULL DEFAULT '',
+  channel      TEXT NOT NULL DEFAULT '',
+  message_id   INTEGER,
+  message_text TEXT NOT NULL DEFAULT '',
+  reason       TEXT NOT NULL DEFAULT '',
+  status       TEXT NOT NULL DEFAULT 'open',       -- open | closed
+  closed_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  closed_at    INTEGER,
+  created_at   INTEGER NOT NULL
+);
+
+-- A co-GM asking the site admins to take over a campaign whose owner was suspended (README, "Accounts and roles").
+CREATE TABLE IF NOT EXISTS takeovers (
+  id          INTEGER PRIMARY KEY,
+  lobby_id    INTEGER REFERENCES lobbies(id) ON DELETE SET NULL,
+  lobby_name  TEXT NOT NULL DEFAULT '',
+  user_id     INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  note        TEXT NOT NULL DEFAULT '',
+  status      TEXT NOT NULL DEFAULT 'open',       -- open | approved | declined
+  reason      TEXT NOT NULL DEFAULT '',           -- the admin's answer
+  resolved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  resolved_at INTEGER,
+  seen_at     INTEGER,
+  created_at  INTEGER NOT NULL
+);
 
 -- Allied convoys (docs/UNITS.md): a nation asks an ally to let troops board or land; the asked nations approve.
 CREATE TABLE IF NOT EXISTS convoy_requests (
@@ -377,6 +431,74 @@ CREATE TABLE IF NOT EXISTS corps (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_corps_lobby ON corps(lobby_id);
+
+-- Nations write their own history. Private entries can be copied by spy missions.
+CREATE TABLE IF NOT EXISTS journal_entries (
+  id INTEGER PRIMARY KEY,
+  lobby_id INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  faction_id INTEGER NOT NULL REFERENCES factions(id) ON DELETE CASCADE,
+  author_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  author_name TEXT NOT NULL,
+  entry_date TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  private INTEGER NOT NULL DEFAULT 0,
+  link TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_journal_entries ON journal_entries(lobby_id, faction_id, entry_date DESC);
+CREATE TABLE IF NOT EXISTS stolen_journal (
+  id INTEGER PRIMARY KEY,
+  lobby_id INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  thief_faction_id INTEGER NOT NULL REFERENCES factions(id) ON DELETE CASCADE,
+  source_entry_id INTEGER REFERENCES journal_entries(id) ON DELETE SET NULL,
+  source_faction_name TEXT NOT NULL,
+  entry_date TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  author_name TEXT NOT NULL,
+  link TEXT NOT NULL DEFAULT '',
+  stolen_at INTEGER NOT NULL,
+  UNIQUE(lobby_id, thief_faction_id, source_entry_id)
+);
+CREATE INDEX IF NOT EXISTS idx_stolen_journal ON stolen_journal(lobby_id, thief_faction_id, stolen_at DESC);
+
+-- Shared, public roleplay context for each nation. Revision prevents co-players overwriting one another.
+CREATE TABLE IF NOT EXISTS nation_governments (
+  faction_id INTEGER PRIMARY KEY REFERENCES factions(id) ON DELETE CASCADE,
+  lobby_id INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  government_form TEXT NOT NULL DEFAULT '',
+  character TEXT NOT NULL DEFAULT '',
+  priorities TEXT NOT NULL DEFAULT '[]',
+  political_factions TEXT NOT NULL DEFAULT '[]',
+  figures TEXT NOT NULL DEFAULT '[]',
+  revision INTEGER NOT NULL DEFAULT 1,
+  updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_name TEXT NOT NULL DEFAULT '',
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_nation_governments_lobby ON nation_governments(lobby_id);
+
+-- Published campaign news. Private variants keep their recipient nations fixed at publication.
+CREATE TABLE IF NOT EXISTS news_posts (
+  id INTEGER PRIMARY KEY,
+  lobby_id INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
+  faction_id INTEGER REFERENCES factions(id) ON DELETE SET NULL,
+  source_name TEXT NOT NULL,
+  author_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  author_name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  headline TEXT NOT NULL,
+  public_body TEXT NOT NULL DEFAULT '',
+  private_body TEXT NOT NULL DEFAULT '',
+  private_to TEXT NOT NULL DEFAULT '[]',
+  game_date TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_news_posts_lobby ON news_posts(lobby_id, id DESC);
 `);
 
 // ---- Lightweight migrations for databases created by earlier versions -------------
@@ -384,19 +506,33 @@ function addColumnIfMissing(table, column, decl) {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
   if (!cols.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
 }
+// Existing campaigns used the Great War catalogue. SQLite fills every old row on migration.
+addColumnIfMissing('lobbies', 'unit_pack', "TEXT NOT NULL DEFAULT 'great-war'");
 addColumnIfMissing('markers', 'visible_to', 'TEXT');
 addColumnIfMissing('markers', 'locked', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('shapes', 'locked', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('shapes', 'data', 'TEXT');   // per-kind extras (trench: facing, state, zigzag)
 addColumnIfMissing('events', 'data', 'TEXT');
+addColumnIfMissing('chat_messages', 'data', 'TEXT');   // { gif, deleted } (docs/COMMS.md)
+// Moderation (README, "Accounts and roles"): suspended accounts, why a report was closed and whether its reporter has seen that.
+addColumnIfMissing('users', 'suspended_at', 'INTEGER');
+addColumnIfMissing('users', 'suspended_reason', 'TEXT');
+addColumnIfMissing('users', 'avatar_url', "TEXT NOT NULL DEFAULT ''");
+addColumnIfMissing('users', 'site_vip', 'INTEGER NOT NULL DEFAULT 0');
+addColumnIfMissing('users', 'music_volume', 'REAL CHECK (music_volume BETWEEN 0 AND 20)');
+addColumnIfMissing('users', 'music_enabled', 'INTEGER CHECK (music_enabled IN (0, 1))');
+addColumnIfMissing('reports', 'close_reason', 'TEXT');
+addColumnIfMissing('reports', 'seen_at', 'INTEGER');
 addColumnIfMissing('game', 'deadline_notified', "TEXT NOT NULL DEFAULT ''");
 addColumnIfMissing('game', 'phase', "TEXT NOT NULL DEFAULT 'move'");   // movement | battle phase of the turn (settings.phases)
+addColumnIfMissing('faction_state', 'policy', 'TEXT');   // a nation's standing choices: { warEconomy } (docs/ECONOMY.md)
 addColumnIfMissing('factions', 'uniform', "TEXT NOT NULL DEFAULT ''");   // army of the figures in battles: '' (from the name), american, anzac, arab, british, french, german, ottoman, russian (once grey, beige, green)
 addColumnIfMissing('provinces', 'lakes_cut', 'INTEGER NOT NULL DEFAULT 0');
 addColumnIfMissing('provinces', 'strays_fixed', 'INTEGER NOT NULL DEFAULT 0');   // land the borders miss moved to the nearest state (provinces.settleStrays)   // lakes cut out of it (provinces cut before lakes were water had them inside)
 addColumnIfMissing('battles', 'cover', 'INTEGER NOT NULL DEFAULT 0');   // the defender fought from trench cover (drawn behind wire)
 addColumnIfMissing('battles', 'losses', 'TEXT');   // JSON { a, d: { from, to, type, nation } }: who fell, for the dead left lying (REMAINS_TURNS)
 addColumnIfMissing('provinces', 'year', 'INTEGER NOT NULL DEFAULT 0');   // borders year the province was cut from (0 = before this column: 1914)   // "<deadline>|<stage>" of the last reminder sent
+addColumnIfMissing('provinces', 'biome_color', "TEXT NOT NULL DEFAULT ''");
 
 function now() { return Date.now(); }
 

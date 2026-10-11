@@ -1,0 +1,113 @@
+/* Nation, Production and the unit card (docs/UI.md). Loaded after the campaign theme. */
+
+/* ---- Production --------------------------------------------------------------------------------------------- */
+.prodbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 10px; padding: 10px 12px; border-radius: 8px;
+  background: linear-gradient(180deg, rgba(207,175,112,.13), rgba(207,175,112,.05)); border: 1px solid rgba(207,175,112,.35); }
+.prodstat { display: flex; flex-direction: column; line-height: 1.1; }
+.prodstat b { font: 600 20px Georgia, serif; color: var(--gold2, #f0dba8); font-variant-numeric: tabular-nums; }
+.prodstat span { font-size: 11px; color: var(--muted); }
+.prodbtns { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+.prodbtns button { font-size: 13px; padding: 6px 11px; }
+.readybox { border-color: rgba(207,175,112,.6); background: rgba(207,175,112,.08); }
+.qitem .ug-counter.tiny { margin-left: -4px; }
+.qitem.ready { border-left-color: var(--gold, #cfaf70); }
+.qprog { width: 54px; height: 5px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; flex: none; }
+.qprog i { display: block; height: 100%; background: var(--gold, #cfaf70); }
+.sitehead .cap { margin-left: 5px; font-size: 12px; opacity: .85; cursor: help; }
+.site.full { opacity: .72; }
+label.inline.mini { margin: 0; font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); font-weight: 400; }
+label.inline.mini input { margin-right: 4px; }
+.sitekey { font-size: 11px; margin: 8px 0 0; }
+details.howto { margin: 0 0 6px; }
+details.howto summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+details.howto[open] summary { margin-bottom: 4px; }
+.qitem .grow { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.qitem .qn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qitem .qmeta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+
+/* ---- The unit card (#popup) ---------------------------------------------------------------------------------- */
+#popup .uhead { display: flex; align-items: center; gap: 9px; margin: -2px 0 8px; }
+#popup .uhead .grow { flex: 1; min-width: 0; }
+#popup .uhead .ug-counter { width: 52px; height: 35px; }
+#popup .utype { font-size: 13px; font-weight: 600; color: #f0e6cc; }
+#popup .utype span { font-weight: 400; color: var(--muted); }
+#popup .unation { font-size: 12px; color: #d6dfd2; display: flex; align-items: center; gap: 4px; }
+#popup .uguide { flex: none; }
+#popup .ustr { position: relative; height: 18px; border-radius: 5px; background: rgba(255,255,255,.08); overflow: hidden; margin-bottom: 8px; }
+#popup .ustr i { position: absolute; inset: 0 auto 0 0; border-radius: 5px; }
+#popup .ustr.good i { background: linear-gradient(90deg, #3f7f52, #5fa66f); }
+#popup .ustr.mid i { background: linear-gradient(90deg, #8c7a2c, #c9a948); }
+#popup .ustr.low i { background: linear-gradient(90deg, #8c3a2c, #c45a40); }
+#popup .ustr span { position: relative; display: block; text-align: center; font-size: 11.5px; font-weight: 600; line-height: 18px; text-shadow: 0 1px 2px rgba(0,0,0,.7); }
+#popup .ustr.dead { background: rgba(120,120,120,.25); }
+#popup .utiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-bottom: 8px; }
+#popup .utile { background: rgba(255,255,255,.05); border-radius: 6px; padding: 4px 6px; display: flex; flex-direction: column; line-height: 1.15; cursor: help; min-width: 0; }
+#popup .utile span { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+#popup .utile b { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+#popup .utile small { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#popup .u-attack b { color: #f0a07a; } #popup .u-defend b { color: #8fc0e6; }
+#popup .uturn { display: flex; align-items: center; gap: 7px; font-size: 12px; margin-bottom: 8px; }
+#popup .uturn .ul { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+#popup .umeter { flex: 1; height: 7px; border-radius: 4px; background: rgba(255,255,255,.08); overflow: hidden; }
+#popup .umeter i { display: block; height: 100%; background: var(--gold, #cfaf70); }
+#popup .uturn small { color: #d6dfd2; white-space: nowrap; font-variant-numeric: tabular-nums; }
+#popup .uap { display: inline-flex; gap: 3px; }
+#popup .uap i { width: 9px; height: 9px; border-radius: 50%; border: 1px solid var(--gold, #cfaf70); }
+#popup .uap i.on { background: var(--gold, #cfaf70); }
+#popup .uchips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+#popup .uchip { font-size: 11.5px; padding: 2px 8px; border-radius: 11px; background: rgba(255,255,255,.08); cursor: help; white-space: nowrap; }
+#popup .uchip.good { background: rgba(72,167,109,.2); color: #c7f0d2; }
+#popup .uchip.warn { background: rgba(214,170,60,.22); color: #f5dc9b; }
+#popup .uchip.bad { background: rgba(214,80,60,.25); color: #ffc0ad; }
+#popup .uchip.sub { background: rgba(70,130,180,.25); color: #c4e0f5; }
+#popup .uwarn { font-size: 12px; line-height: 1.35; margin: 0 0 8px; padding: 6px 8px; border-left: 3px solid #d68a4a; background: rgba(214,120,60,.1); color: #f6d3bf; }
+#popup .urows { border-top: 1px solid var(--line); padding-top: 4px; }
+#popup .urows .stat > span:last-child { text-align: right; }
+#popup .usec { margin-top: 8px; }
+#popup .usec h5 { margin: 0 0 4px; font: 600 10.5px 'Segoe UI', sans-serif; text-transform: uppercase; letter-spacing: .08em; color: var(--gold, #cfaf70); }
+#popup .usec .ug-mh { width: 46px; }
+#popup .actions.orders { padding-top: 8px; border-top: 1px solid var(--line); }
+#popup .actions.minor { margin-top: 6px; }
+#popup .actions.minor button { background: transparent; border: 1px solid var(--line, #3d5543); color: #cdd7c9; padding: 2px 7px; font-size: 11px; }
+#popup .actions.minor button.danger { color: #ff9f80; border-color: rgba(214,80,60,.5); }
+#popup .actions.minor button:hover { background: rgba(255,255,255,.06); }
+
+/* ---- Nation ------------------------------------------------------------------------------------------------- */
+.glancebar { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin: 0 0 10px; }
+.glance { display: grid; grid-template-columns: auto 1fr; grid-template-areas: "i l" "i v"; align-items: center; column-gap: 8px; text-align: left;
+  background: rgba(255,255,255,.04); border: 1px solid var(--line, #3d5543); border-radius: 7px; padding: 6px 8px; color: var(--text); min-width: 0; }
+.glance:hover { background: rgba(255,255,255,.08); filter: none; }
+.glance .gi { grid-area: i; font-size: 18px; }
+.glance .gl { grid-area: l; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.glance b { grid-area: v; font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.glance.bad { border-color: rgba(214,80,60,.55); } .glance.bad b { color: #ffb39c; }
+.glance.idle b { color: var(--muted); font-weight: 400; }
+.glance.note { border-color: rgba(207,175,112,.6); }
+.goodsflow td:first-child { white-space: nowrap; }
+.goodsflow .resicon { width: 16px; height: 16px; vertical-align: -3px; }
+.goodsbox .wareco { display: block; margin: 10px 0 4px; }
+.goodsbox .warecohead { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; }
+.goodsbox .warecohead b { font: 600 16px Georgia, serif; color: var(--gold2, #f0dba8); min-width: 0; text-align: left; }
+.goodsbox .warecoslider { position: relative; }
+.goodsbox .warecoslider input { width: 100%; margin: 4px 0 0; }
+.goodsbox .warecoslider s { position: absolute; left: var(--be); top: 2px; bottom: -2px; width: 2px; background: #e0975a; pointer-events: auto; cursor: help; transform: translateX(-1px); border-radius: 1px; }
+.goodsbox .warecoends { display: flex; justify-content: space-between; gap: 6px; font-size: 11px; color: #cdd7c9; }
+
+/* ---- Diplomacy ---------------------------------------------------------------------------------------------- */
+.diplosearch { margin: 0 0 6px; }
+.relgroup .section { margin: 8px 0 2px; }
+.relgroup:first-of-type .section { margin-top: 0; }
+.relgroup.war .section { color: #ff9f80; }
+.relgroup.alliance .section { color: #8fdca5; }
+
+/* ---- Research tree header ------------------------------------------------------------------------------------ */
+.techhint { margin: 0 0 8px; }
+.techfacts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12.5px; }
+.techfacts > span { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 12px; background: rgba(255,255,255,.06); color: #d6dfd2; }
+.techfacts > span img { width: 15px; height: 15px; object-fit: contain; }
+.techfacts > span.on { background: rgba(72,167,109,.18); color: #c7f0d2; }
+.techfacts > span.idle { background: rgba(214,170,60,.16); color: #f5dc9b; }
+.techfacts button { margin-left: auto; }
+.techhint details.howto { margin: 6px 0 0; }
+.tech-node.flash { animation: techflash 1.6s ease-out; }
+@keyframes techflash { 0%, 40% { box-shadow: 0 0 0 3px #f0dba8, 0 0 18px rgba(240,219,168,.8); } 100% { box-shadow: none; } }

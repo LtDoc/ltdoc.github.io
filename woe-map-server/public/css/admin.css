@@ -1,0 +1,8 @@
+.admin-user{display:block!important;padding:13px 8px!important}
+.admin-user-head{display:flex;align-items:center;gap:8px;min-width:0}
+.admin-user-head .grow{line-height:1.6}
+.admin-user-actions{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin-top:9px}
+.admin-user-actions button{white-space:nowrap}
+.admin-user-actions select{width:auto;max-width:100%;margin:0;padding:4px 8px;font-size:12px}
+.admin-user-actions .vip-grant{background:#bd9a52;color:#1e190f;font-weight:700}
+.site-vip-badge{background:#8c6327;color:#fff3c9;border:1px solid #d5ae62}

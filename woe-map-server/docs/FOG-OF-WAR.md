@@ -5,6 +5,10 @@ below lists what differs from the proposal. The rest of this document is the des
 
 ## As built
 
+- **Destroyed unit markers**: zero-strength wrecks provide no vision and skip radius, province and sonar
+  visibility checks. They remain visible subject to explicit marker restrictions (GM-only/Visible to), while
+  foreign orders and history retain their existing privacy rules. Wrecks do not generate last-known-position
+  ghosts. This concerns unit markers; battle animations and their decorative casualties still follow battle visibility.
 - **Switch**: ⚖ Rules → *Fog of war* (game mode only, off by default), with the vision range table (`settings.vision`,
   by unit type or category, places by size, heroes) and how close submarines are spotted (`subSpotKm`).
 - **Server**: `server/vision.js` works out each nation's sight (cached per campaign, rebuilt when units, ownership,
@@ -17,9 +21,23 @@ below lists what differs from the proposal. The rest of this document is the des
 - **Last known positions** (decision 7): stored per nation in `fog_ghosts`, drawn as faded counters "seen turn N".
   A ghost appears only when the side's sight leaves the spot (an enemy seen walking away is known not to be there),
   and goes when the unit is seen again or the spot is back in sight without it.
-- **Battles**: the combat report and the battle on the map go to the two sides (and their allies) and the GM; the
-  attacker is revealed to the defender's side until End turn (`revealTo`, as a spy's recon). Capture lines name the
-  nation, not the unit. Other sides' unit counts are hidden on the Nation panel even with public treasuries.
+- **Battles**: the combat report goes to the two sides (and their allies) and the GM; the attacker is revealed to
+  the defender's side until End turn (`revealTo`, as a spy's recon). Capture lines name the nation, not the unit.
+  Other sides' unit counts are hidden on the Nation panel even with public treasuries.
+- **The battlefield** (4 Oct 2026): nobody knows the shape of a battlefield without having looked at it.
+  - *Trenches.* Another side's trench (or one belonging to nobody) reaches a player only where it runs through
+    their vision: the server cuts it into the stretches in sight (`vision.shapeViews`; each piece keeps the trench's
+    state and nation, with `data.of` the trench, `data.part` its number, and an id below zero) and sends nothing of
+    the rest, so the browser never holds it. Pieces appear and go live as sight moves, like enemy units do
+    (`syncFog` keeps each socket's pieces; a shape edit goes out clipped per viewer), and the History tab shows a
+    foreign trench's changes only to its own side, since they carry its line. Own and allied trenches come whole.
+    Nothing is remembered: a line mapped last turn has to be looked at again (decision 8 went the other way; this
+    is stricter and simpler).
+  - *Gunfire, shelling, craters and the dead.* A fight on the map stays visible to the two sides in it; anyone else
+    sees it (its tracers or shells this turn, and the dead afterwards) only while **both** ends are in their vision
+    (`vision.fightSeen`), and sees a crater only on ground in sight (`craterSeen`). When what a player may see of the
+    fighting changes, their map fetches the battles again (WebSocket `reload` with `what: 'battles'`). The view
+    goes by nation, not by account: a GM viewing as a nation sees what it would.
 - **GM**: sees everything; 👁 View as player (docs/UI.md) shows a nation's view, fog included.
 - **Submerged submarines** (3 Oct 2026, docs/WARFARE.md) are hidden from other sides in every game, fog or not,
   except within `subDetectKm` of one of their destroyers. Without fog the vision state then tracks only submarines,
@@ -28,8 +46,9 @@ below lists what differs from the proposal. The rest of this document is the des
   photography* (1915, aircraft +100 km), added to existing campaigns' trees. *Wireless telegraphy* and *Sound
   ranging* are unchanged.
 - **Not built**: the "Reveal to everyone" checkbox (list every nation under *Visible to* instead), spotted versus
-  identified (decision 6, later if needed), hidden or remembered enemy trenches (trenches stay public, the
-  "always visible" alternative of decision 8), trench concealment.
+  identified (decision 6, later if needed), remembered enemy trenches (they are seen only while in sight, see
+  *The battlefield* above), trench concealment, hidden No Man's Land areas and railways (GM-drawn terrain and
+  public infrastructure stay public).
 
 ## 1. What changes for players
 

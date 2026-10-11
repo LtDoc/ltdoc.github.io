@@ -399,10 +399,12 @@ const ProvinceLayer = (() => {
     /** Zoom: line widths stay in screen pixels, hairlines appear from about a third, labels when a group is big enough. */
     setZoom(scale) {
       if (this.lineUniforms) this.lineUniforms.uniforms.uPx = 1 / scale;
-      if (this.edges) this.edges.visible = scale >= 0.35;
+      if (this.edges) this.edges.visible = scale >= (this.r.azgaar ? 1.5 : 0.35);
+      // Zoomed out to the strategic view (map-renderer.js), where names are all there is, smaller nations are named too.
+      const least = scale <= 0.505 ? 40 : 90;
       for (const t of this.labels) {
         t.scale.set(1 / scale);
-        t.visible = !!t.text && t._size * scale > 90;
+        t.visible = !!t.text && t._size * scale > least;
       }
     }
   }

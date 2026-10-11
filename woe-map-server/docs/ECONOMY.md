@@ -52,6 +52,12 @@ The per-level income is a campaign rule (⚖ Rules → Economy → Town developm
 
 ## Resource works
 
+Procedural towns and resource works are rasterized into bounded local images before being shown on the map,
+preventing stray geometry from stretching across the screen during zoom or pan. Zoom detail changes, town damage
+and resource changes rebuild the images. Offscreen images release their GPU textures while retaining their plans;
+individual images are capped at 2048 pixels per side. `tests/procedural-render.html` provides a browser stress test
+(serve the public scripts and Pixi under `/vendor/pixi.min.js`); `node --test tests/procedural-render.test.cjs` checks cleanup and rebuilding.
+
 Every resource node can be improved three times (**⛏ Improve** in its popup, or Nation → Production →
 Development). Each level adds **25 % of the node's base yield** (a campaign rule: ⚖ Rules → Economy → *Resource
 works*), so a fully improved node yields 1¾ times as much: the Ruhr coalfield's 8 coal becomes 10, 12, then 14. Gains
@@ -122,6 +128,103 @@ factories), so they compound with the projects.
 
 Existing campaigns get the branch automatically the first time their tree is loaded (once; tracked in the
 `tree_patches` table). If the GM had already made a tech with one of these keys, theirs is kept.
+
+## Goods and unrest (4 Oct 2026)
+
+Supply used to be endless. Now towns make two goods, store them, and pass them along their network, and armies and
+citizens both draw on them. Server: `server/goods.js` (making, storing, networks, draws and refills),
+`server/routes/economy.js` (war economy, column depots and salvage, rebellions), `server/supply.js` (who supplies
+whom). Rules: ⚖ Rules → Goods & unrest (`goodsEnabled` switches it all off: supply is endless again).
+
+**Two goods.**
+- **Consumer goods** keep a town's people content.
+- **Military goods** are what supply is made of: a supplied land unit draws **1** a turn.
+
+Both live in the towns' stores, not in the national stockpile. The nation bar and the Nation panel's **Goods** box
+show the totals and what they do a turn; a town's panel shows its own stores, what it makes and its unrest.
+
+**What a town makes.** Each turn: **6** for a capital, **2** for a city, **1** for a village, plus **4 for each point
+of industry** (the 1914 cities carry 1–6) and **2 for each development level**. A nation's **war economy** (the
+slider in the Goods box, 0–100 %, 30 % until it is moved) decides how much of that is military goods; the rest is
+consumer goods. **Factories** make **10 goods a turn per level**, split by the same war economy. At a 30 % war economy,
+each level makes 3 military and 7 consumer goods; at 50 %, it makes 5 of each.
+
+**What a town needs.** Its people consume **half its output** in consumer goods a turn. So any nation can run up to a
+**50 % war economy** and keep its towns supplied; beyond that, factory output, stores built up in quieter turns, or
+trade can cover the shortfall. That is the choice the war economy puts in front of a nation: how
+many supplies its armies get against how content its cities stay.
+
+**Stores and networks.** A town stores up to 12 turns of its output of each good, and starts with 4 turns of half its
+output. A nation's towns **share their stores**:
+- with every town of theirs within **500 km**, unless the straight way between them crosses ground held by a nation at
+  war with theirs;
+- further apart, only **by railway**: towns within 25 km of one open stretch of track their side may use.
+
+At End turn the stores are levelled across each network in proportion to what each town makes, so a captured town
+takes its share with it. Towns cut off from the rest (a besieged city, an island, a colony beyond the railways) live
+on their own; the Goods box says how many separate networks a nation's towns form. In 1914 France's 18 towns form 6
+(home and the colonies), Germany's 25 form 3, the British Empire's 52 form 30.
+
+**Unrest.** Each town has unrest from 0 to 100:
+- **Needs met** at End turn: it falls by **10**.
+- **Short**: it rises by up to **25**, scaled by the share of its needs that went unmet (at least 2).
+- **Critical (75)**: the town has **3 End turns** to come back below 75. Its panel, the Goods box and the turn report
+  count them down, and a 🔥 badge sits on the town.
+- **Revolt**: still critical at the third, it rises in revolt.
+
+**Rebellion.**
+- **The rebels:** "**<Nation> Rebels**" (a faction made the first time, in a darker shade of the nation's colour, at
+  war with it) take the town and the nation's provinces nearest it within 200 km: **6** for a capital, **3** for a city,
+  **1** for a village. Places on that ground go with it.
+- **Troops on that ground:** the nation's land units standing there go over to the rebels. They take the rebels' colour
+  and are the GM's to command, with no corps or orders.
+- **Militia:** take up arms round the town: **4** for a capital, **2** for a city, **1** for a village.
+- **News:** the log carries it to everyone. The town's unrest starts again at 0 under its new masters.
+
+The GM can set a town's stores and unrest in its Edit form (setting unrest below critical stops the countdown).
+
+**Supply runs on military goods** (docs/UNITS.md, Supply):
+- **Towns:** a town supplies its garrison only while it holds military goods.
+- **Supply Columns:** a column carries **50** supplies, for itself and the units it supplies. It supplies while they
+  last, linked or not, and at End turn it refills from the network of the town it is linked to.
+- **Convoys:** a convoy carries **100** and refills at a town of its nation within 50 km.
+- **Running dry:** a unit whose source has run dry lives on its own 3 turns of supplies, like a unit cut off.
+- **Loading and unloading:** a column standing in one of its nation's towns can **📦 Load** from the town's stores or
+  **📦 Unload** into them (a depot for later).
+- **Salvage:** a column within 30 km of a destroyed column (anyone's) can **📦 Salvage** what it still carried.
+
+**Trades** carry both goods (docs/COMMS.md): they come out of the seller's fullest stores and go into the buyer's
+capital (or its biggest town), from where End turn spreads them over its network.
+
+### Balance against 1914
+
+The numbers were set against the bundled 1914 cities (`public/earth/cities.json`, assigned by the 1914 borders) and
+each power's field army on mobilisation (one unit per division, the same table as Upkeep below). The military goods a
+power can make at a 50 % war economy, with no factories and no development, against the supplies its army would draw:
+
+| Power | Capital / cities | Industry | Output a turn | Military goods at 50 % | Divisions | Short or spare |
+|---|---|---|---|---|---|---|
+| German Empire | 1 / 20 | 60 | 286 | 143 | 98 | +45 |
+| Russian Empire | 1 / 22 | 46 | 234 | 117 | 115 | +2 |
+| France | 1 / 11 | 29 | 144 | 72 | 88 | −16 |
+| Austria-Hungary | 1 / 12 | 25 | 130 | 65 | 49 | +16 |
+| British Isles | 1 / 20 | 51 | 250 | 125 | 11 | +114 |
+| Italy | 1 / 7 | 18 | 92 | 46 | 36 | +10 |
+| Ottoman Empire | 0 / 11 | 11 | 66 | 33 | 36 | −3 |
+| Japan | 1 / 9 | 22 | 112 | 56 | 21 | +35 |
+| United States | 1 / 25 | 57 | 284 | 142 | 8 | +134 |
+| Belgium | 1 / 5 | 14 | 72 | 36 | 7 | +29 |
+| Bulgaria | 2 / 1 | 6 | 38 | 19 | 11 | +8 |
+| Greece | 1 / 1 | 4 | 24 | 12 | 9 | +3 |
+| Romania | 1 / 0 | 3 | 18 | 9 | 23 | −14 |
+| Serbia | 1 / 0 | 2 | 14 | 7 | 11 | −4 |
+
+Germany can field its whole 1914 army and still bank goods; Russia just about can; France, the Ottomans, Romania and
+Serbia cannot, not without factories, a war economy past 50 % (and the unrest that brings), or imports. Britain and
+the United States make far more military goods than their small armies draw: the arsenals of their allies, as they
+were. Supply Columns add a little (each draws 1 for itself and supplies about ten units). A campaign usually fields
+far fewer units than the table's divisions, which leaves room for development, factories and stores. The analysis
+script is not bundled; the inputs are the two bundled files above.
 
 ## Upkeep (balanced 3 Oct 2026)
 

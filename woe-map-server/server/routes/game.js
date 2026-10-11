@@ -8,22 +8,43 @@ const access = require('../lobbyAccess');
 const hub = require('../ws');
 const game = require('../game');
 const GameData = require('../../public/js/game-data');
+const discordWebhook = require('../discordWebhook');
 
 const territory = require('../territory');
 const provinces = require('../provinces');
 const zlib = require('node:zlib');
 
 const production = require('../production');
+const goods = require('../goods');
 const research = require('../research');
 const vision = require('../vision');   // fog of war
 const UnitTypes = require('../../public/js/units');
 const geo = require('../geo');
+const journal = require('../journal');
+const government = require('../government');
+const news = require('../news');
+const treaties = require('../treaties');
 
 module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNation, setShapeNation, shapeById, createMarker, writeMarker, writeShape, canEditMarker, scheduleSupply, createShape, reshapeShape, removeShape, moveMarkerTo, trenchNation }) {
   const router = express.Router({ mergeParams: true });
+  router.use('/journal', journal.router());
+  router.use('/government', government.router());
+  router.use('/news', news.router());
+  router.use('/treaties', treaties.router({ sync: req => {
+    applyOwnership(req);
+    hub.broadcast(req.lobby.id, { type: 'provinceOwners', owners: provinces.ownership(req.lobby.id), replace: true });
+    hub.broadcast(req.lobby.id, { type: 'territory', territories: provinces.has(req.lobby.id) ? [] : territory.all(req.lobby.id), replace: true });
+    broadcastRelations(req.lobby.id);
+    hub.broadcast(req.lobby.id, { type: 'reload', what: 'markers' });
+    for (const w of treaties.load(req.lobby.id).wars.filter(w => w.status === 'active')) for (const a of w.attackers) for (const b of w.defenders) expelBetween(req, a, b);
+    for (const f of game.q.factions.all(req.lobby.id)) broadcastFaction(req, game.get(req.lobby.id), f);
+  } }));
   // Unit orders: replenish, dive, dig, demolish, corps (routes/orders.js).
   const orders = require('./orders')({ logEvent, clean, num, writeMarker, canEditMarker, createShape, reshapeShape, removeShape, moveMarkerTo, trenchNation });
   router.use(orders.router);
+  // Goods and unrest: war economy, column depots and salvage, rebellions (routes/economy.js).
+  const economy = require('./economy')({ logEvent, num, clamp, writeMarker, createMarker, setMarkerNation, canEditMarker, applyOwnership, broadcastLand, broadcastRelations, broadcastFaction });
+  router.use(economy.router);
 
   function requireGm(req, res, next) {
     if (req.lobbyRole !== 'gm') return res.status(403).json({ error: 'Game master only' });
@@ -40,6 +61,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
   }
   function stateView(req, g, markers) {
     const fogSide = req.lobbyRole !== 'gm' && vision.on(req.lobby.id) ? new Set((vision.sideNames(req.lobby.id, req.member?.nation) || []).map(n => n.toLowerCase())) : null;
+    const N = goods.on(g.settings) ? goods.networks(req.lobby, g.settings, markers) : null;
     return game.factionStates(req.lobby.id, g.settings).map(({ faction, state }) => {
       const visible = canSeeState(req, g, faction);
       const units = markers.filter(m => m.type === 'unit' && String(m.data?.nation || '').toLowerCase() === faction.name.toLowerCase());
@@ -49,6 +71,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       if (visible) {
         out.state = state;
         out.income = game.incomeFor(req.lobby, g, faction, state, markers);
+        out.goods = goods.summary(req.lobby, g.settings, faction, state, markers, N);
       }
       return out;
     });
@@ -63,7 +86,8 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
   function broadcastFaction(req, g, faction) {
     const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
     const state = game.serializeState(game.q.state.get(faction.id) || game.ensureState(req.lobby.id, faction.id, g.settings));
-    const msg = { type: 'faction', faction: access.serializeFaction(faction), state, income: game.incomeFor(req.lobby, g, faction, state, markers) };
+    const N = goods.on(g.settings) ? goods.networks(req.lobby, g.settings, markers) : null;
+    const msg = { type: 'faction', faction: access.serializeFaction(faction), state, income: game.incomeFor(req.lobby, g, faction, state, markers), goods: goods.summary(req.lobby, g.settings, faction, state, markers, N) };
     hub.broadcast(req.lobby.id, msg, ws => ws.lobbyRole === 'gm' || g.settings.publicTreasury || String(ws.nation || '').toLowerCase() === faction.name.toLowerCase());
   }
 
@@ -119,7 +143,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     if (r.territories && r.territories.length) hub.broadcast(lobbyId, { type: 'territory', territories: r.territories });
     if (r.owners && (r.owners.length || r.replace)) hub.broadcast(lobbyId, { type: 'provinceOwners', owners: r.owners, replace: !!r.replace });
   }
-  /** Apply territory-driven ownership to nodes, factories and towns; returns the markers that changed. */
+  /** Apply territory-driven ownership to nodes, factories, towns and capturable emplacements; returns the markers that changed. */
   function applyOwnership(req) {
     const factions = game.q.factions.all(req.lobby.id).map(access.serializeFaction);
     const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
@@ -192,6 +216,9 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
   });
 
   router.post('/territory/clear', requireGm, (req, res) => {
+    if (access.safeJson(req.lobby.settings).azgaar) {
+      return res.status(409).json({ error: 'Azgaar land cells are the map and cannot be cleared' });
+    }
     territory.clear(req.lobby.id);
     const hadProvinces = provinces.has(req.lobby.id);
     provinces.clear(req.lobby.id);
@@ -209,7 +236,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const stamp = list.length ? `${list.length}:${list[list.length - 1].id}` : '0';
     let hit = provinceCache.get(req.lobby.id);
     if (!hit || hit.stamp !== stamp) {
-      const body = JSON.stringify({ provinces: list.map(p => ({ id: p.id, n: p.name, s: p.state, x: p.cx, y: p.cy, g: p.geometry })) });
+      const body = JSON.stringify({ provinces: list.map(p => ({ id: p.id, n: p.name, s: p.state, b: p.biomeColor, x: p.cx, y: p.cy, g: p.geometry })) });
       hit = { stamp, buf: zlib.gzipSync(Buffer.from(body, 'utf8')) };
       provinceCache.set(req.lobby.id, hit);
     }
@@ -296,8 +323,9 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const isProject = q => !!GameData.PROJECTS[q.typeId];
     const sites = production.sites(req.lobby, g, access.serializeFaction(faction), markers, fx).map(s => ({
       ...s, coastal: geo.isEarth(req.lobby) ? territory.isCoastal(req.lobby, s.x, s.y, num(g.settings.coastalKm, 30)) : true,
-      queue: (state.production || []).filter(q => q.siteId === s.id && q.typeId !== 'factory' && !isProject(q)),
+      queue: (state.production || []).filter(q => q.siteId === s.id && q.typeId !== 'factory' && !isProject(q) && !q.ready),
     }));
+    const ready = (state.production || []).filter(q => q.ready);
     const factories = (state.production || []).filter(q => q.typeId === 'factory');
     // Long-term projects: every factory, town and resource node of the faction, with the next step's cost and any
     // project under way.
@@ -308,9 +336,10 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       const res = m.type === 'resource' ? { resource: m.data?.kind, yield: num(m.data?.yield) } : {};
       return { id: m.id, name: m.name, kind: m.type === 'factory' ? 'factory' : m.type === 'resource' ? 'resource' : (m.data?.size || 'village'), project: p.id, level: p.level, max: p.max, cost: p.cost, active, ...res };
     });
-    const costs = Object.fromEntries([...UnitTypes.LIST.map(t => t.id), 'factory'].map(id => [id, production.costWith(g, fx, id)]));
-    const buildable = Object.fromEntries(UnitTypes.LIST.map(t => [t.id, research.canBuild(fx, t.id)]));
-    return { factionId: faction.id, sites, factoryBuilds: factories, projects, costs, buildable, state };
+    const pack = UnitTypes.forPack(req.lobby.unit_pack);
+    const costs = Object.fromEntries([...pack.LIST.map(t => t.id), 'factory'].map(id => [id, production.costWith(g, fx, id, pack.id)]));
+    const buildable = Object.fromEntries(pack.LIST.map(t => [t.id, research.canBuild(fx, t.id) || !!treaties.license(req.lobby.id, faction.id, t.id)]));
+    return { factionId: faction.id, sites, factoryBuilds: factories, ready, projects, costs, buildable, state };
   }
 
   router.get('/production', (req, res) => {
@@ -337,11 +366,43 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     game.writeState(state);
     const what = item.typeId === 'factory' ? 'building a factory at' : GameData.PROJECTS[item.typeId]
       ? `${{ upgradeFactory: 'upgrading', developTown: 'developing', improveResource: 'improving' }[item.typeId]} ${item.siteName} to level ${item.toLevel}`
-      : `building ${UnitTypes.LIST.find(t => t.id === item.typeId)?.unit || item.typeId} at`;
+      : `building ${UnitTypes.forPack(req.lobby.unit_pack).LIST.find(t => t.id === item.typeId)?.unit || item.typeId} at`;
     logEvent(req.lobby.id, req.user.id, 'system', `${faction.name} begins ${what}${GameData.PROJECTS[item.typeId] ? '' : ` ${item.siteName}`} (${item.turns} turn${item.turns === 1 ? '' : 's'})`, { faction: faction.name, audience: { nations: [faction.name], treasury: true } },
       ws => ws.lobbyRole === 'gm' || g.settings.publicTreasury || String(ws.nation || '').toLowerCase() === faction.name.toLowerCase());
     broadcastFaction(req, g, f);
     res.status(201).json({ item, ...productionView(req, g, f) });
+  });
+
+  /**
+   * Place a finished emplacement: { x, y } on the nation's own ground (on land; a coastal battery within coastalKm of the
+   * sea). It stands there from now on, its stats the type's defaults.
+   */
+  router.post('/production/:qid/place', (req, res) => {
+    const g = game.get(req.lobby.id);
+    if (!g.enabled) return res.status(400).json({ error: 'Game mode is off' });
+    const f = factionFor(req, req.body?.factionId);
+    if (!f) return res.status(400).json({ error: 'You need a faction' });
+    const state = game.serializeState(game.q.state.get(f.id) || game.ensureState(req.lobby.id, f.id, g.settings));
+    const item = (state.production || []).find(q => q.id === Number(req.params.qid) && q.ready);
+    if (!item) return res.status(404).json({ error: 'Nothing ready to place by that name' });
+    const t = UnitTypes.forPack(req.lobby.unit_pack).LIST.find(u => u.id === item.typeId);
+    const x = num(req.body?.x, NaN), y = num(req.body?.y, NaN);
+    if (!t || !Number.isFinite(x) || !Number.isFinite(y)) return res.status(400).json({ error: 'Pick a spot on the map' });
+    if (geo.isEarth(req.lobby) && !territory.isLand(req.lobby, x, y)) return res.status(400).json({ error: `${t.unit} must stand on land` });
+    const lookup = territory.ownerLookup(req.lobby);
+    if (lookup && lookup(x, y) !== f.id) return res.status(400).json({ error: `Place ${t.unit} on ${f.name}'s own ground` });
+    if (t.id === 'coastal' && geo.isEarth(req.lobby) && !territory.isCoastal(req.lobby, x, y, num(g.settings.coastalKm, 30))) return res.status(400).json({ error: `A coastal battery must stand within ${num(g.settings.coastalKm, 30)} km of the sea` });
+    const owner = access.getMembers(req.lobby.id).find(m => String(m.nation || '').toLowerCase() === f.name.toLowerCase())?.user_id || null;
+    const d = UnitTypes.defaults(t, g.settings.unitStats) || {};
+    let marker;
+    try { marker = createMarker(req, { type: 'unit', autoName: true, x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, color: f.color, ownerId: owner, data: { nation: f.name, unitType: t.name, ...d, strength: 100 } }, true); }
+    catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+    state.production = (state.production || []).filter(q => q !== item);
+    game.writeState(state);
+    logEvent(req.lobby.id, req.user.id, 'system', `🏗 ${f.name} placed ${marker.name}`, { faction: f.name, audience: { nations: [f.name] } },
+      ws => ws.lobbyRole === 'gm' || String(ws.nation || '').toLowerCase() === f.name.toLowerCase());
+    broadcastFaction(req, g, f);
+    res.status(201).json({ marker, ...productionView(req, g, f) });
   });
 
   router.delete('/production/:qid', (req, res) => {
@@ -363,7 +424,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const fx = research.effectsFor(techs, state.techs || []);
     const have = new Set(state.techs || []);
     const items = techs.map(t => ({
-      ...t, unlocked: have.has(t.key), active: r.active === t.key, queued: r.queue.includes(t.key), progress: r.progress[t.key] || 0,
+      ...t, baseRp: t.rp, rp: treaties.researchCost(req.lobby.id, faction.id, t, state), unlocked: have.has(t.key), active: r.active === t.key, queued: r.queue.includes(t.key), progress: r.progress[t.key] || 0,
       blocker: have.has(t.key) ? null : research.blocker(t, state, techs, g),
     }));
     return {
@@ -530,11 +591,18 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     if (!game.q.faction.get(a, req.lobby.id) || !game.q.faction.get(b, req.lobby.id)) return res.status(404).json({ error: 'No such faction' });
     const g = game.get(req.lobby.id);
     const was = game.relationStatus(req.lobby.id, a, b);
-    game.setRelation(req.lobby.id, a, b, status, g.turn);
+    if (was === 'war' && status !== 'war') return res.status(400).json({ error: 'End this war through a shared treaty approved by every participant.' });
+    if (status === 'war') treaties.declare(req.lobby, a, b);
+    else game.setRelation(req.lobby.id, a, b, status, g.turn);
     if (was !== status) {
       // On the record like any treaty, so notifications announce wars the GM declares directly.
       const did = game.q.insertDiplomacy.run(req.lobby.id, a, b, status, 'accepted', 'set by the GM', req.user.id, Date.now()).lastInsertRowid;
       game.q.resolveDiplomacy.run('accepted', Date.now(), did);
+      if (status === 'war' || (status === 'peace' && was === 'war')) discordWebhook.emit(req.lobby.id, req.lobby.name, {
+        kind: status, title: status === 'war' ? '⚔ War declared' : '🕊 Peace declared',
+        description: status === 'war' ? `${factionName(req, a)} declares war on ${factionName(req, b)}.` : `${factionName(req, a)} and ${factionName(req, b)} make peace.`,
+        fields: [{ name: 'Turn', value: g.turn, inline: true }],
+      });
     }
     if (status === 'war') { expelBetween(req, a, b); if (game.cancelTradesBetween(req.lobby.id, a, b, 'cancelled by war').length) tradesChanged(req.lobby.id); }
     logEvent(req.lobby.id, req.user.id, 'system', `${factionName(req, a)} and ${factionName(req, b)} are now at ${status === 'alliance' ? 'alliance' : status}`);
@@ -550,9 +618,11 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     if (!kind || !mine) return res.status(400).json({ error: 'You need a faction to conduct diplomacy' });
     if (!game.q.faction.get(to, req.lobby.id) || to === mine.id) return res.status(400).json({ error: 'Pick another faction' });
     const cur = game.relationStatus(req.lobby.id, mine.id, to);
+    if (kind === 'peace') return res.status(400).json({ error: 'Open a shared peace conference in Treaties. Every war participant must approve its settlement.' });
     if (kind === 'war' && cur === 'war') return res.status(400).json({ error: 'Already at war' });
     if (kind === 'peace' && cur !== 'war') return res.status(400).json({ error: 'Not at war' });
     if (kind === 'alliance' && cur === 'alliance') return res.status(400).json({ error: 'Already allied' });
+    if (kind === 'alliance' && cur === 'war') return res.status(400).json({ error: 'End the war through a shared treaty before forming an alliance.' });
     const g = game.get(req.lobby.id);
     // Heroes: a peace offer or alliance proposal travels with a diplomat posted to the other nation.
     let envoy = null;
@@ -580,6 +650,11 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const finish = (status, message) => {
       game.q.resolveDiplomacy.run(status, Date.now(), d.id);
       if (message) logEvent(req.lobby.id, req.user.id, 'system', message);
+      if (status === 'accepted' && (d.kind === 'war' || d.kind === 'peace')) discordWebhook.emit(req.lobby.id, req.lobby.name, {
+        kind: d.kind, title: d.kind === 'war' ? '⚔ War declared' : '🕊 Peace declared',
+        description: d.kind === 'war' ? `${from} declares war on ${to}.` : `${from} and ${to} make peace.`,
+        fields: [{ name: 'Turn', value: g.turn, inline: true }],
+      });
       broadcastRelations(req.lobby.id);
       res.json({ diplomacy: game.serializeDiplomacy(game.q.diplomacyOne.get(d.id, req.lobby.id)), relations: game.relations(req.lobby.id) });
     };
@@ -593,7 +668,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       if (d.status !== 'pending') return res.status(400).json({ error: 'Not awaiting the GM' });
       if (action === 'block') return finish('blocked', `The GM blocked ${from}'s ${d.kind === 'war' ? 'declaration of war on' : d.kind + ' offer to'} ${to}`);
       if (d.kind === 'war') {
-        game.setRelation(req.lobby.id, d.from_faction, d.to_faction, 'war', g.turn);
+        treaties.declare(req.lobby, d.from_faction, d.to_faction);
         expelBetween(req, d.from_faction, d.to_faction);
         if (game.cancelTradesBetween(req.lobby.id, d.from_faction, d.to_faction, 'cancelled by war').length) tradesChanged(req.lobby.id);
         return finish('accepted', `⚔ ${from} declares war on ${to}!`);
@@ -608,6 +683,8 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       if (!gm && !(mine && mine.id === d.to_faction)) return res.status(403).json({ error: 'Only the other faction can answer' });
       if (d.status !== 'offered') return res.status(400).json({ error: 'Not open for an answer' });
       if (action === 'decline') return finish('declined', `${to} declined ${from}'s ${d.kind === 'peace' ? 'peace offer' : 'alliance proposal'}`);
+      if (d.kind === 'peace') return res.status(400).json({ error: 'Use a shared treaty conference to end this war for all parties.' });
+      if (game.relationStatus(req.lobby.id, d.from_faction, d.to_faction) === 'war') return res.status(400).json({ error: 'A shared peace treaty must end the war before this alliance can be accepted.' });
       game.setRelation(req.lobby.id, d.from_faction, d.to_faction, d.kind === 'peace' ? 'peace' : 'alliance', g.turn);
       return finish('accepted', d.kind === 'peace' ? `🕊 ${from} and ${to} make peace` : `🤝 ${from} and ${to} form an alliance`);
     }
@@ -707,7 +784,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       // One-time: both halves change hands now, or nothing does.
       const fs = game.factionStates(req.lobby.id, g.settings);
       const A = fs.find(x => x.faction.id === t.from), B = fs.find(x => x.faction.id === t.to);
-      const r = game.exchange(A.state, B.state, t);
+      const r = game.exchange(A.state, B.state, t, { lobby: req.lobby, settings: g.settings, from: A.faction.name, to: B.faction.name });
       if (!r.ok) return res.status(409).json({ error: `${r.short.side === 'from' ? from : to} does not have enough ${game.goodName(r.short.good)}` });
       game.writeState(A.state); game.writeState(B.state);
       const out = settle('completed', 0, [{ turn: g.turn, ok: true, text: `${from} → ${to}: ${describe(t)}` }]);
@@ -721,6 +798,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
   router.post('/enable', requireGm, (req, res) => {
     const g = game.get(req.lobby.id);
     const on = !!req.body?.enabled;
+    const starting = on && !g.enabled;
     if (on && !g.enabled) {
       const start = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.startDate || '')) ? req.body.startDate : g.date;
       g.date = start;
@@ -739,6 +817,10 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       }
     }
     logEvent(req.lobby.id, req.user.id, 'system', on ? `${req.user.displayName} switched game mode on: turn ${saved.turn}, ${GameData.fmtDate(saved.date)}` : `${req.user.displayName} switched game mode off`);
+    if (starting && saved.phase === 'move') discordWebhook.emit(req.lobby.id, req.lobby.name, {
+      kind: 'movement', title: '🚩 Movement phase begins', description: 'Units may move. Attacks wait until the battle phase.',
+      fields: [{ name: 'Turn', value: saved.turn, inline: true }],
+    });
     broadcastGame(req.lobby.id, saved);
     // Earth campaigns can set up the whole world (provinces, cities, resources) as the game starts.
     const setupError = on && req.body?.setup ? startSetup(req, req.body, true) : null;
@@ -803,7 +885,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
         const cur = s.replaceUnitCosts ? {} : { ...(g.settings.unitCosts || {}) };
         if (s.unitCosts && typeof s.unitCosts === 'object') {
           for (const [id, row] of Object.entries(s.unitCosts).slice(0, 200)) {
-            if (!/^[a-z0-9_-]{1,40}$/.test(id)) continue;
+            if (!/^[a-z0-9_-]{1,40}$/.test(id) || (id !== 'factory' && !UnitTypes.forPack(req.lobby.unit_pack)?.exact(id))) continue;
             if (row === null) { delete cur[id]; continue; }
             if (!row || typeof row !== 'object') continue;
             const o = {};
@@ -813,12 +895,24 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
         }
         out.unitCosts = cur;
       }
-      for (const k of ['waiveMovement', 'occupyNeutrals', 'upkeep', 'publicTreasury', 'capturedIdle', 'diplomatsRequired', 'supplyEnabled', 'fogOfWar', 'phases', 'trenchBlocks']) if (s[k] !== undefined) out[k] = !!s[k];
+      for (const k of ['waiveMovement', 'occupyNeutrals', 'upkeep', 'publicTreasury', 'capturedIdle', 'diplomatsRequired', 'supplyEnabled', 'fogOfWar', 'phases', 'trenchBlocks', 'goodsEnabled', 'rebellions']) if (s[k] !== undefined) out[k] = !!s[k];
       numIn('subSpotKm', 0, 1000);
       numIn('wornStep', 0, 100); numIn('replenishMax', 0, 100); numIn('replenishEnemyKm', 0, 5000);
       numIn('trenchSectionKm', 1, 500); numIn('trenchDigKm', 0, 1000); numIn('trenchDigTimber', 0, 1000); numIn('trenchReinforceTimber', 0, 1000); numIn('trenchDemolishDefence', -10, 50);
       numIn('blockadeKm', 0, 2000); numIn('subDetectKm', 0, 1000); numIn('corpsDepthKm', 0, 500);
       numIn('resourceImproveRate', 0, 5);
+      // Goods and unrest (docs/ECONOMY.md).
+      numIn('goodsPerIndustry', 0, 1000); numIn('goodsPerDev', 0, 1000); numIn('factoryOutput', 0, 1000); numIn('warEconomy', 0, 100); numIn('consumerNeed', 0, 10);
+      numIn('goodsStoreTurns', 1, 1000); numIn('goodsStartTurns', 0, 1000); numIn('goodsLinkKm', 0, 20000); numIn('unitDraw', 0, 100);
+      numIn('columnPool', 0, 10000); numIn('convoyPool', 0, 10000); numIn('convoyLoadKm', 0, 2000); numIn('salvageKm', 0, 2000);
+      numIn('unrestRise', 0, 100); numIn('unrestFall', 0, 100); numIn('unrestCritical', 1, 100); numIn('unrestGrace', 1, 50); numIn('rebelRadiusKm', 0, 5000);
+      numIn('fortPool', 0, 100000); numIn('fortLinkKm', 0, 5000); numIn('fortRifleRange', 0, 50); numIn('railBuildKm', 1, 500); numIn('railBuildIron', 0, 1000); numIn('railBuildTimber', 0, 1000);
+      for (const grp of ['goodsBase', 'rebelProvinces', 'rebelMilitia']) {
+        if (s[grp] && typeof s[grp] === 'object') {
+          out[grp] = { ...(g.settings[grp] || {}) };
+          for (const k of ['capital', 'city', 'village']) if (s[grp][k] !== undefined) out[grp][k] = clamp(num(s[grp][k], 0), 0, grp === 'goodsBase' ? 10000 : 100);
+        }
+      }
       if (s.vision && typeof s.vision === 'object') {
         out.vision = { ...(g.settings.vision || {}) };
         for (const [k, v] of Object.entries(s.vision)) if (Object.hasOwn(GameData.DEFAULT_SETTINGS.vision, k)) out.vision[k] = clamp(num(v, 0), 0, 5000);
@@ -835,6 +929,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       g.settings = GameData.mergeSettings(g.settings, out);
     }
     const saved = game.save(g);
+    scheduleSupply(req.lobby.id);   // Hero aura and supply rule edits change logistics reach.
     broadcastGame(req.lobby.id, saved);
     // Fog of war switched: every player reloads what they may see; ranges changed: vision is worked out again.
     if (!!saved.settings.fogOfWar !== fogWas) { vision.reset(req.lobby.id); hub.broadcast(req.lobby.id, { type: 'reload', what: 'markers' }); }
@@ -871,6 +966,13 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     logEvent(req.lobby.id, req.user.id, 'system', phase === 'battle'
       ? `⚔ Turn ${saved.turn}: the battle phase begins. Attacks are open; units hold their positions until the next turn.`
       : `🚩 Turn ${saved.turn}: back to the movement phase. Units may move again; attacks wait for the battle phase.`);
+    discordWebhook.emit(req.lobby.id, req.lobby.name, phase === 'battle' ? {
+      kind: 'battle', title: '⚔ Battle phase begins', description: 'Attacks are open. Units hold their positions until the next turn.',
+      fields: [{ name: 'Turn', value: saved.turn, inline: true }],
+    } : {
+      kind: 'movement', title: '🚩 Movement phase begins', description: 'Units may move again. Attacks wait until the battle phase.',
+      fields: [{ name: 'Turn', value: saved.turn, inline: true }],
+    });
     broadcastGame(req.lobby.id, saved);
     hub.broadcast(req.lobby.id, { type: 'phase', turn: saved.turn, phase });
     broadcastReady(req.lobby.id, saved);
@@ -904,8 +1006,10 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       if (item.typeId === 'factory') {
         return createMarker(req, { type: 'factory', name: `${item.siteName || faction.name} Works`, x: item.x, y: item.y, color: faction.color, ownerId: owner, data: { nation: faction.name, industry: 1 } }, true);
       }
-      const t = UnitTypes.LIST.find(u => u.id === item.typeId);
+      const t = UnitTypes.forPack(req.lobby.unit_pack).LIST.find(u => u.id === item.typeId);
       if (!t) throw new Error('unknown type');
+      // Emplacements wait for their nation to place them where it wants (POST /production/:qid/place).
+      if (t.cat === 'Emplacements') { state.production = [...(state.production || []), { ...item, turnsLeft: 0, ready: true, readyTurn: g0.turn }]; return { name: `${t.unit} (ready to place)` }; }
       const n = (spawnIndex.get(item.siteId) || 0); spawnIndex.set(item.siteId, n + 1);
       let p = site ? production.spawnPoint(req.lobby, site, n) : { x: item.x || 0, y: item.y || 0 };
       // New ships are launched on the nearest water, not on the shipyard's town.
@@ -916,6 +1020,10 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const g0 = before;
     try { result = game.endTurn(req.lobby, { spawn }); } catch (e) { return res.status(400).json({ error: e.message }); }
     const g = result.game;
+    applyOwnership(req);
+    broadcastLand(req.lobby.id, { owners: provinces.ownership(req.lobby.id), replace: true });
+    hub.broadcast(req.lobby.id, { type: 'territory', territories: provinces.has(req.lobby.id) ? [] : territory.all(req.lobby.id), replace: true });
+    broadcastRelations(req.lobby.id);
     // Heroes on the road arrive: diplomats take up their post (or come home).
     for (const h of game.q.markers.all(req.lobby.id).map(access.serializeMarker)) {
       if (h.type !== 'hero' || h.data?.status !== 'travelling' || !h.data.travel || num(h.data.travel.arrives) > g.turn) continue;
@@ -926,8 +1034,18 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     }
     // Marching orders carry on with the new turn's movement (by rail where quicker).
     orders.processMarches(req);
+    // Towns left in critical unrest too long rise in revolt (docs/ECONOMY.md).
+    economy.processRebellions(req, result.rebels);
     if (settled.length) logEvent(req.lobby.id, null, 'system', `${settled.length} place${settled.length === 1 ? '' : 's'} changed hands with the front line`);
     logEvent(req.lobby.id, req.user.id, 'system', `Turn ${before.turn} ended. Turn ${g.turn} begins: ${GameData.fmtDate(g.date)}. Movement and action points are reset.`);
+    discordWebhook.emit(req.lobby.id, req.lobby.name, {
+      kind: 'turn', title: `⌛ Turn ${before.turn} ended`, description: 'The next turn is underway. Movement and action points have reset.',
+      fields: [{ name: 'New turn', value: g.turn, inline: true }, { name: 'Date', value: GameData.fmtDate(g.date), inline: true }],
+    });
+    if (g.phase === 'move') discordWebhook.emit(req.lobby.id, req.lobby.name, {
+      kind: 'movement', title: '🚩 Movement phase begins', description: 'Units may move. Attacks wait until the battle phase.',
+      fields: [{ name: 'Turn', value: g.turn, inline: true }],
+    });
     for (const s of result.summaries) {
       const nation = s.faction.name.toLowerCase();
       for (const name of s.data.researched || []) logEvent(req.lobby.id, null, 'system', `🔬 ${s.faction.name} completes research: ${name}`);
@@ -959,6 +1077,8 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     if (provinces.has(req.lobby.id)) broadcastLand(req.lobby.id, { owners: provinces.ownership(req.lobby.id), replace: true });
     broadcastRelations(req.lobby.id);
     for (const f of game.q.factions.all(req.lobby.id)) broadcastFaction(req, g, f);
+    hub.broadcast(req.lobby.id, { type: 'treatiesChanged' });
+    hub.broadcast(req.lobby.id, { type: 'newsChanged' });
     vision.schedulePush(req.lobby.id);
     res.json({ game: g });
   });
@@ -1069,7 +1189,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     if (!gm && !canEditMarker(req, hero)) return res.status(403).json({ error: `Only the GM or ${hero.name}'s owner can give orders` });
     if (d.status === 'captured') return res.status(409).json({ error: `${hero.name} has been captured` });
     if (d.status === 'travelling') return res.status(409).json({ error: `${hero.name} is travelling and arrives at the end of the turn` });
-    const need = { recon: 'spy', steal: 'spy', hunt: 'spy', send: 'diplomat', recall: 'diplomat' }[action];
+    const need = { recon: 'spy', steal: 'spy', 'steal-notes': 'spy', hunt: 'spy', send: 'diplomat', recall: 'diplomat' }[action];
     if (!need) return res.status(400).json({ error: 'Unknown order' });
     if (d.role !== need) return res.status(400).json({ error: `Only a ${need} can do that` });
     // One mission or journey per turn in game mode (the GM is never limited).
@@ -1098,20 +1218,37 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const lookup = territory.ownerLookup(req.lobby);
     const groundId = lookup ? lookup(hero.x, hero.y) : null;
     const ground = groundId ? game.q.faction.get(groundId, req.lobby.id) : null;
-    const km = Heroes.missionRadiusKm(d.stars);
+    const km = action === 'recon' ? Heroes.reconRadius(hero) : Heroes.missionRadiusKm(d.stars);
+    const intelligence = heroRules.intelligence(req.lobby, g.settings, markers, hero), perception = Heroes.spyPerception(hero);
     /** Counter-intelligence of `nation`: its sharpest spy nearby, or the campaign's base security. */
     const contested = nation => {
       const spy = heroRules.counterSpy(req.lobby, markers, nation, hero.x, hero.y, num(g.settings.spyCounterKm, 150));
-      const per = spy ? num(spy.data.perception) : num(g.settings.spySecurity, 0);
-      return { ...heroRules.contest(per, num(d.intelligence)), spy, per };
+      const per = spy ? Heroes.spyPerception(spy) : num(g.settings.spySecurity, 0);
+      return { ...heroRules.contest(per, intelligence), spy, per };
     };
     const caughtBy = (nation, c) => {
       capture(req, g, hero, nation);
       const who = c.spy ? `${nation}'s ${c.spy.name}` : `${nation}'s security`;
-      const msg = `🕵 ${d.nation}'s spy ${hero.name} was caught ${place} by ${who}: ${c.sRoll}+${c.per}=${c.sTotal} vs ${c.hRoll}+${num(d.intelligence)}=${c.hTotal}`;
+      const msg = `🕵 ${d.nation}'s spy ${hero.name} was caught ${place} by ${who}: ${c.sRoll}+${c.per}=${c.sTotal} vs ${c.hRoll}+${intelligence}=${c.hTotal}`;
       secretLog(req, [d.nation, nation], msg, { heroId: hero.id, caught: true });
       return res.json({ ok: false, caught: true, message: msg });
     };
+
+    if (action === 'steal-notes') {
+      if (!g.enabled) return res.status(400).json({ error: 'Stealing notes needs game mode' });
+      if (!ground || norm(ground.name) === norm(d.nation)) return res.status(400).json({ error: `${hero.name} must be on another nation's ground to steal notes` });
+      const mine = factionNamed(req, d.nation);
+      if (!mine) return res.status(409).json({ error: 'The spy has no nation to receive notes' });
+      if (!journal.hasStealable(req, mine, ground)) return res.status(409).json({ error: `${ground.name} has no new private notes to steal` });
+      const c = contested(ground.name);
+      if (c.caught) return caughtBy(ground.name, c);
+      const copied = journal.steal(req, mine, ground);
+      writeMarker(req, hero, { data: spent });
+      const msg = `🗝 ${hero.name} copied a private note from ${ground.name} ${place}: ${copied.title}`;
+      secretLog(req, [d.nation], msg, { heroId: hero.id });
+      secretLog(req, [ground.name], `🗝 A private note went missing ${place}`);
+      return res.json({ ok: true, message: msg, noteId: copied.id });
+    }
 
     if (action === 'steal') {
       if (!g.enabled) return res.status(400).json({ error: 'Stealing research needs game mode' });
@@ -1120,7 +1257,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       if (c.caught) return caughtBy(ground.name, c);
       const mine = factionNamed(req, d.nation);
       const theirs = game.serializeState(game.q.state.get(ground.id) || game.ensureState(req.lobby.id, ground.id, g.settings));
-      const amount = Math.max(0, Math.min(num(g.settings.spyStealPerStar, 5) * Heroes.stars(d.stars), num(theirs.rp)));
+      const amount = Math.max(0, Math.min(Math.round(num(g.settings.spyStealPerStar, 5) * Heroes.stars(d.stars) * Heroes.theftMultiplier(hero) * 10) / 10, num(theirs.rp)));
       if (amount > 0 && mine) {
         const ours = game.serializeState(game.q.state.get(mine.id) || game.ensureState(req.lobby.id, mine.id, g.settings));
         theirs.rp = Math.round((theirs.rp - amount) * 10) / 10; ours.rp = Math.round((ours.rp + amount) * 10) / 10;
@@ -1128,7 +1265,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
         broadcastFaction(req, g, ground); broadcastFaction(req, g, mine);
       }
       writeMarker(req, hero, { data: spent });
-      const rolls = `${c.hRoll}+${num(d.intelligence)}=${c.hTotal} vs ${c.sRoll}+${c.per}=${c.sTotal}`;
+      const rolls = `${c.hRoll}+${intelligence}=${c.hTotal} vs ${c.sRoll}+${c.per}=${c.sTotal}`;
       const msg = amount > 0 ? `🗝 ${hero.name} stole ${amount} research points from ${ground.name} ${place} (${rolls})` : `🗝 ${hero.name} got into ${ground.name}'s offices ${place} but found no research points to take (${rolls})`;
       secretLog(req, [d.nation], msg);
       if (amount > 0) secretLog(req, [ground.name], `🗝 Research papers went missing ${place}: ${ground.name} lost ${amount} research points`);
@@ -1160,11 +1297,12 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       const targets = heroRules.spiesNear(req.lobby, markers, hero.x, hero.y, km, friend);
       const caught = [];
       for (const t of targets) {
-        const c = heroRules.contest(num(d.perception), num(t.data.intelligence));
+        const targetIntelligence = heroRules.intelligence(req.lobby, g.settings, markers, t);
+        const c = heroRules.contest(perception, targetIntelligence);
         if (!c.caught) continue;
         capture(req, g, t, d.nation);
         caught.push(t);
-        secretLog(req, [t.data.nation, d.nation], `🕵 ${t.data.nation}'s spy ${t.name} was caught ${placeName(req, markers, t.x, t.y)} by ${d.nation}'s ${hero.name}: ${c.sRoll}+${num(d.perception)}=${c.sTotal} vs ${c.hRoll}+${num(t.data.intelligence)}=${c.hTotal}`, { heroId: t.id, caught: true });
+        secretLog(req, [t.data.nation, d.nation], `🕵 ${t.data.nation}'s spy ${t.name} was caught ${placeName(req, markers, t.x, t.y)} by ${d.nation}'s ${hero.name}: ${c.sRoll}+${perception}=${c.sTotal} vs ${c.hRoll}+${targetIntelligence}=${c.hTotal}`, { heroId: t.id, caught: true });
       }
       writeMarker(req, hero, { data: spent });
       const msg = caught.length ? `🕵 ${hero.name} hunted within ${km} km (${place}) and caught ${caught.map(t => `${t.name} (${t.data.nation})`).join(', ')}` : `🕵 ${hero.name} hunted within ${km} km (${place}) and caught no one`;
@@ -1234,8 +1372,9 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     } else {
       const bonus = research.statBonus(game.factionEffects(req.lobby.id, unit.data?.nation), UnitTypes.resolve(unit.data?.unitType)).attack;
       const gen = heroRules.generalFor(req.lobby, g.settings, markers, unit);
-      const worn = g.enabled ? game.wornPenalty(g.settings, unit) : 0;
-      const atk = num(unit.data?.attack) + bonus + (gen ? gen.bonus : 0) - worn;
+      const traits = heroRules.effects(req.lobby, g.settings, markers, unit);
+      const worn = g.enabled ? Math.max(0, game.wornPenalty(g.settings, unit) - traits.worn) : 0;
+      const atk = num(unit.data?.attack) + bonus + (gen ? gen.bonus : 0) + traits.attack - worn;
       // The holder's (or its allies') strongest land unit within the guard radius defends the line.
       const guardOf = holder && holder.id ? friendsOf(req, holder.name) : null;
       const guards = guardOf ? markers.filter(m => territory.isLandUnit(m) && num(m.data?.strength, 100) > 0 && guardOf(m.data?.nation) &&
@@ -1245,7 +1384,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       const aRoll = crypto.randomInt(1, 21), dRoll = crypto.randomInt(1, 21);
       success = aRoll + atk > dRoll + def;
       rolls = { aRoll, dRoll, atk, def, guard: guard ? guard.name : null };
-      const notes = [bonus ? `+${bonus} tech` : '', gen ? `+${gen.bonus} ${gen.hero.name}` : '', worn ? `−${worn} worn` : '', guard ? `guarded by ${guard.name}` : ''].filter(Boolean);
+      const notes = [bonus ? `+${bonus} tech` : '', gen ? `+${gen.bonus} ${gen.hero.name}` : '', traits.attack ? `+${traits.attack} traits (${traits.notes.filter(n => n.fields.attack).map(n => n.name).join(', ')})` : '', worn ? `−${worn} worn` : '', guard ? `guarded by ${guard.name}` : ''].filter(Boolean);
       text = `💥 ${unit.name} attacked ${railName(rail)} ${place}: ${aRoll}+${atk}=${aRoll + atk} vs ${dRoll}+${def}=${dRoll + def}${notes.length ? ` (${notes.join(', ')})` : ''} → ` +
         (success ? `the line is cut (${Math.round(num(g.settings.railCutKm, 10) * 2)} ${u} of track)` : 'the line holds');
     }
@@ -1261,7 +1400,7 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     res.status(201).json({ event, success, shape: after });
   });
 
-  /** Repair a cut: the GM, or a unit of the side holding that ground within railRepairKm (uses its action). */
+  /** Repair a cut: the GM, or an engineering crew within railRepairKm (uses one action point). */
   router.post('/rail/repair', (req, res) => {
     const g = game.get(req.lobby.id);
     const gm = req.lobbyRole === 'gm';
@@ -1272,11 +1411,14 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
     const markers = game.q.markers.all(req.lobby.id).map(access.serializeMarker);
     const place = placeName(req, markers, cut.x, cut.y);
     let who = 'The GM';
+    let repairedBy = null;
     if (!gm || req.body?.unitId) {
       const viewer = { role: req.lobbyRole, userId: req.user.id, nation: req.member?.nation || '', viewAs: req.viewAs?.id || null, lobbyId: req.lobby.id };
       const unit = markers.find(m => m.id === Number(req.body?.unitId));
       if (!unit || !access.canSee(unit, viewer) || !['unit', 'hero'].includes(unit.type)) return res.status(404).json({ error: 'Pick one of your units near the break' });
       if (!canEditMarker(req, unit)) return res.status(403).json({ error: 'You can only repair with units you control' });
+      if (unit.type !== 'unit' || !['engineers', 'pioneers', 'railway'].includes(UnitTypes.resolve(unit.data?.unitType)?.id)) return res.status(400).json({ error: 'Only engineers, pioneers and railway troops repair railways' });
+      if (Number(unit.data?.strength ?? 100) <= 0 || unit.data?.surrendered || unit.data?.aboard) return res.status(409).json({ error: `${unit.name} cannot repair railways while out of action or aboard a convoy` });
       const u = unitsLabel(req), range = num(g.settings.railRepairKm, 30);
       const dist = geo.distance(req.lobby, unit.x, unit.y, cut.x, cut.y);
       if (!gm && dist > range + 1e-6) return res.status(409).json({ error: `${unit.name} is ${Math.round(dist)} ${u} from the break; repair crews work within ${range} ${u}` });
@@ -1285,13 +1427,13 @@ module.exports = function gameRoutes({ logEvent, clean, num, clamp, setMarkerNat
       if (g.enabled && !gm) {
         const ap = Math.max(1, num(unit.data?.ap, 1));
         if (num(unit.data?.apUsed) >= ap) return res.status(409).json({ error: `${unit.name} has used its action points this turn` });
-        writeMarker(req, unit, { data: { apUsed: num(unit.data?.apUsed) + 1 } });
+        repairedBy = writeMarker(req, unit, { data: { apUsed: num(unit.data?.apUsed) + 1 } });
       }
       who = unit.name;
     }
     const after = writeShape(req, rail, { ...(rail.data || {}), cuts: (rail.data?.cuts || []).filter(c => c.id !== cut.id) });
     const event = logEvent(req.lobby.id, req.user.id, 'system', `🛠 ${who} repaired ${railName(rail)} ${place}`, { railId: rail.id, cutId: cut.id });
-    res.json({ event, shape: after });
+    res.json({ event, shape: after, marker: repairedBy });
   });
 
 

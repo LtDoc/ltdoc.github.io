@@ -20,8 +20,17 @@ lines the same way even where the drawing was not snapped: a line's end within 2
 point within 5 km, and **wherever two lines cross**, vertex or not. (Before 1 Oct 2026 only vertices within 5 km
 joined, so lines that crossed, or ended a little short, carried no through traffic.) **Extend** in the railway's popup adds track at its end. Points can be dragged like any drawing.
 
-While the game is running only the GM lays, edits or removes railways; outside game mode anyone may draw them.
-A **GM only** railway is a plan: it is drawn for the GM but carries no traffic.
+While the game is running players **plan** railways: the 🛤 tool draws a planned line (a dashed survey line with
+its sleepers pegged out, "(planned)" after its name) that carries no traffic. **Engineers, pioneers and railway
+troops** within 20 km of a planned line of their side can be ordered to **🛤 Lay track** (their panel): at End turn
+they lay the **15 km** of it nearest them, for **5 iron and 5 timber** from their nation (⚖ Rules → Railways →
+Building). The section becomes track whose ends meet the track already laid, so the network joins it up; the rest
+stays planned. The order lasts the turn, like digging a trench. A player can redraw or remove their own plans; built
+track is the GM's to change, as is everything while the game runs. Outside game mode anyone may draw railways. A
+**GM only** railway is a plan too: drawn for the GM, carrying no traffic.
+
+Railways also carry goods: a nation's towns on one stretch of open track share their stores however far apart they
+are (docs/ECONOMY.md, Goods and unrest).
 
 ## Look
 
@@ -72,8 +81,10 @@ A cut stays until it is repaired. The railway's popup lists each cut ("💥 Cut 
 by France") with **Show** and, when you can, **🛠 Repair**:
 
 - The GM repairs any cut.
-- A player sends their nearest unit or hero within **Repair within** (30 km) of the break; the ground must be
-  theirs, an ally's or no one's, and it uses that unit's action for the turn.
+- Select an **Engineer**, **Pioneer** or **Railway troops** unit and choose **🛠 Repair railway…** to pick a nearby
+  broken link. The railway popup's **Repair** button also selects the nearest available engineering crew.
+- The crew must be alive, not surrendered, ashore and within **Repair within** (30 km). The ground must be
+  theirs, an ally's or no one's. Each repair uses one action point and reopens that break immediately; other cuts remain.
 
 ## Campaign rules (⚖ Rules → Railways)
 

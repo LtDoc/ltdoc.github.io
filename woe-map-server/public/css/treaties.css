@@ -1,0 +1,86 @@
+#treatyModal { padding: 24px; background: rgba(5, 12, 9, .78); }
+#treatyModal .treaty-card { --treaty-ink: #edf0e7; --treaty-muted: #b5c3b5; --treaty-line: #42584a; width: min(1240px, 96vw); max-width: none; max-height: 92dvh; overflow: auto; padding: 0; background: #182a21; color: var(--treaty-ink); border: 1px solid #657459; border-radius: 14px; box-shadow: 0 28px 90px #0009; scrollbar-gutter: stable; }
+.treaty-card > header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 22px 28px; border-bottom: 1px solid var(--treaty-line); background: #20362a; }
+.treaty-card h2 { margin: 4px 0 0; font: 600 27px Georgia, serif; color: #f0dba8; }
+.treaty-card h3 { margin: 0 0 12px; font-size: 17px; font-weight: 600; }
+.treaty-card h4 { margin: 0 0 8px; font-size: 16px; }
+.treaty-card p { line-height: 1.55; }
+.treaty-card .hint { color: var(--treaty-muted); font-size: 12px; line-height: 1.6; margin: 6px 0 12px; }
+.treaty-card .treaty-eyebrow { margin: 0; color: #cdb982; font-size: 10px; letter-spacing: .14em; font-weight: 700; text-transform: uppercase; }
+#treatyContent { padding: 24px 28px 0; }
+.treaty-card label { display: block; margin-bottom: 14px; color: #d5ded2; font-size: 12px; font-weight: 600; }
+#treatyModal input:not([type=checkbox]), #treatyModal select, #treatyModal textarea { width: 100%; min-height: 42px; margin: 6px 0 0; padding: 10px 12px; border: 1px solid #5c7161; border-radius: 6px; background: #11231a; color: #edf0e7; font-size: 14px; font-weight: 400; }
+#treatyModal input::placeholder { color: #a8b5a8; }
+#treatyModal button { min-height: 40px; padding: 10px 14px; font-size: 13px; font-weight: 600; }
+#treatyModal button.secondary { border: 1px solid #526956; background: #2a4134; color: #eef1e7; }
+#treatyModal button.treaty-primary { background: #d6bb7c; color: #18251b; border: 1px solid #e3ce97; }
+#treatyModal button.small { min-height: 34px; padding: 7px 10px; font-size: 12px; }
+#treatyModal button.treaty-close { width: 40px; padding: 0; font-size: 24px; background: transparent; }
+#treatyModal :is(button,input,select,textarea,summary):focus-visible { outline: 2px solid #efd393; outline-offset: 3px; }
+#treatyModal button:disabled { opacity: .55; cursor: not-allowed; }
+#treatyModal button.danger { color: #ffd6ce; border-color: #a96e64; background: #512e2a; }
+.treaty-library-toolbar, .treaty-editor-nav, .treaty-section-heading, .treaty-clause-heading, .treaty-action-bar, .treaty-list-item, .treaty-signatory { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.treaty-library-toolbar { margin-bottom: 28px; }
+.treaty-library-toolbar label { margin: 0; width: min(280px, 55%); }
+.treaty-library-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr); gap: 28px; padding-bottom: 28px; }
+.treaty-library-main > h3 { margin-top: 8px; font: 600 24px Georgia, serif; }
+.treaty-panel { padding: 18px; border: 1px solid var(--treaty-line); border-radius: 9px; background: #20352a; margin-bottom: 18px; }
+.treaty-panel .box, .treaty-panel .diplo { padding: 14px 0; border: 0; border-top: 1px solid var(--treaty-line); background: transparent; border-radius: 0; }
+.treaty-list-item { padding: 20px; margin-top: 12px; background: #20352a; border: 1px solid var(--treaty-line); border-radius: 9px; }
+.treaty-list-item .grow { min-width: 0; overflow-wrap: anywhere; }
+.treaty-list-item > button { flex-shrink: 0; }
+.treaty-list-item .hint { margin-bottom: 0; }
+.treaty-list-meta { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; color: var(--treaty-muted); font-size: 11px; flex-wrap: wrap; }
+.treaty-status { display: inline-flex; align-items: center; border: 1px solid #70816a; color: #dce7d5; border-radius: 30px; padding: 4px 9px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.treaty-status-draft { background: #403d24; color: #efdb9e; border-color: #8c7b49; }
+.treaty-status-active { background: #254633; color: #bfe5c5; border-color: #65976d; }
+.treaty-status-withdrawn { color: #edb8ab; border-color: #a06c60; }
+.treaty-editor-nav { margin-bottom: 22px; }
+.treaty-editor-nav > div { display: flex; align-items: center; gap: 12px; }
+.treaty-editor-nav .hint { margin: 0; }
+.treaty-grid { display: grid; grid-template-columns: minmax(280px, .85fr) minmax(0, 1.4fr); gap: 28px; align-items: start; }
+.treaty-grid section { min-width: 0; }
+.treaty-section-heading { margin-bottom: 16px; flex-wrap: wrap; }
+.treaty-section-heading h3, .treaty-section-heading .hint { margin: 0; }
+.treaty-section-heading .treaty-eyebrow { margin-bottom: 6px; }
+.treaty-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.treaty-signatory { padding: 12px 0; border-bottom: 1px solid var(--treaty-line); font-size: 13px; }
+.treaty-signatory:last-of-type { border-bottom: 0; }
+.treaty-signatory strong { font-weight: 500; }
+.treaty-signatory .hint { display: block; margin: 3px 0 0; font-size: 11px; }
+.treaty-approval { color: #b6c2b2; font-size: 11px; white-space: nowrap; }
+.treaty-approval.is-approved { color: #a8ddb4; }
+.treaty-progress { width: 100%; height: 5px; border: 0; border-radius: 8px; overflow: hidden; accent-color: #d6bb7c; background: #102218; }
+.treaty-progress::-webkit-progress-bar { background: #102218; }
+.treaty-progress::-webkit-progress-value { background: #d6bb7c; }
+.treaty-checks { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+.treaty-checks label { display: flex; align-items: center; gap: 8px; margin: 0; padding: 9px 11px; border: 1px solid #536956; border-radius: 6px; background: #182b20; font-weight: 400; }
+.treaty-checks label:has(input:checked) { border-color: #c4ac76; background: #34412d; }
+.treaty-checks input[type=checkbox] { accent-color: #d6bb7c; margin: 0; }
+.treaty-card .treaty-clause { padding: 18px; margin-bottom: 14px; background: #20352a; border: 1px solid var(--treaty-line); border-radius: 9px; }
+.treaty-clause-heading { margin-bottom: 14px; }
+.treaty-card .treaty-add { width: 100%; border-style: dashed; margin-bottom: 24px; }
+.treaty-peace-note { border-left: 2px solid #baa064; padding-left: 12px; font-size: 12px; color: #d8dcc9; }
+#treatyModal #treatyTitle { font-size: 18px; }
+#treatyModal #treatyText { min-height: 440px; resize: vertical; line-height: 1.85; padding: 28px; font-family: Georgia, serif; font-size: 16px; background: #f3eddf; color: #302c24; border: 1px solid #d2c7ae; box-shadow: inset 0 1px 3px #40311814; }
+.treaty-document-label { margin-top: 20px; }
+.treaty-history { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; padding: 16px; background: #11231a; border-radius: 6px; font-size: 12px; line-height: 1.7; }
+#treatyConflict { background: #403a22; border: 1px solid #c7a54b; border-radius: 8px; padding: 18px; margin-bottom: 20px; }
+#treatyConflict[hidden] { display: none; }
+.treaty-text-warning { color: #ffdc89; background: #403a22; border-left: 3px solid #c7a54b; padding: 14px; font-size: 13px; border-radius: 4px; }
+.treaty-card details { margin: 14px 0; }
+.treaty-card summary { cursor: pointer; padding: 8px 0; color: #dce3d6; font-size: 13px; }
+.treaty-history-section, .treaty-danger-zone { border-top: 1px solid var(--treaty-line); padding-top: 8px; }
+.treaty-danger-zone summary { color: #dfa99d; }
+.treaty-action-bar { position: sticky; bottom: 0; margin: 24px -28px 0; padding: 16px 28px; background: #14261b; border-top: 1px solid #687557; box-shadow: 0 -8px 20px #0002; z-index: 2; }
+#treatySaveStatus { margin: 0; color: #bfe0c3; font-size: 13px; font-weight: 600; }
+#treatySaveStatus.is-dirty { color: #f1d28d; }
+.treaty-action-bar .hint { margin: 4px 0 0; font-size: 11px; }
+.treaty-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.treaty-empty { padding: 22px; margin: 16px 0; border: 1px dashed #61725d; border-radius: 8px; color: var(--treaty-muted); font-size: 13px; }
+.treaty-empty p { margin: 0; }
+.treaty-empty h4 { color: #e5eadd; }
+.treaty-create { max-width: 720px; margin: 10px auto; padding-bottom: 30px; }
+.treaty-create h3 { font: 600 26px Georgia, serif; margin-top: 10px; }
+@media (max-width: 900px) { .treaty-grid, .treaty-library-grid { grid-template-columns: 1fr; } .treaty-document { grid-row: 1; } .treaty-action-bar { align-items: start; flex-direction: column; gap: 12px; } .treaty-actions { width: 100%; } .treaty-actions button { flex: 1; } }
+@media (max-width: 540px) { #treatyModal { padding: 8px; } #treatyModal .treaty-card { width: 100%; max-height: 96dvh; border-radius: 10px; } .treaty-card > header { padding: 16px; } .treaty-card h2 { font-size: 23px; } #treatyContent { padding: 16px 16px 0; } .treaty-action-bar { margin: 20px -16px 0; padding: 12px 16px; } .treaty-row { grid-template-columns: 1fr; gap: 0; } #treatyModal #treatyText { padding: 18px; min-height: 340px; font-size: 15px; } .treaty-list-item { align-items: start; flex-direction: column; padding: 16px; } .treaty-editor-nav { gap: 8px; } .treaty-editor-nav > div { flex-wrap: wrap; gap: 6px; justify-content: end; } .treaty-library-toolbar { align-items: end; gap: 12px; } .treaty-actions button { min-width: 120px; } }

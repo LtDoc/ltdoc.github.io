@@ -12,7 +12,8 @@ if (!dir) { console.error('Usage: node scripts/build-machines.js <folder with Ta
 const OUT = path.join(__dirname, '..', 'public', 'assets');
 const SCALE = 2;   // the art is drawn at about twice the size it is ever shown
 
-// Guns: file, and whether it is drawn from above (barrel up) or from the side (barrel to the left).
+// Guns: file, and whether it is drawn from above (barrel up) or from the side (barrel to the left); optionally how much
+// to shrink it (default SCALE) and 'right' for art drawn from above with the barrels pointing right (turned barrel-up).
 const GUNS = {
   field: ['FieldArtillery.png', 'top'],
   heavy: ['HeavyArtilleryBattery.png', 'top'],
@@ -20,7 +21,33 @@ const GUNS = {
   mortar: ['TrenchMortarBattery.png', 'top'],
   horse: ['HorseArtilleryBattery.png', 'side'],
   hmg: ['HeavyMG.png', 'side'],
+  coastal: ['CoastalTurret.png', 'top', 4, 'right', 'ring'],   // a twin-gun turret in its concrete ring, turning on its centre
 };
+
+/** The centre of a turret's ring (the widest rows of the frame), as fractions of the frame: where it pivots. */
+function ringCentre(f) {
+  const rows = [];
+  let best = 0;
+  for (let y = 0; y < f.h; y++) {
+    let x0 = -1, x1 = -1;
+    for (let x = 0; x < f.w; x++) if (f.px[(y * f.w + x) * 4 + 3] > 60) { if (x0 < 0) x0 = x; x1 = x; }
+    const w = x0 < 0 ? 0 : x1 - x0 + 1;
+    rows.push([y, x0, x1, w]); best = Math.max(best, w);
+  }
+  const top = rows.filter(r => r[3] >= best * 0.98);
+  const cx = top.reduce((a, r) => a + (r[1] + r[2] + 1) / 2, 0) / top.length, cy = top.reduce((a, r) => a + r[0], 0) / top.length + 0.5;
+  return [cx, cy];
+}
+
+/** Turn a cut frame a quarter turn anticlockwise (barrels pointing right → pointing up). */
+function turnLeft(f) {
+  const out = Buffer.alloc(f.w * f.h * 4);
+  for (let y = 0; y < f.h; y++) for (let x = 0; x < f.w; x++) {
+    const s = (y * f.w + x) * 4, d = ((f.w - 1 - x) * f.h + y) * 4;
+    out[d] = f.px[s]; out[d + 1] = f.px[s + 1]; out[d + 2] = f.px[s + 2]; out[d + 3] = f.px[s + 3];
+  }
+  return { w: f.h, h: f.w, px: out, cx: f.cy, cy: f.w - 1 - f.cx };
+}
 
 /** Where the muzzle is, as fractions of the frame: the top of the barrel (from above) or its left end (from the side). */
 function muzzle(f, view) {
@@ -41,11 +68,14 @@ const tankBoxes = lab.boxes.map((b, i) => ({ b, a: lab.area[i] })).filter(t => t
 const tanks = tankBoxes.map(b => ({ ...P.cut(sheet, [b], SCALE, lab), view: 'side' }));
 tanks.forEach(t => { t.muzzle = muzzle(t, 'side'); });
 
-const guns = Object.entries(GUNS).map(([key, [file, view]]) => {
+const guns = Object.entries(GUNS).map(([key, [file, view, scale = SCALE, facing, pivot]]) => {
   const img = P.decodePng(fs.readFileSync(path.join(dir, file)));
   const l = P.blobs(img);
   const boxes = l.boxes.filter((b, i) => b && l.area[i] > 40);
-  const f = { ...P.cut(img, boxes, SCALE), key, view };
+  let cut = P.cut(img, boxes, scale);
+  if (facing === 'right') cut = turnLeft(cut);
+  if (pivot === 'ring') [cut.cx, cut.cy] = ringCentre(cut);
+  const f = { ...cut, key, view };
   f.muzzle = muzzle(f, view);
   return f;
 });

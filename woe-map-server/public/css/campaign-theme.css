@@ -1,0 +1,153 @@
+/* Campaign chrome. Map art, faction colors and gameplay status colors stay independent. */
+body.campaign-map {
+  color-scheme: dark;
+  --bg: #101c17;
+  --panel: #1c3026;
+  --panel2: #294034;
+  --accent: #68886b;
+  --accent2: #cfaf70;
+  --text: #edf0e7;
+  --muted: #acbcaa;
+  --ok: #48a76d;
+  --gold: #cfaf70;
+  --gold2: #f0dba8;
+  --chrome: #121f18;
+  --chrome2: #1a2b22;
+  --line: #3d5543;
+  background: var(--bg);
+}
+body.campaign-map a { color: #ddc88e; }
+body.campaign-map a:hover { color: #f4dfa8; }
+body.campaign-map button.secondary { background-color: #2a4235; color: #e9eee3; }
+body.campaign-map button:focus-visible, body.campaign-map a:focus-visible,
+body.campaign-map input:focus-visible, body.campaign-map select:focus-visible,
+body.campaign-map textarea:focus-visible { outline: 2px solid #e4c682; outline-offset: 2px; }
+body.campaign-map input, body.campaign-map select, body.campaign-map textarea {
+  background: #14251b; border-color: #607560; color: var(--text);
+}
+body.campaign-map input::placeholder, body.campaign-map textarea::placeholder { color: #9dad9d; }
+body.campaign-map input[type=range], body.campaign-map input[type=checkbox] { accent-color: #d2b776; }
+body.campaign-map label, body.campaign-map .field { color: #d0dacd; }
+body.campaign-map .card { background: #20362a; border: 1px solid #536a50; }
+body.campaign-map .badge { color: #edf0e7; }
+body.campaign-map .badge.gm { color: #182318; }
+body.campaign-map .list li, body.campaign-map .treasury td,
+body.campaign-map .treasury th { border-color: #405647; }
+body.campaign-map .list li.selected { background: rgba(207,175,112,.18); }
+body.campaign-map .code, body.campaign-map .spritegrid { background: #14251b; }
+body.campaign-map .spritegrid .cell:hover { border-color: #d5bd7c; }
+body.campaign-map .flagpreview, body.campaign-map .flaggrid,
+body.campaign-map .stats th { background: #14251b; }
+body.campaign-map .flaggrid .cell:hover { border-color: #d5bd7c; }
+body.campaign-map .statswrap, body.campaign-map .stats th,
+body.campaign-map .stats td, body.campaign-map .diplo,
+body.campaign-map .log .ev { border-color: #405647; }
+body.campaign-map .log .who { color: #d9bd7e; }
+body.campaign-map .toast { background: #1c3026; border-color: #8e9a6a; }
+
+/* Persistent shell and map controls */
+body.campaign-map #topbar {
+  background: linear-gradient(180deg,#263c2d,#17271e);
+  border-bottom-color: #0b160f;
+  box-shadow: 0 1px 0 rgba(218,188,122,.65),0 3px 16px rgba(0,0,0,.25);
+}
+body.campaign-map #topbar h1 { color: #f0dba8; }
+body.campaign-map #topbar a.back { color: #e0cf9d; }
+body.campaign-map #topbar .topactions button,
+body.campaign-map #notifBtn { border: 1px solid #577050; }
+body.campaign-map #audioWrap { position: relative; }
+body.campaign-map #audioPanel {
+  position: absolute; top: calc(100% + 9px); right: 0; z-index: 25;
+  width: min(310px, calc(100vw - 20px)); padding: 16px;
+  background: #1c3026; border: 1px solid #a58e60; border-radius: 8px;
+  box-shadow: 0 14px 36px rgba(0,0,0,.55);
+}
+body.campaign-map #audioPanel h2 { margin: 0 0 12px; font: 600 17px Georgia,serif; color: #f0dba8; }
+body.campaign-map .audio-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 0; border-top: 1px solid #405647; }
+body.campaign-map .audio-option strong, body.campaign-map .audio-option span { display: block; }
+body.campaign-map .audio-option strong { font-size: 13px; color: #ecf0e7; }
+body.campaign-map .audio-option span { margin-top: 3px; font-size: 11px; color: #acbcaa; }
+body.campaign-map #audioPanel .audio-option button { width: 51px; flex: none; font-size: 12px; }
+body.campaign-map #audioPanel .audio-option button.active { background: #c9ab6a; border-color: #e1c888; color: #172218; outline: none; }
+body.campaign-map .audio-volume { display: flex; justify-content: space-between; margin: 0; color: #c7d3be; }
+body.campaign-map #campaignMusicVolume { display: block; width: 100%; margin: 7px 0 13px; padding: 0; height: 18px; }
+body.campaign-map #rail {
+  background: linear-gradient(90deg,#111e17,#1c3025);
+  border-color: #0b160f;
+  box-shadow: 1px 0 0 rgba(218,188,122,.32);
+}
+body.campaign-map #rail button { color: #ced9c9; }
+body.campaign-map #rail button:hover { background: rgba(207,175,112,.12); color: #f4e7c7; }
+body.campaign-map #rail button.on {
+  background: rgba(207,175,112,.2);
+  border-color: #b89c63;
+  color: #f2dba6;
+}
+body.campaign-map #rail button.on::before { background: #e3c378; }
+body.campaign-map #rail hr { border-color: #3d5543; }
+body.campaign-map #nationbar { background: rgba(18,31,24,.97); border-bottom-color: #3e5644; }
+body.campaign-map .nb-nation select { background: #182a20; }
+body.campaign-map #readyBar { border-color: #426044; }
+body.campaign-map #viewAsMenu { border-color: #70815d; }
+body.campaign-map #viewAsMenu .vhead { border-bottom-color: #405647; }
+body.campaign-map .rchip.mine { border-color: #64795b; }
+body.campaign-map .hudgroup, body.campaign-map #modeHud, body.campaign-map #selBar {
+  background: rgba(20,36,27,.96); border-color: #617359;
+}
+body.campaign-map #popup {
+  background: linear-gradient(#243b2e,#17291e);
+  border-color: #b69b64;
+}
+body.campaign-map #turnWidget {
+  background: linear-gradient(#263e2e,#18291e);
+  border-color: #b69b64;
+}
+body.campaign-map #phaseBanner { background: rgba(18,32,23,.92); }
+
+/* Panels, cards, dialogs and settings */
+body.campaign-map #sidebar {
+  background: linear-gradient(180deg,#243b2e,#192b21);
+  border-right-color: #0b160f;
+}
+body.campaign-map .panelhead {
+  background: linear-gradient(#304a37,#243a2d);
+  border-bottom-color: #0b160f;
+}
+body.campaign-map .box { background: rgba(8,20,12,.32); border-color: #4b604a; }
+body.campaign-map .subtabs { background: rgba(5,16,9,.3); }
+body.campaign-map .subtabs button.on,
+body.campaign-map .setnav button.on { background: rgba(207,175,112,.22); color: #f0dba8; }
+body.campaign-map .modal { background: rgba(5,15,10,.72); }
+body.campaign-map .modal .card { box-shadow: 0 18px 55px rgba(0,0,0,.58); }
+body.campaign-map .rulesave { background: var(--panel); }
+body.campaign-map .pools div, body.campaign-map .restile,
+body.campaign-map .unrestrow { background-color: rgba(215,233,210,.06); }
+
+/* Notification centre and chat */
+body.campaign-map #notifPanel { border-color: #70815d; }
+body.campaign-map #notifPanel .nhead,
+body.campaign-map #notifPanel .nitem { border-color: #405647; }
+body.campaign-map #chatToggle { background: #294734; border: 1px solid #8f9f70; }
+body.campaign-map #chatToggle.active { background: #426247; }
+body.campaign-map #chatToggle.has { background: #755c29; }
+body.campaign-map #chatWin { background: #1b2d22; border-color: #ad9360; }
+body.campaign-map .chat-top { background: linear-gradient(#304a37,#20352a); }
+body.campaign-map #chatSide { background: #14251b; border-right-color: #3f5541; }
+body.campaign-map .crow, body.campaign-map .prow { color: #d8e1d4; }
+body.campaign-map .crow.on, body.campaign-map .prow.on {
+  background: rgba(207,175,112,.2); color: #f0dba8;
+}
+body.campaign-map .prow.picked { background: rgba(116,151,109,.24); box-shadow: inset 0 0 0 1px #8ca778; }
+body.campaign-map #chatPick { background: rgba(116,151,109,.17); border-color: #72896a; }
+body.campaign-map .cmsg .bubble { background: rgba(226,238,216,.08); }
+body.campaign-map .cmsg.own .bubble { background: rgba(207,175,112,.19); border-color: rgba(207,175,112,.38); }
+body.campaign-map .cmsg .text a { color: #e1ca8d; }
+body.campaign-map #chatMenu { background: #20362a; }
+body.campaign-map #chatGifs, body.campaign-map #chatReply,
+body.campaign-map #chatOutgoing, body.campaign-map #chatMentions { background: #14251b; }
+body.campaign-map #chatFindResults button { background: #294034; }
+body.campaign-map .mention { color: #e5d29f; background: rgba(207,175,112,.2); }
+
+@media (max-width:760px) {
+  body.campaign-map #rail { background: linear-gradient(#1d3025,#121f18); border-top-color: #617359; }
+}

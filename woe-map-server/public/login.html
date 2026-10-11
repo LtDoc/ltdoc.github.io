@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · Rob's Strategic Warfare Roleplayer 1</title>
+  <link rel="icon" type="image/x-icon" href="/assets/favicon/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon/favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/favicon/apple-touch-icon.png">
+  <link rel="manifest" href="/assets/favicon/site.webmanifest">
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/css/campaign-hub.css">
+</head>
+<body class="login-page">
+  <div class="center-page login-layout">
+    <section class="login-story"><a href="/" class="login-story-brand"><img src="/assets/brand/robs-strategic-warfare.png" alt="Rob's Strategic Warfare Roleplayer 1"></a><p class="hub-kicker">THE COMMAND TABLE AWAITS</p><h1>Every campaign starts with a choice.</h1><p>Sign in to return to your worlds, join your friends with a code, or set a new campaign in motion.</p><a href="/">← Back to home</a></section>
+    <div class="card login-card">
+      <a class="login-brand" href="/" aria-label="Rob's Strategic Warfare Roleplayer 1 home"><img src="/assets/brand/robs-strategic-warfare.png" alt="Rob's Strategic Warfare Roleplayer 1" width="2172" height="724"></a>
+      <p class="hub-kicker">YOUR ACCOUNT</p><h2>Welcome back.</h2><p class="muted">Your next turn is waiting.</p>
+      <div class="tabs">
+        <button id="tabLogin" class="active">Sign in</button>
+        <button id="tabRegister">Create account</button>
+      </div>
+
+      <form id="loginForm">
+        <label>Username<input id="loginUser" autocomplete="username" required></label>
+        <label>Password<input id="loginPass" type="password" autocomplete="current-password" required></label>
+        <div class="error" id="loginError"></div>
+        <button type="submit" style="width:100%">Sign in</button>
+      </form>
+
+      <form id="registerForm" hidden>
+        <label>Username <span class="hint">(3-24 letters, numbers, . _ -)</span><input id="regUser" autocomplete="username" required minlength="3" maxlength="24"></label>
+        <label>Display name<input id="regDisplay" maxlength="40" placeholder="Shown to other players"></label>
+        <label>Password <span class="hint">(8+ characters)</span><input id="regPass" type="password" autocomplete="new-password" required minlength="8"></label>
+        <div class="error" id="regError"></div>
+        <button type="submit" style="width:100%">Create account</button>
+        <p class="hint">The first account created on this server becomes the site admin.</p>
+      </form>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    (async () => {
+      const next = new URLSearchParams(location.search).get('next') || '/lobbies.html';
+      const safeNext = next.startsWith('/') && !next.startsWith('//') ? next : '/lobbies.html';
+      try { await api.get('/api/auth/me'); location.replace(safeNext); return; } catch { /* not signed in */ }
+
+      const $ = s => document.querySelector(s);
+      const show = (login) => {
+        $('#loginForm').hidden = !login; $('#registerForm').hidden = login;
+        $('#tabLogin').classList.toggle('active', login); $('#tabRegister').classList.toggle('active', !login);
+      };
+      $('#tabLogin').onclick = () => show(true);
+      $('#tabRegister').onclick = () => show(false);
+      if (location.hash === '#register') show(false);   // the home page's "Create an account"
+
+      const msg = new URLSearchParams(location.search).get('msg');
+      if (msg) $('#loginError').textContent = msg;
+      $('#loginForm').onsubmit = async (e) => {
+        e.preventDefault(); $('#loginError').textContent = '';
+        try {
+          await api.post('/api/auth/login', { username: $('#loginUser').value.trim(), password: $('#loginPass').value });
+          location.replace(safeNext);
+        } catch (err) { $('#loginError').textContent = err.message; }
+      };
+      $('#registerForm').onsubmit = async (e) => {
+        e.preventDefault(); $('#regError').textContent = '';
+        try {
+          const r = await api.post('/api/auth/register', {
+            username: $('#regUser').value.trim(), displayName: $('#regDisplay').value.trim(), password: $('#regPass').value,
+          });
+          if (r.firstUser) alert('You are the first account on this server, so you are now the site admin.');
+          location.replace(safeNext);
+        } catch (err) { $('#regError').textContent = err.message; }
+      };
+    })();
+  </script>
+</body>
+</html>

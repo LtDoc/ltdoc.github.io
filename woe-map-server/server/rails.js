@@ -22,9 +22,9 @@ function metric(lobby) {
   };
 }
 
-/** Rails that carry traffic: every rail drawing except GM-only ones (plans). */
+/** Rails that carry traffic: every rail drawing except GM-only ones and planned lines not yet built. */
 function railShapes(lobbyId) {
-  return q.rails.all(lobbyId).map(access.serializeShape).filter(s => !s.adminOnly);
+  return q.rails.all(lobbyId).map(access.serializeShape).filter(s => !s.adminOnly && s.data?.state !== 'plan');
 }
 
 const cache = new Map();   // lobbyId -> { key, net }
@@ -60,7 +60,7 @@ function usableFor(lobby, nation, net) {
   const factions = game.q.factions.all(lobby.id);
   const me = factions.find(f => f.name.toLowerCase() === n);
   const friends = new Set(me ? [me.id] : []);
-  if (me) for (const f of factions) if (f.id !== me.id && game.relationStatus(lobby.id, me.id, f.id) === 'alliance') friends.add(f.id);
+  if (me) for (const f of factions) if (f.id !== me.id && require('./treaties').permission(lobby.id, me.id, f.id, 'land')) friends.add(f.id);
   return e => {
     if (owners && owners.has(e)) { const owner = owners.get(e); return owner === null || friends.has(owner); }
     if (lookup === undefined) lookup = territory.ownerLookup(lobby);
@@ -98,7 +98,8 @@ function plan(lobby, settings, marker, x, y) {
   if (!canRide(marker)) return null;
   const net = network(lobby, settings);
   if (!net.edges.length) return null;
-  return RailNet.route(net, { x: marker.x, y: marker.y }, { x, y }, { usable: usableFor(lobby, marker.data?.nation, net), speed: num(settings.railSpeed, 4) });
+  const game = require('./game'), traits = require('./heroes').effects(lobby, settings, game.q.markers.all(lobby.id).map(access.serializeMarker), marker);
+  return RailNet.route(net, { x: marker.x, y: marker.y }, { x, y }, { usable: usableFor(lobby, marker.data?.nation, net), speed: num(settings.railSpeed, 4) * traits.rail, walkSpeed: traits.walk });
 }
 
 /** Walk a route until the budget runs out. */

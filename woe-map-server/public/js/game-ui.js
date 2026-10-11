@@ -12,6 +12,22 @@ const GameUI = (() => {
   const fmt = n => (Math.round(Number(n) * 10) / 10).toLocaleString();
   const signed = n => (n > 0 ? '+' : '') + fmt(n);
 
+  async function clearDeadUnits() {
+    if (!ctx.isGm()) return;
+    const button = ctx.$('#btnClearDeadUnits');
+    button.disabled = true;
+    try {
+      await ctx.loadMarkers();
+      const markerIds = [...ctx.state.markers.values()].filter(m => m.type === 'unit' && Number(m.data?.strength ?? 100) <= 0).map(m => m.id);
+      if (!markerIds.length) { toast('There are no dead units to clear'); return; }
+      if (!confirm(`Clear all ${markerIds.length} dead units from this campaign? Their remaining salvage will be removed too. Individual units can be restored from History.`)) return;
+      const r = await api.post(`${ctx.base}/markers/clear-dead`, { markerIds });
+      await ctx.loadMarkers();
+      toast(`Cleared ${r.count} dead unit${r.count === 1 ? '' : 's'}`);
+    } catch (err) { toast(err.message); }
+    finally { button.disabled = false; }
+  }
+
   function init(c) {
     ctx = c;
     const { $, $$ } = ctx;
@@ -22,6 +38,7 @@ const GameUI = (() => {
     $('#btnPhaseBattle').onclick = () => setPhase('battle');
     $('#btnPhaseMove').onclick = () => setPhase('move');
     $('#btnUndoTurn').onclick = undoTurn;
+    $('#btnClearDeadUnits').onclick = clearDeadUnits;
     $('#btnSupplyNow').onclick = async () => {
       try { const r = await api.post(`${ctx.base}/game/supply/recompute`, {}); toast(`Supply: ${r.supplied} supplied, ${r.unsupplied} cut off`); await ctx.loadMarkers(); }
       catch (err) { toast(err.message); }
@@ -49,7 +66,7 @@ const GameUI = (() => {
     $('#histFaction').onchange = () => { $('#histName').value = ''; $('#histName').placeholder = $('#histFaction').selectedOptions[0]?.textContent || 'e.g. Mexico'; };
     $('#histName').onfocus = () => { if (!$('#histNames').options.length) loadHistoryNames(); };
     $('#btnGenResources').onclick = generateResources;
-    $('#buildFilter').oninput = renderBuildList;
+    initPicker();
     $('#btnTurnReports').onclick = () => openReports();
     // GM panel sub-pages: Turn, Nations, World.
     $$('#gmTabs [data-gm]').forEach(b => b.onclick = () => {
@@ -67,6 +84,25 @@ const GameUI = (() => {
       const r = e.target.closest('[data-report]');
       if (r) openReports(Number(r.dataset.report) || undefined, Number(r.dataset.faction) || undefined);
     });
+    // War economy: the slider shows its value as it moves and is saved when let go.
+    document.addEventListener('input', e => {
+      if (e.target.matches?.('.diplosearch')) {
+        const q = e.target.value.trim().toLowerCase(), box = e.target.closest('.box');
+        box.querySelectorAll('[data-diplorow]').forEach(r => { r.hidden = !!q && !r.dataset.diplorow.includes(q); });
+        box.querySelectorAll('.relgroup').forEach(g => { g.hidden = ![...g.querySelectorAll('[data-diplorow]')].some(r => !r.hidden); });
+        return;
+      }
+      const w = e.target.closest('[data-wareco]');
+      if (w) { const out = w.closest('.wareco')?.querySelector('b'); if (out) out.textContent = `${w.value}%`; }
+    });
+    document.addEventListener('change', async e => {
+      const pp = e.target.closest('[data-prodpref]');
+      if (pp) { prodPrefs[pp.dataset.prodpref] = pp.checked; try { localStorage.setItem('woe.prodPrefs', JSON.stringify(prodPrefs)); } catch { /* private window */ } renderNation(); return; }
+      const w = e.target.closest('[data-wareco]');
+      if (!w) return;
+      try { await api.post(`${ctx.base}/game/policy`, { warEconomy: Number(w.value), factionId: Number(w.dataset.wareco) }); toast(`War economy: ${w.value}% of town and factory goods become military goods`); }
+      catch (err) { toast(err.message); }
+    });
     setInterval(() => { if (g()?.enabled && g().deadline) updateHud(); }, 30e3);   // countdown ticks
     document.addEventListener('click', e => {
       const b = e.target.closest('[data-build]');
@@ -77,8 +113,19 @@ const GameUI = (() => {
       if (c) { cancelBuild(Number(c.dataset.cancelbuild)); return; }
       const o = e.target.closest('[data-openbuild]');
       if (o) { openBuildPicker(Number(o.dataset.openbuild)); return; }
+      const gl = e.target.closest('[data-glance]');
+      if (gl) {
+        const k = gl.dataset.glance;
+        if (k === 'production') ctx.$('#rail [data-tab="production"]')?.click();
+        else if (k === 'research') ResearchUI.openTree();
+        else (k === 'forces' ? ctx.$('#nationForces') : ctx.$('#nationPanel .goodsbox .unrestlist'))?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+      if (e.target.closest('[data-unitguide]')) { openUnitGuide(e.target.closest('[data-unitguide]').dataset.type); return; }
       const f = e.target.closest('[data-buildfactory]');
-      if (f) { ctx.armFactory(); }
+      if (f) { ctx.armFactory(); return; }
+      const pl = e.target.closest('[data-placebuild]');
+      if (pl) { const item = (prod?.ready || []).find(x => x.id === Number(pl.dataset.placebuild)); if (item) ctx.armEmplacement(item); }
     });
     // Diplomacy buttons live inside re-rendered panels: delegate.
     document.addEventListener('click', e => {
@@ -139,7 +186,8 @@ const GameUI = (() => {
     const others = (ctx.state.gameFactions || []).filter(x => x.faction.id !== me);
     if (!others.length) return '<p class="hint">No other nations yet.</p>';
     const from = ctx.isGm() ? ` data-from="${me}"` : '';
-    const rows = others.map(x => {
+    const groups = { war: [], alliance: [], peace: [] };
+    others.forEach(x => {
       const st = relStatus(me, x.faction.id), open = openBetween(me, x.faction.id);
       const envoy = [...ctx.state.markers.values()].find(m => m.type === 'hero' && m.data?.role === 'diplomat' && m.data?.status === 'posted'
         && Number(m.data.postedTo) === x.faction.id && String(m.data.nation || '').toLowerCase() === e.faction.name.toLowerCase());
@@ -148,11 +196,14 @@ const GameUI = (() => {
       if (actor && !open) {
         if (st !== 'war') act += `<button class="small danger" data-diplo="propose" data-kind="war" data-to="${x.faction.id}"${from} title="Declare war (queued for the GM to approve)">War</button>`;
         const why = needsEnvoy ? ' (needs a diplomat posted there: send one from a diplomat\'s card)' : '';
-        if (st === 'war') act += `<button class="small secondary" data-diplo="propose" data-kind="peace" data-to="${x.faction.id}"${from} title="Offer peace${why}">Peace</button>`;
+        if (st === 'war') act += `<button class="small secondary" data-treaty-peace="${x.faction.id}"${from} title="Negotiate peace with every war participant">Peace conference</button>`;
         if (st === 'peace') act += `<button class="small secondary" data-diplo="propose" data-kind="alliance" data-to="${x.faction.id}"${from} title="Propose an alliance${why}">Ally</button>`;
       } else if (open) act = `<span class="hint">${open.status === 'pending' ? 'awaiting the GM' : 'awaiting an answer'}</span>`;
-      return `<div class="diplo"><span class="grow">${ctx.flagImg(x.faction.name)} ${esc(x.faction.name)}</span>${relBadge(st)}${act}</div>`;
-    }).join('');
+      (groups[st] || groups.peace).push(`<div class="diplo" data-diplorow="${esc(x.faction.name.toLowerCase())}"><span class="grow">${ctx.flagImg(x.faction.name)} ${esc(x.faction.name)}</span>${relBadge(st)}${act}</div>`);
+    });
+    const section = (key, title, hint) => groups[key].length ? `<div class="relgroup ${key}"><div class="section">${title} <span class="hint">${groups[key].length}${hint ? ` · ${hint}` : ''}</span></div>${groups[key].join('')}</div>` : '';
+    const rows = section('war', '⚔ At war', '') + section('alliance', '🤝 Allies', 'share supply, convoys and ground') + section('peace', '🕊 At peace', '');
+    const search = others.length > 10 ? `<input type="search" class="diplosearch" placeholder="Find a nation…" aria-label="Find a nation">` : '';
     const mine = (ctx.state.diplomacy || []).filter(d => ['pending', 'offered'].includes(d.status) && (d.from === me || d.to === me));
     const items = mine.map(d => {
       const incoming = d.to === me;
@@ -162,7 +213,7 @@ const GameUI = (() => {
       const text = incoming ? `${esc(factionName(d.from))}: ${KIND_LABEL[d.kind]}${d.status === 'pending' ? ' (with the GM)' : ''}` : `To ${esc(factionName(d.to))}: ${KIND_LABEL[d.kind]}, ${d.status === 'pending' ? 'awaiting the GM' : 'awaiting their answer'}`;
       return `<div class="diplo"><span class="grow">${text}</span>${act}</div>`;
     }).join('');
-    return `<div class="box"><h4>Relations</h4>${rows}</div>${items ? `<div class="box"><h4>Open proposals</h4>${items}</div>` : ''}`;
+    return `${items ? `<div class="box readybox"><h4>Open proposals <span class="hint">${mine.length}</span></h4>${items}</div>` : ''}<div class="box"><h4>Relations</h4>${search}${rows}</div><div class="box"><h4>Treaties and coalitions</h4><p class="toolrow"><button class="small" data-treaty-open="${me}">📜 Negotiate / view treaties</button></p><p class="hint">Peace settlements, research, licences, access, defensive pacts, coalitions and reparations.</p></div>`;
   }
 
   async function proposeDiplomacy(kind, to, from) {
@@ -271,7 +322,7 @@ const GameUI = (() => {
   function onFaction(msg) {
     const list = ctx.state.gameFactions || [];
     const i = list.findIndex(x => x.faction.id === msg.faction.id);
-    const entry = { ...(i >= 0 ? list[i] : {}), faction: msg.faction, state: msg.state, income: msg.income, visible: true };
+    const entry = { ...(i >= 0 ? list[i] : {}), faction: msg.faction, state: msg.state, income: msg.income, visible: true, ...(msg.goods ? { goods: msg.goods } : {}) };
     if (i >= 0) list[i] = entry; else list.push(entry);
     ctx.state.gameFactions = list;
     renderNation(); renderGameTab();
@@ -295,32 +346,57 @@ const GameUI = (() => {
   function productionHtml(e) {
     if (!prod || prod.factionId !== e.faction.id) return `<p class="hint">Loading…</p>`;
     const actor = ctx.isGm() || ctx.state.myFactionId === e.faction.id;
-    // A build ordered this turn starts work at End turn: "starts next turn" until then.
+    const color = e.faction.color;
+    // A build ordered this turn starts work at End turn: "starts at End turn" until then.
     const left = item => item.queuedTurn !== undefined && item.queuedTurn >= g().turn
       ? `starts at End turn · ${item.turnsLeft} turn${item.turnsLeft === 1 ? '' : 's'}`
       : `${item.turnsLeft} turn${item.turnsLeft === 1 ? '' : 's'} left`;
-    let used = 0, total = 0;
+    const progress = item => {
+      const total = Math.max(1, Number(item.turns) || Number(item.turnsLeft) || 1), done = Math.max(0, total - (Number(item.turnsLeft) || 0));
+      return `<span class="qprog" title="${done} of ${total} turns done"><i style="width:${Math.round(done / total * 100)}%"></i></span>`;
+    };
+    const unitOf = id => UnitTypes.LIST.find(x => x.id === id);
+    let used = 0, total = 0, free = 0;
+    const hideFull = !!prodPrefs.hideFull;
     const sites = prod.sites.map(s => {
       used += s.queue.length; total += s.capacity;
+      const open = s.capacity - s.queue.length;
+      free += Math.max(0, open);
+      if (hideFull && open <= 0) return '';
       const q = s.queue.map(item => {
-        const t = UnitTypes.LIST.find(x => x.id === item.typeId);
-        return `<div class="qitem"><span class="grow">${esc(t ? t.unit : item.typeId)}</span><span class="hint">${left(item)}</span>${actor ? `<button class="small secondary" data-cancelbuild="${item.id}" title="Cancel and refund">×</button>` : ''}</div>`;
+        const t = unitOf(item.typeId);
+        return `<div class="qitem">${t ? UnitGuide.counterImg(t, color, 'ug-counter tiny') : ''}<span class="grow"><span class="qn">${esc(t ? t.unit : item.typeId)}</span><span class="qmeta">${progress(item)}${left(item)}</span></span>${actor ? `<button class="small secondary" data-cancelbuild="${item.id}" title="Cancel and refund">×</button>` : ''}</div>`;
       }).join('');
-      const free = s.capacity - s.queue.length;
-      const pips = `<span class="pips" title="${s.queue.length} of ${s.capacity} build slots in use">${'<i class="on"></i>'.repeat(s.queue.length)}${'<i></i>'.repeat(Math.max(0, free))}</span>`;
-      return `<div class="site${free > 0 ? '' : ' full'}"><div class="sitehead"><span class="grow"><b>${esc(s.name)}</b> <span class="hint">${s.kind}${s.kind === 'factory' ? ` ${s.industry}` : ''}${s.coastal ? ' · ⚓ port' : ''}</span></span>${pips}${actor && free > 0 ? `<button class="small" data-openbuild="${s.id}">Build…</button>` : ''}</div>${q}</div>`;
+      const pips = `<span class="pips" title="${s.queue.length} of ${s.capacity} build slots in use">${'<i class="on"></i>'.repeat(s.queue.length)}${'<i></i>'.repeat(Math.max(0, open))}</span>`;
+      const caps = `${s.coastal ? '<span class="cap" title="Coastal: builds ships">⚓</span>' : ''}${s.industry >= 2 ? '<span class="cap" title="Industry 2+: builds aircraft">✈</span>' : ''}`;
+      const kind = s.kind === 'factory' ? `factory ${s.industry}` : s.kind;
+      return `<div class="site${open > 0 ? '' : ' full'}"><div class="sitehead"><span class="grow"><b>${esc(s.name)}</b> <span class="hint">${esc(kind)}</span>${caps}</span>${pips}${actor && open > 0 ? `<button class="small" data-openbuild="${s.id}">＋ Build</button>` : ''}</div>${q}</div>`;
     }).join('');
-    const factories = prod.factoryBuilds.map(item => `<div class="qitem"><span class="grow">🏭 Factory near ${esc(item.siteName || '')}</span><span class="hint">${left(item)}</span>${actor ? `<button class="small secondary" data-cancelbuild="${item.id}" title="Cancel and refund">×</button>` : ''}</div>`).join('');
+    const factories = prod.factoryBuilds.map(item => `<div class="qitem"><span class="grow"><span class="qn">🏭 Factory near ${esc(item.siteName || '')}</span><span class="qmeta">${progress(item)}${left(item)}</span></span>${actor ? `<button class="small secondary" data-cancelbuild="${item.id}" title="Cancel and refund">×</button>` : ''}</div>`).join('');
     const fc = prod.costs.factory;
-    return `<div class="box"><h4>Build sites <span class="hint">${used}/${total} slots in use</span></h4>
-        ${sites.length ? sites : '<p class="hint">No cities or factories. Production needs a city, a capital or a factory in your colours.</p>'}
+    // Finished emplacements wait here until the player puts them on the map.
+    const ready = (prod.ready || []).map(item => {
+      const t = unitOf(item.typeId);
+      return `<div class="qitem ready">${t ? UnitGuide.counterImg(t, color, 'ug-counter tiny') : ''}<span class="grow">${esc(t ? t.unit : item.typeId)} <span class="hint">built at ${esc(item.siteName || '')}</span></span>${actor ? `<button class="small" data-placebuild="${item.id}" title="Click the map where it should stand: your own ground${item.typeId === 'coastal' ? ', on the coast' : ''}">📍 Place…</button><button class="small secondary" data-cancelbuild="${item.id}" title="Scrap it and refund the cost">×</button>` : ''}</div>`;
+    }).join('');
+    const hasFree = prod.sites.some(s => s.capacity > s.queue.length);
+    return `<div class="prodbar">
+        <div class="prodstat"><b>${used}</b><span>of ${total} slots busy</span></div>
+        <div class="prodstat"><b>${free}</b><span>free</span></div>
+        <div class="prodbtns">${actor ? `<button type="button" data-openbuild="0" ${hasFree ? '' : 'disabled title="Every build slot is in use"'}>🏗 Build a unit…</button>` : ''}<button type="button" class="secondary" data-unitguide="1" title="What every unit does, its stats, matchups and cost">📖 Unit guide</button></div>
+      </div>
+      ${ready ? `<div class="box readybox"><h4>Ready to place <span class="hint">${(prod.ready || []).length} finished: click 📍 then the map</span></h4>${ready}</div>` : ''}
+      <div class="box"><h4>Build sites <span class="headbtns"><label class="inline mini"><input type="checkbox" data-prodpref="hideFull" ${hideFull ? 'checked' : ''}> Hide full</label></span></h4>
+        ${prod.sites.length ? (sites || '<p class="hint">Every site is busy.</p>') : '<p class="hint">No cities or factories. Production needs a city, a capital or a factory in your colours.</p>'}
+        <p class="hint sitekey">⚓ coastal: can build ships · ✈ industry 2+: can build aircraft · ■ slot in use · □ free slot</p>
       </div>
       <div class="box"><h4>New factories</h4>
         ${factories}
-        ${actor ? `<p class="toolrow"><button class="small" data-buildfactory="1" title="${esc(GameData.costLabel(fc))}">🏭 Build a factory…</button><span class="hint">${esc(GameData.costLabel(fc))} · within ${g().settings.factoryRangeKm} ${ctx.state.lobby?.scaleLabel || 'km'} of your city or town</span></p>` : (factories ? '' : '<p class="hint">None under way.</p>')}
+        ${actor ? `<div class="toolrow"><button class="small" data-buildfactory="1">🏭 Build a factory…</button>${UnitGuide.costChips(fc, prod.state)}</div><p class="hint">Place it within ${g().settings.factoryRangeKm} ${ctx.state.lobby?.scaleLabel || 'km'} of one of your towns. Each factory is a new build site and makes goods.</p>` : (factories ? '' : '<p class="hint">None under way.</p>')}
       </div>
       ${developmentHtml(actor)}`;
   }
+  const prodPrefs = (() => { try { return JSON.parse(localStorage.getItem('woe.prodPrefs') || '{}'); } catch { return {}; } })();
   /** What the next level of a project brings, from the campaign's rules. */
   function projectGain(p) {
     const s = g().settings;
@@ -350,7 +426,7 @@ const GameUI = (() => {
       return `<div class="diplo"><span class="grow">${head}<br><span class="hint">Level ${p.level + 1}: ${esc(projectGain(p))} · ${esc(GameData.costLabel(p.cost))}</span>${short.length ? `<br><span class="hint" style="color:#ff9f80">short of ${esc(short.join(', '))}</span>` : ''}</span>${actor ? `<button class="small" data-project="${p.project}" data-site="${p.id}" ${short.length ? 'disabled' : ''}>${{ upgradeFactory: 'Upgrade', improveResource: 'Improve' }[p.project] || 'Develop'}</button>` : ''}</div>`;
     }).join('');
     return `<div class="box devlist"><h4>Development <span class="hint">${running ? `${running} under way · ` : ''}long-term growth</span></h4>
-      <p class="hint">Slow projects that pay back over many turns: each factory level adds income and a build slot; each town level adds income, and every second one a build slot; each level of a resource node's works adds ${Math.round((g().settings.resourceImproveRate ?? 0.25) * 100)} % of its yield. One project per site; each step costs more and takes longer than the last.</p>${rows}</div>`;
+      <details class="sub howto"><summary>How development works</summary><p class="hint">Slow projects that pay back over many turns: each factory level adds income and a build slot; each town level adds income, and every second one a build slot; each level of a resource node's works adds ${Math.round((g().settings.resourceImproveRate ?? 0.25) * 100)} % of its yield. One project per site; each step costs more and takes longer than the last.</p></details>${rows}</div>`;
   }
   /** The project row for a site (for the map popup), when the production view is loaded. */
   function projectInfo(siteId) { return (prod?.projects || []).find(p => p.id === siteId) || null; }
@@ -365,51 +441,176 @@ const GameUI = (() => {
       return r;
     } catch (err) { toast(err.message); return null; }
   }
-  let buildSiteId = null;
-  function openBuildPicker(siteId) {
-    const { $ } = ctx;
+  // ---- Build picker and unit guide (docs/UI.md, "Build and the unit guide") ---------------------------------------
+  // One window for both: with a site it builds there (the site can be changed in it); without one it is the Unit guide,
+  // which explains every type and its cost but builds nothing.
+  const pick = { siteId: null, guide: false, cat: 'all', typeId: null, pinned: null, sort: 'default' };
+  const SORTS = { default: 'Catalogue order', attack: 'Attack', defend: 'Defence', movement: 'Movement', range: 'Range', money: 'Cost (money)', turns: 'Build time' };
+  function openBuildPicker(siteId, typeId) {
     if (!prod) return;
-    const site = prod.sites.find(s => s.id === siteId);
-    if (!site) return;
-    buildSiteId = siteId;
-    $('#buildSite').textContent = site.name;
-    $('#buildHint').textContent = `${site.kind}${site.kind === 'factory' ? ` level ${site.industry}` : ''} · ${site.capacity - site.queue.length} slot${site.capacity - site.queue.length === 1 ? '' : 's'} free${site.coastal ? ' · coastal (ships allowed)' : ' · inland (no ships)'}${site.industry < 2 ? ' · no aircraft below industry 2' : ''}`;
-    $('#buildFilter').value = '';
-    renderBuildList();
-    $('#buildModal').classList.add('open');
+    const site = prod.sites.find(s => s.id === siteId) || prod.sites.find(s => s.capacity > s.queue.length) || prod.sites[0];
+    if (!site) { toast('No build sites: production needs a city, a capital or a factory in your colours'); return; }
+    Object.assign(pick, { siteId: site.id, guide: false });
+    if (typeId) { pick.typeId = typeId; pick.cat = 'all'; }
+    showPicker();
   }
+  /** The Unit guide: every type explained, without building (from Production, a unit's card, or the Place panel). */
+  function openUnitGuide(typeId) {
+    Object.assign(pick, { guide: true, siteId: null });
+    if (typeId) { pick.typeId = typeId; pick.cat = 'all'; ctx.$('#buildFilter').value = ''; }
+    showPicker();
+  }
+  function showPicker() {
+    const { $ } = ctx;
+    $('#buildModal').classList.add('open');
+    renderBuildList();
+    $('#buildList .ug-row.sel')?.scrollIntoView({ block: 'center' });
+    if (!matchMedia('(pointer: coarse)').matches) setTimeout(() => $('#buildFilter').focus({ preventScroll: true }), 30);
+  }
+  const pickSite = () => (!pick.guide && prod ? prod.sites.find(s => s.id === pick.siteId) : null) || null;
+  const costOf = id => prod?.costs?.[id] || GameData.costFor(id, g()?.settings?.unitCosts);
+  const statsOverrides = () => ctx.state.lobby?.settings?.unitStats;
+  /** The tech that unlocks a type, from the loaded research view. */
+  function unlockTech(id) {
+    const techs = ResearchUI.view?.techs || [];
+    return techs.find(t => (t.effects || []).some(e => e.type === 'unlockUnit' && e.unit === id)) || null;
+  }
+  /** Why a type cannot be built at the chosen site now ('' when it can): research, the site, then the treasury. */
+  function blockFor(t, site) {
+    const st = prod?.state;
+    if (prod?.buildable && prod.buildable[t.id] === false) { const tech = unlockTech(t.id); return { why: tech ? `Needs research: ${tech.name}` : 'Not yet researched', kind: 'tech' }; }
+    if (site && t.cat === 'Naval' && !site.coastal) return { why: 'Needs a coastal site (a port)', kind: 'site' };
+    if (site && t.cat === 'Air' && site.industry < 2) return { why: 'Needs a site with industry 2 or more', kind: 'site' };
+    const short = st ? UnitGuide.shortOf(costOf(t.id), st) : [];
+    if (short.length) return { why: `Short of ${short.join(', ')}`, kind: 'cost' };
+    if (site && site.capacity - site.queue.length <= 0) return { why: `${site.name} has no free build slot`, kind: 'full' };
+    return null;
+  }
+  /** Sites with a free slot that could build a type, for "build it at…" suggestions. */
+  const sitesFor = t => (prod?.sites || []).filter(s => s.capacity > s.queue.length && !(t.cat === 'Naval' && !s.coastal) && !(t.cat === 'Air' && s.industry < 2));
   function renderBuildList() {
     const { $ } = ctx;
-    if (!prod) return;
-    const site = prod.sites.find(s => s.id === buildSiteId);
-    const q = $('#buildFilter').value.trim().toLowerCase();
-    const st = prod.state;
-    let html = '';
-    for (const cat of UnitTypes.categories) {
-      const types = UnitTypes.LIST.filter(t => t.cat === cat && (!q || t.unit.toLowerCase().includes(q) || t.name.toLowerCase().includes(q) || cat.toLowerCase().includes(q)));
-      if (!types.length) continue;
-      html += `<div class="section">${esc(cat)}</div>`;
-      for (const t of types) {
-        const cost = prod.costs[t.id];
-        const short = [];
-        for (const k of GameData.RESOURCE_KEYS) if ((st.resources[k] || 0) < cost[k]) short.push(GameData.byKey[k].name.toLowerCase());
-        if (st.money < cost.money) short.push('money');
-        if (st.manpower < cost.manpower) short.push('manpower');
-        let blocked = prod.buildable && prod.buildable[t.id] === false ? 'not yet researched' : (short.length ? `short of ${short.join(', ')}` : '');
-        if (!blocked && t.cat === 'Naval' && site && !site.coastal) blocked = 'needs a coastal city';
-        if (!blocked && t.cat === 'Air' && site && site.industry < 2) blocked = 'needs industry 2';
-        html += `<div class="diplo"><span class="grow"><b>${esc(t.unit)}</b><br><span class="hint">${esc(GameData.costLabel(cost))}</span>${blocked ? `<br><span class="hint" style="color:#ff9f80">${esc(blocked)}</span>` : ''}</span><button class="small" data-build="${t.id}" data-site="${buildSiteId}" ${blocked ? 'disabled' : ''}>Build</button></div>`;
-      }
+    const game = g(), S = game?.settings || GameData.DEFAULT_SETTINGS;
+    const e = myEntry(), color = e?.faction?.color || '#5b6b4f';
+    const site = pickSite();
+    // Header: the title, the site picker (build mode) and the site's facts.
+    $('#buildTitle').textContent = pick.guide ? 'Unit guide' : 'Build';
+    $('#buildSiteWrap').hidden = pick.guide || !prod;
+    $('#buildOnlyWrap').hidden = pick.guide;
+    if (!pick.guide && prod) {
+      const sel = $('#buildSiteSel');
+      sel.innerHTML = prod.sites.map(s => { const free = s.capacity - s.queue.length; return `<option value="${s.id}" ${s.id === pick.siteId ? 'selected' : ''}${free <= 0 ? ' class="full"' : ''}>${esc(s.name)} · ${free}/${s.capacity} free${s.coastal ? ' · ⚓' : ''}${s.industry >= 2 ? ' · ✈' : ''}</option>`; }).join('');
     }
-    $('#buildList').innerHTML = html || '<p class="hint">No unit types match.</p>';
+    $('#buildHint').innerHTML = pick.guide ? 'What every unit does and costs. Build from <i class="ti" style="--n:1"></i> Production.'
+      : site ? [`${esc(site.kind)}${site.kind === 'factory' ? ` level ${site.industry}` : ''}`, site.coastal ? '⚓ builds ships' : 'inland: no ships', site.industry >= 2 ? '✈ builds aircraft' : 'no aircraft (industry 2 needed)'].map(x => `<span>${x}</span>`).join('') : '';
+    // Category tabs with counts.
+    const LIST = UnitTypes.LIST;
+    const tabs = [['all', 'All', '']].concat(UnitTypes.categories.map(c => [c, c, UnitGuide.CAT_ICON[c] || '']));
+    $('#buildTabs').innerHTML = tabs.map(([k, label, icon]) => {
+      const n = k === 'all' ? LIST.length : LIST.filter(t => t.cat === k).length;
+      return `<button type="button" class="${pick.cat === k ? 'on' : ''}" data-ugcat="${esc(k)}">${icon ? `<span>${icon}</span>` : ''}${esc(label === 'Mounted & mobile' ? 'Mounted' : label)}<small>${n}</small></button>`;
+    }).join('');
+    // The list: filter, sort, one row per type.
+    const q = $('#buildFilter').value.trim().toLowerCase();
+    const onlyReady = !pick.guide && $('#buildOnlyReady').checked;
+    const ov = statsOverrides();
+    let types = LIST.filter(t => (pick.cat === 'all' || t.cat === pick.cat) && (!q || [t.unit, t.name, t.cat, UnitGuide.info(t.id).role].some(x => String(x).toLowerCase().includes(q))));
+    if (onlyReady) types = types.filter(t => !blockFor(t, site));
+    const key = pick.sort, num = (t, k) => k === 'money' || k === 'turns' ? costOf(t.id)[k] : Number(UnitGuide.stats(t, ov)?.[k]) || 0;
+    if (key !== 'default') types = types.slice().sort((a, b) => (key === 'money' || key === 'turns' ? num(a, key) - num(b, key) : num(b, key) - num(a, key)) || a.unit.localeCompare(b.unit));
+    if (!types.some(t => t.id === pick.typeId)) pick.typeId = types[0]?.id || null;
+    let html = '', lastCat = null;
+    for (const t of types) {
+      if (key === 'default' && pick.cat === 'all' && t.cat !== lastCat) { html += `<div class="ug-cathead">${esc(UnitGuide.CAT_ICON[t.cat] || '')} ${esc(t.cat)}</div>`; lastCat = t.cat; }
+      const s = UnitGuide.stats(t, ov), c = costOf(t.id), b = pick.guide ? (prod?.buildable?.[t.id] === false ? { why: 'Not yet researched', kind: 'tech' } : null) : blockFor(t, site);
+      html += `<button type="button" class="ug-row${t.id === pick.typeId ? ' sel' : ''}${b ? ` blocked ${b.kind}` : ''}" data-ugpick="${t.id}">
+        ${UnitGuide.counterImg(t, color)}
+        <span class="ug-rn"><b>${esc(t.unit)}</b><small>${esc(UnitGuide.info(t.id).role || t.cat)}</small></span>
+        <span class="ug-mini">${s ? `<i title="Attack">⚔${s.attack}</i><i title="Defence">🛡${s.defend}</i><i title="Movement">➜${s.movement}</i><i title="Range">◎${s.range}</i>` : ''}</span>
+        <span class="ug-rc"><span title="Money"><img src="/icons/cash.png" alt="">${c.money}</span><span title="Build time">⏱${c.turns}</span></span>
+        ${b ? `<span class="ug-why">${b.kind === 'tech' ? '🔒 ' : ''}${esc(b.why)}</span>` : ''}
+      </button>`;
+    }
+    $('#buildList').innerHTML = html || '<p class="hint" style="padding:12px">No unit types match.</p>';
+    renderBuildDetail();
+  }
+  function renderBuildDetail() {
+    const { $ } = ctx;
+    const t = UnitTypes.LIST.find(x => x.id === pick.typeId);
+    const S = g()?.settings || GameData.DEFAULT_SETTINGS, e = myEntry(), site = pickSite();
+    const actor = !pick.guide && (ctx.isGm() || ctx.state.myFactionId === e?.faction?.id);
+    const opts = { settings: { ...S, supplyEnabled: S.supplyEnabled }, scale: ctx.state.lobby?.scaleLabel || 'km', overrides: statsOverrides(), color: e?.faction?.color, cost: t ? costOf(t.id) : null, have: prod?.state || null };
+    if (!t) { $('#buildDetail').innerHTML = UnitGuide.detailHtml(null); return; }
+    const pinned = pick.pinned && pick.pinned !== t.id ? UnitTypes.LIST.find(x => x.id === pick.pinned) : null;
+    opts.vs = pinned;
+    let actions = '';
+    if (!pick.guide) {
+      const b = blockFor(t, site);
+      if (b) {
+        opts.status = { cls: 'bad', text: `${b.kind === 'tech' ? '🔒' : '⚠'} ${esc(b.why)}` };
+        if (b.kind === 'tech' && unlockTech(t.id)) actions += `<button type="button" class="secondary" data-ugtech="1">🔬 Open the tech tree</button>`;
+        if (b.kind === 'site' || b.kind === 'full') {
+          const alt = sitesFor(t).slice(0, 3);
+          if (alt.length) actions += alt.map(s => `<button type="button" class="secondary" data-ugsite="${s.id}">Build at ${esc(s.name)} instead</button>`).join('');
+        }
+      } else {
+        const c = costOf(t.id);
+        opts.status = { cls: 'ok', text: `✓ Ready: joins the queue at ${esc(site.name)} and is done in ${c.turns} turn${c.turns === 1 ? '' : 's'}${t.cat === 'Emplacements' ? ', then you place it on your own ground' : ''}` };
+      }
+      if (actor) actions = `<button type="button" class="ug-buildbtn" data-build="${t.id}" data-site="${site?.id ?? ''}" ${b ? 'disabled' : ''}>🏗 Build ${esc(t.unit)}</button>` + actions;
+    } else if (prod?.buildable?.[t.id] === false) {
+      const tech = unlockTech(t.id);
+      opts.status = { cls: 'bad', text: `🔒 ${tech ? `Unlocked by research: ${esc(tech.name)}` : 'Not yet researched'}` };
+    }
+    actions += `<button type="button" class="secondary ug-pin${pick.pinned === t.id ? ' on' : ''}" data-ugpin="${t.id}" title="Pin this unit, then pick others to see how their stats compare">${pick.pinned === t.id ? '📌 Pinned for comparison' : '⇄ Compare with others'}</button>`;
+    opts.actions = actions;
+    $('#buildDetail').innerHTML = (pinned ? `<div class="ug-vs">Comparing with ${UnitGuide.counterImg(pinned, e?.faction?.color, 'ug-counter tiny')} <b>${esc(pinned.unit)}</b><button type="button" class="small secondary" data-ugpin="">✕</button></div>` : '') + UnitGuide.detailHtml(t, opts);
+  }
+  function initPicker() {
+    const { $ } = ctx;
+    $('#buildFilter').oninput = renderBuildList;
+    $('#buildOnlyReady').onchange = renderBuildList;
+    $('#buildSort').innerHTML = Object.entries(SORTS).map(([k, v]) => `<option value="${k}">Sort: ${v}</option>`).join('');
+    $('#buildSort').onchange = () => { pick.sort = $('#buildSort').value; renderBuildList(); };
+    $('#buildSiteSel').onchange = () => { pick.siteId = Number($('#buildSiteSel').value); renderBuildList(); };
+    $('#buildModal').addEventListener('click', e => {
+      const c = e.target.closest('[data-ugcat]');
+      if (c) { pick.cat = c.dataset.ugcat; renderBuildList(); return; }
+      const p = e.target.closest('[data-ugpick]');
+      if (p) {
+        pick.typeId = p.dataset.ugpick;
+        ctx.$$('#buildList .ug-row').forEach(r => r.classList.toggle('sel', r === p));
+        renderBuildDetail();
+        if (matchMedia('(max-width: 760px)').matches) $('#buildDetail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+      const pin = e.target.closest('[data-ugpin]');
+      if (pin) { pick.pinned = pin.dataset.ugpin && pick.pinned !== pin.dataset.ugpin ? pin.dataset.ugpin : null; renderBuildDetail(); return; }
+      const s = e.target.closest('[data-ugsite]');
+      if (s) { pick.siteId = Number(s.dataset.ugsite); renderBuildList(); return; }
+      if (e.target.closest('[data-ugtech]')) { $('#buildModal').classList.remove('open'); ResearchUI.openTree(); }
+    });
+    // Arrow keys move through the list.
+    $('#buildModal').addEventListener('keydown', e => {
+      if (!['ArrowDown', 'ArrowUp'].includes(e.key) || e.target.tagName === 'SELECT') return;
+      const rows = ctx.$$('#buildList .ug-row'), i = rows.findIndex(r => r.dataset.ugpick === pick.typeId);
+      const next = rows[Math.max(0, Math.min(rows.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))];
+      if (next) { e.preventDefault(); next.click(); next.scrollIntoView({ block: 'nearest' }); }
+    });
   }
   async function queueBuild(typeId, siteId) {
     const e = myEntry();
     try {
       prod = await api.post(`${ctx.base}/game/production`, { typeId, siteId, factionId: e ? e.faction.id : undefined });
       const p = GameData.PROJECTS[typeId] ? projectInfo(siteId) : null;
-      toast(p && p.active ? `${{ upgradeFactory: 'Upgrading', improveResource: 'Improving' }[p.project] || 'Developing'} ${p.name} to level ${p.active.toLevel} (${p.active.turnsLeft} turns)` : 'Queued');
-      renderNation(); renderBuildList();
+      toast(p && p.active ? `${{ upgradeFactory: 'Upgrading', improveResource: 'Improving' }[p.project] || 'Developing'} ${p.name} to level ${p.active.toLevel} (${p.active.turnsLeft} turns)` : `Queued ${UnitTypes.LIST.find(t => t.id === typeId)?.unit || typeId} at ${prod.sites.find(x => x.id === siteId)?.name || 'the site'}`);
+      // The site just filled: carry on at the next one with a free slot.
+      const here = prod.sites.find(x => x.id === siteId);
+      if (!p && !pick.guide && pick.siteId === siteId && here && here.capacity <= here.queue.length) {
+        const next = prod.sites.find(x => x.capacity > x.queue.length);
+        if (next) { pick.siteId = next.id; toast(`${here.name} is full: now building at ${next.name}`); }
+      }
+      renderNation(); if (ctx.$('#buildModal').classList.contains('open')) renderBuildList();
       ctx.onProjects?.();
     } catch (err) { toast(err.message); }
   }
@@ -417,6 +618,14 @@ const GameUI = (() => {
     const e = myEntry();
     try { prod = await api.del(`${ctx.base}/game/production/${id}?factionId=${e ? e.faction.id : ''}`); renderNation(); toast('Cancelled and refunded'); }
     catch (err) { toast(err.message); }
+  }
+  /** map.js calls this with the map point the player clicked while placing a finished emplacement. */
+  async function placeEmplacementAt(item, x, y) {
+    const e = myEntry();
+    try {
+      const d = await api.post(`${ctx.base}/game/production/${item.id}/place`, { x, y, factionId: e ? e.faction.id : undefined });
+      prod = d; renderNation(); toast(`${d.marker?.name || 'Emplacement'} placed`); return true;
+    } catch (err) { toast(err.message); return false; }
   }
   /** map.js calls this with the map point the player clicked while placing a factory. */
   async function buildFactoryAt(x, y) {
@@ -444,7 +653,8 @@ const GameUI = (() => {
   function refresh() {
     const { $, state, renderer } = ctx;
     const game = g();
-    renderer.setGameRules(game ? { enabled: game.enabled, kmPerMove: game.settings.kmPerMove, turn: game.turn, supply: game.settings.supplyEnabled !== false } : null);
+    renderer.setGameRules(game ? { enabled: game.enabled, kmPerMove: game.settings.kmPerMove, turn: game.turn, supply: game.settings.supplyEnabled !== false,
+      unrestCritical: game.settings.goodsEnabled !== false ? Number(game.settings.unrestCritical ?? 75) : null } : null);
     const on = !!(game && game.enabled), gm = ctx.isGm();
     // Main menu: the nation screens exist in game mode; the GM screens for the GM only.
     for (const sel of ['#rail [data-tab="nation"]', '#rail [data-tab="production"]', '#rail [data-tab="diplomacy"]', '#railResearch', '#railSplit']) $(sel).hidden = !on;
@@ -507,11 +717,13 @@ const GameUI = (() => {
     const e = myEntry();
     renderNationBar(e);
     if (!e) {
-      const msg = `<p class="hint">${ctx.isGm() ? 'No factions yet. Create factions on the 👥 People panel (or seed them from history).' : 'You are not assigned to a faction yet. Ask the GM to set your faction on the 👥 People panel.'}</p>`;
+      const msg = `<p class="hint">${ctx.isGm() ? 'No factions yet. Create factions on the <i class="ti" style="--n:6"></i> People panel (or seed them from history).' : 'You are not assigned to a faction yet. Ask the GM to set your faction on the <i class="ti" style="--n:6"></i> People panel.'}</p>`;
       for (const x of [el, prodEl, diploEl]) x.innerHTML = msg;
       return;
     }
-    diploEl.innerHTML = diplomacyHtml(e) + `<div class="box"><h4>Trade</h4><p class="toolrow"><button type="button" class="small" data-opentrade="1">＋ Offer a trade…</button></p><p class="hint">Resources, money, manpower or research, once or every turn. Offers and running trades are listed under 🔔 at the top.</p></div>`;
+    const diploQ = diploEl.querySelector('.diplosearch')?.value || '';
+    diploEl.innerHTML = diplomacyHtml(e) + `<div class="box"><h4>Trade</h4><p class="toolrow"><button type="button" class="small" data-opentrade="1">＋ Offer a trade…</button></p><p class="hint">Resources, money, manpower or research, once or every turn. Offers and running trades are listed under the ✉ envelope at the top.</p></div>`;
+    if (diploQ) { const q = diploEl.querySelector('.diplosearch'); if (q) { q.value = diploQ; q.dispatchEvent(new Event('input', { bubbles: true })); } }
     if (!e.visible || !e.state) {
       el.innerHTML = `<div class="box"><h4>${ctx.flagImg(e.faction.name)} ${esc(e.faction.name)}</h4><p class="hint">This faction's treasury is private.</p></div>`;
       prodEl.innerHTML = '<p class="hint">This faction\'s production is private.</p>';
@@ -560,13 +772,15 @@ const GameUI = (() => {
           <div><span class="hint"><img class="resicon" src="/icons/paper_roll.png" alt="">Research</span><b>${fmt(s.rp)}</b><span class="delta up">${signed(inc.rp)} a turn</span></div>
         </div>
       </div>
+      ${glanceHtml(e, units.length, cut, out)}
       <div class="box"><h4>Stockpiles <span class="hint">change per turn</span></h4>
         <div class="restiles">${tiles}</div>
         ${inc.notes && inc.notes.length ? `<details class="sub"><summary>Where it comes from</summary><ul class="hintlist">${inc.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul></details>` : ''}
       </div>
+      ${goodsHtml(e)}
       ${capturedHtml}
-      <div class="box"><h4>Forces <span class="hint">${units.length} unit${units.length === 1 ? '' : 's'}${cut ? ` · <span style="color:#ff9f80">${cut} cut off${out ? `, ${out} out of supplies` : ''}</span>` : ''}</span></h4>
-        ${Object.keys(cats).length ? `<table class="treasury"><tbody>${Object.entries(cats).map(([c, v]) => `<tr><td>${esc(c)}</td><td class="num">${v.n}</td><td class="hint">${v.moved ? `${v.moved} moved` : ''}${v.spent ? `${v.moved ? ', ' : ''}${v.spent} attacked` : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="hint">No units on the map.</p>'}
+      <div class="box" id="nationForces"><h4>Forces <span class="hint">${units.length} unit${units.length === 1 ? '' : 's'}${cut ? ` · <span style="color:#ff9f80">${cut} cut off${out ? `, ${out} out of supplies` : ''}</span>` : ''}</span></h4>
+        ${Object.keys(cats).length ? `<table class="treasury"><tbody>${Object.entries(cats).map(([c, v]) => `<tr><td>${UnitGuide.CAT_ICON[c] || ''} ${esc(c)}</td><td class="num">${v.n}</td><td class="hint">${v.moved ? `${v.moved} moved` : ''}${v.spent ? `${v.moved ? ', ' : ''}${v.spent} attacked` : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="hint">No units on the map.</p>'}
         ${heroesHtml(e)}
         ${ctx.corpsHtml ? ctx.corpsHtml(e) : ''}
       </div>
@@ -576,6 +790,60 @@ const GameUI = (() => {
     prodEl.innerHTML = productionHtml(e);
   }
 
+  /** The Nation panel's "at a glance" strip: production, research, forces and unrest, each opening where it is handled. */
+  function glanceHtml(e, units, cut, out) {
+    const items = [];
+    const item = (key, icon, label, value, cls = '') => items.push(`<button type="button" class="glance ${cls}" data-glance="${key}"><span class="gi">${icon}</span><span class="gl">${label}</span><b>${value}</b></button>`);
+    if (prod && prod.factionId === e.faction.id) {
+      let used = 0, total = 0;
+      for (const s of prod.sites) { used += s.queue.length; total += s.capacity; }
+      const ready = (prod.ready || []).length;
+      item('production', '🏗', 'Build slots', `${used} / ${total} busy${ready ? ` · ${ready} to place` : ''}`, ready ? 'note' : '');
+    }
+    const rv = ResearchUI.view;
+    if (rv && rv.factionId === e.faction.id) {
+      const active = rv.research?.active ? rv.techs.find(t => t.key === rv.research.active) : null;
+      item('research', '🔬', 'Research', active ? `${esc(active.name)} · ${Math.min(100, Math.round(active.progress / Math.max(1, active.rp) * 100))}%` : 'nothing under way', active ? '' : 'idle');
+    }
+    item('forces', '⚔', 'Forces', `${units} unit${units === 1 ? '' : 's'}${cut ? ` · ${cut} cut off${out ? ` (${out} out of supply)` : ''}` : ''}`, cut ? 'bad' : '');
+    const crit = (e.goods?.unrest?.list || []).filter(u => u.critical).length;
+    if (e.goods?.enabled && crit) item('unrest', '🔥', 'Unrest', `${crit} town${crit === 1 ? '' : 's'} near revolt`, 'bad');
+    return `<div class="glancebar">${items.join('')}</div>`;
+  }
+  /** What a nation's goods do a turn: consumer goods made less the towns' needs; military goods made less what its units draw. */
+  function goodsDelta(gd, key) { return Math.round(((gd.made?.[key] || 0) - (key === 'consumer' ? gd.need || 0 : gd.draw || 0)) * 10) / 10; }
+  /**
+   * The Nation panel's goods (docs/ECONOMY.md): what the towns hold and make, the war economy slider (the share of output that
+   * is military goods), the break-even point past which consumer goods run short, and the towns growing restless.
+   */
+  function goodsHtml(e) {
+    const gd = e.goods;
+    if (!gd || !gd.enabled) return '';
+    const S = g()?.settings || {}, w = gd.warEconomy, total = (gd.made.consumer || 0) + (gd.made.military || 0);
+    const mine = ctx.isGm() || (ctx.state.myFactionId && ctx.state.myFactionId === e.faction.id);
+    // Towns consume a fixed share of what they make (consumerNeed), so consumer goods run short past the same war economy anywhere.
+    const breakEven = Math.round((1 - Number(S.consumerNeed ?? 0.5)) * 100);
+    const crit = Number(S.unrestCritical ?? 75);
+    const unrest = (gd.unrest?.list || []).map(u => `<button type="button" class="unrestrow${u.critical ? ' critical' : ''}" data-herofind="${u.id}" title="Find ${esc(u.name)} on the map"><span class="grow">${u.critical ? '🔥 ' : ''}${esc(u.name)}</span><span class="unrestbar"><i style="width:${Math.min(100, u.unrest)}%"></i><s style="left:${crit}%"></s></span><b>${Math.round(u.unrest)}</b>${u.critical ? `<span class="hint">revolts in ${u.turns} End turn${u.turns === 1 ? '' : 's'}</span>` : ''}</button>`).join('');
+    // One row per good: what is stored, what is made, what is used, and the balance a turn.
+    const row = (x, made, usedLabel, used) => {
+      const net = Math.round((made - used) * 10) / 10;
+      return `<tr><td><img class="resicon" src="/icons/${x.icon}" alt=""> ${x.key === 'consumer' ? 'Consumer' : 'Military'}</td><td class="num">${fmt(gd.stock[x.key] || 0)}</td><td class="num up">+${fmt(made)}</td><td class="num down" title="${esc(usedLabel)}">−${fmt(used)}</td><td class="num ${net > 0 ? 'up' : net < 0 ? 'down' : ''}"><b>${signed(net) || '0'}</b></td></tr>`;
+    };
+    const [cg, mg] = GameData.GOODS;
+    return `<div class="box goodsbox"><h4>Goods <span class="hint">stored in your towns</span></h4>
+      <table class="treasury goodsflow"><thead><tr><th></th><th class="num">Stored</th><th class="num">Made</th><th class="num">Used</th><th class="num">A turn</th></tr></thead><tbody>
+        ${row(cg, gd.made.consumer || 0, 'Your towns consume this', gd.need || 0)}
+        ${row(mg, gd.made.military || 0, 'Your supplied units draw this', gd.draw || 0)}
+      </tbody></table>
+      <div class="wareco"><div class="warecohead"><span>War economy</span><b>${w}%</b><span class="hint">of ${fmt(total)} goods a turn go to the army</span></div>
+        <div class="warecoslider" style="--be:${breakEven}%"><input type="range" min="0" max="100" step="5" value="${w}" data-wareco="${e.faction.id}"${mine ? '' : ' disabled'} aria-label="War economy"><s title="Above ${breakEven}% your towns make fewer consumer goods than they need"></s></div>
+        <div class="warecoends"><span>🛋 Consumer goods</span><span class="hint">towns run short past ${breakEven}%</span><span>Military goods 🎖</span></div></div>
+      <details class="sub howto"><summary>How goods work</summary><p class="hint">Towns and factories make goods each turn; the war economy decides how many become military goods. Towns consume consumer goods, and run short (unrest grows) when they lack them; factory output can help cover a shortage. Supplied units draw military goods through their towns and Supply Columns.</p>
+      ${gd.nets > 1 ? `<p class="hint">Your ${gd.towns} towns form ${gd.nets} separate networks: towns share their stores only within ${S.goodsLinkKm ?? 500} ${ctx.state.lobby?.scaleLabel || 'km'} of each other (not across enemy ground) or by railway.</p>` : ''}</details>
+      ${unrest ? `<div class="section">Unrest <span class="hint">critical from ${crit}</span></div><div class="unrestlist">${unrest}</div>` : '<p class="hint">No unrest in your towns.</p>'}
+    </div>`;
+  }
   /** The nation bar above the map: flag and name (a faction picker for the GM), money, manpower, research and stockpiles. */
   function renderNationBar(e) {
     const { $ } = ctx;
@@ -596,8 +864,14 @@ const GameUI = (() => {
     const img = f => `<img src="/icons/${f}" alt="">`;
     let html = chip('money', img('cash.png'), 'Money', s.money, inc.money, true)
       + chip('manpower', '<span>👥</span>', 'Manpower', s.manpower, inc.manpower, true)
-      + chip('rp', img('paper_roll.png'), 'Research points', s.rp, inc.rp, true)
-      + '<span class="nb-sep"></span>';
+      + chip('rp', img('paper_roll.png'), 'Research points', s.rp, inc.rp, true);
+    // Goods (in the towns' stores) come right after the pools: the war and the home front run on them.
+    const gd = e.goods;
+    if (gd && gd.enabled) {
+      html += '<span class="nb-sep"></span>';
+      for (const x of GameData.GOODS) html += chip(x.key, img(x.icon), `${x.name} (in your towns)`, gd.stock[x.key] || 0, goodsDelta(gd, x.key), true);
+    }
+    html += '<span class="nb-sep"></span>';
     for (const r of GameData.RESOURCES) {
       const delta = (inc.resources[r.key] || 0) - (inc.upkeep[r.key] || 0);
       html += chip(r.key, r.icon ? img(r.icon) : `<span class="reskey" style="background:${r.color}"></span>`, r.name, s.resources[r.key] || 0, delta, false);
@@ -632,9 +906,9 @@ const GameUI = (() => {
     $('#gameStartWrap').hidden = on;
     $('#gameSetupWrap').hidden = on || !isEarthMap();
     if (!on && document.activeElement !== $('#gameSetupWorld')) $('#gameSetupWorld').checked = !(ctx.renderer.provinces && ctx.renderer.provinces.length);
-    $('#gameSetupHint').textContent = (state.factions || []).length
+    $('#gameSetupHint').innerHTML = (state.factions || []).length
       ? 'Cuts provinces from the map\'s historical year, gives each faction its states, and adds the major cities and resource regions. Takes a minute or two.'
-      : 'No factions yet: seed them from history on the 👥 People panel first, or provinces start neutral. Takes a minute or two.';
+      : 'No factions yet: seed them from history on the <i class="ti" style="--n:6"></i> People panel first, or provinces start neutral. Takes a minute or two.';
     $('#gameOnBlock').hidden = !on;
     $('#gameOffBlock').hidden = on;
     // One switch: in the off block before the game starts, at the foot of the Turn page once it runs.
@@ -658,7 +932,7 @@ const GameUI = (() => {
       // Diplomacy queue and relation setter.
       const pending = (state.diplomacy || []).filter(d => d.status === 'pending');
       $('#diploQueue').innerHTML = pending.length ? pending.map(d => `<div class="diplo"><span class="grow">${esc(factionName(d.from))} → ${esc(factionName(d.to))}: ${KIND_LABEL[d.kind]}${d.note ? ` <span class="hint">${esc(d.note)}</span>` : ''}</span><button class="small" data-diplo="approve:${d.id}">Approve</button><button class="small secondary" data-diplo="block:${d.id}">Block</button></div>`).join('')
-        : '<p class="hint">No proposals waiting for you. Players queue declarations and offers from their 🤝 Diplomacy panel.</p>';
+        : '<p class="hint">No proposals waiting for you. Players queue declarations and offers from their <i class="ti" style="--n:3"></i> Diplomacy panel.</p>';
       const opts = list.map(x => `<option value="${x.faction.id}">${esc(x.faction.name)}</option>`).join('');
       for (const id of ['#relA', '#relB', '#terrAssignFaction', '#terrBrushFaction', '#histFaction']) {
         const sel = $(id), cur = sel.value;
@@ -669,6 +943,7 @@ const GameUI = (() => {
       const rels = (state.relations || []).filter(r => r.status !== 'peace');
       $('#relationList').innerHTML = rels.length ? rels.map(r => `${esc(factionName(r.a))} ${relBadge(r.status)} ${esc(factionName(r.b))}`).join(' · ') : 'Everyone is at peace.';
       $('#territoryEarthRow').hidden = state.lobby?.mapKind !== 'earth';
+      $('#btnTerrClear').hidden = state.lobby?.mapKind === 'azgaar';
     }
     // Rules form (only overwrite fields the GM is not typing in).
     const s = game.settings;
@@ -684,6 +959,11 @@ const GameUI = (() => {
     for (const el of document.querySelectorAll('[data-vis]')) if (document.activeElement !== el) el.value = s.vision?.[el.dataset.vis] ?? '';
     set('#ruleTrenchBlocks', s.trenchBlocks !== false); set('#ruleTrenchRange', s.trenchRangeKm); set('#ruleTrenchDug', s.trenchBonusDug); set('#ruleTrenchReinforced', s.trenchBonusReinforced);
     set('#ruleCaptureRadius', s.captureRadiusKm); set('#ruleCityRadius', s.cityRadiusKm); set('#ruleOccupyNeutrals', s.occupyNeutrals);
+    for (const el of document.querySelectorAll('[data-rule]')) {
+      const v = el.dataset.rule.split('.').reduce((o, k) => (o == null ? o : o[k]), s);
+      if (el.type === 'checkbox') el.checked = el.dataset.rule === 'goodsEnabled' || el.dataset.rule === 'rebellions' ? v !== false : !!v;
+      else el.value = v ?? '';
+    }
     set('#ruleSupplyOn', s.supplyEnabled !== false); set('#ruleSupplyTown', s.supplyTownKm); set('#ruleSupplyLink', s.supplyLinkKm); set('#ruleConvoyLink', s.convoyLinkKm ?? 200); set('#ruleAttrition', s.attritionRate ?? 25); set('#ruleSupplyStock', s.supplyStock ?? 3); set('#ruleDisband', s.attritionDisbandBelow ?? 10); set('#ruleConvoyRange', s.convoyRangeKm ?? 100);
     set('#ruleConvoyCap', s.convoyCapacity ?? 10); set('#ruleConvoyBoard', s.convoyBoardKm ?? 30); set('#ruleConvoyLand', s.convoyLandKm ?? 100);
     const lb = s.supplyLinkBySize || {}; set('#ruleLinkCapital', lb.capital ?? 600); set('#ruleLinkCity', lb.city ?? 400); set('#ruleLinkVillage', lb.village ?? 200); set('#ruleSupplyRange', s.supplyRangeKm);
@@ -779,6 +1059,12 @@ const GameUI = (() => {
       startStock: { resources: v('#ruleStartRes'), money: v('#ruleStartMoney'), manpower: v('#ruleStartMp') },
     };
     for (const size of ['capital', 'city', 'village']) settings.cityIncome[size] = { money: v(`#rule_${size}_money`), rp: v(`#rule_${size}_rp`), manpower: v(`#rule_${size}_manpower`) };
+    for (const el of document.querySelectorAll('[data-rule]')) {
+      const path = el.dataset.rule.split('.'), val = el.type === 'checkbox' ? el.checked : Number(el.value);
+      if (el.type !== 'checkbox' && el.value === '') continue;
+      if (path.length === 1) settings[path[0]] = val;
+      else (settings[path[0]] = settings[path[0]] || {})[path[1]] = val;
+    }
     try { const d = await api.patch(`${ctx.base}/game`, { settings }); ctx.state.game = d.game; await load(); toast('Rules saved'); }
     catch (err) { toast(err.message); }
   }
@@ -944,7 +1230,7 @@ const GameUI = (() => {
       </div>`;
   }
 
-  return { projectInfo, startProject, init, load, refresh, onGame, onFaction, onRelations, onTerritories, onTurn, onProgress, openReports, renderNation, loadProduction, buildFactoryAt };
+  return { openBuildPicker, openUnitGuide, projectInfo, startProject, init, load, refresh, onGame, onFaction, onRelations, onTerritories, onTurn, onProgress, openReports, renderNation, loadProduction, buildFactoryAt, placeEmplacementAt };
 })();
 
 // Small helper so the modifiers table starts with every resource present.

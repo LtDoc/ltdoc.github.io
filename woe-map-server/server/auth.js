@@ -32,7 +32,7 @@ function verifyPassword(password, stored) {
 const insertSession = db.prepare(
   'INSERT INTO sessions (token, user_id, created_at, expires_at, user_agent) VALUES (?, ?, ?, ?, ?)');
 const selectSession = db.prepare(`
-  SELECT s.token, s.expires_at, u.id, u.username, u.display_name, u.role
+  SELECT s.token, s.expires_at, u.id, u.username, u.display_name, u.role, u.avatar_url, u.site_vip, u.suspended_at, u.suspended_reason
   FROM sessions s JOIN users u ON u.id = s.user_id
   WHERE s.token = ?`);
 const deleteSession = db.prepare('DELETE FROM sessions WHERE token = ?');
@@ -62,7 +62,8 @@ function parseCookies(header) {
 }
 
 function publicUser(row) {
-  return { id: row.id, username: row.username, displayName: row.display_name, role: row.role };
+  return { id: row.id, username: row.username, displayName: row.display_name, role: row.role,
+    avatarUrl: row.avatar_url || '', siteVip: !!row.site_vip };
 }
 
 /** Resolve the logged-in user from a raw http request (works for HTTP and WS upgrade). */
@@ -74,7 +75,17 @@ function getUserFromRequest(req) {
   if (row.expires_at < now()) { deleteSession.run(token); return null; }
   const user = publicUser(row);
   user.sessionToken = token;
+  if (row.suspended_at) user.suspended = { at: row.suspended_at, reason: row.suspended_reason || '' };
   return user;
+}
+/** What a suspended account is told, everywhere it knocks. */
+function suspendedMessage(user) {
+  return `Your account has been suspended${user.suspended?.reason ? `: ${user.suspended.reason}` : ''}`;
+}
+function refuseSuspended(req, res) {
+  if (!req.user?.suspended) return false;
+  res.status(403).json({ error: suspendedMessage(req.user), suspended: true });
+  return true;
 }
 
 function cookieAttrs(maxAgeSec) {
@@ -101,11 +112,13 @@ function attachUser(req, res, next) {
 
 function requireAuth(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Not signed in' });
+  if (refuseSuspended(req, res)) return;
   next();
 }
 
 function requireSiteAdmin(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Not signed in' });
+  if (refuseSuspended(req, res)) return;
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Site admin only' });
   next();
 }
@@ -127,5 +140,5 @@ module.exports = {
   hashPassword, verifyPassword,
   createSession, destroySession, getUserFromRequest,
   setSessionCookie, clearSessionCookie,
-  attachUser, requireAuth, requireSiteAdmin, loginLimiter, publicUser,
+  attachUser, requireAuth, requireSiteAdmin, loginLimiter, publicUser, suspendedMessage, refuseSuspended,
 };

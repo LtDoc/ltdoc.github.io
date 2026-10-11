@@ -3,70 +3,124 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sign in · WoE Strategy Map</title>
-  <link rel="stylesheet" href="/css/app.css">
+  <title>Rob's Strategic Warfare Roleplayer 1</title>
+  <link rel="icon" type="image/x-icon" href="/assets/favicon/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon/favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/favicon/apple-touch-icon.png">
+  <link rel="manifest" href="/assets/favicon/site.webmanifest">
+  <meta name="description" content="Run a real-world campaign on the Earth map or import your own fantasy world from Azgaar. Build nations, command armies and shape a shared story.">
+  <meta name="theme-color" content="#121a18">
+  <link rel="stylesheet" href="/css/home.css">
 </head>
 <body>
-  <div class="center-page">
-    <div class="card">
-      <h1 style="font-size:20px">World of Elyndor</h1>
-      <p class="muted" style="margin-top:-6px">Strategy map</p>
-      <div class="tabs">
-        <button id="tabLogin" class="active">Sign in</button>
-        <button id="tabRegister">Create account</button>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="site-header wrap">
+    <a class="brand" href="/" aria-label="Rob's Strategic Warfare Roleplayer 1 home">
+      <img src="/assets/brand/robs-strategic-warfare.png" alt="Rob's Strategic Warfare Roleplayer 1" width="2172" height="724" fetchpriority="high">
+    </a>
+    <nav aria-label="Main navigation">
+      <a href="#worlds">Choose your world</a><a href="#campaign">The campaign</a><a href="#store">Scenario packs</a><a href="#start">Getting started</a>
+      <a data-guest href="/login.html">Sign in</a>
+      <a class="button compact" data-guest href="/login.html#register">Join the table <span aria-hidden="true">↗</span></a>
+      <a class="button compact" data-member href="/lobbies.html" hidden>Your campaigns <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+  <main id="main">
+    <section class="hero wrap" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow">A shared world. A human story.</p>
+        <h1 id="hero-title">Command a nation.<br><em>Shape its history.</em></h1>
+        <p class="lead">Play through a real-world campaign or import your own fantasy map from Azgaar and make a world of your own.</p>
+        <p class="intro">A live strategy map for game masters and players to build nations, command armies and write the next chapter together.</p>
+        <div class="actions">
+          <a class="button" data-guest href="/login.html#register">Create your account <span aria-hidden="true">↗</span></a>
+          <a class="button" data-member href="/lobbies.html" hidden>Return to your campaigns <span aria-hidden="true">↗</span></a>
+          <a class="text-link" href="#start">How to play <span aria-hidden="true">↓</span></a>
+        </div>
+        <p class="hero-note">For tabletop and play-by-post campaigns · In your browser</p>
       </div>
+      <figure class="hero-map">
+        <div class="figure-label"><span>THE CAMPAIGN MAP</span><span>01 / EUROPE</span></div>
+        <img src="/assets/home/europe.png" alt="A European campaign map showing national borders, cities, armies and resource nodes" width="760" height="500" fetchpriority="high">
+        <figcaption><span class="live-dot" aria-hidden="true"></span>One map. Every decision leaves its mark.</figcaption>
+      </figure>
+    </section>
+    <div class="principles wrap" aria-label="Campaign essentials"><span>Real or fantasy worlds</span><span>Player-led nations</span><span>GM-run turns</span><span>Live shared map</span></div>
 
-      <form id="loginForm">
-        <label>Username<input id="loginUser" autocomplete="username" required></label>
-        <label>Password<input id="loginPass" type="password" autocomplete="current-password" required></label>
-        <div class="error" id="loginError"></div>
-        <button type="submit" style="width:100%">Sign in</button>
-      </form>
+    <section id="worlds" class="worlds wrap" aria-labelledby="worlds-title">
+      <div class="section-heading horizontal"><div><p class="eyebrow">01 — Choose your world</p><h2 id="worlds-title">History is a starting point.<br>Your imagination goes further.</h2></div><p>Choose the built-in Earth map for a real-world campaign, or bring a fantasy world your group created in Azgaar.</p></div>
+      <div class="world-grid">
+        <article class="world-card earth-world"><div class="world-card-top"><span>01 / EARTH</span><span>BUILT IN</span></div><div class="world-card-copy"><h3>Rewrite the real world.</h3><p>Start with the Earth map, choose your nations and set the stage for a campaign rooted in real geography.</p></div></article>
+        <article class="world-card fantasy-world"><div class="world-card-top"><span>02 / YOUR WORLD</span><span>AZGAAR IMPORT</span></div><div class="world-card-copy"><h3>Make a world of your own.</h3><p>Export your fantasy map as Full JSON from Azgaar, then import it into a new campaign. Its nations, borders and settlements come with it.</p></div></article>
+      </div>
+      <p class="world-note">Game masters can import an Azgaar Full JSON export from an empty campaign's map settings.</p>
+    </section>
 
-      <form id="registerForm" hidden>
-        <label>Username <span class="hint">(3-24 letters, numbers, . _ -)</span><input id="regUser" autocomplete="username" required minlength="3" maxlength="24"></label>
-        <label>Display name<input id="regDisplay" maxlength="40" placeholder="Shown to other players"></label>
-        <label>Password <span class="hint">(8+ characters)</span><input id="regPass" type="password" autocomplete="new-password" required minlength="8"></label>
-        <div class="error" id="regError"></div>
-        <button type="submit" style="width:100%">Create account</button>
-        <p class="hint">The first account created on this server becomes the site admin.</p>
-      </form>
-    </div>
-  </div>
+    <section id="campaign" class="campaign wrap" aria-labelledby="campaign-title">
+      <div class="section-heading"><p class="eyebrow">02 — The campaign</p><h2 id="campaign-title">Think beyond<br>the next battle.</h2><p>A successful offensive needs more than an army. Bring the battlefield, the home front and the negotiating table into the same campaign.</p></div>
+      <div class="features">
+        <article><span class="feature-no">I</span><h3>Command the front</h3><p>Move infantry, armour, ships and aircraft. Dig trenches, hold provinces and rebuild broken rail links. Optional fog of war makes reconnaissance matter.</p></article>
+        <article><span class="feature-no">II</span><h3>Keep a nation running</h3><p>Turn resources into supplies, equipment and new forces. Develop towns, invest in research and keep the supply lines open when the front moves.</p></article>
+        <article><span class="feature-no">III</span><h3>Give diplomacy a voice</h3><p>Trade, make alliances and negotiate peace. Keep the conversation close with private groups, user mentions, replies, pinned messages and dice rolls.</p></article>
+      </div>
+    </section>
 
+    <section class="field-notes" aria-labelledby="detail-title">
+      <div class="wrap detail-grid">
+        <figure class="detail-image"><img src="/assets/home/front.png" alt="A close view of the campaign, with a procedural town and soldiers on the ground" width="800" height="500" loading="lazy"><figcaption>FROM THE WORLD MAP TO THE FRONT LINE</figcaption></figure>
+        <div class="detail-copy"><p class="eyebrow">The map tells the story</p><h2 id="detail-title">A world you can<br>get close to.</h2><p>Zoom from national borders to towns and troops on the ground. Watch armies march and see the landscape change as your campaign unfolds.</p><p>Use the built-in Earth map or import an Azgaar fantasy world. Choose factions, flags and campaign rules to suit the story your group wants to tell.</p><a class="text-link light" href="#roles">Find your place at the table <span aria-hidden="true">↓</span></a></div>
+      </div>
+    </section>
+
+    <section class="screenshots wrap" aria-labelledby="screenshots-title">
+      <div class="section-heading horizontal"><div><p class="eyebrow">From the campaign</p><h2 id="screenshots-title">See the world in motion.</h2></div><p>From the front line to the decisions behind it, these are scenes from a live campaign.</p></div>
+      <div class="screenshot-grid">
+        <figure class="screenshot-card screenshot-wide"><img src="/assets/home/battlefield.png" alt="A large battle around Cincinnati with infantry, artillery, tanks and airships on the map" width="1894" height="1028" loading="lazy"><figcaption><span>01 / THE FRONT LINE</span><strong>Command the battlefield</strong></figcaption></figure>
+        <figure class="screenshot-card"><img src="/assets/home/paris-battle.png" alt="Paris on the campaign map with two opposing units and a battle at the edge of the city" width="586" height="443" loading="lazy"><figcaption><span>02 / CITIES</span><strong>Fight for every city</strong></figcaption></figure>
+        <figure class="screenshot-card"><img src="/assets/home/houston-front.png" alt="Forces and supply lines surrounding Houston on the campaign map" width="1367" height="703" loading="lazy"><figcaption><span>03 / MANOEUVRE</span><strong>Move across the map</strong></figcaption></figure>
+        <figure class="screenshot-card screenshot-ui"><img src="/assets/home/trade-offer.png" alt="Trade offer window showing resources exchanged between the German Empire and Belgium" width="871" height="698" loading="lazy"><figcaption><span>04 / DIPLOMACY</span><strong>Make a deal</strong></figcaption></figure>
+        <figure class="screenshot-card"><img src="/assets/home/research-tree.png" alt="Research tree showing technologies from 1914 to 1918" width="1398" height="723" loading="lazy"><figcaption><span>05 / RESEARCH</span><strong>Plan what comes next</strong></figcaption></figure>
+      </div>
+    </section>
+
+    <section id="roles" class="roles wrap" aria-labelledby="roles-title">
+      <div class="section-heading horizontal"><div><p class="eyebrow">03 — The people</p><h2 id="roles-title">One table. Different perspectives.</h2></div><p>The game master sets the stage.<br>The players decide what happens next.</p></div>
+      <div class="role-grid">
+        <article><p class="eyebrow">For game masters</p><h3>Build the world.<br>Keep the story moving.</h3><p>Set the rules, place starting forces and invite your players. Manage turns, treasuries and announcements, then view the campaign from a nation's perspective when you need to check what it can see.</p><p class="role-foot">Campaign setup · Turn control · Marker and drawing history</p></article>
+        <article><p class="eyebrow">For players</p><h3>Take command.<br>Make your choices count.</h3><p>Lead your nation's forces, production, research and diplomacy within the campaign's rules. Coordinate with allies, read your turn report and ready up when your orders are in.</p><p class="role-foot">National economy · Military orders · Private conversations</p></article>
+      </div>
+    </section>
+
+    <section id="start" class="getting-started wrap" aria-labelledby="start-title">
+      <div class="section-heading horizontal"><div><p class="eyebrow">04 — Getting started</p><h2 id="start-title">Your first turn starts here.</h2></div><p>Starting a new world or joining an existing one?<br>You only need an account to begin.</p></div>
+      <ol class="steps">
+        <li><span aria-hidden="true">01</span><h3>Make an account</h3><p>Choose a username and a display name so the table knows who you are.</p></li>
+        <li><span aria-hidden="true">02</span><h3>Create or join</h3><p>Create a campaign as its GM, or enter the join code shared by your game master.</p></li>
+        <li><span aria-hidden="true">03</span><h3>Set the stage</h3><p>The GM chooses Earth or imports an Azgaar map, sets the rules, assigns nations and places the starting forces.</p></li>
+        <li><span aria-hidden="true">04</span><h3>Write the next chapter</h3><p>Issue orders, talk to your neighbours and ready up. The GM advances the turn.</p></li>
+      </ol>
+    </section>
+    <section id="store" class="store" aria-labelledby="store-title">
+      <div class="wrap">
+        <div class="section-heading horizontal"><div><p class="eyebrow">05 — Scenario packs</p><h2 id="store-title">Find a setting for your next story.</h2></div><p>Explore the planned scenario pack store. Each pack is listed at $10.</p></div>
+        <div class="pack-grid">
+          <article class="pack-card"><span class="pack-category">HISTORICAL</span><h3>Medieval Roleplay Pack</h3><p>Courts, kingdoms and contested borders for a medieval campaign.</p><span class="pack-price">$10</span></article>
+          <article class="pack-card"><span class="pack-category">HISTORICAL</span><h3>World War 2 Roleplay Pack</h3><p>Global alliances and high-stakes decisions for a World War 2 campaign.</p><span class="pack-price">$10</span></article>
+          <article class="pack-card"><span class="pack-category">FANTASY</span><h3>Fantasy Roleplay Pack</h3><p>Rival realms and new stories for a world your group imagines.</p><span class="pack-price">$10</span></article>
+        </div>
+        <p class="store-note">Store reference only. Packs are not available to purchase yet.</p>
+      </div>
+    </section>
+    <section class="closing wrap" aria-labelledby="closing-title"><div><p class="eyebrow">The next move is yours</p><h2 id="closing-title">Bring your world to the table.</h2><p>Your map. Your nations. A history written together.</p></div><div class="actions"><a class="button" data-guest href="/login.html#register">Create your account <span aria-hidden="true">↗</span></a><a class="text-link" data-guest href="/login.html">Already playing? Sign in</a><a class="button" data-member href="/lobbies.html" hidden>Open your campaigns <span aria-hidden="true">↗</span></a></div></section>
+  </main>
+  <footer class="wrap"><span>Rob's Strategic Warfare Roleplayer 1</span><span>A campaign is better with company.</span></footer>
   <script src="/js/api.js"></script>
   <script>
-    (async () => {
-      const next = new URLSearchParams(location.search).get('next') || '/lobbies.html';
-      const safeNext = next.startsWith('/') && !next.startsWith('//') ? next : '/lobbies.html';
-      try { await api.get('/api/auth/me'); location.replace(safeNext); return; } catch { /* not signed in */ }
-
-      const $ = s => document.querySelector(s);
-      const show = (login) => {
-        $('#loginForm').hidden = !login; $('#registerForm').hidden = login;
-        $('#tabLogin').classList.toggle('active', login); $('#tabRegister').classList.toggle('active', !login);
-      };
-      $('#tabLogin').onclick = () => show(true);
-      $('#tabRegister').onclick = () => show(false);
-
-      $('#loginForm').onsubmit = async (e) => {
-        e.preventDefault(); $('#loginError').textContent = '';
-        try {
-          await api.post('/api/auth/login', { username: $('#loginUser').value.trim(), password: $('#loginPass').value });
-          location.replace(safeNext);
-        } catch (err) { $('#loginError').textContent = err.message; }
-      };
-      $('#registerForm').onsubmit = async (e) => {
-        e.preventDefault(); $('#regError').textContent = '';
-        try {
-          const r = await api.post('/api/auth/register', {
-            username: $('#regUser').value.trim(), displayName: $('#regDisplay').value.trim(), password: $('#regPass').value,
-          });
-          if (r.firstUser) alert('You are the first account on this server, so you are now the site admin.');
-          location.replace(safeNext);
-        } catch (err) { $('#regError').textContent = err.message; }
-      };
-    })();
+    api.get('/api/auth/me').then(() => {
+      document.querySelectorAll('[data-guest]').forEach(el => { el.hidden = true; });
+      document.querySelectorAll('[data-member]').forEach(el => { el.hidden = false; });
+    }).catch(() => {});
   </script>
 </body>
 </html>

@@ -87,6 +87,9 @@ gives trench cover) of the point where the move would cross. The move ends just 
 the German Empire's manned trench: beat its defenders or go round") and costs only the way there; a unit already at
 the trench cannot cross at all. Cavalry charging the wire is stopped like everyone else.
 
+Under fog of war (docs/FOG-OF-WAR.md, *The battlefield*) an enemy trench shows only where your side can see:
+send reconnaissance to learn the shape of a line, and expect a halt at a manned stretch nobody had looked at.
+
 To get through, beat the defenders (attack them, shell them, cut their supply), blow a gap with sappers, or go
 round the end of the line. Stretches with no defender within 20 km, planned trenches, and the gaps sappers blew
 let anyone through. The trench's own side and its allies cross freely, ships, aircraft and heroes are not stopped,

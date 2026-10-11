@@ -1,6 +1,6 @@
 # Heroes
 
-Named characters with a star rating from 1 to 5: **generals**, **diplomats** and **spies**. Built 29 Sep 2026.
+Named characters with a star rating from 1 to 5: **generals**, **statesmen**, **diplomats** and **spies**. Built 29 Sep 2026.
 The shared numbers are in `public/js/heroes.js`, the server rules in `server/heroes.js` and the orders in
 `server/routes/game.js` (`POST /api/lobbies/:id/game/heroes/:heroId/:order`).
 
@@ -79,3 +79,40 @@ no spy nearby (0) · peace offers and alliance proposals need a diplomat (on).
 Recon reveals units by adding the spy's nation to a marker's `revealTo` list until the end of the turn, which
 `canSee()` already honours. When automatic fog of war (`docs/FOG-OF-WAR.md`) is built, recon becomes the way to
 see beyond your units' vision.
+
+## Character traits (10 Oct 2026)
+
+The GM chooses a defining trait on quick placement or in the Hero editor. The full editor also allows a second, earned trait. Traits are optional, fixed in strength, and independent of stars; existing Heroes keep their previous behaviour. Role changes remove incompatible traits. Players can command their Heroes but cannot edit traits. Diplomats have no mechanical traits.
+
+Military traits affect the Hero’s own nation within the campaign general aura (60 km by default). Each distinct trait counts once, movement multipliers do not compound, and added combat bonuses cap at +2 attack and +2 defence per unit. These bonuses stack with the existing general, research and support bonuses. Captured, travelling, GM-only and embarked Heroes project no aura. Wrecks receive no effects.
+
+Spy specialties modify existing recon, research theft and capture checks. Reconnaissance Expert leaves hunt range unchanged; Network Coordinator reaches other own-nation spies within 60 km and never boosts itself. Spy traits remain secret with their Hero.
+
+Statesmen’s economic traits require no movement that turn and resolve from their current posting. Industrialist and Resource Baron reach 100 km and affect only their own nation. Industrialist adds one level only to goods output, including at level five: it grants no slots, income or permanent upgrades. Rail Magnate must stand within 1 km of an own-nation capital for the turn and boosts rail distance nationwide for units, from the default 4× to 5×. It grants no walking bonus or access to closed track. Relocating an economic Hero suspends their bonuses until the next turn.
+
+Construction bonuses increase length and material costs together. Hospitals still require working support and linked patients, supply still requires real stores, and normal movement and action restrictions remain in force.
+
+| Trait | Role | Effect |
+|---|---|---|
+| Master Logistician | General | Supply Columns: +25% delivery and link range. |
+| Expert Cavalryman | General | Cavalry: +1 attack and +25% movement off rail. |
+| Infantry Commander | General | Infantry: +1 attack and +1 defence. |
+| Artillery Coordinator | General | Mobile artillery: +1 attack and +25% Signals spotting reach. |
+| Siege Specialist | General | Artillery: +2 attack against forts and emplacements. |
+| Defensive Strategist | General | Entrenched land units: +2 defence. |
+| Assault Planner | General | Infantry and sappers: +2 attack against entrenched defenders. |
+| Marching General | General | Linked infantry and support units: +25% movement off rail. |
+| Combat Engineer | General | Engineers, pioneers and railway troops: +25% construction length, at proportional material cost. |
+| Medical Organiser | General | Field hospitals: +5 percentage points of healing per turn. |
+| Inspiring Commander | General | Troops: worn penalty reduced by 1, minimum zero. |
+| Fleet Tactician | General | Warships: +1 attack and +1 defence. |
+| Reconnaissance Expert | Spy | Recon mission radius: +25%. |
+| Master of Disguise | Spy | +2 intelligence on capture checks. |
+| Counterintelligence Chief | Spy | +2 perception when hunting or contesting enemy missions. |
+| Research Thief | Spy | Research theft: +25% points, limited by the target’s stock. |
+| Network Coordinator | Spy | Other friendly spies within 60 km: +1 intelligence on capture checks. |
+| Industrialist | Statesman | Factories within 100 km: goods output as one level higher; no extra build slots. |
+| Rail Magnate | Statesman | Stationed at the capital for the turn: national rail distance +25%. |
+| Resource Baron | Statesman | Resource nodes within 100 km: +15% yield. |
+
+Hero cards describe the traits and spy mission totals. Recipient cards show active bonuses and their sources; conditional combat bonuses appear in the combat report. Economic, supply and rail previews use the same shared rules as the server. Run `npm run test:heroes` for trait, supply, movement, economy, permission and combat coverage.

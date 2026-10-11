@@ -3,36 +3,58 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Campaigns · WoE Strategy Map</title>
+  <title>Campaigns · Rob's Strategic Warfare Roleplayer 1</title>
+  <link rel="icon" type="image/x-icon" href="/assets/favicon/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon/favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/favicon/apple-touch-icon.png">
+  <link rel="manifest" href="/assets/favicon/site.webmanifest">
   <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/css/campaign-hub.css">
 </head>
 <body>
-  <div class="page">
+  <div class="page campaign-hub">
     <header>
-      <h1>Campaigns</h1>
+      <a class="hub-brand" href="/" aria-label="Home"><img src="/assets/brand/robs-strategic-warfare.png" alt="Rob's Strategic Warfare Roleplayer 1"></a>
+      <span class="hub-header-gap"></span>
       <span id="whoami" class="muted"></span>
+      <a id="btnAdmin" href="/admin.html" class="small" hidden style="padding:6px 10px;border-radius:6px;background:var(--accent2);color:#fff;text-decoration:none" title="Users, every campaign and reports">Site admin</a>
       <button id="btnAccount" class="secondary small">Account</button>
       <button id="btnLogout" class="secondary small">Sign out</button>
     </header>
 
-    <div class="cols">
-      <div class="card">
-        <h2 style="font-size:16px">Your campaigns</h2>
-        <ul id="lobbyList" class="list"></ul>
+    <section class="hub-hero" aria-labelledby="hubTitle">
+      <p class="hub-kicker">YOUR COMMAND TABLE</p>
+      <h1 id="hubTitle">Choose your next campaign.</h1>
+      <p>Return to a world in progress, start one of your own, or use a code from your game master.</p>
+    </section>
+
+    <!-- Answers from the site admins to your reports and takeover requests (README, "Accounts and roles"). -->
+    <div id="noticesCard" class="card" style="margin-bottom:16px" hidden>
+      <h2 style="font-size:16px">Notices <span id="noticesNew" class="badge" hidden></span></h2>
+      <ul id="noticeList" class="list"></ul>
+    </div>
+    <div class="cols hub-grid">
+      <div class="card hub-main-card">
+        <div class="hub-section-head"><div><p class="hub-kicker">CONTINUE PLAYING</p><h2>Campaigns you own</h2></div><span class="hub-count" id="campaignCount"></span></div>
+        <ul id="lobbyList" class="list campaign-list"></ul>
+        <p id="noOwned" class="muted" hidden>You have not created a campaign yet.</p>
+        <div id="joinedSection" hidden><h3 class="hub-subhead">Campaigns you joined</h3><ul id="joinedList" class="list campaign-list"></ul></div>
         <p id="noLobbies" class="muted" hidden>You are not in any campaign yet. Create one or join with a code.</p>
       </div>
       <div>
-        <div class="card" style="margin-bottom:16px">
-          <h2 style="font-size:16px">Create a campaign</h2>
+        <div class="card hub-action-card" style="margin-bottom:16px">
+          <p class="hub-kicker">NEW WORLD</p><h2>Create a campaign</h2>
           <form id="createForm">
             <label>Name<input id="createName" maxlength="60" required placeholder="e.g. The Great War, 1914"></label>
+            <label>Unit pack<select id="createUnitPack" required></select></label>
             <div class="error" id="createError"></div>
             <button type="submit">Create</button>
-            <p class="hint">You become the game master. Upload a map image from the campaign settings once inside.</p>
+            <p class="hint">You become the game master. Import an Azgaar Full JSON map or upload an image from the campaign settings once inside.</p>
           </form>
         </div>
-        <div class="card">
-          <h2 style="font-size:16px">Join with a code</h2>
+        <div class="card hub-action-card">
+          <p class="hub-kicker">GOT AN INVITE?</p><h2>Join with a code</h2>
           <form id="joinForm">
             <label>Join code<input id="joinCode" maxlength="12" required placeholder="ABCD23" style="text-transform:uppercase;letter-spacing:.15em"></label>
             <div class="error" id="joinError"></div>
@@ -41,11 +63,8 @@
         </div>
       </div>
     </div>
+    <section class="card hub-packs" aria-labelledby="ownedPacksTitle"><div class="hub-section-head"><div><p class="hub-kicker">YOUR LIBRARY</p><h2 id="ownedPacksTitle">Owned packs</h2></div></div><div id="ownedPacks" class="hub-pack-grid"></div><p class="hint">More packs are planned. Available packs appear here when added to your account.</p></section>
 
-    <div id="adminCard" class="card" style="margin-top:16px" hidden>
-      <h2 style="font-size:16px">Site admin · users</h2>
-      <ul id="userList" class="list"></ul>
-    </div>
     <p class="muted" style="margin-top:16px;font-size:11px;text-align:center" title="The git commit this server is running; + means uncommitted changes">Build __WOE_BUILD__</p>
   </div>
 
@@ -54,6 +73,12 @@
       <button class="close" data-close>×</button>
       <h2>Account</h2>
       <p id="accountInfo" class="muted"></p>
+      <form id="profileForm">
+        <div class="profile-preview"><span id="profileAvatar" class="profile-avatar"></span><div><strong>Profile picture</strong><label class="profile-upload">Choose image<input id="avatarFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label><button id="removeAvatar" type="button" class="secondary small">Remove picture</button></div></div>
+        <label>Display name<input id="profileDisplay" maxlength="40" required></label>
+        <div class="error" id="profileError"></div><button type="submit">Save profile</button>
+      </form>
+      <hr><h3>Security</h3>
       <form id="passwordForm">
         <label>Current password<input id="pwCurrent" type="password" autocomplete="current-password" required></label>
         <label>New password<input id="pwNext" type="password" autocomplete="new-password" required minlength="8"></label>
@@ -70,32 +95,101 @@
     (async () => {
       const me = await requireUser();
       const $ = s => document.querySelector(s);
-      $('#whoami').textContent = me.displayName + (me.role === 'admin' ? ' (site admin)' : '');
+      const refreshMe = u => { Object.assign(me, u); $('#whoami').textContent = me.displayName; $('#whoami').className = me.role === 'admin' ? 'name-site-admin' : me.siteVip ? 'name-site-vip' : 'muted'; $('#profileDisplay').value = me.displayName; $('#profileAvatar').innerHTML = me.avatarUrl ? `<img src="${esc(me.avatarUrl)}" alt="">` : esc(me.displayName.slice(0, 1).toUpperCase()); };
+      refreshMe(me);
+      $('#btnAdmin').hidden = me.role !== 'admin';   // the admin page: users, every campaign, reports (admin.html)
       $('#accountInfo').textContent = `Signed in as ${me.username}`;
+      async function loadPacks() {
+        try {
+          const { packs } = await api.get('/api/auth/me/packs');
+          $('#createUnitPack').innerHTML = packs.filter(p => p.owned && p.available).map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+          $('#ownedPacks').innerHTML = packs.filter(p => p.owned).map(p => `<article class="hub-pack"><span class="pack-symbol">✦</span><div><strong>${esc(p.name)}</strong><span>${p.included ? 'Included with every account' : p.available ? 'Owned · Ready to use' : 'Owned · Content coming soon'}</span></div><span class="hub-owned">Owned</span></article>`).join('') || '<p class="muted">No packs in your library yet.</p>';
+        } catch {
+          $('#createUnitPack').innerHTML = UnitTypes.PACKS.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+          $('#ownedPacks').innerHTML = '<p class="muted">Pack ownership is temporarily unavailable. Your campaigns are still accessible.</p>';
+        }
+      }
 
       async function loadLobbies() {
         const { lobbies } = await api.get('/api/lobbies');
         const ul = $('#lobbyList');
-        ul.innerHTML = lobbies.map(l => `
-          <li class="clickable" data-id="${l.id}">
-            <span class="grow"><strong>${esc(l.name)}</strong><br><span class="hint">${l.memberCount} member${l.memberCount === 1 ? '' : 's'}${l.mapUrl ? '' : ' · no map yet'}</span></span>
-            <span class="badge ${l.yourRole === 'gm' ? 'gm' : ''}">${l.yourRole === 'gm' ? 'GM' : 'Player'}</span>
-            ${l.yourRole === 'gm' ? '<button class="small secondary" data-act="stats" title="Default unit stats for this campaign">Unit stats</button>' : ''}
-            <button class="small">Open</button>
-          </li>`).join('');
+        const lobbyHtml = l => `
+          <li class="${l.suspended ? '' : 'clickable'}" data-id="${l.id}" style="${l.suspended ? 'opacity:.6' : ''}">
+            <span class="grow"><strong>${esc(l.name)}</strong><br><span class="hint">${esc(UnitTypes.forPack(l.unitPack)?.name || l.unitPack)} · ${l.suspended ? 'Shut: its owner has been suspended' : `${l.memberCount} member${l.memberCount === 1 ? '' : 's'}${l.mapKind === 'none' ? ' · no map yet' : ''}`}</span></span>
+            <span class="badge ${l.yourRole === 'gm' ? 'gm' : ''}">${l.yourRole === 'gm' ? 'GM' : l.yourRole === 'observer' ? 'Observer' : 'Player'}</span>
+            ${l.suspended ? (l.canTakeOver ? (l.takeover === 'open' ? '<span class="hint">takeover requested</span>' : '<button class="small" data-act="takeover" title="Ask the site admins to make you the owner">Apply to take over</button>') : '')
+              : l.yourRole === 'gm' ? '<button class="small secondary" data-act="stats" title="Default unit stats for this campaign">Unit stats</button>' : '<button class="small secondary" data-act="report" title="Report this campaign to the site admins (abuse, hate, anything that should not be here)">⚑</button>'}
+            ${l.ownerId === me.id ? '<button class="small danger" data-act="delete" title="Delete this campaign and all its contents">Delete</button>'
+              : '<button class="small danger" data-act="leave" title="Leave this campaign">Leave</button>'}
+            ${l.suspended ? '' : '<button class="small">Open</button>'}
+          </li>`;
+        ul.innerHTML = lobbies.filter(l => l.ownerId === me.id).map(lobbyHtml).join('');
+        $('#joinedList').innerHTML = lobbies.filter(l => l.ownerId !== me.id).map(lobbyHtml).join('');
+        $('#joinedSection').hidden = !lobbies.some(l => l.ownerId !== me.id);
+        $('#noOwned').hidden = lobbies.some(l => l.ownerId === me.id) || !lobbies.length;
         $('#noLobbies').hidden = lobbies.length > 0;
-        ul.querySelectorAll('li').forEach(li => li.onclick = () => location.href = `/map/${li.dataset.id}`);
-        ul.querySelectorAll('[data-act="stats"]').forEach(b => b.onclick = e => {
+        $('#campaignCount').textContent = `${lobbies.length} ${lobbies.length === 1 ? 'campaign' : 'campaigns'}`;
+        const lists = document.querySelector('.hub-main-card');
+        lists.querySelectorAll('li.clickable').forEach(li => li.onclick = () => location.href = `/map/${li.dataset.id}`);
+        lists.querySelectorAll('[data-act="takeover"]').forEach(b => b.onclick = async e => {
+          e.stopPropagation();
+          const l = lobbies.find(x => String(x.id) === b.closest('li').dataset.id);
+          const note = prompt(`Ask the site admins to make you the owner of "${l.name}". Anything they should know?`, '');
+          if (note === null) return;
+          try { await api.post(`/api/lobbies/${l.id}/takeover`, { note }); toast('Asked: the site admins will answer in your notices'); loadLobbies(); } catch (err) { toast(err.message); }
+        });
+        lists.querySelectorAll('[data-act="report"]').forEach(b => b.onclick = async e => {
+          e.stopPropagation();
+          const l = lobbies.find(x => String(x.id) === b.closest('li').dataset.id);
+          const reason = prompt(`Report the campaign "${l.name}" to the site admins. What is wrong with it?`);
+          if (!reason || !reason.trim()) return;
+          try { await api.post(`/api/lobbies/${l.id}/reports`, { campaign: true, reason: reason.trim() }); toast('Reported to the site admins'); } catch (err) { toast(err.message); }
+        });
+        lists.querySelectorAll('[data-act="stats"]').forEach(b => b.onclick = e => {
           e.stopPropagation();
           const l = lobbies.find(x => String(x.id) === b.closest('li').dataset.id);
           StatsEditor.open(l, { onSaved: nl => Object.assign(l, nl) });
         });
+        lists.querySelectorAll('[data-act="delete"], [data-act="leave"]').forEach(b => b.onclick = async e => {
+          e.stopPropagation();
+          const l = lobbies.find(x => String(x.id) === b.closest('li').dataset.id);
+          if (!l) return;
+          const deleting = b.dataset.act === 'delete';
+          const message = deleting
+            ? `Delete "${l.name}" for everyone, including its map, markers and campaign history? This cannot be undone.`
+            : `Leave "${l.name}"? You can rejoin later if you have its join code.`;
+          if (!confirm(message)) return;
+          b.disabled = true;
+          try {
+            await api.del(deleting ? `/api/lobbies/${l.id}` : `/api/lobbies/${l.id}/members/${me.id}`);
+            toast(deleting ? 'Campaign deleted' : 'You left the campaign');
+            await loadLobbies();
+          } catch (err) { toast(err.message); b.disabled = false; }
+        });
+      }
+
+      async function loadNotices() {
+        let d;
+        try { d = await api.get('/api/auth/me/notices'); } catch { return; }
+        const answered = d.notices.filter(n => n.status !== 'open');
+        $('#noticesCard').hidden = !answered.length;
+        $('#noticesNew').hidden = !d.unseen; $('#noticesNew').textContent = d.unseen + ' new';
+        const when = t => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        $('#noticeList').innerHTML = answered.map(n => `
+          <li style="flex-wrap:wrap;${n.seen ? 'opacity:.7' : 'background:rgba(212,168,75,.1)'}">
+            <span class="grow" style="white-space:normal">${n.kind === 'report'
+              ? `Your report${n.about ? ` of <strong>${esc(n.about)}</strong>` : ' of the campaign'} in <strong>${esc(n.lobbyName)}</strong> was closed`
+              : `Your request to take over <strong>${esc(n.lobbyName)}</strong> was <strong>${n.status}</strong>`}
+              <span class="muted">· ${when(n.answeredAt || n.createdAt)}</span>${n.answer ? `<br><em>${esc(n.answer)}</em>` : ''}</span>
+            ${n.kind === 'takeover' && n.status === 'approved' && n.lobbyId ? `<a class="small" href="/map/${n.lobbyId}" style="padding:4px 8px;border-radius:6px;background:var(--accent);color:#fff;text-decoration:none">Open</a>` : ''}
+          </li>`).join('');
+        if (d.unseen) api.post('/api/auth/me/notices/seen', {}).catch(() => {});   // read now; plain next time
       }
 
       $('#createForm').onsubmit = async (e) => {
         e.preventDefault(); $('#createError').textContent = '';
         try {
-          const { lobby } = await api.post('/api/lobbies', { name: $('#createName').value });
+          const { lobby } = await api.post('/api/lobbies', { name: $('#createName').value, unitPack: $('#createUnitPack').value });
           location.href = `/map/${lobby.id}`;
         } catch (err) { $('#createError').textContent = err.message; }
       };
@@ -108,6 +202,9 @@
       };
       $('#btnLogout').onclick = async () => { await api.post('/api/auth/logout'); location.replace('/'); };
       $('#btnAccount').onclick = () => $('#accountModal').classList.add('open');
+      $('#profileForm').onsubmit = async e => { e.preventDefault(); $('#profileError').textContent = ''; try { const d = await api.patch('/api/auth/me/profile', { displayName: $('#profileDisplay').value.trim() }); refreshMe(d.user); toast('Profile saved'); } catch (err) { $('#profileError').textContent = err.message; } };
+      $('#avatarFile').onchange = async e => { const file = e.target.files[0]; if (!file) return; const body = new FormData(); body.append('file', file); try { const d = await api.post('/api/auth/me/avatar', body); refreshMe(d.user); toast('Picture updated'); } catch (err) { $('#profileError').textContent = err.message; } e.target.value = ''; };
+      $('#removeAvatar').onclick = async () => { try { const d = await api.del('/api/auth/me/avatar'); refreshMe(d.user); } catch (err) { $('#profileError').textContent = err.message; } };
       document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => b.closest('.modal').classList.remove('open'));
       $('#passwordForm').onsubmit = async (e) => {
         e.preventDefault(); $('#pwError').textContent = '';
@@ -117,31 +214,9 @@
         } catch (err) { $('#pwError').textContent = err.message; }
       };
 
-      async function loadUsers() {
-        if (me.role !== 'admin') return;
-        $('#adminCard').hidden = false;
-        const { users } = await api.get('/api/auth/users');
-        $('#userList').innerHTML = users.map(u => `
-          <li data-id="${u.id}">
-            <span class="grow"><strong>${esc(u.displayName)}</strong> <span class="hint">@${esc(u.username)}</span></span>
-            <span class="badge ${u.role === 'admin' ? 'admin' : ''}">${u.role}</span>
-            ${u.id === me.id ? '' : `<button class="small secondary" data-act="role">${u.role === 'admin' ? 'Make player' : 'Make admin'}</button>
-            <button class="small secondary" data-act="pw">Reset password</button>
-            <button class="small danger" data-act="del">Delete</button>`}
-          </li>`).join('');
-        $('#userList').querySelectorAll('button').forEach(b => b.onclick = async () => {
-          const li = b.closest('li'); const id = li.dataset.id; const u = users.find(x => String(x.id) === id);
-          try {
-            if (b.dataset.act === 'role') await api.patch(`/api/auth/users/${id}`, { role: u.role === 'admin' ? 'player' : 'admin' });
-            if (b.dataset.act === 'pw') { const pw = prompt(`New password for ${u.username} (8+ chars):`); if (!pw) return; await api.patch(`/api/auth/users/${id}`, { password: pw }); toast('Password reset'); }
-            if (b.dataset.act === 'del') { if (!confirm(`Delete user ${u.username}? This cannot be undone.`)) return; await api.del(`/api/auth/users/${id}`); }
-            loadUsers();
-          } catch (err) { toast(err.message); }
-        });
-      }
-
       await loadLobbies();
-      await loadUsers();
+      await loadNotices();
+      await loadPacks();
     })();
   </script>
 </body>

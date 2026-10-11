@@ -3,8 +3,8 @@
 
 /**
  * GM table for a campaign's default unit stats. Every catalogue type gets a row with +/- steppers for
- * attack, defend, action points, range and movement. Values that differ from the catalogue are stored as
- * overrides in the campaign settings (settings.unitStats = { typeId: [a, d, ap, r, m] }); everything else
+ * attack, defend, action points, range, movement, armour class and penetration. Values that differ from
+ * the catalogue are stored as overrides in campaign settings ({ typeId: [a, d, ap, r, m, ac, pen] }); everything else
  * keeps following the catalogue. Used from the campaigns page and from the map's settings modal.
  */
 const StatsEditor = (() => {
@@ -20,8 +20,9 @@ const StatsEditor = (() => {
         <button class="close" data-close>×</button>
         <h2>Unit stats · <span id="statsLobbyName"></span></h2>
         <p class="hint">Defaults filled in when a unit of each type is placed. Attack and defend are added to the d20 combat
-          roll: 0–1 very weak, 2–3 weak, 4–5 mid, 6–7 strong, 8–9 very strong, 10 extreme. Range and movement are in map
-          tiles per turn. Changed values are highlighted; existing units keep the stats they already have.</p>
+          roll: 0–1 very weak, 2–3 weak, 4–5 mid, 6–7 strong, 8–9 very strong, 10 extreme. Penetration must meet or exceed
+          the target's Armour Class to cause strength loss. Range and movement are in map tiles per turn. Changed values are
+          highlighted; existing units keep the stats they already have.</p>
         <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:6px">
           <label class="inline" style="margin:0"><input type="search" id="statsFilter" placeholder="Filter types…" style="width:180px;margin:0"></label>
           <span><button type="button" class="small secondary" id="statsResetAll">Reset all to catalogue</button></span>
@@ -50,7 +51,7 @@ const StatsEditor = (() => {
         return;
       }
       const i = Number(btn.dataset.i), step = e.shiftKey ? 5 : 1;
-      values[id][i] = round(values[id][i] + Number(btn.dataset.d) * step);
+      values[id][i] = round(values[id][i] + Number(btn.dataset.d) * step, i);
       refreshRow(tr);
     });
     body.addEventListener('input', e => {
@@ -58,15 +59,16 @@ const StatsEditor = (() => {
       if (!inp) return;
       const tr = inp.closest('tr'), id = tr.dataset.id;
       const n = Number(inp.value);
-      if (Number.isFinite(n)) { values[id][Number(inp.dataset.i)] = round(n); refreshRow(tr, false); }
+      if (Number.isFinite(n)) { const i = Number(inp.dataset.i); values[id][i] = round(n, i); refreshRow(tr, false); }
     });
   }
 
-  const round = n => Math.max(-99, Math.min(999, Math.round(n * 10) / 10));
+  const round = (n, i) => Math.max(i >= 5 ? 0 : -99, Math.min(999, Math.round(n * 10) / 10));
 
   function open(l, opts = {}) {
     ensure();
     lobby = l; onSaved = opts.onSaved || null;
+    UnitTypes.selectPack(l.unitPack || UnitTypes.DEFAULT_PACK);
     const ov = (l.settings && l.settings.unitStats) || {};
     values = {};
     for (const t of UnitTypes.LIST) values[t.id] = UnitTypes.statsFor(t, ov);

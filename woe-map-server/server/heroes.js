@@ -11,7 +11,14 @@ const norm = s => String(s || '').trim().toLowerCase();
 const num = (v, f = 0) => { const n = Number(v); return Number.isFinite(n) ? n : f; };
 const isHero = m => m && m.type === 'hero';
 /** A hero that can act: not captured, not on the road, not hidden from play by the GM. */
-const ready = m => isHero(m) && !m.adminOnly && !['captured', 'travelling'].includes(m.data?.status);
+const ready = Heroes.ready;
+function effects(lobby, settings, markers, target, context = {}) {
+  return Heroes.effects(markers, target, settings, (x, y, a, b) => geo.distance(lobby, x, y, a, b),
+    { type: target.type === 'unit' ? require('../public/js/units').resolve(target.data?.unitType) : null, ...context });
+}
+function intelligence(lobby, settings, markers, spy) {
+  return Heroes.spyIntelligence(spy) + effects(lobby, settings, markers, spy).intelligence;
+}
 
 /** The best general of the unit's own nation within the aura, or null. */
 function generalFor(lobby, settings, markers, unit) {
@@ -46,7 +53,7 @@ function counterSpy(lobby, markers, nation, x, y, km) {
   for (const m of markers) {
     if (!ready(m) || m.data.role !== 'spy' || norm(m.data.nation) !== norm(nation)) continue;
     if (geo.distance(lobby, x, y, m.x, m.y) > km) continue;
-    if (!best || num(m.data.perception) > num(best.data.perception)) best = m;
+    if (!best || Heroes.spyPerception(m) > Heroes.spyPerception(best)) best = m;
   }
   return best;
 }
@@ -81,4 +88,4 @@ function spiesNear(lobby, markers, x, y, km, isFriend) {
   return markers.filter(m => ready(m) && m.data.role === 'spy' && !isFriend(m.data.nation) && geo.distance(lobby, x, y, m.x, m.y) <= km);
 }
 
-module.exports = { isHero, ready, generalFor, postedDiplomat, capitalOf, counterSpy, contest, unitsNear, spiesNear, norm };
+module.exports = { isHero, ready, effects, intelligence, generalFor, postedDiplomat, capitalOf, counterSpy, contest, unitsNear, spiesNear, norm };

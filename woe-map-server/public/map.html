@@ -3,10 +3,20 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>WoE Strategy Map</title>
+  <title>Rob's Strategic Warfare Roleplayer 1</title>
+  <link rel="icon" type="image/x-icon" href="/assets/favicon/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon/favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/favicon/apple-touch-icon.png">
+  <link rel="manifest" href="/assets/favicon/site.webmanifest">
   <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/css/treaties.css">
+  <link rel="stylesheet" href="/css/campaign-theme.css">
+  <link rel="stylesheet" href="/css/campaign-stories.css">
+  <link rel="stylesheet" href="/css/unit-guide.css">
+  <link rel="stylesheet" href="/css/game-panels.css">
 </head>
-<body>
+<body class="campaign-map">
   <div id="app">
     <!-- Top bar: campaign and ready-up (left), notifications (centre), people online and settings (right). -->
     <header id="topbar">
@@ -16,9 +26,9 @@
         <div id="readyBar" hidden></div>
       </div>
       <div id="notifWrap">
-        <button id="notifBtn" class="secondary small" type="button" title="Notifications">🔔<span id="notifCount"></span></button>
+        <button id="notifBtn" class="secondary small" type="button" title="Notifications"><img id="notifIcon" src="/icons/mail-read.png" alt="Notifications"><span id="notifCount"></span></button>
         <div id="notifPanel" hidden>
-          <div class="nhead"><strong>Notifications</strong><button id="notifTrade" type="button" class="small" title="Offer another nation a trade of resources, money, manpower or research">＋ Trade</button></div>
+          <div class="nhead"><strong>Notifications</strong><button id="notifClear" type="button" class="small secondary" hidden title="Dismiss every notice that needs no answer from you">Clear all</button></div>
           <div id="notifList"></div>
         </div>
       </div>
@@ -29,27 +39,39 @@
           <button id="btnViewAs" class="secondary small" type="button">👁</button>
           <div id="viewAsMenu" hidden></div>
         </div>
-        <button id="btnNotify" class="secondary small" title="Sound and desktop alerts when something happens while this tab is in the background">🔇</button>
-        <button id="btnBattleSound" class="secondary small" title="Battle sounds: gunfire, shells and hooves where you are looking">🎧</button>
+        <div id="audioWrap">
+          <button id="btnAudio" class="secondary small" type="button" aria-expanded="false" aria-controls="audioPanel" title="Music and sound settings">♫ Audio</button>
+          <div id="audioPanel" hidden>
+            <h2>Audio settings</h2>
+            <div class="audio-option"><div><strong>Campaign music</strong><span>The theme while you play</span></div><button id="btnMusic" class="secondary small" type="button" aria-pressed="false">Off</button></div>
+            <label class="audio-volume" for="campaignMusicVolume">Music volume <span id="campaignMusicVolumeValue">8%</span></label>
+            <input id="campaignMusicVolume" type="range" min="0" max="20" step="1" value="8" aria-label="Campaign music volume">
+            <div class="audio-option"><div><strong>Battle sound effects</strong><span>Gunfire, shells and hooves</span></div><button id="btnBattleSound" class="secondary small" type="button" aria-pressed="false">Off</button></div>
+            <div class="audio-option"><div><strong>Background alerts</strong><span>Chimes when this tab is hidden</span></div><button id="btnNotify" class="secondary small" type="button" aria-pressed="false">Off</button></div>
+          </div>
+        </div>
         <button id="btnSettings" class="secondary small" title="Campaign settings and game rules" hidden>⚙</button>
       </div>
     </header>
 
     <!-- Main menu (left rail): each button opens a panel over the map; click it again to close. Keys 1–0. -->
     <nav id="rail" aria-label="Main menu">
-      <button data-tab="nation" data-key="1" hidden title="Nation: treasury, stockpiles, forces and last turn (1)"><i>🏛</i><span>Nation</span></button>
-      <button data-tab="production" data-key="2" hidden title="Production: build units, factories and develop towns (2)"><i>🏭</i><span>Production</span></button>
-      <button data-opentree="1" data-key="3" id="railResearch" hidden title="Research: the tech tree (3)"><i>🔬</i><span>Research</span></button>
-      <button data-tab="diplomacy" data-key="4" hidden title="Diplomacy: war, peace, alliances and trades (4)"><i>🤝</i><span>Diplomacy</span></button>
+      <button data-tab="nation" data-key="1" hidden title="Nation: treasury, stockpiles, forces and last turn (1)"><i class="ti" style="--n:0"></i><span>Nation</span></button>
+      <button data-tab="production" data-key="2" hidden title="Production: build units, factories and develop towns (2)"><i class="ti" style="--n:1"></i><span>Production</span></button>
+      <button data-opentree="1" data-key="3" id="railResearch" hidden title="Research: the tech tree (3)"><i class="ti" style="--n:2"></i><span>Research</span></button>
+      <button data-tab="diplomacy" data-key="4" hidden title="Diplomacy: war, peace, alliances and trades (4)"><i class="ti" style="--n:3"></i><span>Diplomacy</span></button>
+      <button data-tab="journal" title="Campaign journals and stolen notes"><span class="story-art story-art--rail story-art--journal" aria-hidden="true"></span><span>Journal</span></button>
+      <button data-tab="government" title="Government, leaders and national priorities"><span class="story-art story-art--rail story-art--government" aria-hidden="true"></span><span>Government</span></button>
+      <button data-tab="news" title="Campaign newspaper, statements and private briefings"><span class="rail-clipping" aria-hidden="true"><b>NEWS</b><i></i></span><span>News</span><span id="newsBadge" class="news-badge" aria-label="Unread news" hidden>●</span></button>
       <hr id="railSplit" hidden>
-      <button data-tab="markers" data-key="5" title="Units, places and drawings on the map, with search (5)"><i>🗺</i><span>Map</span></button>
-      <button data-tab="add" data-key="6" title="Place new units, towns and other tokens (6)"><i>➕</i><span>Place</span></button>
-      <button data-tab="members" data-key="7" title="Factions and members (7)"><i>👥</i><span>People</span></button>
-      <button data-tab="log" data-key="8" title="Log of everything that happens, dice rolls (8)"><i>📜</i><span>Log</span></button>
-      <button data-tab="history" data-key="9" title="History of changes, with undo (9)"><i>🕘</i><span>History</span></button>
+      <button data-tab="markers" data-key="5" title="Units, places and drawings on the map, with search (5)"><i class="ti" style="--n:4"></i><span>Map</span></button>
+      <button data-tab="add" data-key="6" title="Place new units, towns and other tokens (6)"><i class="ti" style="--n:5"></i><span>Place</span></button>
+      <button data-tab="members" data-key="7" title="Factions and members (7)"><i class="ti" style="--n:6"></i><span>People</span></button>
+      <button data-tab="log" data-key="8" title="Log of everything that happens, dice rolls (8)"><i class="ti" style="--n:7"></i><span>Log</span></button>
+      <button data-tab="history" data-key="9" title="History of changes, with undo (9)"><i class="ti" style="--n:8"></i><span>History</span></button>
       <div class="railgap"></div>
-      <button data-tab="game" data-key="0" hidden title="Game master: turns, factions and the world (0)"><i>👑</i><span>GM</span></button>
-      <button id="railRules" hidden title="Game rules and campaign settings"><i>⚖</i><span>Rules</span></button>
+      <button data-tab="game" data-key="0" hidden title="Game master: turns, factions and the world (0)"><i class="ti" style="--n:9"></i><span>GM</span></button>
+      <button id="railRules" hidden title="Game rules and campaign settings"><i class="ti" style="--n:10"></i><span>Rules</span></button>
     </nav>
 
     <section id="main">
@@ -97,7 +119,7 @@
           <div id="phaseBanner" hidden></div>
           <div id="emptyMap">
             <div class="card">
-              <h3>No map image yet</h3>
+              <h3>No map yet</h3>
               <p class="muted" id="emptyMapText">The game master has not uploaded a map for this campaign.</p>
               <button id="btnEmptyUpload" class="small" hidden>Upload a map</button>
             </div>
@@ -108,9 +130,65 @@
 
         <!-- Panels opened from the rail -->
         <aside id="sidebar" hidden>
-          <header class="panelhead"><i id="panelIcon"></i><h2 id="panelTitle"></h2><button id="panelClose" type="button" title="Close (Esc)">×</button></header>
+          <header class="panelhead"><i id="panelIcon" class="ti"></i><h2 id="panelTitle"></h2><button id="panelClose" type="button" title="Close (Esc)">×</button></header>
 
           <div class="panel" data-panel="nation"><div id="nationPanel"></div></div>
+          <div class="panel story-panel" data-panel="journal">
+            <div class="story-intro"><span class="story-eyebrow">Campaign archive</span><h3>A nation's story</h3><p>Events, turning points and the notes behind them.</p></div>
+            <label>Nation<select id="journalFaction"></select></label>
+            <details id="journalCompose" class="box story-compose" hidden>
+              <summary id="journalFormTitle">Write an entry</summary>
+              <form id="journalForm">
+                <div class="grid2"><label>Date<input id="journalDate" type="date" required></label><label>Type<select id="journalKind"><option value="event">Event</option><option value="speech">Speech</option><option value="law">Law</option><option value="crisis">Crisis</option><option value="turning-point">Turning point</option><option value="note">Note</option></select></label></div>
+                <label>Title<input id="journalTitle" maxlength="160" required></label>
+                <label>Entry<textarea id="journalBody" rows="6" maxlength="12000" required></textarea></label>
+                <label>Order or message link (optional)<input id="journalLink" placeholder="/map/…" maxlength="500"></label>
+                <label class="inline"><input id="journalPrivate" type="checkbox"> Private note — visible to this nation and the GM; spies may steal a copy</label>
+                <div class="toolrow"><button type="submit" class="small">Save entry</button><button id="journalCancel" type="button" class="small secondary" hidden>Cancel edit</button></div>
+              </form>
+            </details>
+            <div id="journalStatus" class="hint" role="status" aria-live="polite"></div>
+            <div id="journalList"></div>
+            <div id="journalStolen"></div>
+          </div>
+          <div class="panel story-panel" data-panel="government">
+            <div class="story-intro"><span class="story-eyebrow">National dossier</span><h3>Character &amp; leadership</h3><p>The outlook, ambitions and people shaping this nation.</p></div>
+            <label>Nation<select id="governmentFaction"></select></label>
+            <div class="story-toolbar"><div id="governmentStatus" class="hint" role="status" aria-live="polite"></div><button id="governmentEdit" type="button" class="small secondary" aria-expanded="false" aria-controls="governmentForm" hidden>Edit profile</button></div>
+            <div id="governmentView"></div>
+            <form id="governmentForm" hidden>
+              <div class="box"><h4>National character</h4>
+                <label>Form of government<input id="governmentFormName" maxlength="120" placeholder="e.g. constitutional monarchy"></label>
+                <label>Character and outlook<textarea id="governmentCharacter" rows="5" maxlength="2000" placeholder="What does this nation believe about itself?"></textarea></label>
+              </div>
+              <div class="box"><h4>Broad priorities</h4><div id="governmentPriorities"></div><button type="button" id="governmentAddPriority" class="small secondary">＋ Priority</button></div>
+              <div class="box"><h4>Political factions</h4><div id="governmentFactions"></div><button type="button" id="governmentAddFaction" class="small secondary">＋ Political faction</button></div>
+              <div class="box"><h4>Key figures</h4><p class="hint">You can link a public statesman, general or diplomat placed on the map. Spies stay secret.</p><div id="governmentFigures"></div><button type="button" id="governmentAddFigure" class="small secondary">＋ Figure</button></div>
+              <div class="toolrow story-save"><button type="submit" class="small">Save profile</button><button type="button" id="governmentReload" class="small secondary">Cancel</button></div>
+            </form>
+          </div>
+          <div class="panel story-panel" data-panel="news">
+            <div class="news-masthead"><span class="story-eyebrow">Dispatches from the campaign</span><h3>The Campaign Gazette</h3><p>Headlines · Statements · Briefings</p></div>
+            <details id="newsCompose" class="box story-compose" hidden><summary>Publish a dispatch</summary>
+            <form id="newsForm">
+              <p class="hint" id="newsByline"></p>
+              <label id="newsSourceWrap" hidden>Publish as<select id="newsSource"></select></label>
+              <label>Type<select id="newsKind"><option value="statement">Public statement</option><option value="newspaper">Newspaper</option><option value="diplomatic-note">Diplomatic note</option><option value="report">Report</option><option value="announcement" data-gm-only>GM announcement</option><option value="world-event" data-gm-only>World event</option><option value="briefing" data-gm-only>GM briefing</option></select></label>
+              <label>Headline<input id="newsHeadline" maxlength="160" required></label>
+              <label>Public text <span class="hint">everyone in the campaign can read this</span><textarea id="newsPublic" rows="5" maxlength="8000"></textarea></label>
+              <details id="newsPrivateWrap"><summary>Add a private version</summary>
+                <label>Private text<textarea id="newsPrivate" rows="5" maxlength="8000" placeholder="Only the recipients below and the GM can read this"></textarea></label>
+                <label>Recipients<select id="newsAudience"><option value="leadership">Nation leadership (all its players)</option><option value="allies">This nation and its allies</option><option value="selected">Selected nations</option></select></label>
+                <div id="newsTargets" hidden></div>
+              </details>
+              <p class="hint">Recipients are fixed when you publish. A later alliance change will not expose an older briefing.</p>
+              <button type="submit" class="small">Publish</button>
+            </form>
+            </details>
+            <div id="newsStatus" class="hint" role="status" aria-live="polite"></div>
+            <div id="newsFeed"></div>
+            <button type="button" id="newsMore" class="small secondary" hidden>Older posts</button>
+          </div>
           <div class="panel" data-panel="production"><div id="prodPanel"></div></div>
           <div class="panel" data-panel="diplomacy">
             <div id="diploPanel"></div>
@@ -157,7 +235,7 @@
                   <h4><b id="turnInfo"></b></h4>
                   <p class="toolrow"><button id="btnUndoTurn" class="small secondary" title="Restore treasuries and the calendar from before the last end of turn">↶ Undo last turn</button><button id="btnTurnReports" class="small secondary" title="What every faction gained last turn">📋 Turn reports…</button></p>
                   <p class="toolrow" id="phaseRow" hidden><span id="phaseInfo" class="grow"></span><button type="button" id="btnPhaseMove" class="small secondary" title="Reopen movement (attacks close again)">🚩 Back to movement</button><button type="button" id="btnPhaseBattle" class="small" title="Close movement and open attacks">⚔ Start battle phase</button></p>
-                  <p class="hint">End the turn with the button at the bottom right of the map. With phased turns (⚖ Rules → Movement) it starts the battle phase first.</p>
+                  <p class="hint">End the turn with the button at the bottom right of the map. With phased turns (<i class="ti" style="--n:10"></i> Rules → Movement) it starts the battle phase first.</p>
                 </div>
                 <form id="turnForm" class="box">
                   <h4>Calendar and deadline</h4>
@@ -186,7 +264,7 @@
                   <div id="factionTable"></div>
                   <p class="toolrow"><button id="btnEditTreasuries" class="small secondary">Edit treasuries…</button><button type="button" id="btnCosts" class="small secondary">Unit costs…</button></p>
                 </div>
-                <p class="hint">Diplomacy approvals and relations are on the 🤝 Diplomacy panel. Factions and members are on 👥 People.</p>
+                <p class="hint">Diplomacy approvals and relations are on the <i class="ti" style="--n:3"></i> Diplomacy panel. Factions and members are on <i class="ti" style="--n:6"></i> People.</p>
               </div>
 
               <div data-gmpage="world" hidden>
@@ -246,6 +324,11 @@
                 </div>
               </div>
             </div>
+            <div class="box">
+              <h4>Map cleanup</h4>
+              <button type="button" id="btnClearDeadUnits" class="small danger">Clear all dead units…</button>
+              <p class="hint">Remove destroyed units and their remaining salvage. Living units stay on the map. Deletions are recorded in History.</p>
+            </div>
           </div>
 
           <div class="panel" data-panel="markers">
@@ -270,11 +353,6 @@
           </div>
           <div class="panel panel-fill" data-panel="log">
             <div id="logList" class="log"></div>
-            <form id="chatForm" class="row" style="margin-top:8px">
-              <input id="chatInput" placeholder="Say something, or /roll 2d6+3" maxlength="500" autocomplete="off">
-              <button type="button" id="btnRoll" class="small secondary" title="Roll dice">🎲</button>
-              <button type="submit" class="small">Send</button>
-            </form>
           </div>
           <div class="panel" data-panel="history">
             <p class="hint">Every change to markers and drawings. GMs can revert any entry; players can revert their own.</p>
@@ -315,9 +393,9 @@
         </div>
         <div id="nmlFields" hidden>
           <label class="inline"><input type="checkbox" id="shapeNoMansLand"> No Man's Land</label>
-          <p class="hint">Churned mud, shell holes, wire and the dead between the lines. Walking across it costs several times the distance (⚖ Rules → Movement); while the game is running only the GM can set this.</p>
+          <p class="hint">Churned mud, shell holes, wire and the dead between the lines. Walking across it costs several times the distance (<i class="ti" style="--n:10"></i> Rules → Movement); while the game is running only the GM can set this.</p>
         </div>
-        <p id="railFields" class="hint" hidden>Land units and heroes move several times faster along open track (⚖ Rules → Railways). Rails whose ends touch are joined; start or end a line on other track to branch off it. GM-only railways are plans: nothing runs on them.</p>
+        <p id="railFields" class="hint" hidden>Land units and heroes move several times faster along open track (<i class="ti" style="--n:10"></i> Rules → Railways). Rails whose ends touch are joined; start or end a line on other track to branch off it. GM-only railways are plans: nothing runs on them.</p>
         <div id="shapeGmFields">
           <label>Visible to nations <span class="hint">(comma separated, blank = everyone)</span><input id="shapeVisibleTo" list="nationList" autocomplete="off" placeholder="Everyone"></label>
           <label class="inline"><input type="checkbox" id="shapeAdminOnly"> GM only (hidden from players)</label>
@@ -328,16 +406,17 @@
   </div>
 
   <div id="techModal" class="modal">
-    <div class="card wide">
+    <div class="card wide research-card-modal">
       <button class="close" data-close>×</button>
       <h2>Research · <span id="techFaction"></span></h2>
-      <p class="hint" id="techHint"></p>
+      <div class="techhint" id="techHint"></div>
       <div class="row" style="flex-wrap:wrap;gap:6px">
         <input id="techFilter" type="search" placeholder="Filter techs…" autocomplete="off" style="width:200px;margin:0">
         <label class="inline" style="margin:0"><input type="checkbox" id="techHideDone"> Hide researched</label>
         <span id="techGmTools" hidden><button type="button" class="small secondary" id="btnTechEdit">Edit tree…</button> <button type="button" class="small secondary" id="btnTechReset">Reset to default tree</button></span>
       </div>
       <div id="techTree" class="techtree"></div>
+      <div id="techTooltip" class="tech-tooltip" role="tooltip" hidden></div>
     </div>
   </div>
 
@@ -360,12 +439,23 @@
   </div>
 
   <div id="buildModal" class="modal">
-    <div class="card">
+    <div class="card ug-modal">
       <button class="close" data-close>×</button>
-      <h2>Build at <span id="buildSite"></span></h2>
-      <p class="hint" id="buildHint"></p>
-      <input id="buildFilter" type="search" placeholder="Filter unit types…" autocomplete="off">
-      <div id="buildList" class="buildlist"></div>
+      <div class="ug-top">
+        <h2 id="buildTitle">Build</h2>
+        <label id="buildSiteWrap" class="ug-site">at <select id="buildSiteSel" aria-label="Build site"></select></label>
+        <div class="ug-sitefacts" id="buildHint"></div>
+      </div>
+      <div class="ug-tabs" id="buildTabs" role="tablist"></div>
+      <div class="ug-tools">
+        <input id="buildFilter" type="search" placeholder="Search units, roles…" autocomplete="off">
+        <select id="buildSort" aria-label="Sort"></select>
+        <label class="inline" id="buildOnlyWrap"><input type="checkbox" id="buildOnlyReady"> Can build now</label>
+      </div>
+      <div class="ug-body">
+        <div id="buildList" class="ug-list"></div>
+        <div id="buildDetail" class="ug-pane"></div>
+      </div>
     </div>
   </div>
 
@@ -422,7 +512,7 @@
         <label id="memNationCustomWrap" hidden>Custom nation name<input id="memNationCustom" maxlength="40"></label>
         <div class="grid2">
           <label>Colour<input id="memColor" type="color"></label>
-          <label>Role<select id="memRole"><option value="player">Player</option><option value="gm">Game master</option></select></label>
+          <label>Role<select id="memRole"><option value="player">Player</option><option value="gm">Game master</option><option value="observer">Observer (read only)</option></select></label>
         </div>
         <button type="submit">Save</button>
       </form>
@@ -454,24 +544,44 @@
   </div>
 
   <div id="chatDock">
+    <!-- Chat (docs/COMMS.md): channels and people down the left, the conversation on the right. -->
     <section id="chatWin" hidden>
       <header class="chat-top">
-        <div id="chatTabs"></div>
-        <button id="chatNew" type="button" class="small secondary" title="New private chat with players or the GM">＋</button>
-        <button id="chatMin" type="button" class="small secondary" title="Minimise">–</button>
+        <button id="chatSideBtn" type="button" class="icon" title="Channels and people">☰</button>
+        <div id="chatHead"></div>
+        <button id="chatLeave" type="button" class="small secondary" hidden title="Leave this chat">Leave</button>
+        <button id="chatBig" type="button" class="icon" title="Larger or smaller window">⤢</button>
+        <button id="chatMin" type="button" class="icon" title="Minimise (Esc)">–</button>
       </header>
-      <div id="chatNewPanel" hidden>
-        <div class="row"><strong class="grow">New private chat</strong><button id="chatNewGm" type="button" class="small" title="A private chat with the GM">Message the GM</button></div>
-        <div id="chatNewList"></div>
-        <input id="chatNewName" maxlength="60" placeholder="Name (optional), e.g. Entente talks">
-        <div class="row"><button id="chatNewStart" type="button" class="small">Start chat</button><button id="chatNewCancel" type="button" class="small secondary">Cancel</button></div>
+      <div class="chat-main">
+        <aside id="chatSide"></aside>
+        <section class="chat-pane">
+          <div id="chatTools" hidden>
+            <form id="chatSearchForm"><input id="chatSearch" aria-label="Search this conversation" placeholder="Search this chat…" maxlength="80"><button type="submit" class="small secondary">Search</button></form>
+            <div class="chat-tool-row"><button type="button" id="chatShowMentions" class="small secondary">@ Mentions</button><button type="button" id="chatShowPins" class="small secondary">Pins</button><select id="chatNotifyMode" aria-label="Notifications for this conversation"><option value="all">All notifications</option><option value="mentions">Mentions only</option><option value="muted">Muted</option></select></div>
+          </div>
+          <div id="chatPick" hidden></div>
+          <div id="chatReport" hidden></div>
+          <div id="chatFind" hidden><button type="button" id="chatFindClose" class="small secondary">Close results</button><div id="chatFindResults" aria-live="polite"></div><button type="button" id="chatFindMore" class="small secondary" hidden>More results</button></div>
+          <div id="chatBody" role="log" aria-label="Conversation messages" aria-live="off" tabindex="0"></div>
+          <button type="button" id="chatJump" class="small secondary" hidden>New messages ↓</button>
+          <div id="chatMenu" role="menu" aria-label="Message actions" hidden></div>
+          <div id="chatGifs" hidden>
+            <div class="ghead"><span id="chatGifHead">Trending GIFs</span><input id="chatGifQ" maxlength="80" placeholder="Search GIFs…"><button type="button" class="icon" id="chatGifClose" title="Close">×</button></div>
+            <div id="chatGifGrid"></div>
+            <div class="gfoot"><button type="button" class="small secondary" id="chatGifMore" hidden>More</button><a href="https://klipy.com" target="_blank" rel="noopener" class="hint">Powered by KLIPY</a></div>
+          </div>
+          <div id="chatTyping" role="status"></div>
+          <div id="chatOutgoing" aria-live="polite" hidden></div>
+          <div id="chatReply" hidden></div>
+          <div id="chatMentions" role="listbox" aria-label="Mention a participant" hidden></div>
+          <form id="chatSend"><button type="button" class="icon" id="chatGif" hidden title="Send a GIF">GIF</button><textarea id="chatMsg" aria-label="Chat message" aria-autocomplete="list" aria-controls="chatMentions" aria-expanded="false" rows="1" maxlength="1000" placeholder="Message…"></textarea><button type="submit" class="small" title="Send (Enter; Shift+Enter for a new line)">Send</button></form>
+          <p id="chatReadOnly" class="hint" hidden>Only the GM posts here. Use OOC or a private chat to reply.</p>
+        </section>
       </div>
-      <div id="chatBody"></div>
-      <form id="chatSend"><input id="chatMsg" maxlength="1000" autocomplete="off"><button type="submit" class="small">Send</button></form>
-      <p id="chatReadOnly" class="hint" hidden>Only the GM posts here. Use OOC or a private chat to reply.</p>
     </section>
     <div class="dockrow">
-      <button id="chatToggle" type="button" title="Chat: OOC, GM announcements and private chats">💬 Chat<span id="chatBadge" hidden></span></button>
+      <button id="chatToggle" type="button" title="Chat: OOC, GM announcements and private chats"><img id="chatIcon" src="/icons/mail-read.png" alt="">Chat<span id="chatBadge" hidden></span><span id="chatMentionBadge" hidden></span></button>
       <!-- Turn (Civ style): date and deadline, End turn for the GM, Ready up for players. -->
       <div id="turnWidget" hidden>
         <div class="tw-info">
@@ -489,27 +599,41 @@
   </div>
 
   <div id="tradeModal" class="modal">
-    <div class="card">
+    <!-- Offer a trade (docs/COMMS.md, Trades): my offer against theirs, a slider for every stock. -->
+    <div class="card trade">
       <button class="close" data-close>×</button>
       <h2>Offer a trade</h2>
       <form id="tradeForm">
-        <div class="grid2">
-          <label id="tradeFromWrap">From<select id="tradeFrom"></select></label>
-          <label>To<select id="tradeTo"></select></label>
+        <div class="tr-parties">
+          <div class="tr-party"><span class="tr-flag" id="tradeFromFlag"></span><div><div class="tr-who">My offer</div><span id="tradeFromWrap" hidden><select id="tradeFrom"></select></span><b id="tradeFromName"></b></div></div>
+          <div class="tr-arrows">⇄</div>
+          <div class="tr-party right"><span class="tr-flag" id="tradeToFlag"></span><div><div class="tr-who">Their offer</div><select id="tradeTo"></select></div></div>
         </div>
-        <div class="section">You give</div>
-        <div id="tradeGive" class="goods"></div>
-        <button type="button" id="tradeAddGive" class="small secondary">＋ Add</button>
-        <div class="section">You ask for</div>
-        <div id="tradeTake" class="goods"></div>
-        <button type="button" id="tradeAddTake" class="small secondary">＋ Add</button>
-        <div class="section">When</div>
-        <label class="inline"><input type="radio" name="tradeMode" id="tradeOnce" checked> Once, as soon as they accept</label>
-        <label class="inline"><input type="radio" name="tradeMode" id="tradeRecurring"> Every turn (delivered at End turn)</label>
-        <label id="tradeTurnsWrap" hidden>For how many turns<input id="tradeTurns" type="number" min="1" max="100" value="4"></label>
-        <label>Note <span class="hint">(optional)</span><input id="tradeNote" maxlength="200" placeholder="Coal for the Grand Fleet…"></label>
-        <p class="hint">Both halves change hands together or not at all: a delivery is skipped when either side is short. War cancels the trade.</p>
-        <button type="submit">Send offer</button>
+        <div class="tr-summary"><div id="tradeGiveSum"></div><div id="tradeTakeSum"></div></div>
+        <div class="tr-cols">
+          <div class="tr-col" id="tradeGive"></div>
+          <div class="tr-col" id="tradeTake"></div>
+        </div>
+        <div class="tr-foot">
+          <div class="tr-when">
+            <label class="inline"><input type="radio" name="tradeMode" id="tradeOnce" checked> Once, as soon as they accept</label>
+            <label class="inline"><input type="radio" name="tradeMode" id="tradeRecurring"> Every turn, for <input id="tradeTurns" type="number" min="1" max="100" value="4"> turns</label>
+          </div>
+          <input id="tradeNote" maxlength="200" placeholder="A note with the offer (optional): coal for the Grand Fleet…">
+          <div class="tr-send"><span class="hint">Both halves change hands together or not at all: a delivery is skipped when either side is short. War cancels the trade.</span><button type="submit">Send offer</button></div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="railRepairModal" class="modal">
+    <div class="card">
+      <button class="close" data-close>×</button>
+      <h2>Repair a railway</h2>
+      <p id="railRepairIntro" class="muted"></p>
+      <form id="railRepairForm">
+        <label>Broken link<select id="railRepairTarget"></select></label>
+        <button type="submit">🛠 Repair link</button>
       </form>
     </div>
   </div>
@@ -535,6 +659,7 @@
         <nav class="setnav" id="setNav">
           <div class="navhead">Campaign</div>
           <button type="button" data-page="general" class="on">General</button>
+          <button type="button" data-page="discord">Discord</button>
           <button type="button" data-page="combat">Combat</button>
           <button type="button" data-page="map">Map</button>
           <div class="navhead">Game rules</div>
@@ -544,6 +669,7 @@
           <button type="button" data-page="r-research">Research</button>
           <button type="button" data-page="r-territory">Territory</button>
           <button type="button" data-page="r-supply">Supply &amp; support</button>
+          <button type="button" data-page="r-goods">Goods &amp; unrest</button>
           <button type="button" data-page="r-rail">Railways</button>
           <button type="button" data-page="r-heroes">Heroes</button>
           <button type="button" data-page="r-trench">Trenches</button>
@@ -573,8 +699,8 @@
                 <label>Extra loss per margin point<input id="setMarginMult" type="number" min="0" max="20" step="any" value="2"></label>
                 <label>Winner's loss %<input id="setWinnerLoss" type="number" min="0" max="100" value="5"></label>
               </div>
-              <p class="hint">Each side rolls the die and adds attack or defend. The loser loses base + margin × extra; the winner loses the winner's loss. Ties cost both half the base.</p>
-              <p><button type="button" class="secondary small" id="btnUnitStats">Unit stats table…</button> <span class="hint">Default attack / defend / AP / range / movement per unit type, with +/- steppers.</span></p>
+              <p class="hint">Each side rolls the die and adds attack or defend. The loser loses base + margin × extra; the winner loses the winner's loss. Ties cost both half the base. A side only causes strength loss when its penetration meets or exceeds the target's Armour Class.</p>
+              <p><button type="button" class="secondary small" id="btnUnitStats">Unit stats table…</button> <span class="hint">Default attack, defend, AP, range, movement, Armour Class and penetration per unit type.</span></p>
               <button type="submit">Save</button>
             </section>
           </form>
@@ -584,10 +710,31 @@
             <div class="section">Danger zone</div>
             <button id="btnDeleteLobby" class="danger">Delete campaign</button>
           </section>
+          <section data-page="discord" hidden>
+            <h3>Discord notifications</h3>
+            <p class="hint">Send campaign updates to one Discord channel. Create a webhook in that channel's settings, then paste its URL here. Only GMs can manage it.</p>
+            <form id="discordWebhookForm">
+              <label>Webhook URL<input id="discordWebhookUrl" type="password" maxlength="500" autocomplete="off" spellcheck="false" placeholder="https://discord.com/api/webhooks/…"></label>
+              <p class="hint">The saved URL is kept on the server and is never shown here again. Paste a new URL to replace it.</p>
+              <button type="submit">Save webhook</button>
+            </form>
+            <p id="discordWebhookStatus" class="hint" aria-live="polite">Checking webhook…</p>
+            <div class="toolrow"><button type="button" id="btnDiscordTest" class="small secondary" hidden>Send test message</button><button type="button" id="btnDiscordClear" class="small danger" hidden>Remove webhook</button></div>
+            <div class="section">Messages sent</div>
+            <p>Turn ending · Movement phase beginning · Battle phase beginning · GM announcements · War and peace declarations</p>
+          </section>
           <section data-page="map" hidden>
             <h3>Map</h3>
             <p class="hint" id="mapInfo"></p>
-            <div class="section">Upload an image</div>
+            <div class="section">Import an Azgaar map</div>
+            <form id="azgaarForm" class="row">
+              <input type="file" id="azgaarFile" accept=".json,application/json" required>
+              <button type="submit" class="secondary">Import JSON</button>
+            </form>
+            <p class="hint" id="azgaarImportHint">Upload Azgaar's Full JSON export. It imports the map, nations, borders and settlements into an empty campaign.</p>
+            <p class="hint" id="azgaarLockedHint" hidden>To use a different map, create a new campaign.</p>
+            <div id="otherMapForms">
+              <div class="section">Upload an image</div>
             <form id="mapForm" class="row">
               <input type="file" id="mapFile" accept="image/png,image/jpeg,image/webp,image/gif" required>
               <button type="submit" class="secondary">Upload image</button>
@@ -619,10 +766,11 @@
               </div>
               <label class="inline"><input type="checkbox" id="importHideLayer" checked> Hide the built-in border layer afterwards</label>
             </div>
+            </div>
           </section>
 
           <form id="rulesForm">
-            <p class="hint rules-off" id="rulesOffHint" hidden>Game mode is off: these rules take effect once the GM switches it on (👑 GM panel).</p>
+            <p class="hint rules-off" id="rulesOffHint" hidden>Game mode is off: these rules take effect once the GM switches it on (<i class="ti" style="--n:9"></i> GM panel).</p>
             <section data-page="r-move" hidden>
               <h3>Movement</h3>
               <div class="grid2">
@@ -675,12 +823,12 @@
               <h3>Production</h3>
               <div class="grid3"><label>Capital builds at once<input id="ruleCapCapital" type="number" min="0" max="20" step="1"></label><label>City builds<input id="ruleCapCity" type="number" min="0" max="20" step="1"></label><label>Village builds<input id="ruleCapVillage" type="number" min="0" max="20" step="1"></label></div>
               <div class="grid2"><label>Factory range from a city/town<input id="ruleFactoryRange" type="number" step="any" min="1"></label><label>Coastal city: sea within<input id="ruleCoastal" type="number" step="any" min="1"></label></div>
-              <p class="hint">Unit costs and build times: 👑 GM panel → Nations → Unit costs.</p>
+              <p class="hint">Unit costs and build times: <i class="ti" style="--n:9"></i> GM panel → Nations → Unit costs.</p>
             </section>
             <section data-page="r-research" hidden>
               <h3>Research</h3>
               <div class="grid2"><label>Research lead <span class="hint">(years ahead of the date)</span><input id="ruleResearchLead" type="number" step="1" min="0"></label><label>Start year <span class="hint">(techs of this year or earlier are free)</span><input id="ruleStartYear" type="number" step="1"></label></div>
-              <p class="hint">Edit the tree itself from 🔬 Research → Edit tree.</p>
+              <p class="hint">Edit the tree itself from <i class="ti" style="--n:2"></i> Research → Edit tree.</p>
             </section>
             <section data-page="r-territory" hidden>
               <h3>Territory</h3>
@@ -712,10 +860,31 @@
                 </tbody>
               </table>
             </section>
+            <section data-page="r-goods" hidden>
+              <h3>Goods &amp; unrest</h3>
+              <label class="inline"><input type="checkbox" data-rule="goodsEnabled"> Towns make and store consumer and military goods. Supply draws on the military goods (Supply Columns and convoys carry a pool); towns short of consumer goods grow restless</label>
+              <div class="section">What a town makes a turn</div>
+              <div class="grid3"><label>Capital<input data-rule="goodsBase.capital" type="number" step="any" min="0"></label><label>City<input data-rule="goodsBase.city" type="number" step="any" min="0"></label><label>Village<input data-rule="goodsBase.village" type="number" step="any" min="0"></label></div>
+              <div class="grid3"><label>Per point of industry<input data-rule="goodsPerIndustry" type="number" step="any" min="0"></label><label>Per development level<input data-rule="goodsPerDev" type="number" step="any" min="0"></label><label>Factory goods, per level<input data-rule="factoryOutput" type="number" step="any" min="0"></label></div>
+              <div class="grid3"><label>War economy until a nation sets one (%)<input data-rule="warEconomy" type="number" step="any" min="0" max="100"></label><label>Towns consume <span class="hint">(share of their output)</span><input data-rule="consumerNeed" type="number" step="any" min="0"></label><label>Stores hold <span class="hint">(turns of output)</span><input data-rule="goodsStoreTurns" type="number" step="any" min="0"></label></div>
+              <div class="grid2"><label>Towns share their stores within <span class="hint">(further apart: by railway)</span><input data-rule="goodsLinkKm" type="number" step="any" min="0"></label><label>Starting stores <span class="hint">(turns of half the output)</span><input data-rule="goodsStartTurns" type="number" step="any" min="0"></label></div>
+              <div class="section">Supplies</div>
+              <div class="grid3"><label>A supplied unit draws a turn<input data-rule="unitDraw" type="number" step="any" min="0"></label><label>A Supply Column carries<input data-rule="columnPool" type="number" step="any" min="0"></label><label>A convoy carries<input data-rule="convoyPool" type="number" step="any" min="0"></label></div>
+              <div class="grid2"><label>Convoys refill at a town of theirs within<input data-rule="convoyLoadKm" type="number" step="any" min="0"></label><label>Salvage a destroyed column within<input data-rule="salvageKm" type="number" step="any" min="0"></label></div>
+              <div class="section">Unrest</div>
+              <label class="inline"><input type="checkbox" data-rule="rebellions"> Towns left in critical unrest rise in revolt: "&lt;Nation&gt; Rebels" take the town and the provinces around it</label>
+              <div class="grid3"><label>Rises a turn with no consumer goods<input data-rule="unrestRise" type="number" step="any" min="0"></label><label>Falls a turn with needs met<input data-rule="unrestFall" type="number" step="any" min="0"></label><label>Critical from<input data-rule="unrestCritical" type="number" step="any" min="0" max="100"></label></div>
+              <div class="grid2"><label>End turns to put a critical town right<input data-rule="unrestGrace" type="number" step="any" min="0"></label><label>Rebels take provinces within<input data-rule="rebelRadiusKm" type="number" step="any" min="0"></label></div>
+              <div class="grid3"><label>Provinces: capital<input data-rule="rebelProvinces.capital" type="number" step="any" min="0"></label><label>City<input data-rule="rebelProvinces.city" type="number" step="any" min="0"></label><label>Village<input data-rule="rebelProvinces.village" type="number" step="any" min="0"></label></div>
+              <div class="grid3"><label>Militia raised: capital<input data-rule="rebelMilitia.capital" type="number" step="any" min="0"></label><label>City<input data-rule="rebelMilitia.city" type="number" step="any" min="0"></label><label>Village<input data-rule="rebelMilitia.village" type="number" step="any" min="0"></label></div>
+            </section>
             <section data-page="r-rail" hidden>
               <h3>Railways</h3>
               <div class="grid3"><label>Speed on rails (×)<input id="ruleRailSpeed" type="number" step="any" min="1"></label><label>Cut closes (each side)<input id="ruleRailCut" type="number" step="any" min="1"></label><label>Line's defence<input id="ruleRailDefence" type="number" step="any"></label></div>
               <div class="grid3"><label>Guards within<input id="ruleRailGuard" type="number" step="any" min="0"></label><label>Repair within<input id="ruleRailRepair" type="number" step="any" min="0"></label><label>Join line ends within <span class="hint">(crossings always join)</span><input id="ruleRailJoin" type="number" step="any" min="0"></label></div>
+              <div class="section">Building</div>
+              <p class="hint">While the game runs players only plan railways. Engineers, pioneers and railway troops lay a section of a planned line each turn, finished at End turn.</p>
+              <div class="grid3"><label>Section a turn<input data-rule="railBuildKm" type="number" step="any" min="0"></label><label>Iron a section<input data-rule="railBuildIron" type="number" step="any" min="0"></label><label>Timber a section<input data-rule="railBuildTimber" type="number" step="any" min="0"></label></div>
             </section>
             <section data-page="r-heroes" hidden>
               <h3>Heroes</h3>
@@ -766,8 +935,14 @@
   <script src="/js/units.js"></script>
   <script src="/js/naming.js"></script>
   <script src="/js/game-data.js"></script>
+  <script src="/js/matchups.js"></script>
+  <script src="/js/unit-guide.js"></script>
   <script src="/js/heroes.js"></script>
   <script src="/js/game-ui.js"></script>
+  <script src="/js/treaties-ui.js"></script>
+  <script src="/js/journal.js"></script>
+  <script src="/js/government.js"></script>
+  <script src="/js/news.js"></script>
   <script src="/js/research-ui.js"></script>
   <script src="/js/cost-editor.js"></script>
   <script src="/js/stats-editor.js"></script>
@@ -779,11 +954,12 @@
   <script src="/js/resource-art.js"></script>
   <script src="/js/nomansland.js"></script>
   <script src="/js/sound.js"></script>
+  <script src="/js/music.js"></script>
   <script src="/js/railnet.js"></script>
   <script src="/js/reach.js"></script>
   <script src="/js/rail.js"></script>
+  <script src="/js/chat-model.js"></script>
   <script src="/js/comms.js"></script>
-  <script src="/js/matchups.js"></script>
   <script src="/js/skirmish.js"></script>
   <script src="/js/map-renderer.js"></script>
   <script src="/js/map.js"></script>

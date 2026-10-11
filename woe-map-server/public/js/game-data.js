@@ -31,6 +31,35 @@ const GameData = (() => {
   ];
   const FACTORY_ICON = 'machine_parts.png';
 
+  // Goods made and stored in towns (docs/ECONOMY.md, Goods and unrest): consumer goods keep the towns content, military goods
+  // keep the armies supplied. Not map resources: they live in the towns' stores, not in the national stockpile.
+  const GOODS = [
+    { key: 'consumer', name: 'Consumer goods', short: 'consumer goods', glyph: 'CG', color: '#c0904d', icon: 'soft_furnishings.png' },
+    { key: 'military', name: 'Military goods', short: 'military goods', glyph: 'MG', color: '#6b7a3a', icon: 'ammo_boxes.png' },
+  ];
+  const GOODS_KEYS = GOODS.map(g => g.key);
+  /**
+   * What a town turns out each turn, consumer and military goods together: goodsBase by size, plus goodsPerIndustry for
+   * each point of its industry (the 1914 cities carry 1 to 6) and goodsPerDev for each development level.
+   */
+  function townOutput(town, settings) {
+    const s = settings || DEFAULT_SETTINGS, d = town?.data || {};
+    const base = Number((s.goodsBase || {})[d.size] ?? (s.goodsBase || {}).village ?? 1) || 0;
+    return Math.round((base + (Number(s.goodsPerIndustry) || 0) * (Number(d.industry) || 0) + (Number(s.goodsPerDev) || 0) * (Number(d.developed) || 0)) * 10) / 10;
+  }
+  /** A factory's total goods per turn, before the nation's war economy splits them. */
+  function factoryOutput(factory, settings) {
+    const s = settings || DEFAULT_SETTINGS;
+    return Math.max(1, Number(factory?.data?.industry) || 1) * Number(s.factoryOutput ?? 10);
+  }
+  /** The war economy share (0–100 %) of a nation's town and factory output that goes to military goods. */
+  const warEconomyOf = (state, settings) => Math.max(0, Math.min(100, Number(state?.policy?.warEconomy ?? (settings || DEFAULT_SETTINGS).warEconomy ?? 30)));
+  /** A Supply Column's, convoy's or fort's pool of supplies when full (null for other units). */
+  function poolMax(typeId, settings) {
+    const s = settings || DEFAULT_SETTINGS;
+    return typeId === 'supply' ? Number(s.columnPool ?? 50) : typeId === 'transport' ? Number(s.convoyPool ?? 100) : typeId === 'fortress' ? Number(s.fortPool ?? 200) : null;
+  }
+
   const TURN_STEPS = { week: 'Week', fortnight: 'Fortnight', month: 'Month', season: 'Season' };
 
   const DEFAULT_SETTINGS = {
@@ -114,6 +143,38 @@ const GameData = (() => {
     fogOfWar: false,          // fog of war (docs/FOG-OF-WAR.md): other sides' units are seen only within sight
     subSpotKm: 20,            // fog of war: submarines are spotted only this close to a vision source
     // Fog of war: how far each unit sees (km), by type where listed, else by category; places by size; heroes.
+    // Goods and unrest (docs/ECONOMY.md). Balanced against the 1914 powers' bundled cities (industry 1–6): Germany's 21
+    // cities turn out about 290 goods a turn, France's 12 about 145; at a 50 % war economy that is 143 and 72 military
+    // goods against field armies of 98 and 88 divisions drawing one supply each.
+    goodsEnabled: true,       // goods: towns make and store consumer and military goods; supply draws on them
+    goodsBase: { capital: 6, city: 2, village: 1 },   // goods: output a turn by size…
+    goodsPerIndustry: 4,      // …plus this per point of the town's industry…
+    goodsPerDev: 2,           // …and this per development level
+    factoryOutput: 10,        // goods: total goods a factory makes a turn per industry level, split by war economy
+    warEconomy: 30,           // goods: share (%) of town and factory output that is military goods, until a nation sets its own
+    consumerNeed: 0.5,        // goods: consumer goods a town consumes a turn, as a share of its output
+    goodsStoreTurns: 12,      // goods: a town stores at most this many turns of its output of each good
+    goodsStartTurns: 4,       // goods: a town's stores when first counted: this many turns of half its output, of each good
+    goodsLinkKm: 500,         // goods: a nation's towns this close share their stores (not across enemy ground); further, by railway
+    unitDraw: 1,              // goods: supplies a supplied land unit draws a turn (from its town, column or convoy)
+    columnPool: 50,           // goods: supplies a Supply Column carries for itself and the units it supplies
+    convoyPool: 100,          // goods: supplies a convoy carries
+    convoyLoadKm: 50,         // goods: a convoy this close to a town of its nation refills from it at End turn
+    salvageKm: 30,            // goods: a Supply Column this close to a destroyed one can take what it carried
+    rebellions: true,         // unrest: towns in critical unrest for too long rise in revolt
+    unrestRise: 25,           // unrest: points a turn when a town gets none of its consumer goods (less when partly covered)
+    unrestFall: 10,           // unrest: points a turn it falls when its needs are met
+    unrestCritical: 75,       // unrest: critical from here…
+    unrestGrace: 3,           // …and the town revolts after this many more End turns still critical
+    rebelProvinces: { capital: 6, city: 3, village: 1 },   // rebellion: provinces that go over with the town
+    rebelMilitia: { capital: 4, city: 2, village: 1 },     // rebellion: militia raised round the town
+    rebelRadiusKm: 200,       // rebellion: provinces this close (the nearest first)
+    fortPool: 200,            // forts: supplies a fort stores, for the units round it and the columns it feeds (refilled from its nation's towns)
+    fortLinkKm: 200,          // forts: a fort feeds Supply Columns this close, as a village does
+    fortRifleRange: 1,        // forts: the garrison's rifles reach this many range points (kmPerRange each); the guns reach the fort's range
+    railBuildKm: 15,          // railways: track engineers (and railway troops) lay a turn on a planned line
+    railBuildIron: 5,         // railways: iron a section costs…
+    railBuildTimber: 5,       // …and timber
     vision: { Infantry: 50, Support: 50, Artillery: 30, Emplacements: 40, 'Mounted & mobile': 80, Naval: 80, Air: 150,
       reconnaissance: 120, tank: 40, armouredtrain: 40, submarine: 30, reconair: 250, airship: 250, balloon: 100,
       hero: 50, capital: 100, city: 60, village: 30 },
@@ -339,7 +400,7 @@ const GameData = (() => {
     return out;
   }
 
-  return { RESOURCES, RESOURCE_KEYS, byKey, iconUrl, POOLS, FACTORY_ICON, TURN_STEPS, DEFAULT_SETTINGS, OIL_CATEGORIES, OIL_TYPES, fuelOf, stepDate, fmtDate, mergeSettings, deadlineInfo,
+  return { RESOURCES, RESOURCE_KEYS, byKey, iconUrl, POOLS, FACTORY_ICON, GOODS, GOODS_KEYS, townOutput, factoryOutput, warEconomyOf, poolMax, TURN_STEPS, DEFAULT_SETTINGS, OIL_CATEGORIES, OIL_TYPES, fuelOf, stepDate, fmtDate, mergeSettings, deadlineInfo,
     COST_KEYS, DEFAULT_COSTS, costFor, costLabel, PROJECTS, projectFor, projectLevel, projectCost, devSlots, RESOURCE_WORKS, worksName, resourceYield };
 })();
 

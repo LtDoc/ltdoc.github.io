@@ -1,7 +1,9 @@
 'use strict';
 /**
  * Production (docs/GAME-DESIGN.md §6.4): factions queue units at the cities and factories they own and pay
- * the cost up front; End turn advances every build and spawns finished units beside their site. Players can
+ * the cost up front; End turn advances every build and spawns finished units beside their site. Emplacements (forts,
+ * batteries, bunkers) are built in a city like a unit but, finished, wait in the queue (`ready`) until the player places
+ * them on their own ground (POST /game/production/:qid/place). Players can
  * also build factories near a city or town they own, and run long-term projects (docs/ECONOMY.md): upgrading a
  * factory's level, developing a town or improving a resource node's works. Routes live in routes/game.js.
  */
@@ -52,8 +54,8 @@ function pay(state, cost, sign = -1) {
  * item = { id, typeId, siteId, turnsLeft, turns, cost, x?, y? } — x/y only for factories.
  */
 /** A type's cost for this faction: campaign table, then tech effects (multipliers, removed resources, build time). */
-function costWith(g, fx, typeId) {
-  const t = UnitTypes.LIST.find(u => u.id === typeId);
+function costWith(g, fx, typeId, packId = UnitTypes.DEFAULT_PACK) {
+  const t = UnitTypes.forPack(packId)?.LIST.find(u => u.id === typeId);
   return research.applyCost(fx, typeId, t ? t.cat : 'Buildings', GameData.costFor(typeId, g.settings.unitCosts));
 }
 
@@ -68,7 +70,7 @@ function projectCostFor(g, fx, marker) {
 
 function queue(lobby, g, faction, state, markers, { typeId, siteId, x, y }, fx) {
   const s = g.settings;
-  let cost = costWith(g, fx, typeId);
+  let cost = costWith(g, fx, typeId, lobby.unit_pack);
   const queueOf = state.production || [];
   let item;
   if (GameData.PROJECTS[typeId]) {
@@ -94,16 +96,18 @@ function queue(lobby, g, faction, state, markers, { typeId, siteId, x, y }, fx) 
     }
     item = { typeId, siteId: anchor.id, siteName: anchor.name, x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 };
   } else {
-    const t = UnitTypes.LIST.find(u => u.id === typeId);
+    const t = UnitTypes.forPack(lobby.unit_pack)?.LIST.find(u => u.id === typeId);
     if (!t) throw new Error('Unknown unit type');
-    if (fx && !research.canBuild(fx, typeId)) throw new Error(`${t.unit} has not been researched yet`);
+    const licensed = fx && !research.canBuild(fx, typeId) ? require('./treaties').license(lobby.id, faction.id, typeId) : null;
+    if (fx && !research.canBuild(fx, typeId) && !licensed) throw new Error(`${t.unit} has not been researched yet`);
     const site = sites(lobby, g, faction, markers, fx).find(st => st.id === Number(siteId));
     if (!site) throw new Error('Pick one of your cities or factories');
-    const inUse = queueOf.filter(q => q.siteId === site.id && q.typeId !== 'factory').length;
+    const inUse = queueOf.filter(q => q.siteId === site.id && q.typeId !== 'factory' && !q.ready).length;
     if (inUse >= site.capacity) throw new Error(`${site.name} is already building ${inUse} unit${inUse === 1 ? '' : 's'} (capacity ${site.capacity})`);
     if (t.cat === 'Naval' && geo.isEarth(lobby) && !territory.isCoastal(lobby, site.x, site.y, num(s.coastalKm, 30))) throw new Error(`${site.name} is not on the coast: ships need a coastal city`);
     if (t.cat === 'Air' && site.industry < 2) throw new Error(`${site.name} needs industry level 2 to build aircraft`);
     item = { typeId, siteId: site.id, siteName: site.name };
+    if (licensed) item.license = { treatyId: licensed.t.id, clauseId: licensed.c.id };
   }
   const short = affordable(state, cost);
   if (short.length) throw new Error(`Cannot afford it: short of ${short.join(', ')}`);
@@ -134,6 +138,7 @@ function cancel(state, itemId) {
 function advance(state, turn) {
   const done = [], left = [];
   for (const item of state.production || []) {
+    if (item.ready) { left.push(item); continue; }   // a finished emplacement waiting to be placed
     if (item.queuedTurn !== undefined && item.queuedTurn >= turn) { left.push(item); continue; }
     const next = { ...item, turnsLeft: item.turnsLeft - 1 };
     if (next.turnsLeft <= 0) done.push(next); else left.push(next);

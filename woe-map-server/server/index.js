@@ -22,6 +22,7 @@ app.use((req, res, next) => {
 
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/lobbies', require('./routes/lobbies'));
+app.use('/api/klipy', require('./routes/klipy'));   // GIFs for the chat (docs/COMMS.md)
 
 app.use('/uploads', express.static(config.uploadsDir, { fallthrough: false, immutable: true, maxAge: '30d', index: false }));
 
@@ -69,7 +70,8 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     const msg = err.code === 'LIMIT_FILE_SIZE'
-      ? (req.path.endsWith('/map') ? `File too large (max ${Math.round(config.maxUploadBytes / 1048576)} MB)` : 'File too large (max 5 MB)')
+      ? (req.path.endsWith('/map/azgaar') ? 'File too large (max 30 MB)'
+        : req.path.endsWith('/map') ? `File too large (max ${Math.round(config.maxUploadBytes / 1048576)} MB)` : 'File too large (max 5 MB)')
       : err.message;
     return res.status(400).json({ error: msg });
   }

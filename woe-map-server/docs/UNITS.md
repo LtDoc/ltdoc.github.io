@@ -13,11 +13,74 @@ up to 3/3 at once. Cut off, it lives on what it carries, using one at each End t
 meanwhile: room for a breakthrough or a wide flank to outrun its columns for a while. Only at **0/3** is it **out of
 supply** (below). Ships, aircraft, heroes and **emplacements** do not need supply.
 
+**Supplies are finite** (docs/ECONOMY.md, Goods and unrest; ⚖ Rules → Goods & unrest):
+- **Who draws:** at End turn every supplied land unit draws 1 supply from its source.
+- **Towns:** a town supplies only while it holds military goods, and they come out of its network's stores.
+- **Supply Columns** carry **50** (their panel: "Supplies 32 / 50"). They supply their units from that pool, linked
+  or not, and draw 1 for themselves too. At End turn they refill from the town their link starts from (directly,
+  through other columns, a railhead or a convoy); if that network's stores are empty they cannot.
+- **Convoys** carry **100** and refill at a town of their nation within 50 km.
+- **Running dry:** a column or convoy with nothing left supplies no one. A unit whose source runs dry at End turn lives
+  on its own 3 turns of supplies like a unit cut off, and the turn report names columns that could not fill up.
+- **Load and unload:** in its own nation's town a column can **📦 Load** from the stores or **📦 Unload** into them.
+- **Salvage:** a destroyed column keeps what it carried until another column within 30 km **📦 Salvages** it: an
+  enemy's spoils, or your own losses recovered.
+
+With goods switched off, supply is endless, as before.
+
+Units at zero strength are inactive wrecks: they skip supply searches, movement/range calculations and support
+auras, and show no out-of-supply badge or supply status. Their existing stores remain available for salvage.
+Players cannot move wrecks; the GM can reposition them without movement checks. Restoring positive strength
+returns them to the normal systems. Regression checks: `npm run test:dead-units`.
+
+The GM tab's **Map cleanup → Clear all dead units…** removes unit markers at zero strength or below after
+confirming the count. It includes hidden and locked wrecks and their remaining salvage, preserves living units,
+and records each deletion in History for individual restoration. It works with game mode on or off.
+
 ## Emplacements
 
+Coastal batteries, MG bunkers and AA emplacements follow the owner of the territory beneath them. They do not hold
+or capture ground: when their province falls, their nation, colour and player control transfer to its new owner,
+with their current strength and stores intact. This also applies to GM border changes and maps without provinces.
+Forts (Fortress guns) remain defenders: their ground cannot be captured until they and any other defenders are defeated.
+
 Fixed works, in their own category: they never move (movement 0), need no supply (never cut off, no attrition) and
-count as **entrenched** for every matchup. They are drawn in grey concrete pits, the MG bunker and fortress behind
-wire.
+count as **entrenched** for every matchup. The MG bunker is drawn in grey concrete pits behind wire; the others have
+their own pictures:
+
+- **Fortress guns** are the fort itself (`public/assets/fort.webp`, from the user's Fort.webp): a star fort drawn on the
+  unit's token, north up, with a garrison of ten of the nation's riflemen and no spotter balloon.
+  - **Its guns** are a mortar crew in the yard, just above the unit's counter (the army's mortar team figure, else the
+    mortar from the gun sheet with two of its men). The fort's shells leave from it.
+  - **It never moves:** it has no movement, it does not advance on ground it clears, and its pieces stay on the token
+    while it fires.
+  - **Two attacks in one:**
+    - **Out of rifle range** (beyond 50 km, ⚖ Rules → `fortRifleRange`), only its guns fire: an ordinary artillery
+      attack with the fort's stats, up to its range (4, 200 km).
+    - **Within rifle range,** the garrison fires a volley from the walls as well, in the same action. It is a second roll
+      as infantry (the Infantry type's attack and tech, the fort's general and support, the infantry matchup) against
+      the same defence, with the usual losses both ways. The log has two lines, the second "🏰 …'s garrison fired on…".
+  - **At rest:** six men walk the wall walk round the rampart and out to the bastions, stopping to look out, and four
+    stroll about the yard.
+  - **In a fight:** the men on the walls run the shorter way round to the ramparts facing the enemy. They fire only
+    when the enemy is within rifle range: when the fort is attacked (unless shelled from afar), or when its own attack
+    brought the volley. Otherwise they watch while the mortar works. The yard men run about.
+  - **Losses:** men fall one per 10 % lost and lie where they fell. A destroyed fort goes grey.
+  - **A supply node,** like a town (Supply, above). It stores **200** supplies (`fortPool`). Land units within 30 km
+    draw on it, and it feeds Supply Columns within **200 km** (`fortLinkKm`), which refill from it. At End turn it
+    restocks from the stores of the nearest town of its nation within 500 km; if there is none, the turn report says it
+    is cut off. Columns can Load and Unload at a fort as at a town. With goods off, a fort supplies without limit.
+- **Coastal batteries** are a single twin-gun turret, with no crew, works or spotter balloon. It turns on the centre of
+  its ring (90° a second) to bear on its target, fires once it bears, and goes grey when destroyed.
+- **AA emplacements** are a single twin AA gun in its own sandbags and wire, with ammunition beside it, and no crew,
+  pits or spotter balloon. The picture is one of three (from the user's AA emplacement art), the same for a unit
+  every time. It does not turn, since it aims at the sky; it is mirrored so its barrels lean towards the enemy's side.
+  - Its barrels fire in turn, two shots a moment apart, then a pause: at planes and balloons every 1.5–3 s, flak
+    bursting among them; at troops every 2–5 s, over open sights; when shelling from range, its shells leave from the
+    barrel next in turn.
+  - It goes grey when destroyed.
+  - Atlas: `public/assets/aa.png` and `aa.json`, cut by `node scripts/build-aa.js "rob assets/AAEmplacement.png"`.
+    The script holds where each gun stands and its barrel tips, measured on the art.
 
 | Type | Attack / defend / range | Notes |
 |---|---|---|
@@ -51,7 +114,7 @@ railway guns get +1 against any emplacement.
   move for the turn. If the convoy is **sunk or removed, everyone aboard goes down with it**. Rules: ⚖ Rules →
   Supply & support → Troops at sea (`convoyCapacity`, `convoyBoardKm`, `convoyLandKm`).
 - **Allies share convoys, by request.** Whichever side acts asks the other, and nothing happens until it agrees
-  (🔔 notifications: **Allow** / **Refuse**; the asker can **Withdraw**):
+  (✉ notifications: **Allow** / **Refuse**; the asker can **Withdraw**):
   - a convoy's nation embarking an ally's units asks that ally; an ally's player boarding its own units onto
     the convoy (**⛴ Ask to board**) asks the convoy's nation;
   - landing with allied troops aboard asks every nation with troops aboard; an ally with troops aboard can ask
@@ -146,7 +209,30 @@ little ahead of it to well behind. Living men = strength ÷ 12.5, rounded up (10
 they fell then). Purely visual: nothing here changes combat. Code: `public/js/skirmish.js`, wired in by
 `MapRenderer._tickBattles`.
 
-**Out of a fight** every land unit on screen (infantry, guns, tanks, cavalry) still stands on the map from 800 %
+**Moving.** A unit's token no longer jumps or glides to where it was sent: it marches there along the way it went
+(the stretch of its trail since it last stood, else straight), at a steady pace on screen, gathering speed at the
+start and slowing at the end. The pace is in screen px a second, so a march reads the same at any zoom: infantry,
+guns and supply 60 (at most 6.5 s), tanks 34 (at most 9 s), cavalry 110, ships 75, aircraft 220 (at most 3.5 s),
+and never under 0.7 s (`MARCH_PX_S` in map-renderer.js). In game mode a unit dragged somewhere goes back to where it
+stood when dropped and marches there once the server takes the move (a move refused leaves it standing). Rail trips
+play their own way. From 800 % zoom its men march with it, in formation 40 px ahead of the token, facing the way
+they go:
+- **Infantry** in a wedge behind a point man, at a steady jog.
+- **Tanks** side by side, slowly, churning tracks.
+- **Guns** in column, each crew walking beside its gun.
+- **Cavalry** in a column of twos.
+- **Supply columns** with the wagon leading and its men walking either side of it.
+Starting off and halting, each man runs (each tank rolls, each gun is hauled) from where he is to his place in the
+formation, or back to his place at ease.
+
+**Supply columns** are drawn as a horse-drawn wagon loaded with crates, its two drivers on the box
+(`public/assets/wagon.png`, from the user's supply wagon art, cut by
+`node scripts/build-wagon.js "rob assets/SupplyWagon.png"`), with four to six of the nation's soldiers (by unit). At a
+halt the wagon stands just behind the unit's line, facing the way the unit faces, its men about it; in a fight they
+kneel or lie by it and fire. A destroyed column's wagon stays on the map in grey, with nobody by it: the wreck to
+salvage.
+
+**Out of a fight** every land unit on screen (infantry, guns, tanks, cavalry, supply) still stands on the map from 800 %
 zoom: its living men and machines at ease about a line 62 px ahead of its token, 110 px wide, facing the nearest unit
 of another nation within about 60 map px (else the way it last moved, else down the screen). Riflemen stand about,
 looking this way and that (in their pits, behind their wire, once dug in); guns stand with their crews, tanks parked,
@@ -190,6 +276,11 @@ dress are worn from November to February. American, Arab and Russian kits do not
   bursts), a medic and riflemen. Who is who changes from unit to unit.
 - Each man lies, kneels or stands to aim at the enemy. Now and then one gets up and rushes to a new spot, forward
   or back and across (three at most at a time, never more than a quarter of the way to the enemy).
+- **Attacking: bounding forward.** A section that has just attacked does not run to its line in one go. It drops
+  by its unit, then goes forward by bounds in two halves (alternate men across the front): one half rushes a stretch
+  and drops while the other lies and fires, then they swap, five bounds in all (to 40 %, 65 %, 85 % and all the way to
+  its line; `BOUNDS` in skirmish.js), with 1.3–2.2 s down between rushes. Everyone fires lying flat until the last
+  man is on the line, then each takes his own stance. A rout stops the advance.
 - **Fire comes only from the men and guns.** Each round leaves the muzzle of the man or gun that fired it, with a
   flash, as a tracer that flies at one of the enemy's men or machines (else at his line) and kicks up dust where it
   lands. Rates of fire are the weapons' own:
@@ -246,8 +337,9 @@ Infantry, Ottoman Infantry and Russian Infantry.
 
 Other units in a battle (attacking or attacked, gunfire or shelling) show their own kit on the same line:
 
-- **Artillery**: four guns spread along the line, each worked by two men of the nation's army. Field guns,
-  anti-aircraft and AA emplacements use the field gun, heavy and coastal batteries and fortress guns the heavy gun, siege batteries and railway guns the
+- **Artillery**: four guns spread along the line, each worked by two men of the nation's army. Field guns and
+  anti-aircraft use the field gun, heavy batteries the heavy gun (fortress guns, coastal batteries and AA emplacements
+  have their own pictures: Emplacements, above), siege batteries and railway guns the
   siege gun, horse artillery the horse-drawn gun (and trench mortars and machine guns, for an army without teams, the
   mortar and the Maxim). Guns recoil, flash and smoke as they fire, and a battery's shells leave from one of its
   guns. The eight crew fall like riflemen (one per 12.5 % lost); a gun whose two crew are both down goes grey and
@@ -257,8 +349,9 @@ Other units in a battle (attacking or attacked, gunfire or shelling) show their 
 
 Guns and tanks are sized against the soldiers (a field gun about twice a soldier's length, a tank about three
 times). Atlas: `public/assets/machines.png`, cut by `node scripts/build-machines.js "rob assets"` from Tank.png,
-FieldArtillery.png, HeavyArtilleryBattery.png, SiegeBattery.png, TrenchMortarBattery.png, HorseArtilleryBattery.png
-and HeavyMG.png.
+FieldArtillery.png, HeavyArtilleryBattery.png, SiegeBattery.png, TrenchMortarBattery.png, HorseArtilleryBattery.png,
+HeavyMG.png and CoastalTurret.png (drawn with its barrels pointing right; the script turns it barrel-up and pivots it on
+the centre of its ring).
 
 ### Cavalry and aircraft in a fight
 
@@ -278,8 +371,9 @@ and HeavyMG.png.
   that are shelling put up a spotter balloon behind the battery. A balloon that loses half its strength is shot down
   in flames: it burns from end to end, drops, and smoulders where it fell. An airship (Zeppelin) slowly circles its
   unit; attacking, it circles over the target and drops a bomb every few seconds.
-- **Flak.** Anti-aircraft guns fighting aircraft or balloons fire every 1.5–3 s, each shell bursting as a flash and
-  a ball of black smoke in the sky close to one of the enemy's planes.
+- **Flak.** Anti-aircraft guns and AA emplacements fighting aircraft or balloons fire every 1.5–3 s, each shell
+  bursting as a flash and a ball of black smoke in the sky close to one of the enemy's planes. While their guns are
+  on screen they fire no shells at the ground under the planes.
 - **Aircraft** (fighter, bomber, reconnaissance and seaplane squadrons): four planes flying above the units, each with
   a shadow on the ground, from 800 % zoom, in or out of a fight.
   - Out of a fight they circle over their unit, one behind the other.
@@ -345,6 +439,12 @@ picture, so the small craft share it.
 Atlas: `public/assets/ships.png`, cut by `node scripts/build-ships.js "rob assets"` (sheets split into ships at the
 emptiest line between them, shrunk by half). Ship sizes are not to true scale: a battleship is about 84 px long
 (before the zoom boost) and a destroyer 40 px, sized against the guns and tanks.
+
+## Unit packs
+
+Each campaign stores one `unit_pack` ID. Existing campaigns migrate to `great-war`; new campaigns select a pack at creation. The choice is fixed for the campaign, and the server rejects a new unit or unit-type change unless the type is in that pack's table. Older custom units already on a map remain editable without changing their type.
+
+The current table is the Great War Pack in `public/js/units.js`. To add a pack, define its own unit list and register it with `UnitTypes.registerPack(id, name, list, keywords)` in that shared module. Each entry needs a distinct ID within its pack, display name, category, symbol and seven default stats (attack, defend, AP, range, movement, armour class, penetration). The registry supplies the campaign picker, stats table and unit picker. Supply the new pack's costs, research rules and artwork when those features apply; do not add its units to the Great War list.
 
 ## Campaign rules
 

@@ -17,7 +17,7 @@ What changed compared with the old page:
 | Firebase rules were the only real security; anyone could write | Every write goes through the server, which checks the session and role |
 | "Admin Only" flag stored but never enforced | GM-only and nation-restricted markers are never sent to people who may not see them |
 | No record of who changed what | Full change history with one-click revert and restore |
-| Leaflet DOM markers | PixiJS WebGL renderer with animated units (spawn pop, movement tweens, trails, idle bob, hit shake, selection pulse) |
+| Leaflet DOM markers | PixiJS WebGL renderer with animated units (spawn pop, paced marches along their route, trails, idle bob, hit shake, selection pulse) |
 | Measure tool that reported nonsense | Pixel-accurate measure tool scaled by a per-campaign "units per pixel" setting |
 | No drawing | Lines and areas with labels, colours and the same visibility rules as markers |
 | Edits by others required a page reload in places | WebSocket push: markers, drawings, live drag previews, presence, chat, history, membership |
@@ -36,8 +36,12 @@ npm install
 start.cmd
 ```
 
-Then open <http://localhost:8080/>. **The first account you create becomes the site admin.**
-Create a campaign, open its settings (⚙) and upload the map image. Share the join code with players.
+Then open <http://localhost:8080/>: the home page (`public/index.html`, what the map does and how a campaign is run),
+with sign-in and account creation at `/login.html`. **The first account you create becomes the site admin.**
+Create a campaign, open its settings (⚙) and upload a map image or import an Azgaar Full JSON export.
+The Azgaar import creates its nations, borders and settlements; use an empty campaign for this import.
+Share the join code with players.
+The campaign list lets the owner delete the campaign for everyone and lets other members leave it.
 
 There is no build step: `start.cmd` and the service run the code in this folder as it is, so after pulling
 or switching branches just restart the server. The console prints the build at start-up ("Build 45224595
@@ -94,7 +98,9 @@ next to it) and copy `backups\uploads\*` back into `data\uploads\`.
 
 - **Reset a lost admin password:** `node scripts/create-admin.js <username> <newpassword>` creates the user as a
   site admin, or promotes an existing user and sets the password.
-- **Manage users:** site admins see a user list on the campaigns page (promote, reset password, delete).
+- **Manage users:** site admins have a **Site admin** page (the button on the campaigns page, `/admin.html`):
+  the user list (promote, reset password, delete), every campaign (join as a player to look, delete) and the
+  reports. The campaigns page itself is the same for an admin as for anyone: the campaigns they are in.
 - **Import the old Firebase data:** export the database (or a node of it) from the Firebase console as JSON,
   then `node scripts/import-firebase.js export.json <lobbyId>`. It imports every section it finds, or only
   the ones you name: `--markers` (the old WoE-Player-Map; upload the map image to the campaign first so the
@@ -131,10 +137,27 @@ what identifies the side on the map.
 
 ### Roles and visibility
 
-- **Site admin**: first registered account. Can manage users and is GM in every campaign.
+- **Site admin**: first registered account, the site's moderator, not a game master: manages users, sees every
+  campaign and the reports (abusive campaigns, racism, anything that should not be here) on the Site admin page,
+  can delete any campaign or reported message, and joins a campaign as a player to look inside it. In a campaign
+  they are a member like anyone else.
+  - **Closing a report** takes a reason; the reporter reads it under **Notices** at the top of their campaigns
+    page (new ones highlighted until seen).
+  - **Suspending an account** (Users, *Suspend…*, with a reason) signs it out everywhere and keeps it out: the
+    reason is shown at sign-in. **Every campaign it owns is shut**: nobody can open it ("This campaign cannot be
+    opened: its owner has been suspended"), anyone inside is shown out, and it is greyed on members' lists.
+    *Unsuspend* reopens everything.
+  - **Transferring a campaign** (Every campaign, *Transfer to…*) makes another member its owner and GM; the old
+    owner stays in it as a player. A **co-GM of a shut campaign** can **Apply to take over** from their campaigns
+    page; the request shows under *Takeover requests* on the admin page, **Approve** hands the campaign over and
+    **Decline** takes a reason; either way the answer reaches them under Notices.
 - **GM** (per campaign): the campaign owner plus anyone promoted. Full control of markers, drawings, members, map, settings.
-- **Player**: can place and move their own player marker, move any marker a GM assigned to them as owner
-  (e.g. their nation's armies), draw lines and areas, chat, roll and attack with units they own.
+- **Observer** (per campaign): assigned by a GM under **People → Edit member → Role**. Sees the full GM map,
+  hidden objects, history, game and nation data, with read-only controls. Cannot place, move, edit, delete,
+  issue orders, advance turns or post messages. Observers can leave the campaign and mark chats as read.
+- **Player**: can place and move their own player marker, move any marker a GM assigned to them as owner,
+  and command units and heroes of their assigned nation, including those placed by the GM. They can draw
+  lines and areas, chat, roll and attack with units they control.
 
 Every marker and drawing has two visibility controls, set by the GM:
 
@@ -151,7 +174,10 @@ stay public. On the Earth map sight goes by province, on uploaded maps by distan
 (infantry 50 km, cavalry 80, reconnaissance 120, artillery 30, aircraft 150, places 30–100…). The server never sends
 a unit out of sight, so nothing can be read from the browser. Out-of-sight land is shaded, enemy units that slip
 out of view leave a faded "seen turn N" marker where they were last seen, an attacker is revealed to the side it
-attacks until End turn, and battles are news only to the two sides. Details: `docs/FOG-OF-WAR.md`.
+attacks until End turn, and combat reports are news only to the two sides. The battlefield is hidden too: an
+enemy trench shows only the stretches in sight, and a fight you are not in (gunfire, shells, craters, the dead)
+only where your side can see both ends, so nobody knows the shape of a battlefield without sending
+reconnaissance. Details: `docs/FOG-OF-WAR.md`.
 
 **View as player (GM).** The 👁 button in the top bar lets a GM use a tab as one nation's player: they see only
 what that player sees (the same markers, treasuries, diplomacy, trades and log) and play by the player rules (moves
@@ -189,7 +215,7 @@ view. Details: `docs/UI.md`.
   transports. Variants carry a small corner tag (ST, MTN, BC, …). A "key" link beside the picker renders the whole
   catalogue in the chosen colour. Free-text types still work: known words map onto a symbol, anything else shows
   a short abbreviation. The catalogue lives in `public/js/units.js` and is easy to extend.
-- **Default unit stats**: picking a type fills attack, defend, action points, range and movement from the
+- **Default unit stats**: picking a type fills attack, defend, action points, range, movement, Armour Class (AC) and penetration from the
   campaign's stat table, so placing a unit is usually a name and a click. After a unit is placed the form
   keeps the faction, type and stats, ready for the next one. A "defaults" link beside Attack refills the
   numbers if you have changed them; custom free-text types are left alone. Attack and defend are d20
@@ -207,6 +233,11 @@ view. Details: `docs/UI.md`.
   `unitStats`), so catalogue improvements still flow through to untouched types. Changing the table never
   edits units already on the map; it only changes what new units start with. Stats also appear in the type
   dropdown and the symbol key.
+- **Armour and penetration**: after the contested combat roll, a side causes strength loss only when its
+  penetration meets or exceeds the target's AC. This applies to both sides' losses, coastal return fire and
+  fortress garrison volleys. Infantry have AC 0 and penetration 1; capital ships and coastal batteries carry
+  the highest armour and heavy guns. GMs can edit both values in the unit stat table or on individual units.
+  Existing units without these fields use their type's current campaign defaults during combat.
 - **Town**: capital (star), city, village. **POI**: diamond. **Player**: circle with initial.
 - **Towns on the ground.** Under each town's counter the town itself is drawn from above at map scale, grown
   procedurally from its name (`public/js/towns.js`), so it always looks the same: main roads out of the centre,
@@ -247,7 +278,9 @@ can be spread out until every unit is clear. Labels keep a constant text size an
 selected tokens always show theirs). Where names would overlap, only one shows: units win over towns and
 other markers, a name already showing keeps its place so labels do not flicker while you pan, and hovering or
 selecting a token always brings its name back. The old behaviour, a fixed pixel size at every zoom, is available as
-"Fixed size on screen". **Token size** multiplies either mode.
+"Fixed size on screen". **Token size** multiplies either mode. Zoomed out to **50 % or further** the map is a
+strategic view: land, national borders and the nations' names only; tokens, drawings, trenches, railways and the
+fighting appear again past 50 % (docs/UI.md). Towns carry no flag: the border says whose they are.
 
 **Scenery** is a GM-only marker type for buildings, trenches, craters, wrecks and other dressing. Unlike counters it
 is drawn at map scale, so it grows and shrinks with the zoom; it has a scale (map px per sprite px), a rotation and
@@ -495,6 +528,22 @@ machine guns but strong against artillery, tanks break wire and machine guns, an
 destroyers hunt submarines, and so on; the attack dialog shows the modifier for each target. Details, all the
 numbers and the full table: `docs/UNITS.md`.
 
+### Goods and unrest (game mode)
+
+Towns make **consumer goods** and **military goods** and store them. A nation's **war economy** (a slider on the Nation
+panel) splits their output between the two, and factories add military goods.
+- **Military goods are supply:** supplied units draw on their town's stores. **Supply Columns** carry 50 supplies and
+  **convoys** 100, refilled at End turn from the town they are linked to. A column can load from a town, unload into
+  it as a depot, or salvage a destroyed column.
+- **Consumer goods keep towns content:** each town consumes half its output, so past a 50 % war economy consumer goods
+  run short and unrest rises.
+- **Rebellion:** a town in critical unrest has 3 End turns to recover before "<Nation> Rebels" take it and the
+  provinces around it. Units there go over to them, and militia rise.
+- **Networks:** towns share their stores within 500 km (not across enemy ground) and along railways.
+- **Trade:** both goods can be traded.
+
+Details and the 1914 balance: `docs/ECONOMY.md`.
+
 ### Long-term growth (game mode)
 
 Nations can grow their income without cutting their army, slowly. From **Nation → Production → Development**
@@ -642,7 +691,7 @@ Details: `docs/UNITS.md`.
 
 ### Dice and combat
 
-Type `/roll 2d6+3 optional note` (or `/r d20`) in the chat, or use the 🎲 button. Rolls happen on the server with
+Type `/roll 2d6+3 optional note` (or `/r d20`) in OOC chat. Rolls happen on the server with
 a cryptographic RNG and are logged for everyone, so nobody can fudge them. Up to 20 dice of up to 1000 sides.
 
 To attack, select your unit (left-click; a dashed red ring shows its reach) and **right-click an enemy unit**: a
@@ -786,11 +835,19 @@ square frames in one row can replace the first two.
 
 ### Chat, notifications, trades and pings
 
-**💬 Chat** (bottom right) has an OOC tab for everyone (the same chat as the Log, with `/roll`), a GM tab for
-announcements only the GM can post, and private chats between any members, including the GM. The **🔔**
+**Chat** (bottom right, the envelope button) has the channels and people down the left: OOC for everyone
+(with `/roll`), GM announcements only the GM can post, and private chats with anyone by
+clicking them (**New group** selects several people), with read receipts, server-side unread counts, typing
+notices, day dividers and GIFs (KLIPY, with `WOE_KLIPY_KEY` set). It also supports `@username` mentions, replies,
+search, pins, per-chat notification settings, mark unread and retrying failed sends. Drafts stay with their
+conversation. Nothing in chat is lost between turns. The **Log** is read-only game activity and dice, with no
+chat, announcements or text input. Site admins
+and the campaign's owner can delete any message, and anyone can report a member to the site admins, who see the
+reports on the campaigns page. The **✉**
 notification centre (top centre) lists diplomacy and trades that need your answer, with Accept, Decline,
-Approve or Block right there, and rings when wars are declared. **＋ Trade** offers another nation resources,
-money, manpower or research points, once or every turn for a set number of turns. The GM's **📍** tool (P) pings
+Approve or Block right there, and rings when wars are declared; **Clear all** dismisses the news that needs no
+answer. **＋ Offer a trade…** on the Diplomacy panel offers another nation resources, money, manpower or research
+points, once or every turn for a set number of turns. The GM's **📍** tool (P) pings
 a spot on the map for everyone for a minute. In game mode the ready-up bar beside the campaign name shows each
 player nation's flag with a green ✓ once its player has finished the turn, so the GM knows when to End turn.
 Details: `docs/COMMS.md`.
@@ -806,8 +863,9 @@ at the map.
 Clients open `/ws` (authenticated by the session cookie) and send `{type:'join', lobbyId}` (plus `viewAs`, a
 faction id, for a GM viewing as a player; REST calls carry it as the `X-View-As` header). The server pushes
 `marker` and `shape` (upsert/delete, filtered per viewer), `drag` (live preview while someone drags), `history`,
-`presence`, `event` (chat/system/roll/combat/announce), `members`, `lobby` (settings/map changed), `role`, `kicked`,
-`chatChannel` and `chatMessage` (private chats, members only), `tradesChanged`, `ping`.
+`presence`, `event` (system/roll/combat and game activity), `members`, `lobby` (settings/map changed), `role`, `kicked`,
+`chatChannel`, `chatMessage`, `chatRead`, `chatPreference`, `chatLeft` (chat members or the affected user only), `typing` (relayed to a chat's other
+members), `tradesChanged`, `ping`.
 All persistent changes go through the REST API, which validates, records history and then broadcasts.
 
 ## Keyboard
@@ -856,7 +914,9 @@ server/geo.js     server-side projection and great-circle distance (mirrors eart
 server/territory.js  faction territories: seeding from a year, brush/assign, the capture rule, ownership of places
 server/production.js  build queues, costs, sites, coastal and industry rules, factory placement
 server/research.js  tech tree storage, research queue and the effects engine
-server/routes/orders.js  unit orders: replenish, dive, engineers' digging, sappers (trenches, wrecking works), corps and corps lines
+server/routes/orders.js  unit orders: replenish, dive, engineers' digging and laying track, sappers (trenches, wrecking works), corps and corps lines
+server/goods.js   consumer and military goods: towns' output and stores, networks, unrest, supply draws and refills
+server/routes/economy.js  war economy, Supply Column depots and salvage, rebellions
 server/trenches.js  trench sections (dig, reinforce, blow up) along a centreline
 defaults/techtree-ww1.json  the default WW1 research tree
   js/stats-editor.js  GM table of per-campaign unit stat overrides (+/- steppers), shared by both pages

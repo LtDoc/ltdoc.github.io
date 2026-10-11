@@ -5,18 +5,26 @@ const selectLobby = db.prepare('SELECT * FROM lobbies WHERE id = ?');
 const selectMember = db.prepare('SELECT * FROM lobby_members WHERE lobby_id = ? AND user_id = ?');
 const selectFaction = db.prepare('SELECT * FROM factions WHERE id = ? AND lobby_id = ?');
 const selectMembers = db.prepare(`
-  SELECT m.user_id, m.role, m.nation, m.color, m.joined_at, u.username, u.display_name
+  SELECT m.user_id, m.role, m.nation, m.color, m.joined_at, u.username, u.display_name, u.role AS site_role, u.site_vip, u.avatar_url
   FROM lobby_members m JOIN users u ON u.id = m.user_id
   WHERE m.lobby_id = ? ORDER BY m.role DESC, u.display_name COLLATE NOCASE`);
 
 function getLobby(id) { return selectLobby.get(Number(id)) || null; }
 function getMember(lobbyId, userId) { return selectMember.get(Number(lobbyId), Number(userId)) || null; }
 function getMembers(lobbyId) { return selectMembers.all(Number(lobbyId)); }
+const selectSuspended = db.prepare('SELECT suspended_at FROM users WHERE id = ?');
+/** Is the campaign's owner suspended? Then nobody opens it (README, "Accounts and roles"). */
+function ownerSuspended(lobby) { return !!(lobby && selectSuspended.get(lobby.owner_id)?.suspended_at); }
+const SUSPENDED_LOBBY = 'This campaign cannot be opened: its owner has been suspended';
 
-/** Returns 'gm' | 'player' | null for a user in a lobby. Site admins are GMs everywhere. */
+/**
+ * Returns 'gm' | 'player' | 'observer' | null: the owner is always its GM.
+ * A site admin is no game master: they are a member like anyone, or nobody; what they do as the site's moderator
+ * (reports, deleting campaigns and messages) goes through routes/auth.js.
+ */
 function getRole(lobby, user) {
   if (!lobby || !user) return null;
-  if (user.role === 'admin' || lobby.owner_id === user.id) return 'gm';
+  if (lobby.owner_id === user.id) return 'gm';
   const m = getMember(lobby.id, user.id);
   return m ? m.role : null;
 }
@@ -40,19 +48,22 @@ function viewerFor(lobby, user, viewAs) {
   const f = viewAsFaction(lobby, role, viewAs);
   if (f) return { role: 'player', realRole: 'gm', userId: user.id, nation: f.name, viewAs: f.id, lobbyId: lobby.id };
   const m = getMember(lobby.id, user.id);
-  return { role, userId: user.id, nation: m ? m.nation : '', lobbyId: lobby.id };
+  // Observers use GM visibility, with their actual role retained for control checks and presence.
+  return { role: role === 'observer' ? 'gm' : role, realRole: role, userId: user.id, nation: m ? m.nation : '', lobbyId: lobby.id };
 }
 
 const sameNation = (a, b) => !!String(b || '').trim() && String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 
 /**
- * May this viewer move, edit or give orders to a marker? GMs anything; players what they own.
+ * May this viewer move, edit or give orders to a marker? GMs anything; players what they own,
+ * plus units and heroes shared by everyone playing that nation.
  * A GM viewing as a nation commands that nation's units and heroes instead of everything they created.
  */
 function canControl(m, viewer) {
-  if (!m || !viewer) return false;
+  if (!m || !viewer || viewer.role === 'observer' || viewer.realRole === 'observer') return false;
   if (viewer.role === 'gm') return true;
-  if (m.adminOnly) return false;
+  if (m.adminOnly || ['resource', 'factory'].includes(m.type)) return false;
+  if ((m.type === 'unit' || m.type === 'hero') && sameNation(m.data?.nation, viewer.nation)) return true;
   if (viewer.viewAs && (m.type === 'unit' || m.type === 'hero')) return sameNation(m.data?.nation, viewer.nation);
   return m.ownerId === viewer.userId;
 }
@@ -66,13 +77,14 @@ function canControl(m, viewer) {
  */
 function canSee(obj, viewer) {
   if (!obj || !viewer) return false;
-  if (viewer.role === 'gm') return true;
+  if (viewer.role === 'gm' || viewer.role === 'observer') return true;
   if (obj.adminOnly) return false;
   const n = String(viewer.nation || '').trim().toLowerCase();
   // A GM viewing as a nation sees what that nation's player would: its own things, not everything the GM made.
   const mine = viewer.viewAs ? sameNation(obj.data?.nation, n)
     : obj.ownerId === viewer.userId || obj.createdBy === viewer.userId;
   if (mine) return true;
+  if (obj.type === 'hero' && sameNation(obj.data?.nation, n)) return true;
   const listed = list => !!n && Array.isArray(list) && list.some(v => String(v).trim().toLowerCase() === n);
   // A spy's recon reveals what it saw to the spy's nation until the end of the turn.
   if (listed(obj.data?.revealTo)) return true;
@@ -95,9 +107,11 @@ function serializeLobby(lobby, role) {
   const out = {
     id: lobby.id,
     name: lobby.name,
+    unitPack: lobby.unit_pack || 'great-war',
     ownerId: lobby.owner_id,
+    suspended: ownerSuspended(lobby),
     mapUrl: lobby.map_file ? `/uploads/${lobby.map_file}` : null,
-    mapKind: lobby.map_file ? 'image' : (settings.earth ? 'earth' : 'none'),
+    mapKind: settings.azgaar ? 'azgaar' : (lobby.map_file ? 'image' : (settings.earth ? 'earth' : 'none')),
     mapWidth: lobby.map_width,
     mapHeight: lobby.map_height,
     scaleLabel: lobby.scale_label,
@@ -106,14 +120,14 @@ function serializeLobby(lobby, role) {
     createdAt: lobby.created_at,
     yourRole: role,
   };
-  if (role === 'gm') out.joinCode = lobby.join_code;
+  if (role === 'gm' || role === 'observer') out.joinCode = lobby.join_code;
   return out;
 }
 
 function serializeMember(m) {
   return {
     userId: m.user_id, username: m.username, displayName: m.display_name,
-    role: m.role, nation: m.nation, color: m.color, joinedAt: m.joined_at,
+    role: m.role, siteRole: m.site_role, siteVip: !!m.site_vip, avatarUrl: m.avatar_url || '', nation: m.nation, color: m.color, joinedAt: m.joined_at,
   };
 }
 
@@ -174,6 +188,6 @@ function serializeShape(row) {
 function safeJson(s) { try { return JSON.parse(s || '{}'); } catch { return {}; } }
 
 module.exports = {
-  getLobby, getMember, getMembers, getRole, viewerFor, viewAsFaction, canSee, canControl, DEFAULT_COMBAT,
+  getLobby, getMember, getMembers, getRole, viewerFor, viewAsFaction, canSee, canControl, DEFAULT_COMBAT, ownerSuspended, SUSPENDED_LOBBY,
   serializeLobby, serializeMember, serializeMarker, serializeShape, serializeFaction, safeJson,
 };

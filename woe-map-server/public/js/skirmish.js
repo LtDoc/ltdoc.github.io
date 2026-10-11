@@ -31,14 +31,25 @@
  * Out of a fight, from the same zoom, every land unit on screen stands on the map as its men and machines, like the
  * pieces of a board game: the section at ease around its token, facing the nearest enemy (else the way it last moved),
  * in its rifle pits behind its wire once it has dug in; guns with their crews, tanks parked, horsemen formed up. When
- * it goes into a fight they run, roll or ride from there to its line, and when the fight ends, back.
+ * it goes into a fight they run, roll or ride from there to its line, and when the fight ends, back. While its token
+ * marches (map-renderer.js, f.march) they march with it: infantry in a wedge, tanks side by side, guns in column,
+ * horsemen in twos, a supply column's wagon (q.machines[0]) with its four to six men beside it. Infantry that has
+ * just attacked goes forward to its line by bounds, half rushing while the other half lies and fires (q.bound).
  *
  * The dead stay where they fell for the turn of the fight and the next two (REMAINS_TURNS; half an hour without game
  * mode): men and fallen riders by their dead horses, kept per campaign in this browser (localStorage). Fights this
  * browser did not see have their dead laid out from the server's record of them (who fell, where the lines were).
  *
- * Emplacements (coastal batteries, fortress guns, MG bunkers, AA emplacements) stand as gun teams and guns in concrete
- * works, always dug in (wire before the bunkers and forts).
+ * Emplacements (fortress guns, MG bunkers) stand as gun teams and guns in concrete works, always dug in (wire before
+ * them). An AA emplacement is one twin AA gun in its own sandbags and wire (public/assets/aa.png, q.aa: one of three
+ * drawings, by unit), standing on the unit's line with its barrels leaning towards the enemy's side, no crew or works
+ * of its own; it fires its barrels in turn, a pair at a time. A coastal battery is a single twin-gun turret (q.turret): no crew, no works;
+ * it turns on the centre of its ring to bear on its target before it fires, and goes grey when destroyed. Fortress
+ * guns are the fort itself (public/assets/fort.webp, q.fort): a star fort drawn on the unit's token, its garrison of the
+ * nation's riflemen patrolling the wall walk out to the bastions and crossing the yard, and its guns a mortar crew in the
+ * middle of the yard, where its shells leave from. The fort never moves. In a fight the men on the walls run to the
+ * ramparts facing the enemy; they fire only when the enemy is within rifle range (a defender's fight, or an attack
+ * that brought a volley from the walls: f.volley), else they watch while the mortar does the work.
  *
  * Holding fire: a unit being shelled does not shoot back at the distant guns, and artillery attacked at close quarters
  * does not return fire (its men stand to their guns); fronts flagged `holdFire` by the renderer.
@@ -63,9 +74,41 @@
   // boost; a man lying full length is then about 20 px).
   const TORSO_PX = 7;
   // Machines, by their longest side on screen (px, before the zoom boost), sized against those soldiers.
-  const GUN_PX = { field: 20, heavy: 24, siege: 24, mortar: 11, horse: 24, hmg: 13 };
+  const GUN_PX = { field: 20, heavy: 24, siege: 24, mortar: 11, horse: 24, hmg: 13, coastal: 40 };
+  const TURRET_TRAVERSE = Math.PI / 2;   // a coastal turret turns this many radians a second
+  const AA_PX = 60;   // an AA emplacement (gun, sandbags and wire) across on screen, px before the zoom boost
+  // The fort (fortress guns): its width on screen (px, before the zoom boost), its garrison, and where they go, as
+  // fractions of the fort image (1616 × 1216): the wall walk round the rampart and out to each bastion and back, and the
+  // yard (left, top, right, bottom).
+  const FORT_PX = 170, FORT_MEN = 10, FORT_ON_WALLS = 6, FORT_ASPECT = 1216 / 1616;
+  const FORT_WALK = [[0.262, 0.24], [0.19, 0.16], [0.262, 0.24], [0.745, 0.24], [0.81, 0.16], [0.745, 0.24], [0.745, 0.717], [0.81, 0.82],
+    [0.745, 0.717], [0.262, 0.717], [0.19, 0.82], [0.262, 0.717]];
+  const FORT_YARD = [0.32, 0.31, 0.69, 0.66], FORT_MORTAR = [0.505, 0.35];   // the yard, and the mortar in the middle of it, clear of the unit's counter on the centre
+  // The walk as a closed loop, measured with the image's own proportions so men keep an even pace round it.
+  const FORT_LOOP = (() => {
+    const pts = [...FORT_WALK, FORT_WALK[0]], cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], (pts[i][1] - pts[i - 1][1]) * FORT_ASPECT));
+    const L = cum[cum.length - 1];
+    const at = w => {
+      w = ((w % L) + L) % L;
+      let i = 1;
+      while (i < cum.length - 1 && cum[i] < w) i++;
+      const k = (w - cum[i - 1]) / Math.max(1e-9, cum[i] - cum[i - 1]);
+      return [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * k, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * k];
+    };
+    return { L, at };
+  })();
   const TANK_PX = 32;
   const RUN_PX_S = 34, ROLL_PX_S = 26;   // running and rolling pace, screen px a second
+  // On the march (the token moving, map-renderer.js): an infantry section in a wedge behind its point man, as
+  // [across, behind] screen px from the head of the formation.
+  const WEDGE = [[0, -24], [-14, -12], [14, -12], [-28, 0], [28, 0], [-42, 12], [42, 12], [0, 6]];
+  // An attack's bounds: [which half of the section rushes, how far towards its line it gets], in turn; the other half
+  // lies and fires meanwhile.
+  const BOUNDS = [[0, 0.4], [1, 0.65], [0, 0.85], [1, 1], [0, 1]];
+  // A supply column's wagon: its length on screen (px before the zoom boost), how far out from its middle its men walk,
+  // and where it stands behind the unit's line at a halt or in a fight (px).
+  const WAGON_PX = 60, WAGON_SIDE = 26, WAGON_HOME = 6;
   // Horsemen (head to tail, lance and all) and planes (wingspan), screen px before the zoom boost.
   const RIDERS = 8, RIDER_PX = 34, GALLOP_PX_S = 49, CANTER_PX_S = 40, TROT_PX_S = 20;
   // Rates of fire, rounds a minute. Bolt-action rifles: aimed fire, 10 to 15 (the trained man's "mad minute" was 15).
@@ -143,7 +186,7 @@
   function strHash(s) { let h = 0; for (const c of String(s || '').toLowerCase()) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; }
   // Which gun each artillery type works; machine-gun companies get the Maxim.
   const GUN_FOR = { fieldartillery: 'field', antiaircraft: 'field', horseartillery: 'horse', heavyartillery: 'heavy', siegeartillery: 'siege',
-    railwaygun: 'siege', coastal: 'heavy', fortress: 'heavy', aaemplacement: 'field', mortar: 'mortar', machinegun: 'hmg', mgbunker: 'hmg' };
+    railwaygun: 'siege', coastal: 'coastal', fortress: 'heavy', mortar: 'mortar', machinegun: 'hmg', mgbunker: 'hmg' };
   // A point on two cubic curves end to end (pts: 7 points, the middle one shared), u from 0 to 1 over both.
   const bez2 = (pts, u) => {
     const j = u < 0.5 ? 0 : 3, k = u < 0.5 ? u * 2 : (u - 0.5) * 2, a = 1 - k;
@@ -170,7 +213,8 @@
       this.deadC = new PIXI.Container(); this.machC = new PIXI.Container(); this.aliveC = new PIXI.Container();
       this.groundG = new PIXI.Graphics();   // dug in: rifle pits, sandbags, gun pits and wire, under the men
       this.remainsC = new PIXI.Container();   // the dead of earlier fights, left lying (see _drawRemains)
-      this.layer.addChild(this.groundG, this.remainsC, this.deadC, this.machC, this.aliveC);
+      this.structC = new PIXI.Container();   // forts, under everything else of the fight
+      this.layer.addChild(this.structC, this.groundG, this.remainsC, this.deadC, this.machC, this.aliveC);
       this.remains = [];             // the dead this browser saw fall: { key, turn, at, x, y (anchor), ox, oy (boosted px off it), r, sg, f, i }
       this.past = [];                // earlier fights from the server, for the dead this browser did not see (see _ghosts)
       this.fixed = [];               // the dead lying in No Man's Land (nomansland.js): they never clear
@@ -198,12 +242,22 @@
         this.r.invalidate();
       } catch (e) { console.warn('Soldier sprites not available', e); }
       try {
-        const meta = await fetch('/assets/machines.json?v=1').then(r => r.json());
-        const base = await PIXI.Assets.load({ src: '/assets/machines.png?v=1', loadParser: 'loadTextures' });
+        const meta = await fetch('/assets/machines.json?v=2').then(r => r.json());
+        const base = await PIXI.Assets.load({ src: '/assets/machines.png?v=2', loadParser: 'loadTextures' });
         const one = f => ({ ...f, t: frame(base, f), len: Math.max(f.w, f.h) });
         this.mach = { tanks: meta.tanks.map(one), guns: Object.fromEntries(Object.entries(meta.guns).map(([k, f]) => [k, one(f)])) };
         this.r.invalidate();
       } catch (e) { console.warn('Gun and tank sprites not available', e); }
+      try { this.fortTex = await PIXI.Assets.load({ src: '/assets/fort.webp?v=1', loadParser: 'loadTextures', data: { autoGenerateMipmaps: true } }); this.r.invalidate(); }
+      catch (e) { console.warn('Fort image not available', e); }
+      try {
+        const meta = await fetch('/assets/aa.json?v=1').then(r => r.json());
+        const base = await PIXI.Assets.load({ src: '/assets/aa.png?v=1', loadParser: 'loadTextures', data: { autoGenerateMipmaps: true } });
+        this.aaFrames = meta.frames.map(f => ({ ...f, t: frame(base, f) }));
+        this.r.invalidate();
+      } catch (e) { console.warn('AA emplacement sprites not available', e); }
+      try { this.wagonTex = await PIXI.Assets.load({ src: '/assets/wagon.png?v=1', loadParser: 'loadTextures', data: { autoGenerateMipmaps: true } }); this.r.invalidate(); }
+      catch (e) { console.warn('Supply wagon image not available', e); }
       try {
         const meta = await fetch('/assets/mounts.json?v=4').then(r => r.json());
         const base = await PIXI.Assets.load({ src: '/assets/mounts.png?v=4', loadParser: 'loadTextures' });
@@ -276,6 +330,7 @@
       if (AIR.has(t.id)) return 'air';
       if (t.id === 'balloon' || t.id === 'airship') return 'balloon';
       if (FLEET[t.id]) return 'ships';
+      if (t.id === 'supply') return 'wagon';
       return null;
     }
     static isInfantry(m) { return Skirmish.kindOf(m) === 'rifles'; }
@@ -319,7 +374,7 @@
     /** Machine-gun companies and trench mortars whose army has the art go in as teams (gun and crew in one figure). */
     _teamFor(q) { return q.kind !== 'guns' || !q.kit ? null : ((q.type === 'machinegun' || q.type === 'mgbunker') && this._frames(q.kit, 'mg')) ? 'mg' : (q.type === 'mortar' && this._frames(q.kit, 'mortar')) ? 'mortar' : null; }
     clear() { for (const q of this.squads.values()) { this._bury(q); this._drop(q); } this.squads.clear(); this.airG.clear(); }
-    _sprites(q) { return [...q.men.flatMap(m => [m.sp, m.carcass, m.litter, m.bearer].filter(Boolean)), ...q.machines.flatMap(x => x.sh ? [x.sp, x.sh] : [x.sp])]; }
+    _sprites(q) { return [...q.men.flatMap(m => [m.sp, m.carcass, m.litter, m.bearer].filter(Boolean)), ...q.machines.flatMap(x => [...(x.sh ? [x.sp, x.sh] : [x.sp]), ...(x.crew || [])]), ...(q.fortSp ? [q.fortSp] : [])]; }
     /** A sprite for a stretcher or a second bearer, among the living. */
     _extraSprite() { const sp = new PIXI.Sprite(); sp.eventMode = 'none'; this.aliveC.addChild(sp); return sp; }
     /** A dead horse's sprite, under every fallen man. */
@@ -330,9 +385,12 @@
      * An artillery unit fires a shell (MapRenderer, shelling): one of its working guns recoils and flashes, and the
      * shell leaves from its muzzle. Returns that point (world units), or null when its guns are not on screen.
      */
+    /** Whether a unit's anti-aircraft guns are on screen (they fire their own flak at planes: no shells from fireGun). */
+    firesFlak(unitId) { const q = this.squads.get(unitId); return !!q?.shown && (q.type === 'antiaircraft' || q.type === 'aaemplacement'); }
     fireGun(unitId, nowMs) {
       const q = this.squads.get(unitId);
       if (q && q.kind === 'ships' && q.shown) return this._shipShot(q, nowMs);
+      if (q && q.fort && q.shown) { const mt = q.machines[0]; if (!mt?.muzzle || !mt.manned) return null; mt.firedAt = nowMs; q.puffs.push({ x: mt.muzzle[0], y: mt.muzzle[1], t0: nowMs, big: true }); return { x: mt.muzzle[0], y: mt.muzzle[1] }; }
       if (!q || q.kind !== 'guns' || !q.shown) return null;
       const ready = q.machines.filter(gn => gn.manned && gn.muzzle);
       if (!ready.length) return null;
@@ -374,9 +432,9 @@
         if (!q.kit) this._dress(q, f.view?.marker);
         if (q.kind === 'guns' && this._teamFor(q) !== q.team) { this._drop(q); q = this._make(id, f, nowMs, s); this.squads.set(id, q); }
         // Into a fight from standing at ease, or back out of it: the men make their way from where they are.
-        const idle = !!f.idle;
-        if (q.idle !== undefined && q.idle !== idle) this._shift(q, f, nowMs, s, idle);
-        q.idle = idle;
+        const idle = !!f.idle, march = !!f.march;
+        if (q.idle !== undefined && (q.idle !== idle || !!q.march !== march)) this._shift(q, f, nowMs, s, idle);
+        q.idle = idle; q.march = march;
         if (!idle) { q.turn = f.turn; q.geo = { x: f.cx - (f.ux || 0) * (f.backPx || 0) / s, y: f.cy - (f.uy || 0) * (f.backPx || 0) / s, s, boost }; }
         q.shown = true;
         this._tick(q, f, nowMs, t, s, boost, g);
@@ -468,6 +526,29 @@
         }
         return q;
       }
+      if (kind === 'wagon') {
+        // A supply column: its wagon (_tickWagon), and four to six men with it.
+        const wg = { i: 0, o: 0, d: WAGON_HOME, home: [0, WAGON_HOME], sp: new PIXI.Sprite(this.wagonTex || PIXI.Texture.EMPTY), hd: null, moving: false };
+        wg.sp.anchor.set(0.5); wg.sp.eventMode = 'none';
+        this.machC.addChild(wg.sp);
+        q.machines.push(wg);
+        const n = 4 + Math.floor(hash(seed, 2) * 3), F = f.front * s;
+        const alive = aliveFor(before, n), kept = aliveFor(f.idle ? before : Math.max(before, Number(f.from ?? 100)), n);
+        for (let i = 0; i < n; i++) {
+          // Either side of the wagon, along its bed.
+          const side = i % 2 ? 1 : -1, row = Math.floor(i / 2);
+          const o = side * (WAGON_SIDE + hash(seed, i + 3) * 8) / F, d = WAGON_HOME + (row - 0.5) * 16 + (hash(seed, i + 5) - 0.5) * 6;
+          const period = 60 / (RIFLE_RPM[0] + hash(seed, i + 60) * (RIFLE_RPM[1] - RIFLE_RPM[0]));
+          const m = { i, o, d, home: [o, d], role: i === 0 ? 'nco' : 'rifle', stance: hash(seed, i + 200) < 0.6 ? 'kneel' : 'prone', sp: new PIXI.Sprite(), pose: null,
+            dead: i >= alive, gone: i >= kept, run: null, tend: null, gun: -1, side: 0,
+            next: nowMs + 2500 + hash(seed, i + 40) * 9000, period, nextShot: nowMs + 600 + hash(seed, i + 80) * period * 1000, firedAt: 0, burst: 0,
+            rot: hash(seed, i + 100) * Math.PI * 2, flip: hash(seed, i + 120) < 0.5, fellAt: 0, jo: hash(seed, i + 140) - 0.5, jd: hash(seed, i + 160) };
+          m.sp.eventMode = 'none';
+          (m.dead ? this.deadC : this.aliveC).addChild(m.sp);
+          q.men.push(m);
+        }
+        return q;
+      }
       if (kind === 'tanks') {
         const design = this.mach.tanks[strHash(v?.marker?.data?.nation) % this.mach.tanks.length];
         const alive = aliveFor(before, TANKS);
@@ -485,7 +566,17 @@
         q.type = typeOf(v?.marker)?.id;
         this._dress(q, v?.marker);
         q.team = this._teamFor(q);
-        const key = GUN_FOR[q.type] || 'field', gf = q.team ? null : this.mach.guns[key];
+        const want = GUN_FOR[q.type] || 'field', key = this.mach.guns[want] ? want : 'heavy', gf = q.team ? null : this.mach.guns[key];   // an older atlas: the heavy gun
+        if (!q.team && q.type === 'fortress') return this._makeFort(q, v, f, nowMs, seed, before, gone);
+        if (q.type === 'aaemplacement') return this._makeAA(q, nowMs, seed);
+        q.turret = !q.team && key === 'coastal';
+        if (q.turret) {
+          const gn = { i: 0, o: 0, d: 0, frame: gf, key, sp: new PIXI.Sprite(gf.t), manned: true, aim: null, nextShot: nowMs + 800 + hash(seed, 30) * 4000, firedAt: 0, burst: 0, muzzle: null };
+          gn.sp.anchor.set(gf.ax, gf.ay); gn.sp.eventMode = 'none';
+          this.machC.addChild(gn.sp);
+          q.machines.push(gn);
+          return q;
+        }
         for (let i = 0; i < GUNS; i++) {
           const gn = { i, o: (i + 0.5) / GUNS - 0.5, d: 6 + hash(seed, i + 3) * 4, frame: gf, key: q.team || key, sp: new PIXI.Sprite(gf ? gf.t : undefined), manned: true,
             nextShot: nowMs + 800 + hash(seed, i + 30) * 4000, firedAt: 0, burst: 0, muzzle: null };
@@ -498,6 +589,9 @@
       // The men: a gun's crew (two a gun), or an infantry section: officer, sergeant, light machine-gunner, medic and
       // riflemen, each to his own stance on the line.
       const alive = aliveFor(before), ROLES = ['officer', 'nco', 'lmg', 'medic'];
+      // Just attacked: the section goes forward by bounds from beside its unit (_bounds), not in one run.
+      const bounding = kind === 'rifles' && fresh && !!f.attacker;
+      if (bounding) q.bound = { step: 0, phase: 'hold', until: nowMs + 600, d0: f.backPx * 0.8 };
       for (let i = 0; i < SQUAD; i++) {
         const crew = kind === 'guns';
         // The first four are the officer, sergeant, gunner and medic (men already down when the section appears are
@@ -518,6 +612,7 @@
           rot: hash(seed, i + 100) * Math.PI * 2, flip: hash(seed, i + 120) < 0.5, fellAt: 0, jo: (hash(seed, i + 140) - 0.5), jd: hash(seed, i + 160) };
         m.sp.eventMode = 'none';
         if (!crew && m.dead) { m.o += m.jo * 0.08; m.d += m.jd * 10; }
+        else if (bounding) { m.grp = Math.round((o + 0.5) * SQUAD) % 2; m.d = q.bound.d0; }   // lying by the unit, its half of the section to rush in turn
         else if (!crew && fresh) m.run = { o0: 0, d0: f.backPx, o1: o, d1: d, t0: nowMs + i * 110, dur: 0 };   // out of the unit to the line
         (m.dead ? this.deadC : this.aliveC).addChild(m.sp);
         q.men.push(m);
@@ -537,8 +632,14 @@
         if (q.kind === 'tanks') this._tickTanks(q, f, nowMs, t, s, boost, g, at, theta);
         else if (q.kind === 'horse') this._tickHorse(q, f, nowMs, t, s, boost, g, at, theta, unit);
         else {
-          if (q.kind === 'guns') this._tickGuns(q, f, nowMs, t, s, boost, g, at, theta, unit);
-          this._tickMen(q, f, nowMs, t, s, boost, g, at, theta, unit);
+          if (q.fort) this._tickFort(q, f, nowMs, t, s, boost, g, theta, unit);
+          else if (q.turret) this._tickTurret(q, f, nowMs, t, s, boost, g, at, theta);
+          else if (q.aa) this._tickAA(q, f, nowMs, s, boost, g, at);
+          else {
+            if (q.kind === 'guns') this._tickGuns(q, f, nowMs, t, s, boost, g, at, theta, unit);
+            if (q.kind === 'wagon') this._tickWagon(q, f, nowMs, t, s, boost, at, theta);
+            this._tickMen(q, f, nowMs, t, s, boost, g, at, theta, unit);
+          }
         }
       }
       if (g) this._drawRounds(q, nowMs, s, g);
@@ -647,7 +748,9 @@
         } else {
           // In his place, or walking his horse there (back on his feet, or the troop's line moved); at ease out of a
           // fight, the echelon closed up.
-          const hx = m.o * F, hd = f.idle ? 4 + (m.d - 4) * 0.3 : m.d, dx = hx - lat, dd = hd - dep, dist = Math.hypot(dx, dd), step = TROT_PX_S * dt;
+          // On the march: in a column of twos.
+          const hx = f.march ? (m.i % 2 ? 7 : -7) : m.o * F, hd = f.march ? Math.floor(m.i / 2) * 13 - 20 : f.idle ? 4 + (m.d - 4) * 0.3 : m.d;
+          const dx = hx - lat, dd = hd - dep, dist = Math.hypot(dx, dd), step = TROT_PX_S * dt;
           m.walking = dist > step;
           if (dist > step) { lat += dx / dist * step; dep += dd / dist * step; } else { lat = hx; dep = hd; }
         }
@@ -665,7 +768,7 @@
         m.hd = m.hd == null ? want : m.hd + Math.atan2(Math.sin(want - m.hd), Math.cos(want - m.hd)) * 0.2;
         sp.position.set(x, y);
         sp.rotation = m.hd + Math.PI / 2;
-        const sc = RIDER_PX / rider.len * boost / s * (m.leg ? 1 + 0.05 * Math.abs(Math.sin(t * 11 + m.i)) : 1);
+        const sc = RIDER_PX / rider.len * boost / s * (m.leg ? 1 + 0.05 * Math.abs(Math.sin(t * 11 + m.i)) : f.march ? 1 + 0.03 * Math.abs(Math.sin(t * 7 + m.i)) : 1);
         sp.scale.set(sc);
         if (m.leg?.st === 'charge' && Math.abs(dep + reach) < 18 && Math.random() < 0.06) {
           // Riding through the enemy's line: a blade or a lance point catching the light.
@@ -977,7 +1080,7 @@
       // Broken by a heavy blow (a quarter of its strength or more at once): the survivors fall back in disorder, out
       // behind the line, and after a few seconds work their way back to their places.
       if (!crew && !f.idle && drop && strength > 0 && drop.from - strength >= 25 && nowMs - drop.at < 2000 && q.routFor !== drop.at) {
-        q.routFor = drop.at; q.routUntil = nowMs + 6000 + Math.random() * 3000;
+        q.routFor = drop.at; q.routUntil = nowMs + 6000 + Math.random() * 3000; q.bound = null;
         for (const m of q.men) {
           if (m.dead || m.pow || m.role === 'medic') continue;
           const [o0, d0] = m.run ? (p => [p.o, p.d])(this._runPos(m, nowMs)) : [m.o, m.d];
@@ -987,7 +1090,7 @@
       }
       const living = q.men.filter(m => !m.dead && !m.pow);
       // Casualties follow strength: one man per 12.5 % lost, falling one after another; healing brings them back.
-      const want = aliveFor(strength);
+      const want = aliveFor(strength, q.men.length);
       if (living.length > want && nowMs >= q.nextDeath) {
         // The medic is hit last but two, so he is about to tend the fallen.
         const pool = living.length > 2 ? living.filter(x => x.role !== 'medic') : living;
@@ -1023,7 +1126,8 @@
       }
       const running = q.men.filter(m => m.run).length;
       const fallen = q.men.filter(m => m.dead && !m.gone);
-      const dug = this._dug(q, f);
+      if (q.bound && !f.idle) this._bounds(q, nowMs);
+      const dug = f.march ? 0 : this._dug(q, f);
       if (dug && !crew) {
         // Dug in: each man in his own rifle pit (the fallen in theirs), the spoil thrown up in front of it and
         // topped with sandbags; after a second turn, a belt of wire out in front.
@@ -1048,6 +1152,14 @@
         sp.alpha = 1;
         if (crew) {
           if (q.team) { sp.visible = false; continue; }   // drawn with the gun
+          if (f.march) {
+            // Marching beside the gun.
+            const fr = this._pick(q, m.i, 'rifle.run');
+            this._pose(m, fr);
+            const [x, y] = at(m.o, m.d);
+            sp.position.set(x, y); sp.rotation = theta - fr.face; sp.scale.set(unit * (1 + 0.04 * Math.abs(Math.sin(t * 8 + m.i))));
+            continue;
+          }
           // Working the gun: standing to it, facing the enemy, with a small bob as they load.
           const fr = this._pick(q, m.i, 'crew');
           this._pose(m, fr);
@@ -1086,14 +1198,14 @@
           m.run = { o0: m.o, d0: m.d, o1: m.home[0], d1: m.home[1], t0: nowMs + Math.random() * 1200, dur: 0, home: true };
         }
         // The medic goes out to one of the fallen now and then, kneels by him a while, and comes back.
-        if (m.role === 'medic' && !f.idle && !m.run && !m.tend && nowMs >= m.next) {
+        if (m.role === 'medic' && !f.idle && !q.bound && !m.run && !m.tend && nowMs >= m.next) {
           const left = fallen.filter(x => !x.evac && !x.carried), v = left[Math.floor(Math.random() * left.length)];
           if (v) {
             const side = Math.random() < 0.5 ? -1 : 1;
             m.run = { o0: m.o, d0: m.d, o1: v.o + side * 7 / (f.front * s), d1: v.d - 2, t0: nowMs, dur: 0, to: v };
           }
           m.next = nowMs + 4000 + Math.random() * 6000;
-        } else if (m.role !== 'medic' && !f.idle && !m.run && !dug && nowMs >= m.next) {
+        } else if (m.role !== 'medic' && !f.idle && !q.bound && q.kind !== 'wagon' && !m.run && !dug && nowMs >= m.next) {
           // Now and then a man gets up and rushes to a new spot, forward or back and across (three at most at a time);
           // never closer to the enemy than a quarter of the way over.
           if (running >= 3) m.next = nowMs + 1000 + Math.random() * 1500;
@@ -1120,7 +1232,7 @@
             sp.rotation = Math.atan2(y1 - y0, x1 - x0) - fr.face;
             sp.scale.set(unit * (1 + 0.07 * Math.abs(Math.sin(t * 13 + m.i))));
             continue;
-          } else { sp.visible = false; continue; }   // still waiting to leave the unit
+          } else if (!r.bound) { sp.visible = false; continue; }   // still waiting to leave the unit (one about to rush on a bound lies where he is)
         }
         if (m.drag) {
           // The stretcher party: the wounded man on a stretcher, the medic at its head and a second bearer at its foot,
@@ -1187,6 +1299,14 @@
           }
           continue;
         }
+        if (f.march) {
+          // On the march: in his place in the formation, at a steady jog the way it goes.
+          const fr = this._pick(q, m.i, m.role === 'rifle' ? 'rifle.run' : m.role + '.run');
+          this._pose(m, fr);
+          const [x, y] = at(m.o, m.d);
+          sp.position.set(x, y); sp.rotation = theta - fr.face; sp.scale.set(unit * (1 + 0.04 * Math.abs(Math.sin(t * 8 + m.i)))); sp.tint = 0xffffff;
+          continue;
+        }
         if (f.idle) {
           // At ease: standing about (in their pits, once dug in), looking this way and that; no firing.
           const fr = this._pick(q, m.i, dug ? (m.role === 'medic' ? 'medic.kneel' : `${m.role}.${m.stance}`)
@@ -1202,7 +1322,8 @@
         // In position: weapon on the enemy, a little sway, a kick and a flash with each round, which flies at one of
         // the enemy's men. Riflemen fire aimed rounds at a bolt-action rate; the light machine-gunner fires bursts at
         // his gun's rate. The medic waits, kneeling.
-        const fr = this._pick(q, m.i, m.role === 'medic' ? 'medic.kneel' : `${m.role}.${m.stance}`);
+        // (Going forward by bounds: down flat between rushes.)
+        const fr = this._pick(q, m.i, m.role === 'medic' ? 'medic.kneel' : `${m.role}.${q.bound ? 'prone' : m.stance}`);
         this._pose(m, fr);
         // In a gas cloud: masks on, a sickly cast to them, and no aimed fire until it clears.
         sp.tint = f.gas > 0.3 ? 0xd3dc9a : 0xffffff;
@@ -1248,9 +1369,280 @@
       g.circle(x, y, r * 2.2).fill({ color: 0xffb030, alpha: 0.3 });
       g.circle(x, y, r).fill({ color: 0xfff3c0, alpha: 0.95 });
     }
+    /**
+     * A coastal battery: one turret on the battery's line, pivoting on the centre of its ring. It turns (at
+     * TURRET_TRAVERSE) to bear on what it fires at, the enemy's line in a fight; at rest it keeps its last bearing.
+     * It fires only once it bears; grey and silent when destroyed.
+     */
+    _tickTurret(q, f, nowMs, t, s, boost, g, at, theta) {
+      const gn = q.machines[0];
+      if (!gn) return;
+      const dt = Math.min(0.1, Math.max(0, (nowMs - (gn.tickAt || nowMs)) / 1000));
+      gn.tickAt = nowMs;
+      if (gn.aim === null) gn.aim = theta;
+      let diff = Math.atan2(Math.sin(theta - gn.aim), Math.cos(theta - gn.aim));
+      if (!f.idle || gn.firedAt) gn.aim += Math.sign(diff) * Math.min(Math.abs(diff), TURRET_TRAVERSE * dt);
+      diff = Math.atan2(Math.sin(theta - gn.aim), Math.cos(theta - gn.aim));
+      const [x, y] = at(0, 0);
+      gn.sp.visible = true;
+      gn.sp.position.set(x, y);
+      this._orient(gn.sp, gn.frame, this._gunScale(gn, boost, s), gn.aim, f.ux);
+      gn.manned = strengthOf(f.view) > 0;
+      gn.sp.tint = gn.manned ? 0xffffff : 0x6f6f6f;
+      gn.muzzle = this._muzzleOf(gn.sp, gn.frame);
+      gn.bears = Math.abs(diff) < 0.05;
+      if (!gn.manned || f.idle || f.holdFire) return;
+      if (!f.shells && gn.bears && nowMs >= gn.nextShot) {
+        gn.firedAt = nowMs; gn.nextShot = nowMs + 3000 + Math.random() * 4000;
+        q.puffs.push({ x: gn.muzzle[0], y: gn.muzzle[1], t0: nowMs, big: true });
+        this._round(q, f, gn.muzzle[0], gn.muzzle[1], nowMs, s, true);
+      }
+      if (gn.firedAt && nowMs - gn.firedAt < 120) this._flash(g, gn.muzzle[0], gn.muzzle[1], 3.5 * boost / s);
+    }
+
+    // ---- AA emplacements ---------------------------------------------------------------------------------------------
+    /** An AA emplacement: one of the three drawings (by unit), and which barrel fires next. */
+    _makeAA(q, nowMs, seed) {
+      q.aa = true;
+      const gn = { i: 0, o: 0, d: 0, key: 'aa', look: Math.floor(hash(seed, 7) * 3), sp: new PIXI.Sprite(), manned: true, barrel: 0, fired: [0, 0], seen: 0,
+        pair: 0, nextShot: nowMs + 800 + hash(seed, 30) * 3000, firedAt: 0, muzzle: null, muzzles: null };
+      gn.sp.eventMode = 'none';
+      this.structC.addChild(gn.sp);
+      q.machines.push(gn);
+      return q;
+    }
+    /**
+     * One frame of an AA emplacement: the gun on the unit's line, drawn as it is (it does not turn: it aims at the sky),
+     * mirrored so its barrels lean towards the enemy's side; grey and silent when destroyed. Its barrels fire in turn, a
+     * pair at a time: at planes and balloons, flak bursting among them; at troops, over open sights; artillery shells
+     * (fireGun) leave from the barrel next in turn.
+     */
+    _tickAA(q, f, nowMs, s, boost, g, at) {
+      const gn = q.machines[0], fr = this.aaFrames?.[gn?.look];
+      if (!gn) return;
+      gn.sp.visible = !!fr;
+      if (!fr) return;
+      if (gn.sp.texture !== fr.t) { gn.sp.texture = fr.t; gn.sp.anchor.set(fr.ax, fr.ay); }
+      const flip = (f.ux || 0) < 0 ? -1 : 1, sc = AA_PX * boost / s / fr.w;
+      // A shot is a fired barrel (its own, or fireGun's), the next one in turn after it.
+      if (gn.firedAt && gn.firedAt !== gn.seen) { gn.seen = gn.firedAt; gn.fired[gn.barrel] = gn.firedAt; gn.barrel ^= 1; }
+      const jolt = [0, 1].some(b => gn.fired[b] && nowMs - gn.fired[b] < 90) ? 0.5 * boost / s : 0;
+      const [x, y] = at(0, 0);
+      gn.sp.position.set(x, y + jolt);
+      gn.sp.scale.set(sc * flip, sc);
+      gn.manned = strengthOf(f.view) > 0;
+      gn.sp.tint = gn.manned ? 0xffffff : 0x7a7a7a;
+      gn.muzzles = fr.muzzles.map(([u, v]) => [x + (u - fr.ax) * fr.w * sc * flip, y + jolt + (v - fr.ay) * fr.h * sc]);
+      gn.muzzle = gn.muzzles[gn.barrel];
+      for (const b of [0, 1]) if (gn.fired[b] && nowMs - gn.fired[b] < 110) this._flash(g, gn.muzzles[b][0], gn.muzzles[b][1], 2.4 * boost / s);
+      const air = f.enemyKind === 'air' || f.enemyKind === 'balloon';
+      if (!gn.manned || f.idle || f.holdFire || nowMs < gn.nextShot || (!air && f.shells)) return;   // shelling: its shells come through fireGun
+      // A pair: the second barrel a moment after the first, then a pause.
+      gn.firedAt = nowMs;
+      gn.pair ^= 1;
+      const [mx, my] = gn.muzzle;
+      q.puffs.push({ x: mx, y: my, t0: nowMs });
+      if (air) {
+        gn.nextShot = nowMs + (gn.pair ? 180 : 1400 + Math.random() * 1400);
+        const foe = this.squads.get(f.enemyId), planes = foe ? foe.machines.filter(p => !p.dead && p.sp?.visible) : [];
+        const p = planes[Math.floor(Math.random() * planes.length)], spread = 26 * boost / s;
+        const [tx, ty] = p ? [p.sp.x, p.sp.y] : foe?.sky ? foe.sky : [f.tx ?? mx, (f.ty ?? my) - 50 / s];
+        this.flak.push({ x: tx + (Math.random() - 0.5) * spread * 2, y: ty + (Math.random() - 0.5) * spread * 2, t0: nowMs + 500 + Math.random() * 400 });
+      } else {
+        gn.nextShot = nowMs + (gn.pair ? 180 : 2200 + Math.random() * 2500);
+        this._round(q, f, mx, my, nowMs, s, true);   // over open sights, at the enemy's line
+      }
+    }
+
+    // ---- The fort ----------------------------------------------------------------------------------------------------
+    /** Fortress guns: the fort and its garrison (see the top of the file). Men on the walls hold a place on the walk. */
+    _makeFort(q, v, f, nowMs, seed, before, gone) {
+      q.fort = true;
+      q.fortSp = new PIXI.Sprite(this.fortTex || PIXI.Texture.EMPTY);
+      q.fortSp.anchor.set(0.5); q.fortSp.eventMode = 'none';
+      this.structC.addChild(q.fortSp);
+      const team = !!this._frames(q.kit, 'mortar'), gf = team ? null : this.mach.guns.mortar;
+      const mortar = { i: 0, o: 0, d: 0, frame: gf, key: 'mortar', team, sp: new PIXI.Sprite(gf ? gf.t : undefined), manned: true, firedAt: 0, muzzle: null,
+        crew: team ? [] : [0, 1].map(() => { const c = new PIXI.Sprite(); c.eventMode = 'none'; this.aliveC.addChild(c); return c; }) };
+      if (gf) mortar.sp.anchor.set(gf.ax, gf.ay);
+      mortar.sp.eventMode = 'none';
+      this.machC.addChild(mortar.sp);
+      q.machines.push(mortar);
+      const alive = aliveFor(before, FORT_MEN), kept = aliveFor(f.idle ? before : Math.max(before, Number(f.from ?? 100)), FORT_MEN);
+      for (let i = 0; i < FORT_MEN; i++) {
+        const r = hash(seed, i + 200), role = i === 0 ? 'officer' : i === 1 ? 'nco' : 'rifle';
+        const m = { i, role, stance: r < 0.55 ? 'stand' : 'kneel', post: i < FORT_ON_WALLS ? 'wall' : 'yard', sp: new PIXI.Sprite(), pose: null,
+          dead: i >= alive, gone: i >= kept, w: hash(seed, i + 3) * FORT_LOOP.L, goal: null, until: 0,
+          yu: FORT_YARD[0] + hash(seed, i + 5) * (FORT_YARD[2] - FORT_YARD[0]), yv: FORT_YARD[1] + hash(seed, i + 7) * (FORT_YARD[3] - FORT_YARD[1]), yg: null,
+          period: 60 / (RIFLE_RPM[0] + hash(seed, i + 60) * (RIFLE_RPM[1] - RIFLE_RPM[0])) * (role === 'officer' ? 1.6 : 1),
+          nextShot: nowMs + 600 + hash(seed, i + 80) * 4000, firedAt: 0, rot: hash(seed, i + 100) * Math.PI * 2, flip: hash(seed, i + 120) < 0.5, fellAt: 0,
+          o: 0, d: 0, home: [0, 0], run: null, jo: hash(seed, i + 140) - 0.5 };
+        m.sp.eventMode = 'none';
+        (m.dead ? this.deadC : this.aliveC).addChild(m.sp);
+        q.men.push(m);
+      }
+      return q;
+    }
+    /**
+     * One frame of a fort. It stands on the unit's token, north up. Wall men walk (at ease) or run (in a fight) round the
+     * wall walk the shorter way to their next place: at ease anywhere, pausing to look out; in a fight a stretch of
+     * rampart facing the enemy, where they fire from the battlements and now and then shift along. Yard men cross the
+     * yard, at a stroll or (in a fight) at a run. Losses follow strength, one man in ten per 10 %, lying where they fell.
+     */
+    _tickFort(q, f, nowMs, t, s, boost, g, theta, unit) {
+      const ux = f.ux || 0, uy = f.uy || 0;
+      const cx = f.cx - ux * (f.backPx || 0) / s, cy = f.cy - uy * (f.backPx || 0) / s;
+      const W = FORT_PX * boost / s, H = W * FORT_ASPECT;
+      const P = (u, v) => [cx + (u - 0.5) * W, cy + (v - 0.5) * H];
+      const sp0 = q.fortSp;
+      if (this.fortTex && sp0.texture !== this.fortTex) sp0.texture = this.fortTex;
+      sp0.visible = !!this.fortTex;
+      sp0.position.set(cx, cy);
+      if (this.fortTex) sp0.scale.set(W / this.fortTex.width);
+      const fight = !f.idle, strength = strengthOf(f.view);
+      // Rifles only at rifle range: always when the fort is attacked (unless shelled from afar), and when its own attack
+      // brought the garrison's volley.
+      const rifles = fight && !f.holdFire && (!f.shells || f.volley);
+      sp0.tint = strength > 0 ? 0xffffff : 0x8a8a8a;
+      // Where the walk faces the enemy: the best place for the guns, and the stretch the men man in a fight.
+      const facing = w => { const [u, v] = FORT_LOOP.at(w), rx = u - 0.5, ry = (v - 0.5) * FORT_ASPECT, n = Math.hypot(rx, ry) || 1; return (rx * ux + ry * uy) / n; };
+      if (!q.front || q.front.ux !== ux || q.front.uy !== uy) {
+        const spots = [];
+        let best = 0, bf = -2;
+        for (let k = 0; k < 120; k++) { const w = k / 120 * FORT_LOOP.L, fc = facing(w); if (fc > 0.45) spots.push(w); if (fc > bf) { bf = fc; best = w; } }
+        q.front = { ux, uy, spots: spots.length ? spots : [best], best };
+      }
+      // The mortar in the middle of the yard, laid on the enemy; a thump, a flash and a puff with each bomb (fireGun).
+      const mt = q.machines[0];
+      if (mt) {
+        const [mx, my] = P(...FORT_MORTAR), since = nowMs - mt.firedAt, kick = mt.firedAt && since < 400 ? (1 - since / 400) * 1.2 * boost / s : 0;
+        const x = mx - Math.cos(theta) * kick, y = my - Math.sin(theta) * kick;
+        mt.manned = strength > 0;
+        mt.sp.visible = true;
+        mt.sp.position.set(x, y);
+        if (mt.team) {
+          const fr = (!mt.manned && this._pick(q, 0, 'mortar.empty')) || this._pick(q, 0, 'mortar');
+          if (fr && mt.frame !== fr) { mt.frame = fr; mt.sp.texture = fr.t; mt.sp.anchor.set(fr.ax, fr.ay); }
+          if (fr) { mt.sp.rotation = theta - fr.face; mt.sp.scale.set(unit); mt.muzzle = [x + Math.cos(theta) * fr.len * unit * 0.45, y + Math.sin(theta) * fr.len * unit * 0.45]; }
+          mt.sp.tint = mt.manned || this._frames(q.kit, 'mortar.empty') ? 0xffffff : 0x6f6f6f;
+        } else if (mt.frame) {
+          this._orient(mt.sp, mt.frame, this._gunScale(mt, boost, s), theta, ux);
+          mt.sp.tint = mt.manned ? 0xffffff : 0x6f6f6f;
+          mt.muzzle = this._muzzleOf(mt.sp, mt.frame);
+          // Two of its men either side of the tube, facing the enemy.
+          const fr = this._pick(q, 0, 'crew'), lat = 6 * boost / s, nx = -uy, ny = ux;
+          mt.crew.forEach((c, k) => {
+            c.visible = mt.manned && !!fr;
+            if (!fr) return;
+            if (c.texture !== fr.t) { c.texture = fr.t; c.anchor.set(fr.ax, fr.ay); }
+            const side = k ? 1 : -1;
+            c.position.set(x + nx * lat * side - ux * 3 * boost / s, y + ny * lat * side - uy * 3 * boost / s);
+            c.rotation = theta + side * 0.35 - fr.face; c.scale.set(unit);
+          });
+        }
+        if (mt.firedAt && nowMs - mt.firedAt < 120 && mt.muzzle) this._flash(g, mt.muzzle[0], mt.muzzle[1], 3 * boost / s);
+      }
+      // Casualties follow strength; healing brings men back.
+      const living = q.men.filter(m => !m.dead), want = aliveFor(strength, FORT_MEN);
+      if (living.length > want && nowMs >= q.nextDeath) {
+        const m = living[Math.floor(Math.random() * living.length)];
+        m.dead = true; m.fellAt = q.fellAt = nowMs; m.pose = null; m.gone = !!f.idle;
+        this.aliveC.removeChild(m.sp); this.deadC.addChild(m.sp);
+        q.nextDeath = nowMs + 260 + Math.random() * 650;
+      } else if (living.length < want) {
+        const m = q.men.find(x => x.gone) || q.men.find(x => x.dead);
+        if (m) { m.dead = m.gone = false; m.pose = null; this.deadC.removeChild(m.sp); this.aliveC.addChild(m.sp); }
+      }
+      const dt = Math.min(0.1, Math.max(0, (nowMs - (q.fortAt || nowMs)) / 1000));
+      q.fortAt = nowMs;
+      const perPx = 1 / (FORT_PX * boost);   // loop units (image widths) per screen px
+      for (const m of q.men) {
+        const sp = m.sp;
+        sp.visible = !m.gone;
+        if (m.gone) continue;
+        const where = () => m.post === 'wall' ? FORT_LOOP.at(m.w) : [m.yu, m.yv];
+        if (m.dead) {
+          this._pose(m, this._pick(q, m.i, 'dead'));
+          const [x, y] = P(...where()), age = nowMs - m.fellAt, k = m.fellAt && age < 320 ? age / 320 : 1;
+          sp.position.set(x, y); sp.rotation = m.rot;
+          const sc = unit * (1.25 - 0.25 * k);
+          sp.scale.set(m.flip ? -sc : sc, sc);
+          sp.alpha = 0.35 + 0.65 * k;
+          continue;
+        }
+        sp.alpha = 1; sp.tint = 0xffffff;
+        const speed = (fight ? RUN_PX_S : 9) * perPx;
+        let moving = false, dir = 0;
+        if (m.post === 'wall') {
+          if (m.goal === null && nowMs >= m.until) {
+            m.goal = fight ? q.front.spots[Math.floor(Math.random() * q.front.spots.length)] + (Math.random() - 0.5) * 0.02 : Math.random() * FORT_LOOP.L;
+          }
+          if (fight && m.goal !== null && facing(m.goal) < 0.45 && !q.front.spots.length) m.goal = q.front.best;
+          if (m.goal !== null) {
+            let diff = ((m.goal - m.w) % FORT_LOOP.L + FORT_LOOP.L) % FORT_LOOP.L;
+            if (diff > FORT_LOOP.L / 2) diff -= FORT_LOOP.L;   // the shorter way round
+            const step = Math.sign(diff) * Math.min(Math.abs(diff), speed * dt);
+            const [u0, v0] = FORT_LOOP.at(m.w);
+            m.w = ((m.w + step) % FORT_LOOP.L + FORT_LOOP.L) % FORT_LOOP.L;
+            const [u1, v1] = FORT_LOOP.at(m.w);
+            if (Math.abs(diff) < 1e-4) { m.goal = null; m.until = nowMs + (fight ? 3000 + Math.random() * 6000 : 2000 + Math.random() * 5000); }
+            else { moving = true; dir = Math.atan2((v1 - v0) * H, (u1 - u0) * W); }
+          }
+          // In a fight, a man standing off the rampart facing the enemy goes there.
+          if (fight && !moving && m.goal === null && facing(m.w) < 0.45) m.until = 0;
+        } else {
+          if (!m.yg && nowMs >= m.until) m.yg = [FORT_YARD[0] + Math.random() * (FORT_YARD[2] - FORT_YARD[0]), FORT_YARD[1] + Math.random() * (FORT_YARD[3] - FORT_YARD[1])];
+          if (m.yg) {
+            const du = m.yg[0] - m.yu, dv = (m.yg[1] - m.yv) * FORT_ASPECT, l = Math.hypot(du, dv), step = Math.min(l, speed * dt);
+            if (l < 1e-4) { m.yg = null; m.until = nowMs + (fight ? 500 + Math.random() * 1500 : 2500 + Math.random() * 6000); }
+            else { m.yu += du / l * step; m.yv += dv / l * step / FORT_ASPECT; moving = true; dir = Math.atan2(dv, du); }
+          }
+        }
+        const [x, y] = P(...where());
+        sp.position.set(x, y);
+        if (moving) {
+          const fr = this._pick(q, m.i, m.role === 'rifle' ? 'rifle.run' : m.role + '.run');
+          this._pose(m, fr);
+          sp.rotation = dir - fr.face;
+          sp.scale.set(unit * (1 + (fight ? 0.07 : 0.03) * Math.abs(Math.sin(t * (fight ? 13 : 7) + m.i))));
+          continue;
+        }
+        if (!fight || m.post === 'yard') {
+          // At ease (or busy in the yard): standing, looking out over the walls or about the yard.
+          const fr = this._pick(q, m.i, m.role === 'rifle' ? 'rifle.idle' : `${m.role}.stand`);
+          this._pose(m, fr);
+          const [u, v] = where(), out = Math.atan2((v - 0.5) * H, (u - 0.5) * W);
+          sp.rotation = (m.post === 'wall' ? out : theta) + m.jo * 0.8 - fr.face;
+          sp.scale.set(unit);
+          continue;
+        }
+        // On the rampart in a fight: aiming over the battlements, a round at a bolt-action rate.
+        const fr = this._pick(q, m.i, `${m.role}.${m.stance}`);
+        this._pose(m, fr);
+        if (rifles && nowMs >= m.nextShot) { m.nextShot = nowMs + m.period * (0.8 + Math.random() * 0.4) * 1000; m.firedAt = nowMs; m.shot = true; }
+        const aim = theta + Math.sin(t * 0.7 + m.i * 2) * 0.1;
+        sp.rotation = aim - fr.face;
+        sp.scale.set(unit);
+        if (m.firedAt && nowMs - m.firedAt < 70 && g) {
+          const reach = fr.len * unit * 0.5, mx = x + Math.cos(aim) * reach, my = y + Math.sin(aim) * reach;
+          g.circle(mx, my, 3.2 * boost / s).fill({ color: 0xffc94a, alpha: 0.35 });
+          g.circle(mx, my, 1.5 * boost / s).fill({ color: 0xfff6c8, alpha: 0.95 });
+          if (m.shot) { m.shot = false; this._round(q, f, mx, my, nowMs, s); }
+        }
+      }
+    }
+
     _tickGuns(q, f, nowMs, t, s, boost, g, at, theta, unit) {
       const hmg = q.machines[0]?.key === 'hmg' || q.team === 'mg';
-      const dug = this._dug(q, f);
+      const dug = f.march ? 0 : this._dug(q, f);
+      // Into column on the march, back to their places at a halt, at a rolling pace.
+      const F = f.front * s, dt = Math.min(0.1, Math.max(0, (nowMs - (q.gLast || nowMs)) / 1000));
+      q.gLast = nowMs;
+      for (const gn of q.machines) {
+        if (!gn.home) gn.home = [gn.o, gn.d];
+        const [o1, d1] = f.march ? this._marchSlot(q, gn, F) : gn.home, dx = (o1 - gn.o) * F, dd = d1 - gn.d, dist = Math.hypot(dx, dd), step = ROLL_PX_S * dt;
+        if (dist <= step) { gn.o = o1; gn.d = d1; gn.moving = false; } else { gn.o += dx / dist * step / F; gn.d += dd / dist * step; gn.moving = true; }
+      }
       if (dug) {
         // Dug in: each gun in a pit walled with sandbags (open at the back); wire out in front after a second turn.
         const concrete = typeOf(f.view?.marker)?.cat === 'Emplacements';
@@ -1272,7 +1664,7 @@
         // Firing on its own: field guns now and then (shells come through fireGun), machine guns in bursts.
         if (hmg) {
           this._mgBurst(q, gn, f, nowMs, s, boost, g);
-        } else if ((q.type === 'antiaircraft' || q.type === 'aaemplacement') && (f.enemyKind === 'air' || f.enemyKind === 'balloon')) {
+        } else if (q.type === 'antiaircraft' && (f.enemyKind === 'air' || f.enemyKind === 'balloon')) {
           // Anti-aircraft: a shell every 1.5–3 s bursting in the sky near one of the enemy's planes.
           if (nowMs >= gn.nextShot) {
             gn.firedAt = nowMs; gn.nextShot = nowMs + 1500 + Math.random() * 1500;
@@ -1540,7 +1932,7 @@
     /** Whether units of this kind are drawn here with their own fire (the renderer then draws no firing line for them). */
     firesOwn(kind) {
       if (!this.tex) return false;
-      return kind === 'rifles' || kind === 'balloon' || ((kind === 'guns' || kind === 'tanks') && !!this.mach) || ((kind === 'air' || kind === 'horse') && !!this.mounts) || (kind === 'ships' && !!this.ships);
+      return kind === 'rifles' || kind === 'wagon' || kind === 'balloon' || ((kind === 'guns' || kind === 'tanks') && !!this.mach) || ((kind === 'air' || kind === 'horse') && !!this.mounts) || (kind === 'ships' && !!this.ships);
     }
     /** A weapon team: gun and crew in one figure, facing the enemy; left empty (or greyed) when its crew are down. */
     _tickTeam(q, gn, f, nowMs, s, boost, g, at, theta, unit, hmg) {
@@ -1574,7 +1966,7 @@
       else if (alive.length < want) { const tk = q.machines.find(x => x.dead); if (tk) tk.dead = false; }
       for (const tk of q.machines) {
         const sp = tk.sp, fr = tk.frame, sc = TANK_PX / fr.len * boost / s;
-        let o = tk.o, d = tk.d, bob = 0;
+        let [o, d] = f.march ? this._marchSlot(q, tk, f.front * s) : [tk.o, tk.d], bob = f.march ? Math.sin(nowMs / 90 + tk.i) * 0.4 : 0;
         if (tk.roll) {
           const r = tk.roll;
           if (!r.dur) r.dur = Math.max(600, Math.hypot((r.o1 - r.o0) * f.front * s, r.d1 - r.d0) / ROLL_PX_S * 1000);
@@ -1610,7 +2002,7 @@
 
     /** Whether a squad at ease has anything moving: men walking to their places, tanks rolling, a man falling, smoke. */
     _busy(q, nowMs) {
-      return q.men.some(m => !m.dead && (m.run || m.leg || m.walking)) || q.machines.some(x => x.roll) || nowMs - (q.fellAt || 0) < 400 ||
+      return q.men.some(m => !m.dead && (m.run || m.leg || m.walking)) || q.machines.some(x => x.roll || x.moving) || nowMs - (q.fellAt || 0) < 400 ||
         q.puffs.length > 0 || q.dust.length > 0 || !!q.rounds?.length;
     }
     /**
@@ -1625,19 +2017,89 @@
         for (const m of q.men) { if (m.dead) continue; if (m.sp.visible) [m.co, m.cd] = rel(m.sp); m.leg = null; }
         q.cycle = { st: 'form', until: nowMs + 2000 + Math.random() * 1500 };
       } else if (q.kind === 'tanks') {
-        for (const tk of q.machines) { if (tk.dead || !tk.sp.visible) continue; const [o0, d0] = rel(tk.sp); tk.roll = { o0, d0, o1: tk.o, d1: tk.d, t0: nowMs, dur: 0 }; }
-      } else if (q.kind === 'rifles') {
+        for (const tk of q.machines) {
+          if (tk.dead || !tk.sp.visible) continue;
+          const [o0, d0] = rel(tk.sp), [o1, d1] = f.march ? this._marchSlot(q, tk, f.front * s) : [tk.o, tk.d];
+          tk.roll = { o0, d0, o1, d1, t0: nowMs, dur: 0 };
+        }
+      } else if (q.kind === 'guns') {
+        // Each gun from where it is (it then rolls to its place: _tickGuns); its crew keep with it.
+        for (const gn of q.machines) if (gn.home && gn.sp.visible) [gn.o, gn.d] = rel(gn.sp);
+      }
+      if (q.kind === 'wagon') for (const wg of q.machines) if (wg.sp.visible) [wg.o, wg.d] = rel(wg.sp);
+      // Infantry standing at ease that has just attacked: first down by its unit, then forward by bounds (_bounds).
+      const bounding = !toIdle && q.kind === 'rifles' && !!f.attacker && f.createdAt && Date.now() - f.createdAt < 10000;
+      if (bounding) q.bound = { step: -1, phase: 'rush', until: 0, d0: f.backPx * 0.8 };
+      if (q.kind === 'rifles' || q.kind === 'wagon') {
         for (const m of q.men) {
           if (m.drag) { m.drag.to.carried = m.drag.to.onLitter = false; m.drag.to.evac = true; m.drag = null; }
           if (m.litter) m.litter.visible = false;
           if (m.bearer) m.bearer.visible = false;
           m.tend = null;
           if (m.dead || m.pow || !m.sp.visible) continue;
-          const [o0, d0] = rel(m.sp);
+          const [o0, d0] = rel(m.sp), [o1, d1] = bounding ? [m.home[0], q.bound.d0] : f.march ? this._marchSlot(q, m, f.front * s) : m.home;
           m.o = o0; m.d = d0; m.away = false;
-          m.run = { o0, d0, o1: m.home[0], d1: m.home[1], t0: nowMs, dur: 0, home: true };
+          m.run = { o0, d0, o1, d1, t0: nowMs, dur: 0, home: true, bound: bounding };
+          if (bounding) m.grp = Math.round((m.home[0] + 0.5) * SQUAD) % 2;
         }
       }
+    }
+    /**
+     * Where a man or machine goes in its squad's formation on the march, [across (fraction of the front), behind (px)]
+     * from the head of it: infantry in a wedge, tanks side by side, guns in column, a wagon's men beside it.
+     */
+    _marchSlot(q, x, F) {
+      if (q.kind === 'tanks') return [(x.i ? 12 : -12) / F, x.i * 6];
+      if (q.kind === 'guns') return [0, x.i * 18 - 27];
+      if (q.kind === 'wagon') {
+        if (x === q.machines[0]) return [0, -10];
+        return [(x.i % 2 ? 1 : -1) * WAGON_SIDE / F, Math.floor(x.i / 2) * 14 - 8];
+      }
+      const w = WEDGE[x.i % WEDGE.length];
+      return [w[0] / F, w[1]];
+    }
+    /**
+     * An attacking section's bounds (q.bound): half its men rush forward a stretch while the other half lie and fire,
+     * then drop and fire while the others rush, until all are on its line (BOUNDS). Then each takes his own stance.
+     */
+    _bounds(q, nowMs) {
+      const B = q.bound;
+      if (B.phase === 'rush') {
+        if (q.men.some(m => m.run?.bound)) return;
+        B.step++; B.phase = 'hold'; B.until = nowMs + 1300 + Math.random() * 900;
+        return;
+      }
+      if (nowMs < B.until) return;
+      const plan = BOUNDS[B.step];
+      if (!plan) { q.bound = null; return; }
+      const [grp, frac] = plan;
+      for (const m of q.men) {
+        if (m.dead || m.pow || m.grp !== grp) continue;
+        m.run = { o0: m.o, d0: m.d, o1: m.home[0], d1: B.d0 + (m.home[1] - B.d0) * frac, t0: nowMs + Math.random() * 300, dur: 0, bound: true };
+      }
+      B.phase = 'rush';
+    }
+    /**
+     * A supply column's wagon (wagon.png, horses to the right): at the head of its men on the march, else standing
+     * behind the unit's line; turning to the way the unit faces or goes, rocking a little on the move; grey when the
+     * column is destroyed (a wreck to salvage).
+     */
+    _tickWagon(q, f, nowMs, t, s, boost, at, theta) {
+      const wg = q.machines[0], tex = this.wagonTex;
+      if (!wg) return;
+      wg.sp.visible = !!tex;
+      if (!tex) return;
+      if (wg.sp.texture !== tex) { wg.sp.texture = tex; wg.sp.anchor.set(0.5); }
+      const F = f.front * s, dt = Math.min(0.1, Math.max(0, (nowMs - (wg.last || nowMs)) / 1000));
+      wg.last = nowMs;
+      const [o1, d1] = f.march ? this._marchSlot(q, wg, F) : wg.home, dx = (o1 - wg.o) * F, dd = d1 - wg.d, dist = Math.hypot(dx, dd), step = ROLL_PX_S * 1.5 * dt;
+      if (dist <= step) { wg.o = o1; wg.d = d1; wg.moving = false; } else { wg.o += dx / dist * step / F; wg.d += dd / dist * step; wg.moving = true; }
+      wg.hd = wg.hd == null ? theta : wg.hd + Math.atan2(Math.sin(theta - wg.hd), Math.cos(theta - wg.hd)) * 0.08;
+      const [x, y] = at(wg.o, wg.d), rock = f.march || wg.moving ? Math.sin(t * 9) * 0.25 * boost / s : 0;
+      wg.sp.position.set(x, y + rock);
+      wg.sp.rotation = wg.hd;
+      wg.sp.scale.set(WAGON_PX * boost / s / tex.width);
+      wg.sp.tint = strengthOf(f.view) > 0 ? 0xffffff : 0x7a7a7a;
     }
     /**
      * A squad leaving its fight (or the map): its dead stay where they fell, as remains (this.remains), each placed
